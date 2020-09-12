@@ -223,8 +223,11 @@ name = "facilitator"
 version = "0.1.0"
 dependencies = [
  "avro-rs",
+ "base64",
+ "chrono",
  "clap",
  "libprio-rs",
+ "rand 0.7.3",
  "serde",
  "tempfile",
  "uuid",
