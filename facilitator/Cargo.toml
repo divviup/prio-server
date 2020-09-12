@@ -1,13 +1,17 @@
 [package]
 name = "facilitator"
 version = "0.1.0"
-authors = ["Tim Geoghegan <timg@letsencrypt.org>"]
+authors = ["Internet Security Research Group"]
 edition = "2018"
-
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+build = "build.rs"
 
 [dependencies]
 avro-rs = "0.11.0"
+clap = "2.33.3"
 libprio-rs = { git = "https://github.com/abetterinternet/libprio-rs"}
 serde = { version = "1.0", features = ["derive"] }
+tempfile = "3.1.0"
 uuid = { version = "0.8", features = ["serde", "v4"] }
+
+[build-dependencies]
+vergen = "3"

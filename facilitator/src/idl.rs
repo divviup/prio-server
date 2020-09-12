@@ -473,6 +473,7 @@ impl IngestionDataSharePacket {
 #[cfg(test)]
 mod tests {
     use super::*;
+
     #[test]
     fn roundtrip_ingestion_header() {
         let headers = &[
