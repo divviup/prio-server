@@ -79,7 +79,7 @@ pub struct IngestionHeader {
 }
 
 impl IngestionHeader {
-    pub fn read_header(reader: impl Read) -> Result<IngestionHeader, Error> {
+    pub fn read(reader: impl Read) -> Result<IngestionHeader, Error> {
         let schema = Schema::parse_str(INGESTION_HEADER_SCHEMA).map_err(|e| Error::AvroError(e))?;
         let mut reader = Reader::with_schema(&schema, reader).map_err(|e| Error::AvroError(e))?;
 
@@ -102,7 +102,7 @@ impl IngestionHeader {
         from_value::<IngestionHeader>(&header).map_err(|e| Error::AvroError(e))
     }
 
-    pub fn write_header<W: Write>(&self, writer: &mut W) -> Result<(), Error> {
+    pub fn write<W: Write>(&self, writer: &mut W) -> Result<(), Error> {
         let schema = Schema::parse_str(INGESTION_HEADER_SCHEMA).map_err(|e| Error::AvroError(e))?;
         let mut writer = Writer::new(&schema, writer);
 
@@ -176,7 +176,7 @@ pub struct IngestionSignature {
 }
 
 impl IngestionSignature {
-    pub fn read_signature(reader: impl Read) -> Result<IngestionSignature, Error> {
+    pub fn read(reader: impl Read) -> Result<IngestionSignature, Error> {
         let schema =
             Schema::parse_str(INGESTION_SIGNATURE_SCHEMA).map_err(|e| Error::AvroError(e))?;
         let mut reader = Reader::with_schema(&schema, reader).map_err(|e| Error::AvroError(e))?;
@@ -236,7 +236,7 @@ impl IngestionSignature {
         })
     }
 
-    pub fn write_signature<W: Write>(&self, writer: &mut W) -> Result<(), Error> {
+    pub fn write<W: Write>(&self, writer: &mut W) -> Result<(), Error> {
         let schema =
             Schema::parse_str(INGESTION_SIGNATURE_SCHEMA).map_err(|e| Error::AvroError(e))?;
         let mut writer = Writer::new(&schema, writer);
@@ -328,7 +328,7 @@ pub struct IngestionDataSharePacket {
 }
 
 impl IngestionDataSharePacket {
-    pub fn read_packet(reader: impl Read) -> Result<IngestionDataSharePacket, Error> {
+    pub fn read(reader: impl Read) -> Result<IngestionDataSharePacket, Error> {
         let schema = Schema::parse_str(INGESTION_DATA_SHARE_PACKET_SCHEMA)
             .map_err(|e| Error::AvroError(e))?;
         // TODO do we want to create an Avro Reader each time we read a packet? Might work provided
@@ -416,7 +416,7 @@ impl IngestionDataSharePacket {
         })
     }
 
-    pub fn write_packet<W: Write>(&self, writer: &mut W) -> Result<(), Error> {
+    pub fn write<W: Write>(&self, writer: &mut W) -> Result<(), Error> {
         let schema = Schema::parse_str(INGESTION_DATA_SHARE_PACKET_SCHEMA)
             .map_err(|e| Error::AvroError(e))?;
         let mut writer = Writer::new(&schema, writer);
@@ -504,9 +504,9 @@ mod tests {
         for header in headers {
             let mut record_vec = Vec::new();
 
-            let res = header.write_header(&mut record_vec);
+            let res = header.write(&mut record_vec);
             assert!(res.is_ok(), "write error {:?}", res);
-            let header_again = IngestionHeader::read_header(&record_vec[..]);
+            let header_again = IngestionHeader::read(&record_vec[..]);
             assert!(header_again.is_ok(), "read error {:?}", header_again);
 
             assert_eq!(header_again.unwrap(), *header);
@@ -521,9 +521,9 @@ mod tests {
         };
 
         let mut record_vec = Vec::new();
-        let res = signature.write_signature(&mut record_vec);
+        let res = signature.write(&mut record_vec);
         assert!(res.is_ok(), "write error {:?}", res);
-        let signature_again = IngestionSignature::read_signature(&record_vec[..]);
+        let signature_again = IngestionSignature::read(&record_vec[..]);
         assert!(signature_again.is_ok(), "read error {:?}", signature_again);
         assert_eq!(signature_again.unwrap(), signature);
     }
@@ -552,9 +552,9 @@ mod tests {
         for packet in packets {
             let mut record_vec = Vec::new();
 
-            let res = packet.write_packet(&mut record_vec);
+            let res = packet.write(&mut record_vec);
             assert!(res.is_ok(), "write error {:?}", res);
-            let packet_again = IngestionDataSharePacket::read_packet(&record_vec[..]);
+            let packet_again = IngestionDataSharePacket::read(&record_vec[..]);
             assert!(packet_again.is_ok(), "read error {:?}", packet_again);
             assert_eq!(packet_again.unwrap(), *packet);
         }
