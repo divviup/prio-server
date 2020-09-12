@@ -1,4 +1,5 @@
 pub mod idl;
+pub mod transport;
 
 #[derive(Debug)]
 pub enum Error {
@@ -6,4 +7,5 @@ pub enum Error {
     MalformedHeaderError(String),
     MalformedSignatureError(String),
     MalformedDataPacketError(String),
+    IoError(std::io::Error),
 }
