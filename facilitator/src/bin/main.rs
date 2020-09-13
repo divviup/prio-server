@@ -1,27 +1,21 @@
 use chrono::prelude::*;
 use chrono::DateTime;
 use clap::{App, Arg, SubCommand};
-use facilitator::sample::generate_ingestion_sample;
+use facilitator::sample::{
+    generate_ingestion_sample, DATE_FORMAT, DEFAULT_FACILITATOR_PRIVATE_KEY,
+    DEFAULT_PHA_PRIVATE_KEY,
+};
 use facilitator::transport::FileTransport;
 use facilitator::Error;
 use libprio_rs::encrypt::PrivateKey;
 use std::path::Path;
+use std::str::FromStr;
 use uuid::Uuid;
 
-const DATE_FORMAT: &str = "%Y/%m/%d/%H/%M";
-const DEFAULT_PHA_PRIVATE_KEY: &str =
-    "BIl6j+J6dYttxALdjISDv6ZI4/VWVEhUzaS05LgrsfswmbLOgNt9HUC2E0w+9Rq\
-    Zx3XMkdEHBHfNuCSMpOwofVSq3TfyKwn0NrftKisKKVSaTOt5seJ67P5QL4hxgPWvxw==";
-const DEFAULT_FACILITATOR_PRIVATE_KEY: &str =
-    "BNNOqoU54GPo+1gTPv+hCgA9U2ZCKd76yOMrWa1xTWgeb4LhFLMQIQoRwDVaW64g\
-    /WTdcxT4rDULoycUNFB60LER6hPEHg/ObBnRPV1rwS3nj9Bj0tbjVPPyL9p8QW8B+w==";
-
-fn usize_validator(s: String) -> Result<(), String> {
-    s.parse::<usize>().map(|_| ()).map_err(|e| e.to_string())
-}
-
-fn f64_validator(s: String) -> Result<(), String> {
-    s.parse::<f64>().map(|_| ()).map_err(|e| e.to_string())
+fn num_validator<F: FromStr>(s: String) -> Result<(), String> {
+    s.parse::<F>()
+        .map(|_| ())
+        .map_err(|_| "could not parse value as number".to_string())
 }
 
 fn date_validator(s: String) -> Result<(), String> {
@@ -58,19 +52,34 @@ fn main() -> Result<(), Error> {
             SubCommand::with_name("generate-ingestion-sample")
                 .about("Generate sample data files")
                 .arg(
-                    Arg::with_name("output")
-                        .long("output")
-                        .short("o")
+                    Arg::with_name("pha-output")
+                        .long("pha-output")
                         .value_name("DIR")
                         .default_value(".")
-                        .help("Directory to write sample data into"),
+                        .help(
+                            "Directory to write sample data for the PHA (aka \
+                            first server) into",
+                        ),
+                )
+                .arg(
+                    Arg::with_name("facilitator-output")
+                        .long("facilitator-output")
+                        .value_name("DIR")
+                        .default_value(".")
+                        .help(
+                            "Directory to write sample data for the \
+                            facilitator (aka second server) into",
+                        ),
                 )
                 .arg(
                     Arg::with_name("aggregation-id")
                         .long("aggregation-id")
                         .value_name("ID")
                         .default_value("fake-aggregation")
-                        .help("Aggregation ID to use when constructing object keys"),
+                        .help(
+                            "Aggregation ID to use when constructing object \
+                            keys",
+                        ),
                 )
                 .arg(
                     Arg::with_name("batch-id")
@@ -78,8 +87,8 @@ fn main() -> Result<(), Error> {
                         .value_name("UUID")
                         .help("Batch ID to use when constructing object keys")
                         .long_help(
-                            "Batch ID to use when constructing object keys. If omitted, a \
-                            UUID is generated.",
+                            "Batch ID to use when constructing object keys. If \
+                            omitted, a UUID is generated.",
                         )
                         .validator(uuid_validator),
                 )
@@ -87,10 +96,13 @@ fn main() -> Result<(), Error> {
                     Arg::with_name("date")
                         .long("date")
                         .value_name("DATE")
-                        .help("Date to use when constructing object keys in YYYYmmddHHMM format")
+                        .help(
+                            "Date to use when constructing object keys in \
+                            YYYYmmddHHMM format",
+                        )
                         .long_help(
-                            "Date to use when constructing object keys. If omitted, the current \
-                        time is used.",
+                            "Date to use when constructing object keys. If \
+                            omitted, the current time is used.",
                         )
                         .validator(date_validator),
                 )
@@ -100,8 +112,11 @@ fn main() -> Result<(), Error> {
                         .short("d")
                         .value_name("INT")
                         .default_value("123")
-                        .validator(usize_validator)
-                        .help("Length in bits of the data packets to generate"),
+                        .validator(num_validator::<i32>)
+                        .help(
+                            "Length in bits of the data packets to generate \
+                            (a.k.a. \"bins\" in some contexts). Must be a natural number.",
+                        ),
                 )
                 .arg(
                     Arg::with_name("packet-count")
@@ -109,7 +124,7 @@ fn main() -> Result<(), Error> {
                         .short("p")
                         .value_name("INT")
                         .default_value("10")
-                        .validator(usize_validator)
+                        .validator(num_validator::<usize>)
                         .help("Number of data packets to generate"),
                 )
                 .arg(
@@ -133,14 +148,6 @@ fn main() -> Result<(), Error> {
                         .validator(b64_validator),
                 )
                 .arg(
-                    Arg::with_name("bins")
-                        .long("bins")
-                        .value_name("INT")
-                        .help("Number of bins for the aggregation")
-                        .default_value("100")
-                        .validator(usize_validator),
-                )
-                .arg(
                     Arg::with_name("epsilon")
                         .long("epsilon")
                         .value_name("DOUBLE")
@@ -149,7 +156,7 @@ fn main() -> Result<(), Error> {
                             aggregation",
                         )
                         .default_value("0.23")
-                        .validator(f64_validator),
+                        .validator(num_validator::<f64>),
                 )
                 .arg(
                     Arg::with_name("batch-start-time")
@@ -157,7 +164,7 @@ fn main() -> Result<(), Error> {
                         .value_name("MILLIS")
                         .help("Start of timespan covered by the batch, in milliseconds since epoch")
                         .default_value("1000000000")
-                        .validator(usize_validator),
+                        .validator(num_validator::<i64>),
                 )
                 .arg(
                     Arg::with_name("batch-end-time")
@@ -165,7 +172,7 @@ fn main() -> Result<(), Error> {
                         .value_name("MILLIS")
                         .help("End of timespan covered by the batch, in milliseconds since epoch")
                         .default_value("1000000100")
-                        .validator(usize_validator),
+                        .validator(num_validator::<i64>),
                 ),
         )
         .get_matches();
@@ -178,9 +185,12 @@ fn main() -> Result<(), Error> {
             // various parameters are present and valid, so it is safe to use
             // unwrap() here.
             generate_ingestion_sample(
-                Box::new(FileTransport::new(
-                    Path::new(sub_matches.value_of("output").unwrap()).to_path_buf(),
-                )),
+                &mut FileTransport::new(
+                    Path::new(sub_matches.value_of("pha-output").unwrap()).to_path_buf(),
+                ),
+                &mut FileTransport::new(
+                    Path::new(sub_matches.value_of("facilitator-output").unwrap()).to_path_buf(),
+                ),
                 sub_matches
                     .value_of("batch-uuid")
                     .map_or_else(|| Uuid::new_v4(), |v| Uuid::parse_str(v).unwrap()),
@@ -195,17 +205,12 @@ fn main() -> Result<(), Error> {
                 sub_matches
                     .value_of("dimension")
                     .unwrap()
-                    .parse::<usize>()
+                    .parse::<i32>()
                     .unwrap(),
                 sub_matches
                     .value_of("packet-count")
                     .unwrap()
                     .parse::<usize>()
-                    .unwrap(),
-                sub_matches
-                    .value_of("bins")
-                    .unwrap()
-                    .parse::<i32>()
                     .unwrap(),
                 sub_matches
                     .value_of("epsilon")
