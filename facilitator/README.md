@@ -6,6 +6,10 @@ This is ISRG's implementation of a Prio accumulation server. It ingests a share 
 
 [Install a Rust toolchain](https://www.rust-lang.org/tools/install), then just `cargo build|run|test`.
 
+## Generating ingestion data
+
+To generate sample ingestion data, see the `generate-ingestion-sample` command and its usage (`cargo run -- generate-ingestion-sample --help`).
+
 ## References
 
 [Prio Data Share Batch IDL](https://docs.google.com/document/d/1L06dpE7OcC4CXho2UswrfHrnWKtbA9aSSmO_5o7Ku6I/edit#heading=h.3kq1yexquq2g)

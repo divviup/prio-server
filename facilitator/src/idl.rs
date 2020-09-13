@@ -65,6 +65,7 @@ const INGESTION_HEADER_SCHEMA: &str = r#"
 }
 "#;
 
+/// The header on a Prio ingestion batch.
 #[derive(Debug, Deserialize, Serialize, PartialEq)]
 pub struct IngestionHeader {
     pub batch_uuid: Uuid,
@@ -79,14 +80,28 @@ pub struct IngestionHeader {
 }
 
 impl IngestionHeader {
-    pub fn read(reader: impl Read) -> Result<IngestionHeader, Error> {
-        let schema = Schema::parse_str(INGESTION_HEADER_SCHEMA).map_err(|e| Error::AvroError(e))?;
-        let mut reader = Reader::with_schema(&schema, reader).map_err(|e| Error::AvroError(e))?;
+    /// Reads and parses one IngestionHeader from the provided std::io::Read
+    /// instance.
+    pub fn read<R: Read>(reader: R) -> Result<IngestionHeader, Error> {
+        let schema = Schema::parse_str(INGESTION_HEADER_SCHEMA).map_err(|e| {
+            Error::AvroError("failed to parse ingestion header schema".to_string(), e)
+        })?;
+        let mut reader = Reader::with_schema(&schema, reader).map_err(|e| {
+            Error::AvroError(
+                "failed to create reader for ingestion header".to_string(),
+                e,
+            )
+        })?;
 
         // We expect exactly one record in the reader and for it to be an ingestion header
         let header = match reader.next() {
             Some(Ok(h)) => h,
-            Some(Err(e)) => return Err(Error::AvroError(e)),
+            Some(Err(e)) => {
+                return Err(Error::AvroError(
+                    "failed to read header from Avro reader".to_string(),
+                    e,
+                ))
+            }
             None => {
                 return Err(Error::MalformedHeaderError(
                     "no records found in reader".to_owned(),
@@ -99,11 +114,16 @@ impl IngestionHeader {
             ));
         }
 
-        from_value::<IngestionHeader>(&header).map_err(|e| Error::AvroError(e))
+        from_value::<IngestionHeader>(&header)
+            .map_err(|e| Error::AvroError("failed to parse ingestion header".to_string(), e))
     }
 
+    /// Serializes this header into Avro format and writes it to the provided
+    /// std::io::Write instance.
     pub fn write<W: Write>(&self, writer: &mut W) -> Result<(), Error> {
-        let schema = Schema::parse_str(INGESTION_HEADER_SCHEMA).map_err(|e| Error::AvroError(e))?;
+        let schema = Schema::parse_str(INGESTION_HEADER_SCHEMA).map_err(|e| {
+            Error::AvroError("failed to parse ingestion header schema".to_string(), e)
+        })?;
         let mut writer = Writer::new(&schema, writer);
 
         // Ideally we would just do `writer.append_ser(self)` to use Serde serialization to write
@@ -139,11 +159,17 @@ impl IngestionHeader {
         );
 
         if let Err(e) = writer.append(record) {
-            return Err(Error::AvroError(e));
+            return Err(Error::AvroError(
+                "failed to append record to Avro writer".to_string(),
+                e,
+            ));
         }
 
         if let Err(e) = writer.flush() {
-            return Err(Error::AvroError(e));
+            return Err(Error::AvroError(
+                "failed to flush Avro writer".to_string(),
+                e,
+            ));
         }
         Ok(())
     }
@@ -169,6 +195,8 @@ const INGESTION_SIGNATURE_SCHEMA: &str = r#"
 }
 "#;
 
+/// The file containing signatures over the ingestion batch header and packet
+/// file.
 #[derive(Debug, Serialize, Deserialize, PartialEq)]
 pub struct IngestionSignature {
     pub batch_header_signature: Vec<u8>,
@@ -176,10 +204,14 @@ pub struct IngestionSignature {
 }
 
 impl IngestionSignature {
-    pub fn read(reader: impl Read) -> Result<IngestionSignature, Error> {
-        let schema =
-            Schema::parse_str(INGESTION_SIGNATURE_SCHEMA).map_err(|e| Error::AvroError(e))?;
-        let mut reader = Reader::with_schema(&schema, reader).map_err(|e| Error::AvroError(e))?;
+    /// Reads and parses one IngestionSignature from the provided std::io::Read
+    /// instance.
+    pub fn read<R: Read>(reader: R) -> Result<IngestionSignature, Error> {
+        let schema = Schema::parse_str(INGESTION_SIGNATURE_SCHEMA).map_err(|e| {
+            Error::AvroError("failed to parse ingestion signature schema".to_string(), e)
+        })?;
+        let mut reader = Reader::with_schema(&schema, reader)
+            .map_err(|e| Error::AvroError("failed to create Avro reader".to_string(), e))?;
 
         // We expect exactly one record and for it to be an ingestion signature
         let record = match reader.next() {
@@ -190,7 +222,10 @@ impl IngestionSignature {
                 ))
             }
             Some(Err(e)) => {
-                return Err(Error::AvroError(e));
+                return Err(Error::AvroError(
+                    "failed to read record from Avro reader".to_string(),
+                    e,
+                ));
             }
             None => {
                 return Err(Error::MalformedSignatureError(
@@ -236,9 +271,12 @@ impl IngestionSignature {
         })
     }
 
+    /// Serializes this signature into Avro format and writes it to the provided
+    /// std::io::Write instance.
     pub fn write<W: Write>(&self, writer: &mut W) -> Result<(), Error> {
-        let schema =
-            Schema::parse_str(INGESTION_SIGNATURE_SCHEMA).map_err(|e| Error::AvroError(e))?;
+        let schema = Schema::parse_str(INGESTION_SIGNATURE_SCHEMA).map_err(|e| {
+            Error::AvroError("failed to parse ingestion signature schema".to_string(), e)
+        })?;
         let mut writer = Writer::new(&schema, writer);
 
         let mut record = match Record::new(writer.schema()) {
@@ -260,11 +298,17 @@ impl IngestionSignature {
             Value::Bytes(self.signature_of_packets.clone()),
         );
         if let Err(e) = writer.append(record) {
-            return Err(Error::AvroError(e));
+            return Err(Error::AvroError(
+                "failed to append record to Avro writer".to_string(),
+                e,
+            ));
         }
 
         if let Err(e) = writer.flush() {
-            return Err(Error::AvroError(e));
+            return Err(Error::AvroError(
+                "failed to flush Avro writer".to_string(),
+                e,
+            ));
         }
         Ok(())
     }
@@ -317,6 +361,20 @@ const INGESTION_DATA_SHARE_PACKET_SCHEMA: &str = r#"
 }
 "#;
 
+/// Creates an avro_rs::Schema from the ingestion data share packet schema. For
+/// use with IngestionDataSharePacket::{read, write}.
+pub fn ingestion_data_share_packet_schema() -> Result<Schema, Error> {
+    Schema::parse_str(INGESTION_DATA_SHARE_PACKET_SCHEMA).map_err(|e| {
+        Error::AvroError(
+            "failed to parse ingestion data share packet schema".to_string(),
+            e,
+        )
+    })
+}
+
+/// A single packet from an ingestion batch file. Note that unlike the header
+/// and signature, which are files containing a single record, the data share
+/// file will contain many IngestionDataSharePacket records.
 #[derive(Debug, Deserialize, Serialize, PartialEq)]
 pub struct IngestionDataSharePacket {
     pub uuid: Uuid,
@@ -328,13 +386,12 @@ pub struct IngestionDataSharePacket {
 }
 
 impl IngestionDataSharePacket {
-    pub fn read(reader: impl Read) -> Result<IngestionDataSharePacket, Error> {
-        let schema = Schema::parse_str(INGESTION_DATA_SHARE_PACKET_SCHEMA)
-            .map_err(|e| Error::AvroError(e))?;
-        // TODO do we want to create an Avro Reader each time we read a packet? Might work provided
-        // we advance through the impl Read appropriately
-        let mut reader = Reader::with_schema(&schema, reader).map_err(|e| Error::AvroError(e))?;
-
+    /// Reads and parses a single IngestionDataSharePacket from the provided
+    /// avro_rs::Reader. Note that unlike other structures, this does not take
+    /// a primitive std::io::Read, because we do not want to create a new Avro
+    /// schema and reader for each packet. The Reader must have been created
+    /// with the schema returned from ingestion_data_share_packet_schema.
+    pub fn read<R: Read>(reader: &mut Reader<R>) -> Result<IngestionDataSharePacket, Error> {
         let record = match reader.next() {
             Some(Ok(Value::Record(r))) => r,
             Some(Ok(_)) => {
@@ -343,7 +400,10 @@ impl IngestionDataSharePacket {
                 ))
             }
             Some(Err(e)) => {
-                return Err(Error::AvroError(e));
+                return Err(Error::AvroError(
+                    "failed to read record from Avro reader".to_string(),
+                    e,
+                ));
             }
             None => {
                 return Err(Error::MalformedDataPacketError(
@@ -371,7 +431,7 @@ impl IngestionDataSharePacket {
                     Value::String(v) => version_configuration = Some(v),
                     Value::Null => version_configuration = None,
                     v => {
-                        return Err(Error::MalformedSignatureError(format!(
+                        return Err(Error::MalformedDataPacketError(format!(
                             "unexpected boxed value {:?} in version_configuration",
                             v
                         )))
@@ -381,14 +441,14 @@ impl IngestionDataSharePacket {
                     Value::Bytes(v) => device_nonce = Some(v),
                     Value::Null => device_nonce = None,
                     v => {
-                        return Err(Error::MalformedSignatureError(format!(
+                        return Err(Error::MalformedDataPacketError(format!(
                             "unexpected boxed value {:?} in device_nonce",
                             v
                         )))
                     }
                 },
                 (f, _) => {
-                    return Err(Error::MalformedSignatureError(format!(
+                    return Err(Error::MalformedDataPacketError(format!(
                         "unexpected field {} in record",
                         f
                     )))
@@ -401,7 +461,7 @@ impl IngestionDataSharePacket {
             || encryption_key_id.is_none()
             || r_pit.is_none()
         {
-            return Err(Error::MalformedSignatureError(
+            return Err(Error::MalformedDataPacketError(
                 "missing fields in record".to_owned(),
             ));
         }
@@ -416,11 +476,12 @@ impl IngestionDataSharePacket {
         })
     }
 
-    pub fn write<W: Write>(&self, writer: &mut W) -> Result<(), Error> {
-        let schema = Schema::parse_str(INGESTION_DATA_SHARE_PACKET_SCHEMA)
-            .map_err(|e| Error::AvroError(e))?;
-        let mut writer = Writer::new(&schema, writer);
-
+    /// Serializes and writes a single IngestionDataSharePacket to the provided
+    /// avro_rs::Writer. Note that unlike other structures, this does not take
+    /// a primitive std::io::Write, because we do not want to create a new Avro
+    /// schema and reader for each packet. The Reader must have been created
+    /// with the schema returned from ingestion_data_share_packet_schema.
+    pub fn write<W: Write>(&self, writer: &mut Writer<W>) -> Result<(), Error> {
         // Ideally we would just do `writer.append_ser(self)` to use Serde serialization to write
         // the record but there seems to be some problem with serializing UUIDs, so we have to
         // construct the record.
@@ -460,12 +521,9 @@ impl IngestionDataSharePacket {
         }
 
         if let Err(e) = writer.append(record) {
-            return Err(Error::AvroError(e));
+            return Err(Error::AvroError("failed to append record".to_string(), e));
         }
 
-        if let Err(e) = writer.flush() {
-            return Err(Error::AvroError(e));
-        }
         Ok(())
     }
 }
@@ -549,12 +607,20 @@ mod tests {
             },
         ];
 
-        for packet in packets {
-            let mut record_vec = Vec::new();
+        let mut record_vec = Vec::new();
 
-            let res = packet.write(&mut record_vec);
+        let schema = ingestion_data_share_packet_schema().unwrap();
+        let mut writer = Writer::new(&schema, &mut record_vec);
+
+        for packet in packets {
+            let res = packet.write(&mut writer);
             assert!(res.is_ok(), "write error {:?}", res);
-            let packet_again = IngestionDataSharePacket::read(&record_vec[..]);
+        }
+        writer.flush().unwrap();
+
+        let mut reader = Reader::with_schema(&schema, &record_vec[..]).unwrap();
+        for packet in packets {
+            let packet_again = IngestionDataSharePacket::read(&mut reader);
             assert!(packet_again.is_ok(), "read error {:?}", packet_again);
             assert_eq!(packet_again.unwrap(), *packet);
         }
