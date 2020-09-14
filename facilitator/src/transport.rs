@@ -140,6 +140,40 @@ impl Transport for MemoryTransport {
     }
 }
 
+/// Trivial implementor of std::io::{Read, Write} used in NullTransport.
+struct NullReadWriter {}
+
+impl Read for NullReadWriter {
+    fn read(&mut self, _buf: &mut [u8]) -> std::io::Result<usize> {
+        Ok(0)
+    }
+}
+
+impl Write for NullReadWriter {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        Ok(buf.len())
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+}
+
+/// Implementation of Transport that simply discards all writes and whose reads
+/// always yield 0 bytes. Intended for use in tests, e.g. when a client is set
+/// up but only needs to emit shares to one server.
+pub struct NullTransport {}
+
+impl Transport for NullTransport {
+    fn get(&self, _key: &Path) -> Result<Box<dyn Read>, Error> {
+        Ok(Box::new(NullReadWriter {}))
+    }
+
+    fn put(&mut self, _key: &Path) -> Result<Box<dyn Write>, Error> {
+        Ok(Box::new(NullReadWriter {}))
+    }
+}
+
 // TODO: S3Transport; https://github.com/rusoto/rusoto
 
 #[cfg(test)]
@@ -150,7 +184,7 @@ mod tests {
     #[test]
     fn roundtrip_file_transport() {
         let tempdir = tempfile::TempDir::new().unwrap();
-        let mut file_transport = FileTransport::new(tempdir.into_path().to_path_buf());
+        let mut file_transport = FileTransport::new(tempdir.path().to_path_buf());
         let content = vec![1, 2, 3, 4, 5, 6, 7, 8];
         let path = Path::new("path");
         let path2 = Path::new("path2");
@@ -181,7 +215,7 @@ mod tests {
     #[test]
     fn roundtrip_file_transport_trait() {
         let tempdir = tempfile::TempDir::new().unwrap();
-        let file_transport = FileTransport::new(tempdir.into_path().to_path_buf());
+        let file_transport = FileTransport::new(tempdir.path().to_path_buf());
         do_roundtrip_transport_trait(file_transport);
     }
 
@@ -249,5 +283,31 @@ mod tests {
             assert!(res.is_ok(), "failed to read: {:?}", res.err());
             assert_eq!(content_again, content);
         }
+    }
+
+    #[test]
+    fn roundtrip_null_transport() {
+        let mut null_transport = NullTransport {};
+        let content = vec![1, 2, 3, 4, 5, 6, 7, 8];
+        let path = Path::new("path");
+
+        let writer = null_transport.put(&path);
+        assert!(writer.is_ok(), "unexpected error {:?}", writer.err());
+
+        let res = writer.unwrap().write_all(&content);
+        assert!(res.is_ok(), "failed to write {:?}", res.err());
+
+        let reader = null_transport.get(&path);
+        assert!(reader.is_ok(), "create reader failed: {:?}", reader.err());
+
+        let mut content_again = Vec::new();
+        let res = reader.unwrap().read_to_end(&mut content_again);
+        assert!(res.is_ok(), "failed to read: {:?}", res.err());
+        assert_eq!(
+            content_again.len(),
+            0,
+            "vector unexpectedly contents: {:?}",
+            content_again
+        );
     }
 }

@@ -1,12 +1,10 @@
 use chrono::prelude::*;
-use chrono::DateTime;
+use chrono::NaiveDateTime;
 use clap::{App, Arg, SubCommand};
-use facilitator::sample::{
-    generate_ingestion_sample, DATE_FORMAT, DEFAULT_FACILITATOR_PRIVATE_KEY,
-    DEFAULT_PHA_PRIVATE_KEY,
-};
+use facilitator::ingestion::BatchIngestor;
+use facilitator::sample::generate_ingestion_sample;
 use facilitator::transport::FileTransport;
-use facilitator::Error;
+use facilitator::{Error, DATE_FORMAT, DEFAULT_FACILITATOR_PRIVATE_KEY, DEFAULT_PHA_PRIVATE_KEY};
 use libprio_rs::encrypt::PrivateKey;
 use std::path::Path;
 use std::str::FromStr;
@@ -15,13 +13,13 @@ use uuid::Uuid;
 fn num_validator<F: FromStr>(s: String) -> Result<(), String> {
     s.parse::<F>()
         .map(|_| ())
-        .map_err(|_| "could not parse value as number".to_string())
+        .map_err(|_| "could not parse value as number".to_owned())
 }
 
 fn date_validator(s: String) -> Result<(), String> {
-    DateTime::parse_from_str(&s, DATE_FORMAT)
+    NaiveDateTime::parse_from_str(&s, DATE_FORMAT)
         .map(|_| ())
-        .map_err(|e| e.to_string())
+        .map_err(|e| format!("{} {}", s, e.to_string()))
 }
 
 fn b64_validator(s: String) -> Result<(), String> {
@@ -98,7 +96,7 @@ fn main() -> Result<(), Error> {
                         .value_name("DATE")
                         .help(
                             "Date to use when constructing object keys in \
-                            YYYYmmddHHMM format",
+                            YYYY/mm/dd/HH/MM format",
                         )
                         .long_help(
                             "Date to use when constructing object keys. If \
@@ -175,59 +173,151 @@ fn main() -> Result<(), Error> {
                         .validator(num_validator::<i64>),
                 ),
         )
+        .subcommand(
+            SubCommand::with_name("validate-ingestion")
+                .about("Validate an ingestion share and emit a validation share.")
+                .arg(
+                    Arg::with_name("aggregation-id")
+                        .long("aggregation-id")
+                        .value_name("ID")
+                        .default_value("fake-aggregation")
+                        .help(
+                            "Aggregation ID to use when constructing object \
+                            keys",
+                        ),
+                )
+                .arg(
+                    Arg::with_name("batch-id")
+                        .long("batch-id")
+                        .value_name("UUID")
+                        .help("Batch ID to use when constructing object keys")
+                        .long_help(
+                            "Batch ID to use when constructing object keys. If \
+                            omitted, a UUID is generated.",
+                        )
+                        .validator(uuid_validator),
+                )
+                .arg(
+                    Arg::with_name("date")
+                        .long("date")
+                        .value_name("DATE")
+                        .help(
+                            "Date to use when constructing object keys in \
+                            YYYYmmddHHMM format",
+                        )
+                        .long_help(
+                            "Date to use when constructing object keys. If \
+                            omitted, the current time is used.",
+                        )
+                        .validator(date_validator),
+                )
+                .arg(
+                    Arg::with_name("private-key")
+                        .long("private-key")
+                        .value_name("B64")
+                        .help("Base64 encoded private key for the server")
+                        .long_help("If not specified, a fixed private key will be used.")
+                        .default_value(DEFAULT_FACILITATOR_PRIVATE_KEY)
+                        .hide_default_value(true)
+                        .validator(b64_validator),
+                )
+                .arg(
+                    Arg::with_name("is-first").long("is-first").help(
+                        "Whether this is the \"first\" server receiving a share, i.e., the PHA.",
+                    ),
+                )
+                .arg(
+                    Arg::with_name("ingestion-bucket")
+                        .long("ingestion-bucket")
+                        .value_name("DIR")
+                        .default_value(".")
+                        .help("Directory containing ingestion data"),
+                )
+                .arg(
+                    Arg::with_name("validation-bucket")
+                        .long("validation-bucket")
+                        .value_name("DIR")
+                        .default_value(".")
+                        .help(
+                            "Peer validation bucket into which to write \
+                            validation shares",
+                        ),
+                ),
+        )
         .get_matches();
 
     let _verbose = matches.is_present("verbose");
 
     match matches.subcommand() {
-        ("generate-ingestion-sample", Some(sub_matches)) => {
-            // The configuration of the Args above should guarantee that the
-            // various parameters are present and valid, so it is safe to use
-            // unwrap() here.
-            generate_ingestion_sample(
-                &mut FileTransport::new(
-                    Path::new(sub_matches.value_of("pha-output").unwrap()).to_path_buf(),
-                ),
-                &mut FileTransport::new(
-                    Path::new(sub_matches.value_of("facilitator-output").unwrap()).to_path_buf(),
-                ),
-                sub_matches
-                    .value_of("batch-uuid")
-                    .map_or_else(|| Uuid::new_v4(), |v| Uuid::parse_str(v).unwrap()),
+        // The configuration of the Args above should guarantee that the
+        // various parameters are present and valid, so it is safe to use
+        // unwrap() here.
+        ("generate-ingestion-sample", Some(sub_matches)) => generate_ingestion_sample(
+            &mut FileTransport::new(
+                Path::new(sub_matches.value_of("pha-output").unwrap()).to_path_buf(),
+            ),
+            &mut FileTransport::new(
+                Path::new(sub_matches.value_of("facilitator-output").unwrap()).to_path_buf(),
+            ),
+            sub_matches
+                .value_of("batch-id")
+                .map_or_else(|| Uuid::new_v4(), |v| Uuid::parse_str(v).unwrap()),
+            sub_matches.value_of("aggregation-id").unwrap().to_owned(),
+            sub_matches.value_of("date").map_or_else(
+                || Utc::now().format(DATE_FORMAT).to_string(),
+                |v| v.to_string(),
+            ),
+            &PrivateKey::from_base64(sub_matches.value_of("pha-private-key").unwrap()).unwrap(),
+            &PrivateKey::from_base64(sub_matches.value_of("facilitator-private-key").unwrap())
+                .unwrap(),
+            sub_matches
+                .value_of("dimension")
+                .unwrap()
+                .parse::<i32>()
+                .unwrap(),
+            sub_matches
+                .value_of("packet-count")
+                .unwrap()
+                .parse::<usize>()
+                .unwrap(),
+            sub_matches
+                .value_of("epsilon")
+                .unwrap()
+                .parse::<f64>()
+                .unwrap(),
+            sub_matches
+                .value_of("batch-start-time")
+                .unwrap()
+                .parse::<i64>()
+                .unwrap(),
+            sub_matches
+                .value_of("batch-end-time")
+                .unwrap()
+                .parse::<i64>()
+                .unwrap(),
+        ),
+        ("validate-ingestion", Some(sub_matches)) => {
+            let mut ingestion_transport = FileTransport::new(
+                Path::new(sub_matches.value_of("ingestion-bucket").unwrap()).to_path_buf(),
+            );
+            let mut validation_transport = FileTransport::new(
+                Path::new(sub_matches.value_of("validation-bucket").unwrap()).to_path_buf(),
+            );
+            let mut batch_ingestor = BatchIngestor::new(
                 sub_matches.value_of("aggregation-id").unwrap().to_owned(),
+                sub_matches
+                    .value_of("batch-id")
+                    .map_or_else(|| Uuid::new_v4(), |v| Uuid::parse_str(v).unwrap()),
                 sub_matches.value_of("date").map_or_else(
                     || Utc::now().format(DATE_FORMAT).to_string(),
                     |v| v.to_string(),
                 ),
-                &PrivateKey::from_base64(sub_matches.value_of("pha-private-key").unwrap()).unwrap(),
-                &PrivateKey::from_base64(sub_matches.value_of("facilitator-private-key").unwrap())
-                    .unwrap(),
-                sub_matches
-                    .value_of("dimension")
-                    .unwrap()
-                    .parse::<i32>()
-                    .unwrap(),
-                sub_matches
-                    .value_of("packet-count")
-                    .unwrap()
-                    .parse::<usize>()
-                    .unwrap(),
-                sub_matches
-                    .value_of("epsilon")
-                    .unwrap()
-                    .parse::<f64>()
-                    .unwrap(),
-                sub_matches
-                    .value_of("batch-start-time")
-                    .unwrap()
-                    .parse::<i64>()
-                    .unwrap(),
-                sub_matches
-                    .value_of("batch-end-time")
-                    .unwrap()
-                    .parse::<i64>()
-                    .unwrap(),
-            )
+                &mut ingestion_transport,
+                &mut validation_transport,
+                sub_matches.is_present("is-first"),
+                PrivateKey::from_base64(sub_matches.value_of("private-key").unwrap()).unwrap(),
+            );
+            batch_ingestor.generate_validation_share()
         }
         (_, _) => Ok(()),
     }
