@@ -1,0 +1,28 @@
+{
+    "namespace": "org.abetterinternet.prio.v1",
+    "type": "record",
+    "name": "PrioValidityPacket",
+    "fields": [
+        {
+            "name": "uuid",
+            "type": "string",
+            "logicalType": "uuid",
+            "doc": "Universal unique identifier to link with data share sent to other server(s) participating in the aggregation."
+        },
+        {
+            "name": "f_r",
+            "type": "long",
+            "doc": "The share of the polynomial f evaluated in r_PIT."
+        },
+        {
+            "name": "g_r",
+            "type": "long",
+            "doc": "The share of the polynomial g evaluated in r_PIT."
+        },
+        {
+            "name": "h_r",
+            "type": "long",
+            "doc": "The share of the polynomial h evaluated in r_PIT."
+        }
+    ]
+}

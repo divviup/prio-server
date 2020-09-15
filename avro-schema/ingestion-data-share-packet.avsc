@@ -1,0 +1,44 @@
+{
+    "namespace": "org.abetterinternet.prio.v1",
+    "type": "record",
+    "name": "PrioDataSharePacket",
+    "fields": [
+        {
+            "name": "uuid",
+            "type": "string",
+            "logicalType": "uuid",
+            "doc": "Universal unique identifier to link with data share sent to other server(s) participating in the aggregation."
+        },
+        {
+            "name": "encrypted_payload",
+            "type": "bytes",
+            "doc": "The encrypted content of the data share algorithm. This represents one of the Vec<u8> results from https://github.com/abetterinternet/libprio-rs/blob/f0092de421c70de9888cfcbbc86be7b5c5e624b0/src/client.rs#L49"
+        },
+        {
+            "name": "encryption_key_id",
+            "type": "string",
+            "doc": "Encryption key identifier (e.g., to support key rotations)"
+        },
+        {
+            "name": "r_pit",
+            "type": "long",
+            "doc": "The random value r_PIT to use for the Polynomial Identity Test."
+        },
+        {
+            "name": "version_configuration",
+            "type": [
+                "null",
+                "string"
+            ],
+            "doc": "Version configuration of the device."
+        },
+        {
+            "name": "device_nonce",
+            "type": [
+                "null",
+                "bytes"
+            ],
+            "doc": "SHA256 hash of the BAA certificate issued to the client device. This would be populated only in cases where ingestion cannot fully address spam/abuse."
+        }
+    ]
+}

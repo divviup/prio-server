@@ -1,0 +1,17 @@
+{
+    "namespace": "org.abetterinternet.prio.v1",
+    "type": "record",
+    "name": "PrioIngestionSignature",
+    "fields": [
+        {
+            "name": "batch_header_signature",
+            "type": "bytes",
+            "doc": "signature of the PrioBatchHeader object"
+        },
+        {
+            "name": "signature_of_packets",
+            "type": "bytes",
+            "doc": "signature of the avro file of individual shares in this batch."
+        }
+    ]
+}

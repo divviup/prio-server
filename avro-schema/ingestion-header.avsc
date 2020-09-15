@@ -1,0 +1,57 @@
+{
+    "namespace": "org.abetterinternet.prio.v1",
+    "type": "record",
+    "name": "PrioBatchHeader",
+    "fields": [
+        {
+            "name": "batch_uuid",
+            "type": "string",
+            "logicalType": "uuid",
+            "doc": "Universal unique identifier to link with data share batch sent to other server(s) participating in the aggregation."
+        },
+        {
+            "name": "name",
+            "type": "string",
+            "doc": "a name for this specific aggregation"
+        },
+        {
+            "name": "bins",
+            "type": "int",
+            "doc": "number of bins for this aggregation"
+        },
+        {
+            "name": "epsilon",
+            "type": "double",
+            "doc": "differential privacy parameter for local randomization before aggregation."
+        },
+        {
+            "name": "prime",
+            "type": "long",
+            "default": 4293918721,
+            "doc": "the value of prime p used in aggregation."
+        },
+        {
+            "name": "number_of_servers",
+            "type": "int",
+            "default": 2,
+            "doc": "the number of servers that will be involved in the aggregation."
+        },
+        {
+            "name": "hamming_weight",
+            "type": ["int", "null"],
+            "doc":  "If specified, the hamming weight of the vector will be verified during the validity check on the server."
+        },
+        {
+            "name": "batch_start_time",
+            "type": "long",
+            "logicalType": "timestamp-millis",
+            "doc": "time range information for the shares in this batch."
+        },
+        {
+            "name": "batch_end_time",
+            "type": "long",
+            "logicalType": "timestamp-millis",
+            "doc": "time range information for the shares in this batch."
+        }
+    ]
+}
