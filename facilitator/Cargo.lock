@@ -228,6 +228,7 @@ dependencies = [
  "clap",
  "libprio-rs",
  "rand 0.7.3",
+ "ring",
  "serde",
  "tempfile",
  "uuid",

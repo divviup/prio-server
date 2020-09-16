@@ -1,13 +1,13 @@
-use crate::idl::{
-    ingestion_data_share_packet_schema, validation_packet_schema, IngestionDataSharePacket,
-    IngestionHeader, ValidationHeader, ValidationPacket,
+use crate::{
+    idl::{
+        ingestion_data_share_packet_schema, validation_packet_schema, IngestionDataSharePacket,
+        IngestionHeader, ValidationHeader, ValidationPacket,
+    },
+    transport::Transport,
+    Error,
 };
-use crate::transport::Transport;
-use crate::Error;
 use avro_rs::{Reader, Writer};
-use libprio_rs::encrypt::PrivateKey;
-use libprio_rs::finite_field::Field;
-use libprio_rs::server::Server;
+use libprio_rs::{encrypt::PrivateKey, finite_field::Field, server::Server};
 use std::convert::TryFrom;
 use std::path::{Path, PathBuf};
 use uuid::Uuid;
@@ -204,9 +204,10 @@ impl<'a> BatchIngestor<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::sample::generate_ingestion_sample;
-    use crate::transport::FileTransport;
-    use crate::{DEFAULT_FACILITATOR_PRIVATE_KEY, DEFAULT_PHA_PRIVATE_KEY};
+    use crate::{
+        default_ingestor_private_key, sample::generate_ingestion_sample, transport::FileTransport,
+        DEFAULT_FACILITATOR_PRIVATE_KEY, DEFAULT_PHA_PRIVATE_KEY,
+    };
 
     #[test]
     fn share_validator() {
@@ -233,6 +234,7 @@ mod tests {
             date.clone(),
             &pha_key,
             &facilitator_key,
+            &default_ingestor_private_key(),
             10,
             10,
             0.11,
