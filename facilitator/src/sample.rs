@@ -5,7 +5,7 @@ use crate::{
     },
     ingestion::Batch,
     transport::Transport,
-    Error,
+    Error, SidecarWriter,
 };
 use avro_rs::Writer;
 use libprio_rs::{
@@ -19,16 +19,19 @@ use ring::{
     rand::SystemRandom,
     signature::{EcdsaKeyPair, ECDSA_P256_SHA256_FIXED_SIGNING},
 };
+use std::io::Write;
 use std::path::Path;
 use uuid::Uuid;
 
 fn write_ingestion_header(
     transport: &mut dyn Transport,
     path: &Path,
-    header: &IngestionHeader,
+    header: &Vec<u8>,
 ) -> Result<(), Error> {
     let mut header_writer = transport.put(path)?;
-    header.write(&mut header_writer)
+    header_writer
+        .write_all(&header)
+        .map_err(|e| Error::IoError("failed to write header".to_owned(), e))
 }
 
 pub fn generate_ingestion_sample(
@@ -52,6 +55,7 @@ pub fn generate_ingestion_sample(
         ));
     }
 
+    let rng = SystemRandom::new();
     let ingestor_key_pair =
         EcdsaKeyPair::from_pkcs8(&ECDSA_P256_SHA256_FIXED_SIGNING, ingestor_key).map_err(|e| {
             Error::CryptographyError(
@@ -60,7 +64,6 @@ pub fn generate_ingestion_sample(
                 None,
             )
         })?;
-    let rng = SystemRandom::new();
 
     let ingestion_batch = Batch::new_ingestion(aggregation_name.to_owned(), batch_uuid, date);
 
@@ -77,21 +80,26 @@ pub fn generate_ingestion_sample(
         batch_end_time: batch_end_time,
     };
 
+    // Avro encoding, apparently, is not deterministic, which means that we have
+    // to be very careful about what we sign: two calls to
+    // ingestion_header.to_buf() may return two different values (both of which)
+    // would decode back into the same object), so we have to be mindful that
+    // the raw bytes we sign match the ones we end up writing out.
+    let ingestion_header_bytes = ingestion_header.to_buf()?;
+
     write_ingestion_header(
         pha_transport,
         ingestion_batch.header_key(),
-        &ingestion_header,
+        &ingestion_header_bytes,
     )?;
     write_ingestion_header(
         facilitator_transport,
         ingestion_batch.header_key(),
-        &ingestion_header,
+        &ingestion_header_bytes,
     )?;
 
-    let mut signature_message = Vec::new();
-    ingestion_header.write(&mut signature_message)?;
     let header_signature = ingestor_key_pair
-        .sign(&rng, &signature_message)
+        .sign(&rng, &ingestion_header_bytes)
         .map_err(|e| {
             Error::CryptographyError("failed to sign ingestion header".to_owned(), None, Some(e))
         })?;
@@ -119,19 +127,19 @@ pub fn generate_ingestion_sample(
 
     // ring::signature does not provide a means of feeding chunks of a message
     // into a signer. You must instead provide the entire message at once
-    // (https://github.com/briansmith/ring/issues/253).
-    let mut pha_signature_message = Vec::new();
-    let mut pha_packet_transport_writer = pha_transport.put(ingestion_batch.packet_file_key())?;
-    let mut pha_packet_writer = Writer::new(&schema, &mut pha_packet_transport_writer);
-    let mut pha_packet_signature_writer = Writer::new(&schema, &mut pha_signature_message);
+    // (https://github.com/briansmith/ring/issues/253). And since the Avro
+    // encoding is nondeterministic, we need to make sure we are signing the
+    // same serialized bytes that get written to the transport, so we wrap the
+    // Transport's writer with a SidecarWriter so we can record the serialized
+    // bytes into memory.
+    let mut pha_packet_sidecar_writer =
+        SidecarWriter::new(pha_transport.put(ingestion_batch.packet_file_key())?);
+    let mut pha_packet_writer = Writer::new(&schema, &mut pha_packet_sidecar_writer);
 
-    let mut facilitator_signature_message = Vec::new();
-    let mut facilitator_packet_transport_writer =
-        &mut facilitator_transport.put(ingestion_batch.packet_file_key())?;
+    let mut facilitator_packet_sidecar_writer =
+        SidecarWriter::new(facilitator_transport.put(ingestion_batch.packet_file_key())?);
     let mut facilitator_packet_writer =
-        Writer::new(&schema, &mut facilitator_packet_transport_writer);
-    let mut facilitator_packet_signature_writer =
-        Writer::new(&schema, &mut facilitator_signature_message);
+        Writer::new(&schema, &mut facilitator_packet_sidecar_writer);
 
     // We need an instance of a libprio server to pick an r_pit, which seems odd
     // because that value is essentially random and must be agreed upon by the
@@ -165,7 +173,6 @@ pub fn generate_ingestion_sample(
         };
 
         pha_packet.write(&mut pha_packet_writer)?;
-        pha_packet.write(&mut pha_packet_signature_writer)?;
 
         let facilitator_packet = IngestionDataSharePacket {
             uuid: Uuid::new_v4(),
@@ -177,17 +184,24 @@ pub fn generate_ingestion_sample(
         };
 
         facilitator_packet.write(&mut facilitator_packet_writer)?;
-        facilitator_packet.write(&mut facilitator_packet_signature_writer)?;
     }
+
+    pha_packet_writer
+        .flush()
+        .map_err(|e| Error::AvroError("failed to flush Avro packet writer".to_owned(), e))?;
+
+    facilitator_packet_writer
+        .flush()
+        .map_err(|e| Error::AvroError("failed to flush Avro packet writer".to_owned(), e))?;
 
     // Sign the PHA's packet file, then construct signature Avro message and PUT
     // it into PHA transport.
     let pha_packet_file_signature = ingestor_key_pair
-        .sign(&rng, &pha_signature_message)
+        .sign(&rng, &pha_packet_sidecar_writer.sidecar)
         .map_err(|e| {
             Error::CryptographyError("failed to sign PHA packet file".to_owned(), None, Some(e))
         })?;
-    let mut signature_writer = pha_transport.put(ingestion_batch.signature_path())?;
+    let mut signature_writer = pha_transport.put(ingestion_batch.signature_key())?;
     IngestionSignature {
         batch_header_signature: header_signature.as_ref().to_vec(),
         signature_of_packets: pha_packet_file_signature.as_ref().to_vec(),
@@ -196,7 +210,7 @@ pub fn generate_ingestion_sample(
 
     // Same thing for the facilitator.
     let facilitator_packet_file_signature = ingestor_key_pair
-        .sign(&rng, &facilitator_signature_message)
+        .sign(&rng, &facilitator_packet_sidecar_writer.sidecar)
         .map_err(|e| {
             Error::CryptographyError(
                 "failed to sign facilitator packet file".to_owned(),
@@ -204,7 +218,7 @@ pub fn generate_ingestion_sample(
                 Some(e),
             )
         })?;
-    let mut signature_writer = facilitator_transport.put(ingestion_batch.signature_path())?;
+    let mut signature_writer = facilitator_transport.put(ingestion_batch.signature_key())?;
     IngestionSignature {
         batch_header_signature: header_signature.as_ref().to_vec(),
         signature_of_packets: facilitator_packet_file_signature.as_ref().to_vec(),
@@ -218,8 +232,8 @@ pub fn generate_ingestion_sample(
 mod tests {
     use super::*;
     use crate::{
-        default_ingestor_private_key, transport::FileTransport, DEFAULT_FACILITATOR_PRIVATE_KEY,
-        DEFAULT_PHA_PRIVATE_KEY,
+        default_ingestor_private_key, transport::FileTransport,
+        DEFAULT_FACILITATOR_ECIES_PRIVATE_KEY, DEFAULT_PHA_ECIES_PRIVATE_KEY,
     };
     use std::path::PathBuf;
 
@@ -237,8 +251,8 @@ mod tests {
             batch_uuid,
             "fake-aggregation".to_owned(),
             "fake-date".to_owned(),
-            &PrivateKey::from_base64(DEFAULT_PHA_PRIVATE_KEY).unwrap(),
-            &PrivateKey::from_base64(DEFAULT_FACILITATOR_PRIVATE_KEY).unwrap(),
+            &PrivateKey::from_base64(DEFAULT_PHA_ECIES_PRIVATE_KEY).unwrap(),
+            &PrivateKey::from_base64(DEFAULT_FACILITATOR_ECIES_PRIVATE_KEY).unwrap(),
             &default_ingestor_private_key(),
             10,
             10,
