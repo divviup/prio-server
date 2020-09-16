@@ -166,6 +166,12 @@ impl IngestionHeader {
         }
         Ok(())
     }
+
+    pub fn to_buf(&self) -> Result<Vec<u8>, Error> {
+        let mut buf = Vec::new();
+        self.write(&mut buf)?;
+        Ok(buf)
+    }
 }
 
 // TODO We ought to use the same signature format across ingestion, validation

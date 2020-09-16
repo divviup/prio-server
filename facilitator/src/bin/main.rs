@@ -2,10 +2,14 @@ use chrono::{prelude::Utc, NaiveDateTime};
 use clap::{App, Arg, SubCommand};
 use facilitator::{
     ingestion::BatchIngestor, sample::generate_ingestion_sample, transport::FileTransport, Error,
-    DATE_FORMAT, DEFAULT_FACILITATOR_PRIVATE_KEY, DEFAULT_INGESTOR_PRIVATE_KEY,
-    DEFAULT_PHA_PRIVATE_KEY,
+    DATE_FORMAT, DEFAULT_FACILITATOR_ECIES_PRIVATE_KEY, DEFAULT_FACILITATOR_SIGNING_PRIVATE_KEY,
+    DEFAULT_INGESTOR_PRIVATE_KEY, DEFAULT_PHA_ECIES_PRIVATE_KEY,
 };
 use libprio_rs::encrypt::PrivateKey;
+use ring::signature::{
+    EcdsaKeyPair, KeyPair, UnparsedPublicKey, ECDSA_P256_SHA256_FIXED,
+    ECDSA_P256_SHA256_FIXED_SIGNING,
+};
 use std::{path::Path, str::FromStr};
 use uuid::Uuid;
 
@@ -130,7 +134,7 @@ fn main() -> Result<(), Error> {
                         .value_name("B64")
                         .help("Base64 encoded private key for the PHA server")
                         .long_help("If not specified, a fixed private key will be used.")
-                        .default_value(DEFAULT_PHA_PRIVATE_KEY)
+                        .default_value(DEFAULT_PHA_ECIES_PRIVATE_KEY)
                         .hide_default_value(true)
                         .validator(b64_validator),
                 )
@@ -140,7 +144,7 @@ fn main() -> Result<(), Error> {
                         .value_name("B64")
                         .help("Base64 encoded private key for the facilitator server")
                         .long_help("If not specified, a fixed private key will be used.")
-                        .default_value(DEFAULT_FACILITATOR_PRIVATE_KEY)
+                        .default_value(DEFAULT_FACILITATOR_ECIES_PRIVATE_KEY)
                         .hide_default_value(true)
                         .validator(b64_validator),
                 )
@@ -221,12 +225,30 @@ fn main() -> Result<(), Error> {
                         .validator(date_validator),
                 )
                 .arg(
-                    Arg::with_name("private-key")
-                        .long("private-key")
+                    Arg::with_name("ecies-private-key")
+                        .long("ecies-private-key")
                         .value_name("B64")
-                        .help("Base64 encoded private key for the server")
+                        .help("Base64 encoded ECIES private key for the server")
                         .long_help("If not specified, a fixed private key will be used.")
-                        .default_value(DEFAULT_FACILITATOR_PRIVATE_KEY)
+                        .default_value(DEFAULT_FACILITATOR_ECIES_PRIVATE_KEY)
+                        .hide_default_value(true)
+                        .validator(b64_validator),
+                )
+                .arg(
+                    Arg::with_name("ingestor-public-key")
+                        .long("ingestor-public-key")
+                        .value_name("B64")
+                        .help("Base64 encoded public key for the ingestor")
+                        .default_value(DEFAULT_INGESTOR_PRIVATE_KEY)
+                        .hide_default_value(true)
+                        .validator(b64_validator),
+                )
+                .arg(
+                    Arg::with_name("share-processor-private-key")
+                        .long("share-processor-private-key")
+                        .help("Base64 encoded share processor private key for the server")
+                        .long_help("If not specified, a fixed private key will be used.")
+                        .default_value(DEFAULT_FACILITATOR_SIGNING_PRIVATE_KEY)
                         .hide_default_value(true)
                         .validator(b64_validator),
                 )
@@ -313,6 +335,40 @@ fn main() -> Result<(), Error> {
             let mut validation_transport = FileTransport::new(
                 Path::new(sub_matches.value_of("validation-bucket").unwrap()).to_path_buf(),
             );
+
+            // ingestor-public-key could be a private key, in which case we just
+            // want its public portion. UnparsedPublicKey::new doesn't return an
+            // error, so try parsing the argument as a private key first.
+            let ingestor_key_bytes =
+                base64::decode(sub_matches.value_of("ingestor-public-key").unwrap()).unwrap();
+            let ingestor_pub_key = match EcdsaKeyPair::from_pkcs8(
+                &ECDSA_P256_SHA256_FIXED_SIGNING,
+                &ingestor_key_bytes,
+            ) {
+                Ok(priv_key) => UnparsedPublicKey::new(
+                    &ECDSA_P256_SHA256_FIXED,
+                    Vec::from(priv_key.public_key().as_ref()),
+                ),
+                Err(_) => UnparsedPublicKey::new(&ECDSA_P256_SHA256_FIXED, ingestor_key_bytes),
+            };
+
+            let share_processor_key_bytes =
+                base64::decode(sub_matches.value_of("share-processor-private-key").unwrap())
+                    .unwrap();
+            let share_processor_key = match EcdsaKeyPair::from_pkcs8(
+                &ECDSA_P256_SHA256_FIXED_SIGNING,
+                &share_processor_key_bytes,
+            ) {
+                Ok(priv_key) => priv_key,
+                Err(e) => {
+                    return Err(Error::CryptographyError(
+                        "failed to parse value for share-processor-private-key".to_owned(),
+                        Some(e),
+                        None,
+                    ))
+                }
+            };
+
             let mut batch_ingestor = BatchIngestor::new(
                 sub_matches.value_of("aggregation-id").unwrap().to_owned(),
                 sub_matches
@@ -325,7 +381,10 @@ fn main() -> Result<(), Error> {
                 &mut ingestion_transport,
                 &mut validation_transport,
                 sub_matches.is_present("is-first"),
-                PrivateKey::from_base64(sub_matches.value_of("private-key").unwrap()).unwrap(),
+                PrivateKey::from_base64(sub_matches.value_of("ecies-private-key").unwrap())
+                    .unwrap(),
+                share_processor_key,
+                ingestor_pub_key,
             );
             batch_ingestor.generate_validation_share()
         }
