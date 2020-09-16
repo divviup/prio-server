@@ -1,13 +1,12 @@
-use chrono::prelude::*;
-use chrono::NaiveDateTime;
+use chrono::{prelude::Utc, NaiveDateTime};
 use clap::{App, Arg, SubCommand};
-use facilitator::ingestion::BatchIngestor;
-use facilitator::sample::generate_ingestion_sample;
-use facilitator::transport::FileTransport;
-use facilitator::{Error, DATE_FORMAT, DEFAULT_FACILITATOR_PRIVATE_KEY, DEFAULT_PHA_PRIVATE_KEY};
+use facilitator::{
+    ingestion::BatchIngestor, sample::generate_ingestion_sample, transport::FileTransport, Error,
+    DATE_FORMAT, DEFAULT_FACILITATOR_PRIVATE_KEY, DEFAULT_INGESTOR_PRIVATE_KEY,
+    DEFAULT_PHA_PRIVATE_KEY,
+};
 use libprio_rs::encrypt::PrivateKey;
-use std::path::Path;
-use std::str::FromStr;
+use std::{path::Path, str::FromStr};
 use uuid::Uuid;
 
 fn num_validator<F: FromStr>(s: String) -> Result<(), String> {
@@ -146,6 +145,16 @@ fn main() -> Result<(), Error> {
                         .validator(b64_validator),
                 )
                 .arg(
+                    Arg::with_name("ingestor-private-key")
+                        .long("ingestor-private-key")
+                        .value_name("B64")
+                        .help("Base64 encoded private key for the ingestor server")
+                        .long_help("If not specified, a fixed private key will be used.")
+                        .default_value(DEFAULT_INGESTOR_PRIVATE_KEY)
+                        .hide_default_value(true)
+                        .validator(b64_validator),
+                )
+                .arg(
                     Arg::with_name("epsilon")
                         .long("epsilon")
                         .value_name("DOUBLE")
@@ -270,6 +279,7 @@ fn main() -> Result<(), Error> {
             &PrivateKey::from_base64(sub_matches.value_of("pha-private-key").unwrap()).unwrap(),
             &PrivateKey::from_base64(sub_matches.value_of("facilitator-private-key").unwrap())
                 .unwrap(),
+            &base64::decode(sub_matches.value_of("ingestor-private-key").unwrap()).unwrap(),
             sub_matches
                 .value_of("dimension")
                 .unwrap()
