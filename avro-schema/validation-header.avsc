@@ -43,6 +43,11 @@
                 "null"
             ],
             "doc": "If specified, the hamming weight of the vector will be verified during the validity check on the server."
+        },
+        {
+            "name": "packet_file_digest",
+            "type": "bytes",
+            "doc": "SHA-256 digest of the .avro file containing packets in this batch."
         }
     ]
 }

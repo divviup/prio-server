@@ -61,6 +61,17 @@
             "type": "long",
             "logicalType": "timestamp-millis",
             "doc": "time range information for the shares in this batch."
+        },
+        {
+            "name": "invalid_packet_uuids",
+            "type": {
+                "type": "array",
+                "items": {
+                    "type": "string",
+                    "logicalType": "uuid"
+                }
+            },
+            "doc": "list of UUIDs of packets which failed validation."
         }
     ]
 }
