@@ -4,10 +4,15 @@
     "name": "PrioSumPart",
     "fields": [
         {
-            "name": "batch_uuid",
-            "type": "string",
-            "logicalType": "uuid",
-            "doc": "Universal unique identifier to link with data share batch sent to other server(s) participating in the aggregation."
+            "name": "batch_uuids",
+            "type": {
+                "type": "array",
+                "items": {
+                    "type": "string",
+                    "logicalType": "uuid"
+                }
+            },
+            "doc": "Universal unique identifiers of data share batches included in this sum."
         },
         {
             "name": "name",
@@ -43,12 +48,12 @@
             "doc": "If specified, the hamming weight of the vector will be verified during the validity check on the server."
         },
         {
-            "name": "sums",
+            "name": "sum",
             "type": {
                 "type": "array",
                 "items": "long"
             },
-            "doc": "The values of the sums."
+            "doc": "The value of the sum computed by the aggregation server, as a bins-dimensional vector."
         },
         {
             "name": "aggregation_start_time",
