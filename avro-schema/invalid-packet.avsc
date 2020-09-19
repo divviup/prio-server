@@ -1,0 +1,13 @@
+{
+    "namespace": "org.abetterinternet.prio.v1",
+    "type": "record",
+    "name": "PrioInvalidPacket",
+    "fields": [
+        {
+            "name": "uuid",
+            "type": "string",
+            "logicalType": "uuid",
+            "doc": "UUID of the packet that failed validation."
+        }
+    ]
+}
