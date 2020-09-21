@@ -7,7 +7,7 @@
             "name": "uuid",
             "type": "string",
             "logicalType": "uuid",
-            "doc": "Universal unique identifier to link with data share sent to other server(s) participating in the aggregation."
+            "doc": "UUID to link with data share sent to other server(s) participating in the aggregation."
         },
         {
             "name": "f_r",

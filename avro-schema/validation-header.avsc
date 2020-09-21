@@ -7,7 +7,7 @@
             "name": "batch_uuid",
             "type": "string",
             "logicalType": "uuid",
-            "doc": "Universal unique identifier to link with data share batch sent to other server(s) participating in the aggregation."
+            "doc": "UUID to link with data share batch sent to other server(s) participating in the aggregation."
         },
         {
             "name": "name",

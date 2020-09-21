@@ -12,7 +12,7 @@
                     "logicalType": "uuid"
                 }
             },
-            "doc": "Universal unique identifiers of data share batches included in this sum."
+            "doc": "UUIDs of data share batches included in this sum."
         },
         {
             "name": "name",
