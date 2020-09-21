@@ -150,9 +150,9 @@ mod tests {
     use super::*;
     use crate::{
         default_facilitator_signing_private_key, default_ingestor_private_key,
-        default_pha_signing_private_key, sample::generate_ingestion_sample,
-        transport::FileTransport, DEFAULT_FACILITATOR_ECIES_PRIVATE_KEY,
-        DEFAULT_PHA_ECIES_PRIVATE_KEY,
+        default_ingestor_private_key_raw, default_pha_signing_private_key,
+        sample::generate_ingestion_sample, transport::FileTransport,
+        DEFAULT_FACILITATOR_ECIES_PRIVATE_KEY, DEFAULT_PHA_ECIES_PRIVATE_KEY,
     };
     use ring::signature::{KeyPair, ECDSA_P256_SHA256_FIXED, ECDSA_P256_SHA256_FIXED_SIGNING};
 
@@ -176,25 +176,17 @@ mod tests {
             PrivateKey::from_base64(DEFAULT_FACILITATOR_ECIES_PRIVATE_KEY).unwrap();
         let ingestor_pub_key = UnparsedPublicKey::new(
             &ECDSA_P256_SHA256_FIXED,
-            EcdsaKeyPair::from_pkcs8(
-                &ECDSA_P256_SHA256_FIXED_SIGNING,
-                &default_ingestor_private_key(),
-            )
-            .unwrap()
-            .public_key()
-            .as_ref()
-            .to_vec(),
+            default_ingestor_private_key()
+                .public_key()
+                .as_ref()
+                .to_vec(),
         );
         let pha_signing_key = EcdsaKeyPair::from_pkcs8(
             &ECDSA_P256_SHA256_FIXED_SIGNING,
             &default_pha_signing_private_key(),
         )
         .unwrap();
-        let facilitator_signing_key = EcdsaKeyPair::from_pkcs8(
-            &ECDSA_P256_SHA256_FIXED_SIGNING,
-            &default_facilitator_signing_private_key(),
-        )
-        .unwrap();
+        let facilitator_signing_key = default_facilitator_signing_private_key();
 
         let res = generate_ingestion_sample(
             &mut pha_ingest_transport,
@@ -204,7 +196,7 @@ mod tests {
             &date,
             &pha_ecies_key,
             &facilitator_ecies_key,
-            &default_ingestor_private_key(),
+            &default_ingestor_private_key_raw(),
             10,
             10,
             0.11,
