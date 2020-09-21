@@ -1,8 +1,12 @@
 use libprio_rs::encrypt::EncryptError;
+use ring::digest;
 use std::io::Write;
+use std::num::TryFromIntError;
 
+pub mod aggregation;
+pub mod batch;
 pub mod idl;
-pub mod ingestion;
+pub mod intake;
 pub mod sample;
 pub mod transport;
 
@@ -47,6 +51,14 @@ pub enum Error {
         Option<ring::error::KeyRejected>,
         Option<ring::error::Unspecified>,
     ),
+    PeerValidationError(String),
+    ConversionError(String),
+}
+
+impl From<TryFromIntError> for Error {
+    fn from(e: TryFromIntError) -> Self {
+        Error::ConversionError(format!("failed to convert value: {}", e))
+    }
 }
 
 /// Constructs an EcdsaKeyPair from the default ingestor server. Should only be
@@ -64,26 +76,64 @@ pub fn default_pha_signing_private_key() -> Vec<u8> {
     base64::decode(DEFAULT_PHA_SIGNING_PRIVATE_KEY).unwrap()
 }
 
-/// SidecarWriter wraps an std::io::Write, but also writes any buffers passed to
-/// it into a Vec<u8>.
-struct SidecarWriter<W: Write> {
-    writer: W,
-    sidecar: Vec<u8>,
+pub struct DigestWriter {
+    context: digest::Context,
 }
 
-impl<W: Write> SidecarWriter<W> {
-    fn new(writer: W) -> SidecarWriter<W> {
+impl DigestWriter {
+    fn new() -> DigestWriter {
+        DigestWriter {
+            context: digest::Context::new(&digest::SHA256),
+        }
+    }
+
+    fn finish(self) -> digest::Digest {
+        self.context.finish()
+    }
+}
+
+impl Write for DigestWriter {
+    fn write(&mut self, buf: &[u8]) -> Result<usize, std::io::Error> {
+        self.context.update(buf);
+        Ok(buf.len())
+    }
+
+    fn flush(&mut self) -> Result<(), std::io::Error> {
+        Ok(())
+    }
+}
+
+/// MemoryWriter is a trait we apply to std::io::Write implementations that are
+/// backed by memory and are assumed to not fail or perform short writes in any
+/// circumstance short of ENOMEM.
+pub trait MemoryWriter: Write {}
+
+impl MemoryWriter for DigestWriter {}
+impl MemoryWriter for Vec<u8> {}
+
+/// SidecarWriter wraps an std::io::Write, but also writes any buffers passed to
+/// it into a MemoryWriter. The reason sidecar isn't simply some other type that
+/// implements std::io::Write is that SidecarWriter::write assumes that short
+/// writes to the sidecar can't happen, so we use the trait to ensure that this
+/// property holds.
+pub struct SidecarWriter<W: Write, M: MemoryWriter> {
+    writer: W,
+    sidecar: M,
+}
+
+impl<W: Write, M: MemoryWriter> SidecarWriter<W, M> {
+    fn new(writer: W, sidecar: M) -> SidecarWriter<W, M> {
         SidecarWriter {
             writer: writer,
-            sidecar: Vec::new(),
+            sidecar: sidecar,
         }
     }
 }
 
-impl<W: Write> Write for SidecarWriter<W> {
+impl<W: Write, M: MemoryWriter> Write for SidecarWriter<W, M> {
     fn write(&mut self, buf: &[u8]) -> Result<usize, std::io::Error> {
         // We might get a short write into whatever writer is, so make sure the
-        // Vec writer doesn't get ahead in that case.
+        // sidecar writer doesn't get ahead in that case.
         let n = self.writer.write(buf)?;
         self.sidecar.write_all(&buf[..n])?;
         Ok(n)

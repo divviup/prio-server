@@ -1,9 +1,10 @@
 use chrono::{prelude::Utc, NaiveDateTime};
-use clap::{App, Arg, SubCommand};
+use clap::{App, Arg, ArgMatches, SubCommand};
 use facilitator::{
-    ingestion::BatchIngestor, sample::generate_ingestion_sample, transport::FileTransport, Error,
-    DATE_FORMAT, DEFAULT_FACILITATOR_ECIES_PRIVATE_KEY, DEFAULT_FACILITATOR_SIGNING_PRIVATE_KEY,
-    DEFAULT_INGESTOR_PRIVATE_KEY, DEFAULT_PHA_ECIES_PRIVATE_KEY,
+    aggregation::BatchAggregator, intake::BatchIntaker, sample::generate_ingestion_sample,
+    transport::FileTransport, Error, DATE_FORMAT, DEFAULT_FACILITATOR_ECIES_PRIVATE_KEY,
+    DEFAULT_FACILITATOR_SIGNING_PRIVATE_KEY, DEFAULT_INGESTOR_PRIVATE_KEY,
+    DEFAULT_PHA_ECIES_PRIVATE_KEY, DEFAULT_PHA_SIGNING_PRIVATE_KEY,
 };
 use libprio_rs::encrypt::PrivateKey;
 use ring::signature::{
@@ -77,19 +78,15 @@ fn main() -> Result<(), Error> {
                         .long("aggregation-id")
                         .value_name("ID")
                         .default_value("fake-aggregation")
-                        .help(
-                            "Aggregation ID to use when constructing object \
-                            keys",
-                        ),
+                        .help("Name of the aggregation"),
                 )
                 .arg(
                     Arg::with_name("batch-id")
                         .long("batch-id")
                         .value_name("UUID")
-                        .help("Batch ID to use when constructing object keys")
-                        .long_help(
-                            "Batch ID to use when constructing object keys. If \
-                            omitted, a UUID is generated.",
+                        .help(
+                            "UUID of the batch. If omitted, a UUID is \
+                            randomly generated.",
                         )
                         .validator(uuid_validator),
                 )
@@ -97,13 +94,10 @@ fn main() -> Result<(), Error> {
                     Arg::with_name("date")
                         .long("date")
                         .value_name("DATE")
-                        .help(
-                            "Date to use when constructing object keys in \
-                            YYYY/mm/dd/HH/MM format",
-                        )
+                        .help("Date for the batch in YYYY/mm/dd/HH/MM format")
                         .long_help(
-                            "Date to use when constructing object keys. If \
-                            omitted, the current time is used.",
+                            "Date for the batch in YYYY/mm/dd/HH/MM format. If \
+                            omitted, the current date is used.",
                         )
                         .validator(date_validator),
                 )
@@ -116,7 +110,8 @@ fn main() -> Result<(), Error> {
                         .validator(num_validator::<i32>)
                         .help(
                             "Length in bits of the data packets to generate \
-                            (a.k.a. \"bins\" in some contexts). Must be a natural number.",
+                            (a.k.a. \"bins\" in some contexts). Must be a \
+                            natural number.",
                         ),
                 )
                 .arg(
@@ -129,21 +124,35 @@ fn main() -> Result<(), Error> {
                         .help("Number of data packets to generate"),
                 )
                 .arg(
-                    Arg::with_name("pha-private-key")
-                        .long("pha-private-key")
+                    Arg::with_name("pha-ecies-private-key")
+                        .long("pha-ecies-private-key")
                         .value_name("B64")
-                        .help("Base64 encoded private key for the PHA server")
-                        .long_help("If not specified, a fixed private key will be used.")
+                        .help(
+                            "Base64 encoded ECIES private key for the PHA \
+                            server",
+                        )
+                        .long_help(
+                            "Base64 encoded private key for the PHA \
+                            server. If not specified, a fixed private key will \
+                            be used.",
+                        )
                         .default_value(DEFAULT_PHA_ECIES_PRIVATE_KEY)
                         .hide_default_value(true)
                         .validator(b64_validator),
                 )
                 .arg(
-                    Arg::with_name("facilitator-private-key")
-                        .long("facilitator-private-key")
+                    Arg::with_name("facilitator-ecies-private-key")
+                        .long("facilitator-ecies-private-key")
                         .value_name("B64")
-                        .help("Base64 encoded private key for the facilitator server")
-                        .long_help("If not specified, a fixed private key will be used.")
+                        .help(
+                            "Base64 encoded ECIES private key for the \
+                            facilitator server",
+                        )
+                        .long_help(
+                            "Base64 encoded ECIES private key for the \
+                            facilitator server. If not specified, a fixed \
+                            private key will be used.",
+                        )
                         .default_value(DEFAULT_FACILITATOR_ECIES_PRIVATE_KEY)
                         .hide_default_value(true)
                         .validator(b64_validator),
@@ -152,8 +161,15 @@ fn main() -> Result<(), Error> {
                     Arg::with_name("ingestor-private-key")
                         .long("ingestor-private-key")
                         .value_name("B64")
-                        .help("Base64 encoded private key for the ingestor server")
-                        .long_help("If not specified, a fixed private key will be used.")
+                        .help(
+                            "Base64 encoded ECDSA P256 private key for the \
+                            ingestor server",
+                        )
+                        .long_help(
+                            "Base64 encoded ECDSA P256 private key for the \
+                            ingestor server. If not specified, a fixed private \
+                            key will be used.",
+                        )
                         .default_value(DEFAULT_INGESTOR_PRIVATE_KEY)
                         .hide_default_value(true)
                         .validator(b64_validator),
@@ -163,8 +179,8 @@ fn main() -> Result<(), Error> {
                         .long("epsilon")
                         .value_name("DOUBLE")
                         .help(
-                            "Differential privacy parameter for local randomization before \
-                            aggregation",
+                            "Differential privacy parameter for local \
+                            randomization before aggregation",
                         )
                         .default_value("0.23")
                         .validator(num_validator::<f64>),
@@ -187,26 +203,22 @@ fn main() -> Result<(), Error> {
                 ),
         )
         .subcommand(
-            SubCommand::with_name("validate-ingestion")
+            SubCommand::with_name("batch-intake")
                 .about("Validate an ingestion share and emit a validation share.")
                 .arg(
                     Arg::with_name("aggregation-id")
                         .long("aggregation-id")
                         .value_name("ID")
                         .default_value("fake-aggregation")
-                        .help(
-                            "Aggregation ID to use when constructing object \
-                            keys",
-                        ),
+                        .help("Name of the aggregation"),
                 )
                 .arg(
                     Arg::with_name("batch-id")
                         .long("batch-id")
                         .value_name("UUID")
-                        .help("Batch ID to use when constructing object keys")
-                        .long_help(
-                            "Batch ID to use when constructing object keys. If \
-                            omitted, a UUID is generated.",
+                        .help(
+                            "UUID of the batch. If omitted, a UUID is \
+                            randomly generated.",
                         )
                         .validator(uuid_validator),
                 )
@@ -214,13 +226,10 @@ fn main() -> Result<(), Error> {
                     Arg::with_name("date")
                         .long("date")
                         .value_name("DATE")
-                        .help(
-                            "Date to use when constructing object keys in \
-                            YYYYmmddHHMM format",
-                        )
+                        .help("Date for the batch in YYYY/mm/dd/HH/MM format")
                         .long_help(
-                            "Date to use when constructing object keys. If \
-                            omitted, the current time is used.",
+                            "Date for the batch in YYYY/mm/dd/HH/MM format. If \
+                            omitted, the current date is used.",
                         )
                         .validator(date_validator),
                 )
@@ -228,8 +237,11 @@ fn main() -> Result<(), Error> {
                     Arg::with_name("ecies-private-key")
                         .long("ecies-private-key")
                         .value_name("B64")
-                        .help("Base64 encoded ECIES private key for the server")
-                        .long_help("If not specified, a fixed private key will be used.")
+                        .help("Base64 encoded ECIES private key")
+                        .long_help(
+                            "Base64 encoded ECIES private key. If not \
+                            specified, a fixed private key will be used.",
+                        )
                         .default_value(DEFAULT_FACILITATOR_ECIES_PRIVATE_KEY)
                         .hide_default_value(true)
                         .validator(b64_validator),
@@ -239,6 +251,11 @@ fn main() -> Result<(), Error> {
                         .long("ingestor-public-key")
                         .value_name("B64")
                         .help("Base64 encoded public key for the ingestor")
+                        .long_help(
+                            "Base64 encoded ECDSA P256 public key for the \
+                            ingestor. If not specified, a default key will be \
+                            used.",
+                        )
                         .default_value(DEFAULT_INGESTOR_PRIVATE_KEY)
                         .hide_default_value(true)
                         .validator(b64_validator),
@@ -246,17 +263,21 @@ fn main() -> Result<(), Error> {
                 .arg(
                     Arg::with_name("share-processor-private-key")
                         .long("share-processor-private-key")
+                        .value_name("B64")
                         .help("Base64 encoded share processor private key for the server")
-                        .long_help("If not specified, a fixed private key will be used.")
+                        .long_help(
+                            "Base64 encoded ECDSA P256 share processor private \
+                            key. If not specified, a fixed private key will be \
+                            used.",
+                        )
                         .default_value(DEFAULT_FACILITATOR_SIGNING_PRIVATE_KEY)
                         .hide_default_value(true)
                         .validator(b64_validator),
                 )
-                .arg(
-                    Arg::with_name("is-first").long("is-first").help(
-                        "Whether this is the \"first\" server receiving a share, i.e., the PHA.",
-                    ),
-                )
+                .arg(Arg::with_name("is-first").long("is-first").help(
+                    "Whether this is the \"first\" server receiving a share, \
+                    i.e., the PHA.",
+                ))
                 .arg(
                     Arg::with_name("ingestion-bucket")
                         .long("ingestion-bucket")
@@ -275,6 +296,165 @@ fn main() -> Result<(), Error> {
                         ),
                 ),
         )
+        .subcommand(
+            SubCommand::with_name("aggregate")
+                .about("Verify peer validation share and emit sum part.")
+                .arg(
+                    Arg::with_name("aggregation-id")
+                        .long("aggregation-id")
+                        .value_name("ID")
+                        .default_value("fake-aggregation")
+                        .help("Name of the aggregation"),
+                )
+                .arg(
+                    Arg::with_name("batch-id")
+                        .long("batch-id")
+                        .multiple(true)
+                        .value_name("UUID")
+                        .help(
+                            "Batch IDs being aggregated. May be specified \
+                            multiple times.",
+                        )
+                        .long_help(
+                            "Batch IDs being aggregated. May be specified \
+                            multiple times. Must be specified in the same \
+                            order as batch-time values.",
+                        )
+                        .min_values(1)
+                        .validator(uuid_validator),
+                )
+                .arg(
+                    Arg::with_name("batch-time")
+                        .long("batch-time")
+                        .multiple(true)
+                        .value_name("DATE")
+                        .help("Date for the batches in YYYY/mm/dd/HH/MM format")
+                        .long_help(
+                            "Date for the batches in YYYY/mm/dd/HH/MM format. \
+                            Must be specified in the same order as batch-id \
+                            values.",
+                        )
+                        .min_values(1)
+                        .validator(date_validator),
+                )
+                .arg(
+                    Arg::with_name("aggregation-start")
+                        .long("aggregation-start")
+                        .value_name("DATE")
+                        .help("Beginning of the timespan covered by the aggregation.")
+                        .long_help(
+                            "Beginning of the timespan covered by the \
+                            aggregation. If omitted, the current time is used.",
+                        )
+                        .validator(date_validator),
+                )
+                .arg(
+                    Arg::with_name("aggregation-end")
+                        .long("aggregation-end")
+                        .value_name("DATE")
+                        .help("End of the timespan covered by the aggregation.")
+                        .long_help(
+                            "End of the timespan covered by the aggregation \
+                            If omitted, the current time is used.",
+                        )
+                        .validator(date_validator),
+                )
+                .arg(
+                    Arg::with_name("ingestion-bucket")
+                        .long("ingestion-bucket")
+                        .value_name("DIR")
+                        .default_value(".")
+                        .help("Directory containing ingestion data"),
+                )
+                .arg(
+                    Arg::with_name("own-validation-bucket")
+                        .long("own-validation-bucket")
+                        .value_name("DIR")
+                        .default_value(".")
+                        .help(
+                            "Bucket in which this share processor's validation \
+                            shares were written",
+                        ),
+                )
+                .arg(
+                    Arg::with_name("peer-validation-bucket")
+                        .long("peer-validation-bucket")
+                        .value_name("DIR")
+                        .default_value(".")
+                        .help(
+                            "Bucket in which the peer share processor's \
+                            validation shares were written",
+                        ),
+                )
+                .arg(
+                    Arg::with_name("aggregation-bucket")
+                        .long("aggregation-bucket")
+                        .value_name("DIR")
+                        .default_value(".")
+                        .help("Bucket into which sum parts are to be written."),
+                )
+                .arg(
+                    Arg::with_name("ecies-private-key")
+                        .long("ecies-private-key")
+                        .value_name("B64")
+                        .help("Base64 encoded ECIES private key")
+                        .long_help(
+                            "Base64 encoded ECIES private key. If not \
+                            specified, a fixed private key will be used.",
+                        )
+                        .default_value(DEFAULT_FACILITATOR_ECIES_PRIVATE_KEY)
+                        .hide_default_value(true)
+                        .validator(b64_validator),
+                )
+                .arg(
+                    Arg::with_name("ingestor-public-key")
+                        .long("ingestor-public-key")
+                        .value_name("B64")
+                        .help("Base64 encoded public key for the ingestor")
+                        .long_help(
+                            "Base64 encoded ECDSA P256 public key for the \
+                            ingestor. If not specified, a default key will be \
+                            used.",
+                        )
+                        .default_value(DEFAULT_INGESTOR_PRIVATE_KEY)
+                        .hide_default_value(true)
+                        .validator(b64_validator),
+                )
+                .arg(
+                    Arg::with_name("share-processor-private-key")
+                        .long("share-processor-private-key")
+                        .value_name("B64")
+                        .help("Base64 encoded share processor private key for the server")
+                        .long_help(
+                            "Base64 encoded ECDSA P256 share processor private \
+                            key. If not specified, a fixed private key will be \
+                            used.",
+                        )
+                        .default_value(DEFAULT_FACILITATOR_SIGNING_PRIVATE_KEY)
+                        .hide_default_value(true)
+                        .validator(b64_validator),
+                )
+                .arg(
+                    Arg::with_name("peer-share-processor-public-key")
+                        .long("peer-share-processor-public-key")
+                        .value_name("B64")
+                        .help(
+                            "Base64 encoded public key for the peer share \
+                            processor",
+                        )
+                        .long_help(
+                            "Base64 encoded ECDSA P256 public key for the peer \
+                            share processor. If not specified, a default key \
+                            will be used.",
+                        )
+                        .default_value(DEFAULT_PHA_SIGNING_PRIVATE_KEY)
+                        .hide_default_value(true)
+                        .validator(b64_validator),
+                )
+                .arg(Arg::with_name("is-first").long("is-first").help(
+                    "Whether this is the \"first\" server receiving a share, i.e., the PHA.",
+                )),
+        )
         .get_matches();
 
     let _verbose = matches.is_present("verbose");
@@ -290,13 +470,13 @@ fn main() -> Result<(), Error> {
             &mut FileTransport::new(
                 Path::new(sub_matches.value_of("facilitator-output").unwrap()).to_path_buf(),
             ),
-            sub_matches
+            &sub_matches
                 .value_of("batch-id")
                 .map_or_else(|| Uuid::new_v4(), |v| Uuid::parse_str(v).unwrap()),
-            sub_matches.value_of("aggregation-id").unwrap().to_owned(),
-            sub_matches.value_of("date").map_or_else(
-                || Utc::now().format(DATE_FORMAT).to_string(),
-                |v| v.to_string(),
+            &sub_matches.value_of("aggregation-id").unwrap(),
+            &sub_matches.value_of("date").map_or_else(
+                || Utc::now().naive_utc(),
+                |v| NaiveDateTime::parse_from_str(&v, DATE_FORMAT).unwrap(),
             ),
             &PrivateKey::from_base64(sub_matches.value_of("pha-private-key").unwrap()).unwrap(),
             &PrivateKey::from_base64(sub_matches.value_of("facilitator-private-key").unwrap())
@@ -327,8 +507,10 @@ fn main() -> Result<(), Error> {
                 .unwrap()
                 .parse::<i64>()
                 .unwrap(),
-        ),
-        ("validate-ingestion", Some(sub_matches)) => {
+        )
+        // Drop return value
+        .map(|_| ()),
+        ("batch-intake", Some(sub_matches)) => {
             let mut ingestion_transport = FileTransport::new(
                 Path::new(sub_matches.value_of("ingestion-bucket").unwrap()).to_path_buf(),
             );
@@ -336,21 +518,11 @@ fn main() -> Result<(), Error> {
                 Path::new(sub_matches.value_of("validation-bucket").unwrap()).to_path_buf(),
             );
 
-            // ingestor-public-key could be a private key, in which case we just
-            // want its public portion. UnparsedPublicKey::new doesn't return an
-            // error, so try parsing the argument as a private key first.
-            let ingestor_key_bytes =
-                base64::decode(sub_matches.value_of("ingestor-public-key").unwrap()).unwrap();
-            let ingestor_pub_key = match EcdsaKeyPair::from_pkcs8(
-                &ECDSA_P256_SHA256_FIXED_SIGNING,
-                &ingestor_key_bytes,
-            ) {
-                Ok(priv_key) => UnparsedPublicKey::new(
-                    &ECDSA_P256_SHA256_FIXED,
-                    Vec::from(priv_key.public_key().as_ref()),
-                ),
-                Err(_) => UnparsedPublicKey::new(&ECDSA_P256_SHA256_FIXED, ingestor_key_bytes),
-            };
+            let share_processor_ecies_key =
+                PrivateKey::from_base64(sub_matches.value_of("ecies-private-key").unwrap())
+                    .unwrap();
+
+            let ingestor_pub_key = public_key_from_arg("ingestor-public-key", sub_matches);
 
             let share_processor_key_bytes =
                 base64::decode(sub_matches.value_of("share-processor-private-key").unwrap())
@@ -369,25 +541,112 @@ fn main() -> Result<(), Error> {
                 }
             };
 
-            let mut batch_ingestor = BatchIngestor::new(
-                sub_matches.value_of("aggregation-id").unwrap().to_owned(),
-                sub_matches
+            let mut batch_intaker = BatchIntaker::new(
+                &sub_matches.value_of("aggregation-id").unwrap(),
+                &sub_matches
                     .value_of("batch-id")
                     .map_or_else(|| Uuid::new_v4(), |v| Uuid::parse_str(v).unwrap()),
-                sub_matches.value_of("date").map_or_else(
-                    || Utc::now().format(DATE_FORMAT).to_string(),
-                    |v| v.to_string(),
+                &sub_matches.value_of("date").map_or_else(
+                    || Utc::now().naive_utc(),
+                    |v| NaiveDateTime::parse_from_str(&v, DATE_FORMAT).unwrap(),
                 ),
                 &mut ingestion_transport,
                 &mut validation_transport,
                 sub_matches.is_present("is-first"),
-                PrivateKey::from_base64(sub_matches.value_of("ecies-private-key").unwrap())
-                    .unwrap(),
-                share_processor_key,
-                ingestor_pub_key,
+                &share_processor_ecies_key,
+                &share_processor_key,
+                &ingestor_pub_key,
+            )?;
+            batch_intaker.generate_validation_share()
+        }
+        ("aggregate", Some(sub_matches)) => {
+            let mut ingestion_transport = FileTransport::new(
+                Path::new(sub_matches.value_of("ingestion-bucket").unwrap()).to_path_buf(),
             );
-            batch_ingestor.generate_validation_share()
+            let mut own_validation_transport = FileTransport::new(
+                Path::new(sub_matches.value_of("own-validation-bucket").unwrap()).to_path_buf(),
+            );
+            let mut peer_validation_transport = FileTransport::new(
+                Path::new(sub_matches.value_of("peer-validation-bucket").unwrap()).to_path_buf(),
+            );
+            let mut aggregation_transport = FileTransport::new(
+                Path::new(sub_matches.value_of("aggregation-bucket").unwrap()).to_path_buf(),
+            );
+
+            let ingestor_pub_key = public_key_from_arg("ingestor-public-key", sub_matches);
+            let peer_share_processor_pub_key =
+                public_key_from_arg("peer-share-processor-public-key", sub_matches);
+            let share_processor_key_bytes =
+                base64::decode(sub_matches.value_of("share-processor-private-key").unwrap())
+                    .unwrap();
+            let share_processor_key = match EcdsaKeyPair::from_pkcs8(
+                &ECDSA_P256_SHA256_FIXED_SIGNING,
+                &share_processor_key_bytes,
+            ) {
+                Ok(priv_key) => priv_key,
+                Err(e) => {
+                    return Err(Error::CryptographyError(
+                        "failed to parse value for share-processor-private-key".to_owned(),
+                        Some(e),
+                        None,
+                    ))
+                }
+            };
+            let share_processor_ecies_key =
+                PrivateKey::from_base64(sub_matches.value_of("ecies-private-key").unwrap())
+                    .unwrap();
+
+            let batch_ids: Vec<Uuid> = sub_matches
+                .values_of("batch-id")
+                .unwrap()
+                .map(|v| Uuid::parse_str(v).unwrap())
+                .collect();
+            let batch_dates: Vec<NaiveDateTime> = sub_matches
+                .values_of("batch-date")
+                .unwrap()
+                .map(|s| NaiveDateTime::parse_from_str(&s, DATE_FORMAT).unwrap())
+                .collect();
+            if batch_ids.len() != batch_dates.len() {
+                return Err(Error::IllegalArgumentError(
+                    "must provide same number of batch-id and batch-date values".to_owned(),
+                ));
+            }
+
+            BatchAggregator::new(
+                &sub_matches.value_of("aggregation-id").unwrap(),
+                &sub_matches.value_of("aggregation-start").map_or_else(
+                    || Utc::now().naive_utc(),
+                    |v| NaiveDateTime::parse_from_str(&v, DATE_FORMAT).unwrap(),
+                ),
+                &sub_matches.value_of("aggregation-end").map_or_else(
+                    || Utc::now().naive_utc(),
+                    |v| NaiveDateTime::parse_from_str(&v, DATE_FORMAT).unwrap(),
+                ),
+                sub_matches.is_present("is-first"),
+                &mut ingestion_transport,
+                &mut own_validation_transport,
+                &mut peer_validation_transport,
+                &mut aggregation_transport,
+                &ingestor_pub_key,
+                &share_processor_key,
+                &peer_share_processor_pub_key,
+                &share_processor_ecies_key,
+            )?
+            .generate_sum_part(&batch_ids.into_iter().zip(batch_dates).collect())
         }
         (_, _) => Ok(()),
+    }
+}
+
+fn public_key_from_arg(arg: &str, matches: &ArgMatches) -> UnparsedPublicKey<Vec<u8>> {
+    // UnparsedPublicKey::new doesn't return an error, so try parsing the
+    // argument as a private key first.
+    let key_bytes = base64::decode(matches.value_of(arg).unwrap()).unwrap();
+    match EcdsaKeyPair::from_pkcs8(&ECDSA_P256_SHA256_FIXED_SIGNING, &key_bytes) {
+        Ok(priv_key) => UnparsedPublicKey::new(
+            &ECDSA_P256_SHA256_FIXED,
+            Vec::from(priv_key.public_key().as_ref()),
+        ),
+        Err(_) => UnparsedPublicKey::new(&ECDSA_P256_SHA256_FIXED, key_bytes),
     }
 }
