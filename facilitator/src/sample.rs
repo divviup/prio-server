@@ -168,7 +168,7 @@ pub fn generate_ingestion_sample(
 mod tests {
     use super::*;
     use crate::{
-        default_ingestor_private_key, idl::Header, transport::FileTransport,
+        default_ingestor_private_key_raw, idl::Header, transport::FileTransport,
         DEFAULT_FACILITATOR_ECIES_PRIVATE_KEY, DEFAULT_PHA_ECIES_PRIVATE_KEY,
     };
     use std::path::PathBuf;
@@ -190,7 +190,7 @@ mod tests {
             &NaiveDateTime::from_timestamp(1234567890, 654321),
             &PrivateKey::from_base64(DEFAULT_PHA_ECIES_PRIVATE_KEY).unwrap(),
             &PrivateKey::from_base64(DEFAULT_FACILITATOR_ECIES_PRIVATE_KEY).unwrap(),
-            &default_ingestor_private_key(),
+            &default_ingestor_private_key_raw(),
             10,
             10,
             0.11,

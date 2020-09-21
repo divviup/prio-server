@@ -3,7 +3,7 @@ use facilitator::{
     aggregation::BatchAggregator,
     batch::{BatchIO, BatchReader},
     default_facilitator_signing_private_key, default_ingestor_private_key,
-    default_pha_signing_private_key,
+    default_ingestor_private_key_raw, default_pha_signing_private_key,
     idl::{IngestionDataSharePacket, SumPart},
     intake::BatchIntaker,
     sample::generate_ingestion_sample,
@@ -43,14 +43,10 @@ fn end_to_end() {
         PrivateKey::from_base64(DEFAULT_FACILITATOR_ECIES_PRIVATE_KEY).unwrap();
     let ingestor_pub_key = UnparsedPublicKey::new(
         &ECDSA_P256_SHA256_FIXED,
-        EcdsaKeyPair::from_pkcs8(
-            &ECDSA_P256_SHA256_FIXED_SIGNING,
-            &default_ingestor_private_key(),
-        )
-        .unwrap()
-        .public_key()
-        .as_ref()
-        .to_vec(),
+        default_ingestor_private_key()
+            .public_key()
+            .as_ref()
+            .to_vec(),
     );
     let pha_signing_key = EcdsaKeyPair::from_pkcs8(
         &ECDSA_P256_SHA256_FIXED_SIGNING,
@@ -61,11 +57,7 @@ fn end_to_end() {
         &ECDSA_P256_SHA256_FIXED,
         pha_signing_key.public_key().as_ref().to_vec(),
     );
-    let facilitator_signing_key = EcdsaKeyPair::from_pkcs8(
-        &ECDSA_P256_SHA256_FIXED_SIGNING,
-        &default_facilitator_signing_private_key(),
-    )
-    .unwrap();
+    let facilitator_signing_key = default_facilitator_signing_private_key();
     let facilitator_pub_signing_key = UnparsedPublicKey::new(
         &ECDSA_P256_SHA256_FIXED,
         facilitator_signing_key.public_key().as_ref().to_vec(),
@@ -79,7 +71,7 @@ fn end_to_end() {
         &date,
         &pha_ecies_key,
         &facilitator_ecies_key,
-        &default_ingestor_private_key(),
+        &default_ingestor_private_key_raw(),
         10,
         10,
         0.11,
@@ -100,7 +92,7 @@ fn end_to_end() {
         &date,
         &pha_ecies_key,
         &facilitator_ecies_key,
-        &default_ingestor_private_key(),
+        &default_ingestor_private_key_raw(),
         10,
         10,
         0.11,

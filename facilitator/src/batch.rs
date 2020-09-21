@@ -302,3 +302,371 @@ impl<'a, H: Header, P: Packet> BatchWriter<'a, H, P> {
             .map_err(|e| Error::IoError("failed to write signature".to_owned(), e))
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{
+        default_facilitator_signing_public_key, default_ingestor_private_key,
+        default_ingestor_public_key,
+        idl::{IngestionDataSharePacket, IngestionHeader},
+        transport::FileTransport,
+    };
+
+    fn roundtrip_batch<'a>(
+        aggregation_name: String,
+        batch_id: Uuid,
+        base_path: PathBuf,
+        filenames: &[String],
+        batch_writer: &mut BatchWriter<'a, IngestionHeader, IngestionDataSharePacket>,
+        batch_reader: &BatchReader<'a, IngestionHeader, IngestionDataSharePacket>,
+        transport: &mut FileTransport,
+        write_key: &EcdsaKeyPair,
+        read_key: &UnparsedPublicKey<Vec<u8>>,
+        keys_match: bool,
+    ) {
+        // These tests cheat by using IngestionHeader and
+        // IngestionDataSharePacket regardless of what kind of batch it is, but
+        // since BatchReader and BatchWriter are generic in H and P, this
+        // exercises what we care about in this module while saving us a bit of
+        // typing.
+        let packets = &[
+            IngestionDataSharePacket {
+                uuid: Uuid::new_v4(),
+                encrypted_payload: vec![0u8, 1u8, 2u8, 3u8],
+                encryption_key_id: "fake-key-1".to_owned(),
+                r_pit: 1,
+                version_configuration: Some("config-1".to_owned()),
+                device_nonce: None,
+            },
+            IngestionDataSharePacket {
+                uuid: Uuid::new_v4(),
+                encrypted_payload: vec![4u8, 5u8, 6u8, 7u8],
+                encryption_key_id: "fake-key-2".to_owned(),
+                r_pit: 2,
+                version_configuration: None,
+                device_nonce: Some(vec![8u8, 9u8, 10u8, 11u8]),
+            },
+            IngestionDataSharePacket {
+                uuid: Uuid::new_v4(),
+                encrypted_payload: vec![8u8, 9u8, 10u8, 11u8],
+                encryption_key_id: "fake-key-3".to_owned(),
+                r_pit: 3,
+                version_configuration: None,
+                device_nonce: None,
+            },
+        ];
+
+        let packet_file_digest = batch_writer.packet_file_writer(|mut packet_writer| {
+            packets[0].write(&mut packet_writer)?;
+            packets[1].write(&mut packet_writer)?;
+            packets[2].write(&mut packet_writer)?;
+            Ok(())
+        });
+        assert!(
+            packet_file_digest.is_ok(),
+            "failed to write packets: {:?}",
+            packet_file_digest.err()
+        );
+
+        let header = IngestionHeader {
+            batch_uuid: batch_id,
+            name: aggregation_name.to_owned(),
+            bins: 2,
+            epsilon: 1.601,
+            prime: 17,
+            number_of_servers: 2,
+            hamming_weight: None,
+            batch_start_time: 789456123,
+            batch_end_time: 789456321,
+            packet_file_digest: packet_file_digest.unwrap().as_ref().to_vec(),
+        };
+
+        let header_signature = batch_writer.put_header(&header, write_key);
+        assert!(
+            header_signature.is_ok(),
+            "failed to write header: {:?}",
+            header_signature.err()
+        );
+
+        let res = batch_writer.put_signature(&header_signature.unwrap());
+        assert!(res.is_ok(), "failed to put signature: {:?}", res.err());
+
+        // Verify file layout is as expected
+        for extension in filenames {
+            let res = transport.get(&base_path.with_extension(extension));
+            assert!(
+                res.is_ok(),
+                "could not get batch file {}: {:?}",
+                extension,
+                res.err()
+            );
+        }
+
+        let header_again = batch_reader.header(read_key);
+        if !keys_match {
+            assert!(
+                header_again.is_err(),
+                "read should fail with mismatched keys"
+            );
+            return;
+        }
+        assert!(
+            header_again.is_ok(),
+            "failed to read header from batch {:?}",
+            header_again.err()
+        );
+        let header_again = header_again.unwrap();
+
+        assert_eq!(header, header_again, "header does not match");
+
+        let packet_file_reader = batch_reader.packet_file_reader(&header_again);
+        assert!(
+            packet_file_reader.is_ok(),
+            "failed to get packet file reader {:?}",
+            packet_file_reader.err()
+        );
+        let mut packet_file_reader = packet_file_reader.unwrap();
+
+        for packet in packets {
+            let packet_again = IngestionDataSharePacket::read(&mut packet_file_reader);
+            assert!(
+                packet_again.is_ok(),
+                "failed to read packet: {:?}",
+                packet_again.is_err()
+            );
+            assert_eq!(packet, &packet_again.unwrap(), "packet does not match");
+        }
+
+        // One more read should get EOF
+        match IngestionDataSharePacket::read(&mut packet_file_reader) {
+            Err(Error::EofError) => (),
+            v => assert!(false, "wrong error {:?}", v),
+        }
+    }
+
+    #[test]
+    fn roundtrip_ingestion_batch_ok() {
+        roundtrip_ingestion_batch(true)
+    }
+
+    #[test]
+    fn roundtrip_ingestion_batch_bad_read_key() {
+        roundtrip_ingestion_batch(false)
+    }
+
+    fn roundtrip_ingestion_batch(keys_match: bool) {
+        let tempdir = tempfile::TempDir::new().unwrap();
+        let mut write_transport = FileTransport::new(tempdir.path().to_path_buf());
+        let mut read_transport = FileTransport::new(tempdir.path().to_path_buf());
+        let mut verify_transport = FileTransport::new(tempdir.path().to_path_buf());
+
+        let aggregation_name = "fake-aggregation";
+        let batch_id = Uuid::new_v4();
+        let date = NaiveDateTime::from_timestamp(2234567890, 654321);
+
+        let mut batch_writer: BatchWriter<'_, IngestionHeader, IngestionDataSharePacket> =
+            BatchWriter::new_ingestion(&aggregation_name, &batch_id, &date, &mut write_transport)
+                .unwrap();
+        let batch_reader: BatchReader<'_, IngestionHeader, IngestionDataSharePacket> =
+            BatchReader::new_ingestion(&aggregation_name, &batch_id, &date, &mut read_transport)
+                .unwrap();
+        let base_path = PathBuf::new()
+            .join(aggregation_name)
+            .join(date.format(DATE_FORMAT).to_string())
+            .join(batch_id.to_hyphenated().to_string());
+        let read_key = if keys_match {
+            default_ingestor_public_key()
+        } else {
+            default_facilitator_signing_public_key()
+        };
+        roundtrip_batch(
+            aggregation_name.to_string(),
+            batch_id,
+            base_path,
+            &[
+                "batch".to_owned(),
+                "batch.avro".to_owned(),
+                "batch.sig".to_owned(),
+            ],
+            &mut batch_writer,
+            &batch_reader,
+            &mut verify_transport,
+            &default_ingestor_private_key(),
+            &read_key,
+            keys_match,
+        )
+    }
+
+    #[test]
+    fn roundtrip_validation_batch_first_ok() {
+        roundtrip_validation_batch(true, true)
+    }
+
+    #[test]
+    fn roundtrip_validation_batch_first_bad_read_key() {
+        roundtrip_validation_batch(true, false)
+    }
+
+    #[test]
+    fn roundtrip_validation_batch_second_ok() {
+        roundtrip_validation_batch(false, true)
+    }
+
+    #[test]
+    fn roundtrip_validation_batch_second_bad_read_key() {
+        roundtrip_validation_batch(false, false)
+    }
+
+    fn roundtrip_validation_batch(is_first: bool, keys_match: bool) {
+        let tempdir = tempfile::TempDir::new().unwrap();
+        let mut write_transport = FileTransport::new(tempdir.path().to_path_buf());
+        let mut read_transport = FileTransport::new(tempdir.path().to_path_buf());
+        let mut verify_transport = FileTransport::new(tempdir.path().to_path_buf());
+
+        let aggregation_name = "fake-aggregation";
+        let batch_id = Uuid::new_v4();
+        let date = NaiveDateTime::from_timestamp(2234567890, 654321);
+
+        let mut batch_writer: BatchWriter<'_, IngestionHeader, IngestionDataSharePacket> =
+            BatchWriter::new_validation(
+                &aggregation_name,
+                &batch_id,
+                &date,
+                is_first,
+                &mut write_transport,
+            )
+            .unwrap();
+        let batch_reader: BatchReader<'_, IngestionHeader, IngestionDataSharePacket> =
+            BatchReader::new_validation(
+                &aggregation_name,
+                &batch_id,
+                &date,
+                is_first,
+                &mut read_transport,
+            )
+            .unwrap();
+        let base_path = PathBuf::new()
+            .join(aggregation_name)
+            .join(date.format(DATE_FORMAT).to_string())
+            .join(batch_id.to_hyphenated().to_string());
+        let first_filenames = &[
+            "validity_0".to_owned(),
+            "validity_0.avro".to_owned(),
+            "validity_0.sig".to_owned(),
+        ];
+        let second_filenames = &[
+            "validity_1".to_owned(),
+            "validity_1.avro".to_owned(),
+            "validity_1.sig".to_owned(),
+        ];
+        let read_key = if keys_match {
+            default_ingestor_public_key()
+        } else {
+            default_facilitator_signing_public_key()
+        };
+        roundtrip_batch(
+            aggregation_name.to_string(),
+            batch_id,
+            base_path,
+            if is_first {
+                first_filenames
+            } else {
+                second_filenames
+            },
+            &mut batch_writer,
+            &batch_reader,
+            &mut verify_transport,
+            &default_ingestor_private_key(),
+            &read_key,
+            keys_match,
+        )
+    }
+
+    #[test]
+    fn roundtrip_sum_batch_first_ok() {
+        roundtrip_sum_batch(true, true)
+    }
+
+    #[test]
+    fn roundtrip_sum_batch_first_bad_read_key() {
+        roundtrip_sum_batch(true, false)
+    }
+
+    #[test]
+    fn roundtrip_sum_batch_second_ok() {
+        roundtrip_sum_batch(false, true)
+    }
+
+    #[test]
+    fn roundtrip_sum_batch_second_bad_read_key() {
+        roundtrip_sum_batch(false, false)
+    }
+
+    fn roundtrip_sum_batch(is_first: bool, keys_match: bool) {
+        let tempdir = tempfile::TempDir::new().unwrap();
+        let mut write_transport = FileTransport::new(tempdir.path().to_path_buf());
+        let mut read_transport = FileTransport::new(tempdir.path().to_path_buf());
+        let mut verify_transport = FileTransport::new(tempdir.path().to_path_buf());
+
+        let aggregation_name = "fake-aggregation";
+        let batch_id = Uuid::new_v4();
+        let start = NaiveDateTime::from_timestamp(1234567890, 654321);
+        let end = NaiveDateTime::from_timestamp(2234567890, 654321);
+
+        let mut batch_writer: BatchWriter<'_, IngestionHeader, IngestionDataSharePacket> =
+            BatchWriter::new_sum(
+                &aggregation_name,
+                &start,
+                &end,
+                is_first,
+                &mut write_transport,
+            )
+            .unwrap();
+        let batch_reader: BatchReader<'_, IngestionHeader, IngestionDataSharePacket> =
+            BatchReader::new_sum(
+                &aggregation_name,
+                &start,
+                &end,
+                is_first,
+                &mut read_transport,
+            )
+            .unwrap();
+        let batch_path = PathBuf::new().join(aggregation_name).join(format!(
+            "{}-{}",
+            start.format(DATE_FORMAT),
+            end.format(DATE_FORMAT)
+        ));
+        let first_filenames = &[
+            "sum_0".to_owned(),
+            "invalid_uuid_0.avro".to_owned(),
+            "sum_0.sig".to_owned(),
+        ];
+        let second_filenames = &[
+            "sum_1".to_owned(),
+            "invalid_uuid_1.avro".to_owned(),
+            "sum_1.sig".to_owned(),
+        ];
+        let read_key = if keys_match {
+            default_ingestor_public_key()
+        } else {
+            default_facilitator_signing_public_key()
+        };
+        roundtrip_batch(
+            aggregation_name.to_string(),
+            batch_id,
+            batch_path,
+            if is_first {
+                first_filenames
+            } else {
+                second_filenames
+            },
+            &mut batch_writer,
+            &batch_reader,
+            &mut verify_transport,
+            &default_ingestor_private_key(),
+            &read_key,
+            keys_match,
+        )
+    }
+}
