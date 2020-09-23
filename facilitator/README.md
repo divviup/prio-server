@@ -4,11 +4,15 @@ This is ISRG's implementation of a Prio accumulation server. It ingests a share 
 
 ## Getting started
 
-[Install a Rust toolchain](https://www.rust-lang.org/tools/install), then just `cargo build|run|test`.
+[Install a Rust toolchain](https://www.rust-lang.org/tools/install), then just `cargo build|run|test`. See `cargo run -- --help` for information on the various options and subcommands.
 
 ## Generating ingestion data
 
 To generate sample ingestion data, see the `generate-ingestion-sample` command and its usage (`cargo run -- generate-ingestion-sample --help`).
+
+## Docker
+
+To build a Docker image, try `docker build -t my-image-repository/facilitator:x.y.z -f facilitator/Dockerfile .` *from the root directory of `prio-server`*. This is important because building `facilitator` depends on the schema files in `avro-schema`.
 
 ## References
 

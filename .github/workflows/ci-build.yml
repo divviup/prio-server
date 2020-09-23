@@ -10,12 +10,11 @@ on:
 env:
   CARGO_TERM_COLOR: always
 
-defaults:
-  run:
-    working-directory: facilitator
-
 jobs:
   build-rust:
+    defaults:
+      run:
+        working-directory: facilitator
     runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@v2
@@ -25,3 +24,13 @@ jobs:
       run: cargo build --verbose
     - name: Run tests
       run: cargo test --verbose
+  docker:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v2
+    - name: Set up Docker build
+      uses: docker/setup-buildx-action@v1
+    - name: build
+      uses: docker/build-push-action@v2
+      with:
+        file: facilitator/Dockerfile
