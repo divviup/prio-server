@@ -1,0 +1,12 @@
+# Terraform
+.terraform/modules/*
+.terraform/plugins/*
+.terraform/*.tf*
+terraform.tfstate*
+.terraform/
+graph.png
+
+# Packer
+*.hwm
+*.pwd
+*.pwi
