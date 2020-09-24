@@ -33,4 +33,4 @@ jobs:
     - name: build
       uses: docker/build-push-action@v2
       with:
-        file: facilitator/Dockerfile
+        file: ./facilitator/Dockerfile
