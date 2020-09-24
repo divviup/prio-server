@@ -24,6 +24,22 @@ jobs:
       run: cargo build --verbose
     - name: Run tests
       run: cargo test --verbose
+
+  terraform:
+    defaults:
+      run:
+        working-directory: terraform
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v2
+    - uses: hashicorp/setup-terraform@v1
+    - name: Terraform fmt
+      run: terraform fmt -check -recursive
+    - name: Terraform init
+      run: terraform init --backend=false
+    - name: Terraform validate
+      run: terraform validate
+
   docker:
     runs-on: ubuntu-latest
     steps:
