@@ -7,7 +7,7 @@ use facilitator::{
     idl::{IngestionDataSharePacket, SumPart},
     intake::BatchIntaker,
     sample::generate_ingestion_sample,
-    transport::FileTransport,
+    transport::LocalFileTransport,
     DEFAULT_FACILITATOR_ECIES_PRIVATE_KEY, DEFAULT_PHA_ECIES_PRIVATE_KEY,
 };
 use libprio_rs::{encrypt::PrivateKey, util::reconstruct_shares};
@@ -30,13 +30,13 @@ fn end_to_end() {
     let batch_1_uuid = Uuid::new_v4();
     let batch_2_uuid = Uuid::new_v4();
 
-    let mut pha_ingest_transport = FileTransport::new(pha_tempdir.path().to_path_buf());
+    let mut pha_ingest_transport = LocalFileTransport::new(pha_tempdir.path().to_path_buf());
     let mut facilitator_ingest_transport =
-        FileTransport::new(facilitator_tempdir.path().to_path_buf());
-    let mut pha_validate_transport = FileTransport::new(pha_tempdir.path().to_path_buf());
+        LocalFileTransport::new(facilitator_tempdir.path().to_path_buf());
+    let mut pha_validate_transport = LocalFileTransport::new(pha_tempdir.path().to_path_buf());
     let mut facilitator_validate_transport =
-        FileTransport::new(facilitator_tempdir.path().to_path_buf());
-    let mut aggregation_transport = FileTransport::new(pha_tempdir.path().to_path_buf());
+        LocalFileTransport::new(facilitator_tempdir.path().to_path_buf());
+    let mut aggregation_transport = LocalFileTransport::new(pha_tempdir.path().to_path_buf());
 
     let pha_ecies_key = PrivateKey::from_base64(DEFAULT_PHA_ECIES_PRIVATE_KEY).unwrap();
     let facilitator_ecies_key =

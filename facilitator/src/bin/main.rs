@@ -2,7 +2,7 @@ use chrono::{prelude::Utc, NaiveDateTime};
 use clap::{App, Arg, ArgMatches, SubCommand};
 use facilitator::{
     aggregation::BatchAggregator, intake::BatchIntaker, sample::generate_ingestion_sample,
-    transport::FileTransport, Error, DATE_FORMAT, DEFAULT_FACILITATOR_ECIES_PRIVATE_KEY,
+    transport::LocalFileTransport, Error, DATE_FORMAT, DEFAULT_FACILITATOR_ECIES_PRIVATE_KEY,
     DEFAULT_FACILITATOR_SIGNING_PRIVATE_KEY, DEFAULT_INGESTOR_PRIVATE_KEY,
     DEFAULT_PHA_ECIES_PRIVATE_KEY, DEFAULT_PHA_SIGNING_PRIVATE_KEY,
 };
@@ -36,7 +36,7 @@ fn uuid_validator(s: String) -> Result<(), String> {
 
 fn main() -> Result<(), Error> {
     let matches = App::new("facilitator")
-        .about("Prio facilitator server")
+        .about("Prio data share processor")
         // Environment variables are injected via build.rs
         .version(&*format!(
             "{} {} {}",
@@ -463,58 +463,59 @@ fn main() -> Result<(), Error> {
         // The configuration of the Args above should guarantee that the
         // various parameters are present and valid, so it is safe to use
         // unwrap() here.
-        ("generate-ingestion-sample", Some(sub_matches)) => generate_ingestion_sample(
-            &mut FileTransport::new(
-                Path::new(sub_matches.value_of("pha-output").unwrap()).to_path_buf(),
-            ),
-            &mut FileTransport::new(
-                Path::new(sub_matches.value_of("facilitator-output").unwrap()).to_path_buf(),
-            ),
-            &sub_matches
-                .value_of("batch-id")
-                .map_or_else(|| Uuid::new_v4(), |v| Uuid::parse_str(v).unwrap()),
-            &sub_matches.value_of("aggregation-id").unwrap(),
-            &sub_matches.value_of("date").map_or_else(
-                || Utc::now().naive_utc(),
-                |v| NaiveDateTime::parse_from_str(&v, DATE_FORMAT).unwrap(),
-            ),
-            &PrivateKey::from_base64(sub_matches.value_of("pha-private-key").unwrap()).unwrap(),
-            &PrivateKey::from_base64(sub_matches.value_of("facilitator-private-key").unwrap())
-                .unwrap(),
-            &base64::decode(sub_matches.value_of("ingestor-private-key").unwrap()).unwrap(),
-            sub_matches
-                .value_of("dimension")
-                .unwrap()
-                .parse::<i32>()
-                .unwrap(),
-            sub_matches
-                .value_of("packet-count")
-                .unwrap()
-                .parse::<usize>()
-                .unwrap(),
-            sub_matches
-                .value_of("epsilon")
-                .unwrap()
-                .parse::<f64>()
-                .unwrap(),
-            sub_matches
-                .value_of("batch-start-time")
-                .unwrap()
-                .parse::<i64>()
-                .unwrap(),
-            sub_matches
-                .value_of("batch-end-time")
-                .unwrap()
-                .parse::<i64>()
-                .unwrap(),
-        )
-        // Drop return value
-        .map(|_| ()),
+        ("generate-ingestion-sample", Some(sub_matches)) => {
+            generate_ingestion_sample(
+                &mut LocalFileTransport::new(
+                    Path::new(sub_matches.value_of("pha-output").unwrap()).to_path_buf(),
+                ),
+                &mut LocalFileTransport::new(
+                    Path::new(sub_matches.value_of("facilitator-output").unwrap()).to_path_buf(),
+                ),
+                &sub_matches
+                    .value_of("batch-id")
+                    .map_or_else(|| Uuid::new_v4(), |v| Uuid::parse_str(v).unwrap()),
+                &sub_matches.value_of("aggregation-id").unwrap(),
+                &sub_matches.value_of("date").map_or_else(
+                    || Utc::now().naive_utc(),
+                    |v| NaiveDateTime::parse_from_str(&v, DATE_FORMAT).unwrap(),
+                ),
+                &PrivateKey::from_base64(sub_matches.value_of("pha-private-key").unwrap()).unwrap(),
+                &PrivateKey::from_base64(sub_matches.value_of("facilitator-private-key").unwrap())
+                    .unwrap(),
+                &base64::decode(sub_matches.value_of("ingestor-private-key").unwrap()).unwrap(),
+                sub_matches
+                    .value_of("dimension")
+                    .unwrap()
+                    .parse::<i32>()
+                    .unwrap(),
+                sub_matches
+                    .value_of("packet-count")
+                    .unwrap()
+                    .parse::<usize>()
+                    .unwrap(),
+                sub_matches
+                    .value_of("epsilon")
+                    .unwrap()
+                    .parse::<f64>()
+                    .unwrap(),
+                sub_matches
+                    .value_of("batch-start-time")
+                    .unwrap()
+                    .parse::<i64>()
+                    .unwrap(),
+                sub_matches
+                    .value_of("batch-end-time")
+                    .unwrap()
+                    .parse::<i64>()
+                    .unwrap(),
+            )?;
+            Ok(())
+        }
         ("batch-intake", Some(sub_matches)) => {
-            let mut ingestion_transport = FileTransport::new(
+            let mut ingestion_transport = LocalFileTransport::new(
                 Path::new(sub_matches.value_of("ingestion-bucket").unwrap()).to_path_buf(),
             );
-            let mut validation_transport = FileTransport::new(
+            let mut validation_transport = LocalFileTransport::new(
                 Path::new(sub_matches.value_of("validation-bucket").unwrap()).to_path_buf(),
             );
 
@@ -535,8 +536,7 @@ fn main() -> Result<(), Error> {
                 Err(e) => {
                     return Err(Error::CryptographyError(
                         "failed to parse value for share-processor-private-key".to_owned(),
-                        Some(e),
-                        None,
+                        e,
                     ))
                 }
             };
@@ -557,19 +557,20 @@ fn main() -> Result<(), Error> {
                 &share_processor_key,
                 &ingestor_pub_key,
             )?;
-            batch_intaker.generate_validation_share()
+            batch_intaker.generate_validation_share()?;
+            Ok(())
         }
         ("aggregate", Some(sub_matches)) => {
-            let mut ingestion_transport = FileTransport::new(
+            let mut ingestion_transport = LocalFileTransport::new(
                 Path::new(sub_matches.value_of("ingestion-bucket").unwrap()).to_path_buf(),
             );
-            let mut own_validation_transport = FileTransport::new(
+            let mut own_validation_transport = LocalFileTransport::new(
                 Path::new(sub_matches.value_of("own-validation-bucket").unwrap()).to_path_buf(),
             );
-            let mut peer_validation_transport = FileTransport::new(
+            let mut peer_validation_transport = LocalFileTransport::new(
                 Path::new(sub_matches.value_of("peer-validation-bucket").unwrap()).to_path_buf(),
             );
-            let mut aggregation_transport = FileTransport::new(
+            let mut aggregation_transport = LocalFileTransport::new(
                 Path::new(sub_matches.value_of("aggregation-bucket").unwrap()).to_path_buf(),
             );
 
@@ -587,8 +588,7 @@ fn main() -> Result<(), Error> {
                 Err(e) => {
                     return Err(Error::CryptographyError(
                         "failed to parse value for share-processor-private-key".to_owned(),
-                        Some(e),
-                        None,
+                        e,
                     ))
                 }
             };
@@ -632,7 +632,8 @@ fn main() -> Result<(), Error> {
                 &peer_share_processor_pub_key,
                 &share_processor_ecies_key,
             )?
-            .generate_sum_part(&batch_ids.into_iter().zip(batch_dates).collect())
+            .generate_sum_part(&batch_ids.into_iter().zip(batch_dates).collect())?;
+            Ok(())
         }
         (_, _) => Ok(()),
     }

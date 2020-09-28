@@ -151,7 +151,7 @@ mod tests {
     use crate::{
         default_facilitator_signing_private_key, default_ingestor_private_key,
         default_ingestor_private_key_raw, default_pha_signing_private_key,
-        sample::generate_ingestion_sample, transport::FileTransport,
+        sample::generate_ingestion_sample, transport::LocalFileTransport,
         DEFAULT_FACILITATOR_ECIES_PRIVATE_KEY, DEFAULT_PHA_ECIES_PRIVATE_KEY,
     };
     use ring::signature::{KeyPair, ECDSA_P256_SHA256_FIXED, ECDSA_P256_SHA256_FIXED_SIGNING};
@@ -164,12 +164,12 @@ mod tests {
         let aggregation_name = "fake-aggregation-1".to_owned();
         let date = NaiveDateTime::from_timestamp(1234567890, 654321);
         let batch_uuid = Uuid::new_v4();
-        let mut pha_ingest_transport = FileTransport::new(pha_tempdir.path().to_path_buf());
+        let mut pha_ingest_transport = LocalFileTransport::new(pha_tempdir.path().to_path_buf());
         let mut facilitator_ingest_transport =
-            FileTransport::new(facilitator_tempdir.path().to_path_buf());
-        let mut pha_validate_transport = FileTransport::new(pha_tempdir.path().to_path_buf());
+            LocalFileTransport::new(facilitator_tempdir.path().to_path_buf());
+        let mut pha_validate_transport = LocalFileTransport::new(pha_tempdir.path().to_path_buf());
         let mut facilitator_validate_transport =
-            FileTransport::new(facilitator_tempdir.path().to_path_buf());
+            LocalFileTransport::new(facilitator_tempdir.path().to_path_buf());
 
         let pha_ecies_key = PrivateKey::from_base64(DEFAULT_PHA_ECIES_PRIVATE_KEY).unwrap();
         let facilitator_ecies_key =
@@ -188,7 +188,7 @@ mod tests {
         .unwrap();
         let facilitator_signing_key = default_facilitator_signing_private_key();
 
-        let res = generate_ingestion_sample(
+        generate_ingestion_sample(
             &mut pha_ingest_transport,
             &mut facilitator_ingest_transport,
             &batch_uuid,
@@ -202,8 +202,8 @@ mod tests {
             0.11,
             100,
             100,
-        );
-        assert!(res.is_ok(), "failed to generate sample: {:?}", res.err());
+        )
+        .expect("failed to generate sample");
 
         let mut pha_ingestor = BatchIntaker::new(
             &aggregation_name,
@@ -218,12 +218,9 @@ mod tests {
         )
         .unwrap();
 
-        let res = pha_ingestor.generate_validation_share();
-        assert!(
-            res.is_ok(),
-            "PHA failed to generate validation: {:?}",
-            res.err()
-        );
+        pha_ingestor
+            .generate_validation_share()
+            .expect("PHA failed to generate validation");
 
         let mut facilitator_ingestor = BatchIntaker::new(
             &aggregation_name,
@@ -238,11 +235,8 @@ mod tests {
         )
         .unwrap();
 
-        let res = facilitator_ingestor.generate_validation_share();
-        assert!(
-            res.is_ok(),
-            "facilitator failed to generate validation: {:?}",
-            res.err()
-        );
+        facilitator_ingestor
+            .generate_validation_share()
+            .expect("facilitator failed to generate validation");
     }
 }

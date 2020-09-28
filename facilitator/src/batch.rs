@@ -181,7 +181,7 @@ impl<'a, H: Header, P: Packet> BatchReader<'a, H, P> {
             .map_err(|e| Error::IoError("failed to read header from transport".to_owned(), e))?;
 
         key.verify(&header_buf, &signature).map_err(|e| {
-            Error::CryptographyError("invalid signature on header".to_owned(), None, Some(e))
+            Error::CryptographyUnspecifiedError("invalid signature on header".to_owned(), e)
         })?;
 
         H::read(Cursor::new(header_buf))
@@ -213,10 +213,8 @@ impl<'a, H: Header, P: Packet> BatchReader<'a, H, P> {
 
         // ... then verify the digest over it ...
         if header.packet_file_digest().as_slice() != sidecar_writer.sidecar.finish().as_ref() {
-            return Err(Error::CryptographyError(
+            return Err(Error::MalformedDataPacketError(
                 "packet file digest does not match header".to_owned(),
-                None,
-                None,
             ));
         }
 
@@ -261,7 +259,7 @@ impl<'a, H: Header, P: Packet> BatchWriter<'a, H, P> {
         let header_signature = key
             .sign(&SystemRandom::new(), &sidecar_writer.sidecar)
             .map_err(|e| {
-                Error::CryptographyError("failed to sign header file".to_owned(), None, Some(e))
+                Error::CryptographyUnspecifiedError("failed to sign header file".to_owned(), e)
             })?;
         Ok(header_signature)
     }
@@ -310,7 +308,7 @@ mod tests {
         default_facilitator_signing_public_key, default_ingestor_private_key,
         default_ingestor_public_key,
         idl::{IngestionDataSharePacket, IngestionHeader},
-        transport::FileTransport,
+        transport::LocalFileTransport,
     };
 
     fn roundtrip_batch<'a>(
@@ -320,7 +318,7 @@ mod tests {
         filenames: &[String],
         batch_writer: &mut BatchWriter<'a, IngestionHeader, IngestionDataSharePacket>,
         batch_reader: &BatchReader<'a, IngestionHeader, IngestionDataSharePacket>,
-        transport: &mut FileTransport,
+        transport: &mut LocalFileTransport,
         write_key: &EcdsaKeyPair,
         read_key: &UnparsedPublicKey<Vec<u8>>,
         keys_match: bool,
@@ -357,17 +355,14 @@ mod tests {
             },
         ];
 
-        let packet_file_digest = batch_writer.packet_file_writer(|mut packet_writer| {
-            packets[0].write(&mut packet_writer)?;
-            packets[1].write(&mut packet_writer)?;
-            packets[2].write(&mut packet_writer)?;
-            Ok(())
-        });
-        assert!(
-            packet_file_digest.is_ok(),
-            "failed to write packets: {:?}",
-            packet_file_digest.err()
-        );
+        let packet_file_digest = batch_writer
+            .packet_file_writer(|mut packet_writer| {
+                packets[0].write(&mut packet_writer)?;
+                packets[1].write(&mut packet_writer)?;
+                packets[2].write(&mut packet_writer)?;
+                Ok(())
+            })
+            .expect("failed to write packets");
 
         let header = IngestionHeader {
             batch_uuid: batch_id,
@@ -379,28 +374,21 @@ mod tests {
             hamming_weight: None,
             batch_start_time: 789456123,
             batch_end_time: 789456321,
-            packet_file_digest: packet_file_digest.unwrap().as_ref().to_vec(),
+            packet_file_digest: packet_file_digest.as_ref().to_vec(),
         };
 
-        let header_signature = batch_writer.put_header(&header, write_key);
-        assert!(
-            header_signature.is_ok(),
-            "failed to write header: {:?}",
-            header_signature.err()
-        );
+        let header_signature = batch_writer
+            .put_header(&header, write_key)
+            .expect("failed to write header");
 
-        let res = batch_writer.put_signature(&header_signature.unwrap());
+        let res = batch_writer.put_signature(&header_signature);
         assert!(res.is_ok(), "failed to put signature: {:?}", res.err());
 
         // Verify file layout is as expected
         for extension in filenames {
-            let res = transport.get(&base_path.with_extension(extension));
-            assert!(
-                res.is_ok(),
-                "could not get batch file {}: {:?}",
-                extension,
-                res.err()
-            );
+            transport
+                .get(&base_path.with_extension(extension))
+                .expect(&format!("could not get batch file {}", extension));
         }
 
         let header_again = batch_reader.header(read_key);
@@ -420,22 +408,14 @@ mod tests {
 
         assert_eq!(header, header_again, "header does not match");
 
-        let packet_file_reader = batch_reader.packet_file_reader(&header_again);
-        assert!(
-            packet_file_reader.is_ok(),
-            "failed to get packet file reader {:?}",
-            packet_file_reader.err()
-        );
-        let mut packet_file_reader = packet_file_reader.unwrap();
+        let mut packet_file_reader = batch_reader
+            .packet_file_reader(&header_again)
+            .expect("failed to get packet file reader");
 
         for packet in packets {
-            let packet_again = IngestionDataSharePacket::read(&mut packet_file_reader);
-            assert!(
-                packet_again.is_ok(),
-                "failed to read packet: {:?}",
-                packet_again.is_err()
-            );
-            assert_eq!(packet, &packet_again.unwrap(), "packet does not match");
+            let packet_again = IngestionDataSharePacket::read(&mut packet_file_reader)
+                .expect("failed to read packet");
+            assert_eq!(packet, &packet_again, "packet does not match");
         }
 
         // One more read should get EOF
@@ -457,9 +437,9 @@ mod tests {
 
     fn roundtrip_ingestion_batch(keys_match: bool) {
         let tempdir = tempfile::TempDir::new().unwrap();
-        let mut write_transport = FileTransport::new(tempdir.path().to_path_buf());
-        let mut read_transport = FileTransport::new(tempdir.path().to_path_buf());
-        let mut verify_transport = FileTransport::new(tempdir.path().to_path_buf());
+        let mut write_transport = LocalFileTransport::new(tempdir.path().to_path_buf());
+        let mut read_transport = LocalFileTransport::new(tempdir.path().to_path_buf());
+        let mut verify_transport = LocalFileTransport::new(tempdir.path().to_path_buf());
 
         let aggregation_name = "fake-aggregation";
         let batch_id = Uuid::new_v4();
@@ -520,9 +500,9 @@ mod tests {
 
     fn roundtrip_validation_batch(is_first: bool, keys_match: bool) {
         let tempdir = tempfile::TempDir::new().unwrap();
-        let mut write_transport = FileTransport::new(tempdir.path().to_path_buf());
-        let mut read_transport = FileTransport::new(tempdir.path().to_path_buf());
-        let mut verify_transport = FileTransport::new(tempdir.path().to_path_buf());
+        let mut write_transport = LocalFileTransport::new(tempdir.path().to_path_buf());
+        let mut read_transport = LocalFileTransport::new(tempdir.path().to_path_buf());
+        let mut verify_transport = LocalFileTransport::new(tempdir.path().to_path_buf());
 
         let aggregation_name = "fake-aggregation";
         let batch_id = Uuid::new_v4();
@@ -605,9 +585,9 @@ mod tests {
 
     fn roundtrip_sum_batch(is_first: bool, keys_match: bool) {
         let tempdir = tempfile::TempDir::new().unwrap();
-        let mut write_transport = FileTransport::new(tempdir.path().to_path_buf());
-        let mut read_transport = FileTransport::new(tempdir.path().to_path_buf());
-        let mut verify_transport = FileTransport::new(tempdir.path().to_path_buf());
+        let mut write_transport = LocalFileTransport::new(tempdir.path().to_path_buf());
+        let mut read_transport = LocalFileTransport::new(tempdir.path().to_path_buf());
+        let mut verify_transport = LocalFileTransport::new(tempdir.path().to_path_buf());
 
         let aggregation_name = "fake-aggregation";
         let batch_id = Uuid::new_v4();
