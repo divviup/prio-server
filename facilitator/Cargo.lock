@@ -337,7 +337,7 @@ checksum = "3286f09f7d4926fc486334f28d8d2e6ebe4f7f9994494b6dab27ddfad2c9b11b"
 [[package]]
 name = "libprio-rs"
 version = "0.1.0"
-source = "git+https://github.com/abetterinternet/libprio-rs#c0a62779b6ad7642edbb99d84c32d57ea9d132d3"
+source = "git+https://github.com/abetterinternet/libprio-rs?branch=main#2b442cdb31aac1796e5da70006cb3c0f81a766f3"
 dependencies = [
  "aes-ctr",
  "aes-gcm",
