@@ -32,17 +32,13 @@ pub fn generate_ingestion_sample(
 ) -> Result<Vec<Field>, Error> {
     if dim <= 0 {
         return Err(Error::IllegalArgumentError(
-            "dimension must be natural number".to_owned(),
+            "dimension must be an integer greater than zero".to_owned(),
         ));
     }
 
     let ingestor_key_pair =
         EcdsaKeyPair::from_pkcs8(&ECDSA_P256_SHA256_FIXED_SIGNING, ingestor_key).map_err(|e| {
-            Error::CryptographyError(
-                "failed to parse ingestor key pair".to_owned(),
-                Some(e),
-                None,
-            )
+            Error::CryptographyError("failed to parse ingestor key pair".to_owned(), e)
         })?;
 
     let mut pha_ingestion_batch: BatchWriter<'_, IngestionHeader, IngestionDataSharePacket> =
@@ -56,21 +52,19 @@ pub fn generate_ingestion_sample(
     // Generate random data packets and write into data share packets
     let mut thread_rng = thread_rng();
 
-    let mut client = match Client::new(
+    let mut client = Client::new(
         // usize is probably bigger than i32 and we have checked that dim is
         // positive so this is safe
         dim as usize,
         PublicKey::from(pha_key),
         PublicKey::from(facilitator_key),
-    ) {
-        Some(c) => c,
-        None => {
-            return Err(Error::LibPrioError(
-                "failed to create client (bad dimension parameter?)".to_owned(),
-                None,
-            ))
-        }
-    };
+    )
+    .ok_or_else(|| {
+        Error::LibPrioError(
+            "failed to create client (bad dimension parameter?)".to_owned(),
+            None,
+        )
+    })?;
 
     let mut reference_sum = vec![Field::from(0); dim as usize];
 
@@ -168,7 +162,7 @@ pub fn generate_ingestion_sample(
 mod tests {
     use super::*;
     use crate::{
-        default_ingestor_private_key_raw, idl::Header, transport::FileTransport,
+        default_ingestor_private_key_raw, idl::Header, transport::LocalFileTransport,
         DEFAULT_FACILITATOR_ECIES_PRIVATE_KEY, DEFAULT_PHA_ECIES_PRIVATE_KEY,
     };
     use std::path::PathBuf;
@@ -178,9 +172,9 @@ mod tests {
     fn write_sample() {
         let tempdir = tempfile::TempDir::new().unwrap();
         let batch_uuid = Uuid::new_v4();
-        let mut pha_transport = FileTransport::new(tempdir.path().to_path_buf().join("pha"));
+        let mut pha_transport = LocalFileTransport::new(tempdir.path().to_path_buf().join("pha"));
         let mut facilitator_transport =
-            FileTransport::new(tempdir.path().to_path_buf().join("pha"));
+            LocalFileTransport::new(tempdir.path().to_path_buf().join("pha"));
 
         let res = generate_ingestion_sample(
             &mut pha_transport,

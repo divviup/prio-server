@@ -52,11 +52,8 @@ pub enum Error {
     LibPrioError(String, Option<EncryptError>),
     FacilitatorError(String),
     IllegalArgumentError(String),
-    CryptographyError(
-        String,
-        Option<ring::error::KeyRejected>,
-        Option<ring::error::Unspecified>,
-    ),
+    CryptographyError(String, ring::error::KeyRejected),
+    CryptographyUnspecifiedError(String, ring::error::Unspecified),
     PeerValidationError(String),
     ConversionError(String),
 }
@@ -67,21 +64,15 @@ impl From<TryFromIntError> for Error {
     }
 }
 
-/// Constructs an EcdsaKeyPair from the default ingestor server. Should only be
-/// used in tests, and since we know DEFAULT_INGESTOR_PRIVATE_KEY is valid, it
-/// is ok to unwrap() here.
+/// Constructs an EcdsaKeyPair from the default ingestor server.
 pub fn default_ingestor_private_key() -> EcdsaKeyPair {
     EcdsaKeyPair::from_pkcs8(
         &ECDSA_P256_SHA256_FIXED_SIGNING,
         &default_ingestor_private_key_raw(),
     )
-    .map_err(|e| {
-        Error::CryptographyError(
-            "failed to parse ingestor key pair".to_owned(),
-            Some(e),
-            None,
-        )
-    })
+    .map_err(|e| Error::CryptographyError("failed to parse ingestor key pair".to_owned(), e))
+    // Since we know DEFAULT_INGESTOR_PRIVATE_KEY is valid, it
+    // is ok to unwrap() here.
     .unwrap()
 }
 
@@ -104,13 +95,7 @@ pub fn default_facilitator_signing_private_key() -> EcdsaKeyPair {
         &ECDSA_P256_SHA256_FIXED_SIGNING,
         &default_facilitator_signing_private_key_raw(),
     )
-    .map_err(|e| {
-        Error::CryptographyError(
-            "failed to parse ingestor key pair".to_owned(),
-            Some(e),
-            None,
-        )
-    })
+    .map_err(|e| Error::CryptographyError("failed to parse ingestor key pair".to_owned(), e))
     .unwrap()
 }
 

@@ -233,19 +233,14 @@ impl Header for IngestionHeader {
             Value::Bytes(self.packet_file_digest.clone()),
         );
 
-        if let Err(e) = writer.append(record) {
-            return Err(Error::AvroError(
-                "failed to append record to Avro writer".to_owned(),
-                e,
-            ));
-        }
+        writer.append(record).map_err(|e| {
+            Error::AvroError("failed to append record to Avro writer".to_owned(), e)
+        })?;
 
-        if let Err(e) = writer.flush() {
-            return Err(Error::AvroError(
-                "failed to flush Avro writer".to_owned(),
-                e,
-            ));
-        }
+        writer
+            .flush()
+            .map_err(|e| Error::AvroError("failed to flush Avro writer".to_owned(), e))?;
+
         Ok(())
     }
 }
@@ -253,7 +248,7 @@ impl Header for IngestionHeader {
 /// A single packet from an ingestion batch file. Note that unlike the header
 /// and signature, which are files containing a single record, the data share
 /// file will contain many IngestionDataSharePacket records.
-#[derive(Debug, Deserialize, Serialize, PartialEq)]
+#[derive(Debug, Deserialize, Serialize, PartialEq, Eq)]
 pub struct IngestionDataSharePacket {
     pub uuid: Uuid,
     pub encrypted_payload: Vec<u8>,
@@ -350,18 +345,15 @@ impl Packet for IngestionDataSharePacket {
     }
 
     fn write<W: Write>(&self, writer: &mut Writer<W>) -> Result<(), Error> {
-        // Ideally we would just do `writer.append_ser(self)` to use Serde serialization to write
-        // the record but there seems to be some problem with serializing UUIDs, so we have to
-        // construct the record.
-        let mut record = match Record::new(writer.schema()) {
-            Some(r) => r,
-            None => {
-                // avro_rs docs say this can only happen "if the `Schema is not a `Schema::Record`
-                // variant", which shouldn't ever happen, so panic for debugging
-                // https://docs.rs/avro-rs/0.11.0/avro_rs/types/struct.Record.html#method.new
-                panic!("Unable to create Record from ingestion data share packet schema");
-            }
-        };
+        // Ideally we would just do `writer.append_ser(self)` to use Serde
+        // serialization to write the record but there seems to be some problem
+        // with serializing UUIDs, so we have to construct the record.
+        // avro_rs docs say this can only fail "if the `Schema is not a
+        // `Schema::Record` variant", which shouldn't ever happen, so panic for
+        // debugging
+        // https://docs.rs/avro-rs/0.11.0/avro_rs/types/struct.Record.html#method.new
+        let mut record = Record::new(writer.schema())
+            .expect("Unable to create Record from ingestion data share packet schema");
 
         record.put("uuid", Value::Uuid(self.uuid));
         record.put(
@@ -388,9 +380,9 @@ impl Packet for IngestionDataSharePacket {
             None => record.put("device_nonce", Value::Union(Box::new(Value::Null))),
         }
 
-        if let Err(e) = writer.append(record) {
-            return Err(Error::AvroError("failed to append record".to_owned(), e));
-        }
+        writer.append(record).map_err(|e| {
+            Error::AvroError("failed to append record to Avro writer".to_owned(), e)
+        })?;
 
         Ok(())
     }
@@ -547,33 +539,30 @@ impl Header for ValidationHeader {
         record.put("epsilon", Value::Double(self.epsilon));
         record.put("prime", Value::Long(self.prime));
         record.put("number_of_servers", Value::Int(self.number_of_servers));
-        match self.hamming_weight {
-            Some(v) => record.put("hamming_weight", Value::Union(Box::new(Value::Int(v)))),
-            None => record.put("hamming_weight", Value::Union(Box::new(Value::Null))),
-        }
+        record.put(
+            "hamming_weight",
+            Value::Union(Box::new(
+                self.hamming_weight.map_or(Value::Null, |v| Value::Int(v)),
+            )),
+        );
         record.put(
             "packet_file_digest",
             Value::Bytes(self.packet_file_digest.clone()),
         );
 
-        if let Err(e) = writer.append(record) {
-            return Err(Error::AvroError(
-                "failed to append record to Avro writer".to_owned(),
-                e,
-            ));
-        }
+        writer.append(record).map_err(|e| {
+            Error::AvroError("failed to append record to Avro writer".to_owned(), e)
+        })?;
 
-        if let Err(e) = writer.flush() {
-            return Err(Error::AvroError(
-                "failed to flush Avro writer".to_owned(),
-                e,
-            ));
-        }
+        writer
+            .flush()
+            .map_err(|e| Error::AvroError("failed to flush Avro writer".to_owned(), e))?;
+
         Ok(())
     }
 }
 
-#[derive(Debug, Deserialize, Serialize, PartialEq)]
+#[derive(Debug, Deserialize, Serialize, PartialEq, Eq)]
 pub struct ValidationPacket {
     pub uuid: Uuid,
     pub f_r: i64,
@@ -621,9 +610,9 @@ impl Packet for ValidationPacket {
         record.put("g_r", Value::Long(self.g_r));
         record.put("h_r", Value::Long(self.h_r));
 
-        if let Err(e) = writer.append(record) {
-            return Err(Error::AvroError("failed to append record".to_owned(), e));
-        }
+        writer.append(record).map_err(|e| {
+            Error::AvroError("failed to append record to Avro writer".to_owned(), e)
+        })?;
 
         Ok(())
     }
@@ -858,24 +847,19 @@ impl Header for SumPart {
             Value::Bytes(self.packet_file_digest.clone()),
         );
 
-        if let Err(e) = writer.append(record) {
-            return Err(Error::AvroError(
-                "failed to append record to Avro writer".to_owned(),
-                e,
-            ));
-        }
+        writer.append(record).map_err(|e| {
+            Error::AvroError("failed to append record to Avro writer".to_owned(), e)
+        })?;
 
-        if let Err(e) = writer.flush() {
-            return Err(Error::AvroError(
-                "failed to flush Avro writer".to_owned(),
-                e,
-            ));
-        }
+        writer
+            .flush()
+            .map_err(|e| Error::AvroError("failed to flush Avro writer".to_owned(), e))?;
+
         Ok(())
     }
 }
 
-#[derive(Debug, Deserialize, Serialize, PartialEq)]
+#[derive(Debug, Deserialize, Serialize, PartialEq, Eq)]
 pub struct InvalidPacket {
     pub uuid: Uuid,
 }
@@ -917,9 +901,9 @@ impl Packet for InvalidPacket {
 
         record.put("uuid", Value::Uuid(self.uuid));
 
-        if let Err(e) = writer.append(record) {
-            return Err(Error::AvroError("failed to append record".to_owned(), e));
-        }
+        writer.append(record).map_err(|e| {
+            Error::AvroError("failed to append record to Avro writer".to_owned(), e)
+        })?;
 
         Ok(())
     }
@@ -961,12 +945,9 @@ mod tests {
         for header in headers {
             let mut record_vec = Vec::new();
 
-            let res = header.write(&mut record_vec);
-            assert!(res.is_ok(), "write error {:?}", res);
-            let header_again = IngestionHeader::read(&record_vec[..]);
-            assert!(header_again.is_ok(), "read error {:?}", header_again);
-
-            assert_eq!(header_again.unwrap(), *header);
+            header.write(&mut record_vec).expect("write error");
+            let header_again = IngestionHeader::read(&record_vec[..]).expect("read error");
+            assert_eq!(header_again, *header);
         }
     }
 
@@ -1005,16 +986,14 @@ mod tests {
         let mut writer = Writer::new(&schema, &mut record_vec);
 
         for packet in packets {
-            let res = packet.write(&mut writer);
-            assert!(res.is_ok(), "write error {:?}", res);
+            packet.write(&mut writer).expect("write error");
         }
         writer.flush().unwrap();
 
         let mut reader = Reader::with_schema(&schema, &record_vec[..]).unwrap();
         for packet in packets {
-            let packet_again = IngestionDataSharePacket::read(&mut reader);
-            assert!(packet_again.is_ok(), "read error {:?}", packet_again);
-            assert_eq!(packet_again.unwrap(), *packet);
+            let packet_again = IngestionDataSharePacket::read(&mut reader).expect("read error");
+            assert_eq!(packet_again, *packet);
         }
 
         // Do one more read. This should yield EOF.
@@ -1052,12 +1031,9 @@ mod tests {
         for header in headers {
             let mut record_vec = Vec::new();
 
-            let res = header.write(&mut record_vec);
-            assert!(res.is_ok(), "write error {:?}", res);
-            let header_again = ValidationHeader::read(&record_vec[..]);
-            assert!(header_again.is_ok(), "read error {:?}", header_again);
-
-            assert_eq!(header_again.unwrap(), *header);
+            header.write(&mut record_vec).expect("write error");
+            let header_again = ValidationHeader::read(&record_vec[..]).expect("read error");
+            assert_eq!(header_again, *header);
         }
     }
 
@@ -1090,16 +1066,14 @@ mod tests {
         let mut writer = Writer::new(&schema, &mut record_vec);
 
         for packet in packets {
-            let res = packet.write(&mut writer);
-            assert!(res.is_ok(), "write error {:?}", res);
+            packet.write(&mut writer).expect("write error");
         }
         writer.flush().unwrap();
 
         let mut reader = Reader::with_schema(&schema, &record_vec[..]).unwrap();
         for packet in packets {
-            let packet_again = ValidationPacket::read(&mut reader);
-            assert!(packet_again.is_ok(), "read error {:?}", packet_again);
-            assert_eq!(packet_again.unwrap(), *packet);
+            let packet_again = ValidationPacket::read(&mut reader).expect("read error");
+            assert_eq!(packet_again, *packet);
         }
 
         // Do one more read. This should yield EOF.
@@ -1143,12 +1117,9 @@ mod tests {
         for header in headers {
             let mut record_vec = Vec::new();
 
-            let res = header.write(&mut record_vec);
-            assert!(res.is_ok(), "write error {:?}", res);
-            let header_again = SumPart::read(&record_vec[..]);
-            assert!(header_again.is_ok(), "read error {:?}", header_again);
-
-            assert_eq!(header_again.unwrap(), *header);
+            header.write(&mut record_vec).expect("write error");
+            let header_again = SumPart::read(&record_vec[..]).expect("read error");
+            assert_eq!(header_again, *header);
         }
     }
 
@@ -1172,16 +1143,14 @@ mod tests {
         let mut writer = Writer::new(&schema, &mut record_vec);
 
         for packet in packets {
-            let res = packet.write(&mut writer);
-            assert!(res.is_ok(), "write error {:?}", res);
+            packet.write(&mut writer).expect("write error");
         }
         writer.flush().unwrap();
 
         let mut reader = Reader::with_schema(&schema, &record_vec[..]).unwrap();
         for packet in packets {
-            let packet_again = InvalidPacket::read(&mut reader);
-            assert!(packet_again.is_ok(), "read error {:?}", packet_again);
-            assert_eq!(packet_again.unwrap(), *packet);
+            let packet_again = InvalidPacket::read(&mut reader).expect("read error");
+            assert_eq!(packet_again, *packet);
         }
 
         // Do one more read. This should yield EOF.
