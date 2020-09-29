@@ -57,6 +57,11 @@
             "name": "packet_file_digest",
             "type": "bytes",
             "doc": "SHA-256 digest of the .avro file containing packets in this batch."
+        },
+        {
+            "name": "key_identifier",
+            "type": "string",
+            "doc": "identifier of the key used for the signature, as specified in the global key manifest."
         }
     ]
 }
