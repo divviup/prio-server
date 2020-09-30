@@ -5,7 +5,7 @@ use crate::{
     Error,
 };
 use chrono::NaiveDateTime;
-use libprio_rs::{encrypt::PrivateKey, finite_field::Field, server::Server};
+use prio::{encrypt::PrivateKey, finite_field::Field, server::Server};
 use ring::signature::{EcdsaKeyPair, UnparsedPublicKey};
 use std::convert::TryFrom;
 use uuid::Uuid;

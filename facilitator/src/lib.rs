@@ -1,4 +1,4 @@
-use libprio_rs::encrypt::EncryptError;
+use prio::encrypt::EncryptError;
 use ring::{
     digest,
     signature::{

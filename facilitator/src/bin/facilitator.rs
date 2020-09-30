@@ -6,7 +6,7 @@ use facilitator::{
     DEFAULT_FACILITATOR_SIGNING_PRIVATE_KEY, DEFAULT_INGESTOR_PRIVATE_KEY,
     DEFAULT_PHA_ECIES_PRIVATE_KEY, DEFAULT_PHA_SIGNING_PRIVATE_KEY,
 };
-use libprio_rs::encrypt::PrivateKey;
+use prio::encrypt::PrivateKey;
 use ring::signature::{
     EcdsaKeyPair, KeyPair, UnparsedPublicKey, ECDSA_P256_SHA256_FIXED,
     ECDSA_P256_SHA256_FIXED_SIGNING,

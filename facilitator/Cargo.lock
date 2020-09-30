@@ -226,7 +226,7 @@ dependencies = [
  "base64",
  "chrono",
  "clap",
- "libprio-rs",
+ "prio",
  "rand 0.7.3",
  "ring",
  "serde",
@@ -335,18 +335,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3286f09f7d4926fc486334f28d8d2e6ebe4f7f9994494b6dab27ddfad2c9b11b"
 
 [[package]]
-name = "libprio-rs"
-version = "0.1.0"
-source = "git+https://github.com/abetterinternet/libprio-rs?branch=main#2b442cdb31aac1796e5da70006cb3c0f81a766f3"
-dependencies = [
- "aes-ctr",
- "aes-gcm",
- "base64",
- "rand 0.7.3",
- "ring",
-]
-
-[[package]]
 name = "log"
 version = "0.4.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -412,6 +400,19 @@ name = "ppv-lite86"
 version = "0.2.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c36fa947111f5c62a733b652544dd0016a43ce89619538a8ef92724a6f501a20"
+
+[[package]]
+name = "prio"
+version = "0.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b5c79b23b9310503f986942f40111447d57cacf58c7c130aebf0efdbc4880345"
+dependencies = [
+ "aes-ctr",
+ "aes-gcm",
+ "base64",
+ "rand 0.7.3",
+ "ring",
+]
 
 [[package]]
 name = "proc-macro2"

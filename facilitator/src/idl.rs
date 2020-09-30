@@ -4,7 +4,7 @@ use avro_rs::{
     types::{Record, Value},
     Reader, Schema, Writer,
 };
-use libprio_rs::{finite_field::Field, server::VerificationMessage};
+use prio::{finite_field::Field, server::VerificationMessage};
 use serde::{Deserialize, Serialize};
 use std::convert::TryFrom;
 use std::io::{Read, Write};

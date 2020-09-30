@@ -5,7 +5,7 @@ use crate::{
     Error,
 };
 use chrono::NaiveDateTime;
-use libprio_rs::{
+use prio::{
     client::Client,
     encrypt::{PrivateKey, PublicKey},
     finite_field::{Field, MODULUS},

@@ -8,7 +8,7 @@ use crate::{
     Error,
 };
 use chrono::NaiveDateTime;
-use libprio_rs::{encrypt::PrivateKey, server::VerificationMessage};
+use prio::{encrypt::PrivateKey, server::VerificationMessage};
 use ring::signature::{EcdsaKeyPair, KeyPair, UnparsedPublicKey, ECDSA_P256_SHA256_FIXED};
 use std::convert::TryFrom;
 use uuid::Uuid;
@@ -78,7 +78,7 @@ impl<'a> BatchAggregator<'a> {
         let mut invalid_uuids = Vec::new();
 
         let ingestion_header = self.ingestion_header(&batch_ids[0].0, &batch_ids[0].1)?;
-        let mut server = libprio_rs::server::Server::new(
+        let mut server = prio::server::Server::new(
             ingestion_header.bins as usize,
             self.is_first,
             self.share_processor_ecies_key.clone(),
@@ -157,7 +157,7 @@ impl<'a> BatchAggregator<'a> {
         batch_id: &Uuid,
         batch_date: &NaiveDateTime,
         share_processor_public_key: &UnparsedPublicKey<Vec<u8>>,
-        server: &mut libprio_rs::server::Server,
+        server: &mut prio::server::Server,
         invalid_uuids: &mut Vec<Uuid>,
     ) -> Result<(), Error> {
         let ingestion_batch: BatchReader<'_, IngestionHeader, IngestionDataSharePacket> =
