@@ -30,8 +30,6 @@ pub enum Error {
     MalformedDataPacketError(String),
     #[error("end of file")]
     EofError,
-    #[error("I/O error: {0}")]
-    IoError(String, #[source] std::io::Error),
 }
 
 pub struct DigestWriter {
