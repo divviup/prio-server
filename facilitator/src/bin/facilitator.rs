@@ -1,18 +1,26 @@
+use std::{path::Path, str::FromStr};
+
 use chrono::{prelude::Utc, NaiveDateTime};
 use clap::{App, Arg, ArgMatches, SubCommand};
-use facilitator::{
-    aggregation::BatchAggregator, intake::BatchIntaker, sample::generate_ingestion_sample,
-    transport::LocalFileTransport, Error, DATE_FORMAT, DEFAULT_FACILITATOR_ECIES_PRIVATE_KEY,
-    DEFAULT_FACILITATOR_SIGNING_PRIVATE_KEY, DEFAULT_INGESTOR_PRIVATE_KEY,
-    DEFAULT_PHA_ECIES_PRIVATE_KEY, DEFAULT_PHA_SIGNING_PRIVATE_KEY,
-};
 use prio::encrypt::PrivateKey;
 use ring::signature::{
     EcdsaKeyPair, KeyPair, UnparsedPublicKey, ECDSA_P256_SHA256_FIXED,
     ECDSA_P256_SHA256_FIXED_SIGNING,
 };
-use std::{path::Path, str::FromStr};
 use uuid::Uuid;
+
+use facilitator::{
+    aggregation::BatchAggregator,
+    intake::BatchIntaker,
+    sample::generate_ingestion_sample,
+    test_utils::{
+        DEFAULT_FACILITATOR_ECIES_PRIVATE_KEY, DEFAULT_FACILITATOR_SIGNING_PRIVATE_KEY,
+        DEFAULT_INGESTOR_PRIVATE_KEY, DEFAULT_PHA_ECIES_PRIVATE_KEY,
+        DEFAULT_PHA_SIGNING_PRIVATE_KEY,
+    },
+    transport::LocalFileTransport,
+    Error, DATE_FORMAT,
+};
 
 fn num_validator<F: FromStr>(s: String) -> Result<(), String> {
     s.parse::<F>()

@@ -149,10 +149,13 @@ impl<'a> BatchIntaker<'a> {
 mod tests {
     use super::*;
     use crate::{
-        default_facilitator_signing_private_key, default_ingestor_private_key,
-        default_ingestor_private_key_raw, default_pha_signing_private_key,
-        sample::generate_ingestion_sample, transport::LocalFileTransport,
-        DEFAULT_FACILITATOR_ECIES_PRIVATE_KEY, DEFAULT_PHA_ECIES_PRIVATE_KEY,
+        sample::generate_ingestion_sample,
+        test_utils::{
+            default_facilitator_signing_private_key, default_ingestor_private_key,
+            default_ingestor_private_key_raw, default_pha_signing_private_key,
+            DEFAULT_FACILITATOR_ECIES_PRIVATE_KEY, DEFAULT_PHA_ECIES_PRIVATE_KEY,
+        },
+        transport::LocalFileTransport,
     };
     use ring::signature::{KeyPair, ECDSA_P256_SHA256_FIXED, ECDSA_P256_SHA256_FIXED_SIGNING};
 
