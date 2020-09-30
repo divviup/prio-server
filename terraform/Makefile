@@ -6,21 +6,19 @@ GREEN=$(shell tput setaf 2)
 YELLOW=$(shell tput setaf 3)
 RESET=$(shell tput sgr0)
 
-ifeq ($(INFRA),)
-$(info $(BOLD)Example usage: \`INFRA=demo make plan\`$(RESET))
-$(info $(BOLD)If using a non-default AWS_PROFILE: \`AWS_PROFILE=leuswest2 INFRA=demo make plan\`$(RESET))
-$(error $(BOLD)$(RED)INFRA was not set$(RESET))
+ifeq ($(ENV),)
+$(info $(BOLD)Example usage: \`ENV=demo make plan\`$(RESET))
+$(error $(BOLD)$(RED)ENV was not set$(RESET))
 endif
 
-VARS="variables/$(INFRA).tfvars"
+VARS="variables/$(ENV).tfvars"
 REGION="$(shell grep '^gcp_region' $(VARS) | awk -F'=' '{print $$2}' | sed 's/[[:space:]]//g')"
 ifeq ($(REGION),)
 $(error $(BOLD)$(RED)REGION was not detected$(RESET))
 endif
 
-STORAGE_BUCKET="$(INFRA)-$(REGION)-prio-terraform"
+STORAGE_BUCKET="$(ENV)-$(REGION)-prio-terraform"
 STORAGE_BUCKET_URL="gs://$(STORAGE_BUCKET)"
-WORKSPACE="$(INFRA)-$(REGION)"
 
 .PHONY: help
 help:
@@ -51,8 +49,6 @@ prep: ## Prepare a new workspace (environment) if needed, configure the tfstate 
 		-verify-plugins=true \
 		-backend=true \
 		-backend-config="bucket=$(STORAGE_BUCKET)"
-	@echo "$(BOLD)Switching to workspace $(WORKSPACE)$(RESET)"
-	@terraform workspace select $(WORKSPACE) || terraform workspace new $(WORKSPACE)
 
 .PHONY: plan
 plan: prep ## Show what terraform thinks it will do
