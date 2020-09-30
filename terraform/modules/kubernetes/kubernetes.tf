@@ -1,42 +1,42 @@
-variable "peer_share_processor_names" {
-  type = list(string)
+variable "peer_share_processor_name" {
+  type = string
 }
 
-variable "infra_name" {
+variable "environment" {
   type = string
 }
 
 variable "container_registry" {
-  type = string
+  type    = string
+  default = "letsencrypt"
 }
 
 variable "execution_manager_image" {
-  type = string
+  type    = string
+  default = "prio-facilitator"
 }
 
 variable "execution_manager_version" {
-  type = string
+  type    = string
+  default = "0.1.0"
 }
 
-resource "kubernetes_namespace" "namespaces" {
-  count = length(var.peer_share_processor_names)
-
+resource "kubernetes_namespace" "namespace" {
   metadata {
-    name = var.peer_share_processor_names[count.index]
+    name = var.peer_share_processor_name
     annotations = {
-      infra = var.infra_name
+      environment = var.environment
     }
   }
 }
 
-resource "kubernetes_cron_job" "execution_managers" {
-  count = length(var.peer_share_processor_names)
+resource "kubernetes_cron_job" "execution_manager" {
   metadata {
-    name      = "${var.infra_name}-execution-manager"
-    namespace = var.peer_share_processor_names[count.index]
+    name      = "${var.environment}-execution-manager"
+    namespace = var.peer_share_processor_name
 
     annotations = {
-      infra = var.infra_name
+      environment = var.environment
     }
   }
   spec {

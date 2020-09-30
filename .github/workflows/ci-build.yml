@@ -34,7 +34,7 @@ jobs:
     - uses: actions/checkout@v2
     - uses: hashicorp/setup-terraform@v1
     - name: Terraform fmt
-      run: terraform fmt -check -recursive
+      run: terraform fmt --check --recursive
     - name: Terraform init
       run: terraform init --backend=false
     - name: Terraform validate

@@ -1,4 +1,4 @@
-variable "infra_name" {
+variable "environment" {
   type = string
 }
 
@@ -14,37 +14,41 @@ variable "machine_type" {
   type = string
 }
 
-data "google_compute_zones" "available" {}
-
 resource "google_container_cluster" "cluster" {
   name = "${var.resource_prefix}-cluster"
   # Specifying a region and not a zone here gives us a regional cluster, meaning
-  # we get cluster masters across multiple zones. This could be overkill for our
-  # availability requirements.
-  location = var.gcp_region
-  node_locations = [
-    data.google_compute_zones.available.names[0],
-    data.google_compute_zones.available.names[1],
-    data.google_compute_zones.available.names[2]
-  ]
-  description = "Prio data share processor ${var.infra_name}"
+  # we get cluster masters across multiple zones.
+  location    = var.gcp_region
+  description = "Prio data share processor ${var.environment}"
+  # We manage our own node pool below, so the next two parameters are required:
   # https://www.terraform.io/docs/providers/google/r/container_cluster.html#remove_default_node_pool
   remove_default_node_pool = true
   initial_node_count       = 1
+  # We opt into a VPC native cluster because they have several benefits (see
+  # https://cloud.google.com/kubernetes-engine/docs/how-to/alias-ips). Enabling
+  # this networking_mode requires an ip_allocation_policy block and the
+  # google-beta provider.
+  provider        = google-beta
+  networking_mode = "VPC_NATIVE"
+  ip_allocation_policy {
+    # We set these to blank values to let Terraform and Google choose
+    # appropriate subnets for us. As we learn more and become more opinionated
+    # about our network topology we can configure this explicitly.
+    # https://www.terraform.io/docs/providers/google/r/container_cluster.html#ip_allocation_policy
+    cluster_ipv4_cidr_block  = ""
+    services_ipv4_cidr_block = ""
+  }
 }
 
 resource "google_container_node_pool" "worker_nodes" {
-  name       = "${var.resource_prefix}-node-pool"
-  location   = var.gcp_region
-  cluster    = google_container_cluster.cluster.name
-  node_count = 1
+  provider           = google-beta
+  name               = "${var.resource_prefix}-node-pool"
+  location           = var.gcp_region
+  cluster            = google_container_cluster.cluster.name
+  initial_node_count = 1
   autoscaling {
     min_node_count = 1
     max_node_count = 3
-  }
-  management {
-    auto_repair  = true
-    auto_upgrade = true
   }
   node_config {
     disk_size_gb = "25"
