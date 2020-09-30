@@ -253,6 +253,7 @@ impl<'a, H: Header, P: Packet> BatchWriter<'a, H, P> {
         let mut sidecar_writer =
             SidecarWriter::new(self.transport.put(self.batch.header_key())?, Vec::new());
         header.write(&mut sidecar_writer)?;
+        sidecar_writer.flush().context("failed to flush writer")?;
 
         let header_signature = key
             .sign(&SystemRandom::new(), &sidecar_writer.sidecar)
@@ -280,20 +281,19 @@ impl<'a, H: Header, P: Packet> BatchWriter<'a, H, P> {
 
         operation(&mut writer)?;
 
-        Ok(writer
-            .into_inner()
-            .context("failed to flush writer")?
-            .sidecar
-            .finish())
+        let mut sidecar_writer = writer.into_inner().context("failed to flush Avro writer")?;
+        sidecar_writer.flush().context("failed to flush writer")?;
+        Ok(sidecar_writer.sidecar.finish())
     }
 
     /// Constructs a signature structure from the provided buffers and writes it
     /// to the batch's signature file
     pub fn put_signature(&mut self, signature: &Signature) -> Result<()> {
-        self.transport
-            .put(self.batch.signature_key())?
+        let mut writer = self.transport.put(self.batch.signature_key())?;
+        writer
             .write_all(signature.as_ref())
-            .context("failed to write signature")
+            .context("failed to write signature")?;
+        writer.flush().context("failed to flush signature")
     }
 }
 

@@ -1,5 +1,3 @@
-use std::{path::Path, str::FromStr};
-
 use anyhow::{anyhow, Context};
 use chrono::{prelude::Utc, NaiveDateTime};
 use clap::{App, Arg, ArgMatches, SubCommand};
@@ -8,6 +6,8 @@ use ring::signature::{
     EcdsaKeyPair, KeyPair, UnparsedPublicKey, ECDSA_P256_SHA256_FIXED,
     ECDSA_P256_SHA256_FIXED_SIGNING,
 };
+use rusoto_core::Region;
+use std::{path::Path, str::FromStr};
 use uuid::Uuid;
 
 use facilitator::{
@@ -19,7 +19,7 @@ use facilitator::{
         DEFAULT_INGESTOR_PRIVATE_KEY, DEFAULT_PHA_ECIES_PRIVATE_KEY,
         DEFAULT_PHA_SIGNING_PRIVATE_KEY,
     },
-    transport::LocalFileTransport,
+    transport::{LocalFileTransport, S3Transport, Transport},
     DATE_FORMAT,
 };
 
@@ -68,8 +68,10 @@ fn main() -> Result<(), anyhow::Error> {
                         .value_name("DIR")
                         .default_value(".")
                         .help(
-                            "Directory to write sample data for the PHA (aka \
-                            first server) into",
+                            "Storage to write sample data for the PHA \
+                            (aka first server) into. May be either a local \
+                            filesystem path or an S3 bucket, formatted as \
+                            \"s3://bucket-name\"",
                         ),
                 )
                 .arg(
@@ -78,8 +80,10 @@ fn main() -> Result<(), anyhow::Error> {
                         .value_name("DIR")
                         .default_value(".")
                         .help(
-                            "Directory to write sample data for the \
-                            facilitator (aka second server) into",
+                            "Storage to write sample data for the \
+                            facilitator (aka second server) into. May be \
+                            either a local filesystem path or an S3 bucket, \
+                            formatted as \"s3://bucket-name\"",
                         ),
                 )
                 .arg(
@@ -292,7 +296,11 @@ fn main() -> Result<(), anyhow::Error> {
                         .long("ingestion-bucket")
                         .value_name("DIR")
                         .default_value(".")
-                        .help("Directory containing ingestion data"),
+                        .help(
+                            "Directory containing ingestion data. May be \
+                            either a local filesystem path or an S3 bucket, \
+                            formatted as \"s3://bucket-name\"",
+                        ),
                 )
                 .arg(
                     Arg::with_name("validation-bucket")
@@ -301,7 +309,9 @@ fn main() -> Result<(), anyhow::Error> {
                         .default_value(".")
                         .help(
                             "Peer validation bucket into which to write \
-                            validation shares",
+                            validation shares. May be either a local \
+                            filesystem path or an S3 bucket, formatted as \
+                            \"s3://bucket-name\"",
                         ),
                 ),
         )
@@ -373,7 +383,11 @@ fn main() -> Result<(), anyhow::Error> {
                         .long("ingestion-bucket")
                         .value_name("DIR")
                         .default_value(".")
-                        .help("Directory containing ingestion data"),
+                        .help(
+                            "Directory containing ingestion data. May be \
+                            either a local filesystem path or an S3 bucket, \
+                            formatted as \"s3://bucket-name\"",
+                        ),
                 )
                 .arg(
                     Arg::with_name("own-validation-bucket")
@@ -382,7 +396,9 @@ fn main() -> Result<(), anyhow::Error> {
                         .default_value(".")
                         .help(
                             "Bucket in which this share processor's validation \
-                            shares were written",
+                            shares were written. May be either a local \
+                            filesystem path or an S3 bucket, formatted as \
+                            \"s3://bucket-name\"",
                         ),
                 )
                 .arg(
@@ -392,7 +408,9 @@ fn main() -> Result<(), anyhow::Error> {
                         .default_value(".")
                         .help(
                             "Bucket in which the peer share processor's \
-                            validation shares were written",
+                            validation shares were written. May be either a \
+                            local filesystem path or an S3 bucket, formatted \
+                            as \"s3://bucket-name\"",
                         ),
                 )
                 .arg(
@@ -474,11 +492,9 @@ fn main() -> Result<(), anyhow::Error> {
         // unwrap() here.
         ("generate-ingestion-sample", Some(sub_matches)) => {
             generate_ingestion_sample(
-                &mut LocalFileTransport::new(
-                    Path::new(sub_matches.value_of("pha-output").unwrap()).to_path_buf(),
-                ),
-                &mut LocalFileTransport::new(
-                    Path::new(sub_matches.value_of("facilitator-output").unwrap()).to_path_buf(),
+                &mut *transport_for_output_path(sub_matches.value_of("pha-output").unwrap()),
+                &mut *transport_for_output_path(
+                    sub_matches.value_of("facilitator-output").unwrap(),
                 ),
                 &sub_matches
                     .value_of("batch-id")
@@ -488,9 +504,14 @@ fn main() -> Result<(), anyhow::Error> {
                     || Utc::now().naive_utc(),
                     |v| NaiveDateTime::parse_from_str(&v, DATE_FORMAT).unwrap(),
                 ),
-                &PrivateKey::from_base64(sub_matches.value_of("pha-private-key").unwrap()).unwrap(),
-                &PrivateKey::from_base64(sub_matches.value_of("facilitator-private-key").unwrap())
+                &PrivateKey::from_base64(sub_matches.value_of("pha-ecies-private-key").unwrap())
                     .unwrap(),
+                &PrivateKey::from_base64(
+                    sub_matches
+                        .value_of("facilitator-ecies-private-key")
+                        .unwrap(),
+                )
+                .unwrap(),
                 &base64::decode(sub_matches.value_of("ingestor-private-key").unwrap()).unwrap(),
                 sub_matches
                     .value_of("dimension")
@@ -521,12 +542,10 @@ fn main() -> Result<(), anyhow::Error> {
             Ok(())
         }
         ("batch-intake", Some(sub_matches)) => {
-            let mut ingestion_transport = LocalFileTransport::new(
-                Path::new(sub_matches.value_of("ingestion-bucket").unwrap()).to_path_buf(),
-            );
-            let mut validation_transport = LocalFileTransport::new(
-                Path::new(sub_matches.value_of("validation-bucket").unwrap()).to_path_buf(),
-            );
+            let mut ingestion_transport =
+                transport_for_output_path(sub_matches.value_of("ingestion-bucket").unwrap());
+            let mut validation_transport =
+                transport_for_output_path(sub_matches.value_of("validation-bucket").unwrap());
 
             let share_processor_ecies_key =
                 PrivateKey::from_base64(sub_matches.value_of("ecies-private-key").unwrap())
@@ -552,8 +571,8 @@ fn main() -> Result<(), anyhow::Error> {
                     || Utc::now().naive_utc(),
                     |v| NaiveDateTime::parse_from_str(&v, DATE_FORMAT).unwrap(),
                 ),
-                &mut ingestion_transport,
-                &mut validation_transport,
+                &mut *ingestion_transport,
+                &mut *validation_transport,
                 sub_matches.is_present("is-first"),
                 &share_processor_ecies_key,
                 &share_processor_key,
@@ -563,18 +582,14 @@ fn main() -> Result<(), anyhow::Error> {
             Ok(())
         }
         ("aggregate", Some(sub_matches)) => {
-            let mut ingestion_transport = LocalFileTransport::new(
-                Path::new(sub_matches.value_of("ingestion-bucket").unwrap()).to_path_buf(),
-            );
-            let mut own_validation_transport = LocalFileTransport::new(
-                Path::new(sub_matches.value_of("own-validation-bucket").unwrap()).to_path_buf(),
-            );
-            let mut peer_validation_transport = LocalFileTransport::new(
-                Path::new(sub_matches.value_of("peer-validation-bucket").unwrap()).to_path_buf(),
-            );
-            let mut aggregation_transport = LocalFileTransport::new(
-                Path::new(sub_matches.value_of("aggregation-bucket").unwrap()).to_path_buf(),
-            );
+            let mut ingestion_transport =
+                transport_for_output_path(sub_matches.value_of("ingestion-bucket").unwrap());
+            let mut own_validation_transport =
+                transport_for_output_path(sub_matches.value_of("own-validation-bucket").unwrap());
+            let mut peer_validation_transport =
+                transport_for_output_path(sub_matches.value_of("peer-validation-bucket").unwrap());
+            let mut aggregation_transport =
+                transport_for_output_path(sub_matches.value_of("aggregation-bucket").unwrap());
 
             let ingestor_pub_key = public_key_from_arg("ingestor-public-key", sub_matches);
             let peer_share_processor_pub_key =
@@ -618,10 +633,10 @@ fn main() -> Result<(), anyhow::Error> {
                     |v| NaiveDateTime::parse_from_str(&v, DATE_FORMAT).unwrap(),
                 ),
                 sub_matches.is_present("is-first"),
-                &mut ingestion_transport,
-                &mut own_validation_transport,
-                &mut peer_validation_transport,
-                &mut aggregation_transport,
+                &mut *ingestion_transport,
+                &mut *own_validation_transport,
+                &mut *peer_validation_transport,
+                &mut *aggregation_transport,
                 &ingestor_pub_key,
                 &share_processor_key,
                 &peer_share_processor_pub_key,
@@ -644,5 +659,12 @@ fn public_key_from_arg(arg: &str, matches: &ArgMatches) -> UnparsedPublicKey<Vec
             Vec::from(priv_key.public_key().as_ref()),
         ),
         Err(_) => UnparsedPublicKey::new(&ECDSA_P256_SHA256_FIXED, key_bytes),
+    }
+}
+
+fn transport_for_output_path(path: &str) -> Box<dyn Transport> {
+    match path.strip_prefix("s3://") {
+        Some(bucket) => Box::new(S3Transport::new(Region::UsWest2, bucket.to_string())),
+        None => Box::new(LocalFileTransport::new(Path::new(path).to_path_buf())),
     }
 }
