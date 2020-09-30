@@ -10,7 +10,7 @@ use facilitator::{
     transport::LocalFileTransport,
     DEFAULT_FACILITATOR_ECIES_PRIVATE_KEY, DEFAULT_PHA_ECIES_PRIVATE_KEY,
 };
-use libprio_rs::{encrypt::PrivateKey, util::reconstruct_shares};
+use prio::{encrypt::PrivateKey, util::reconstruct_shares};
 use ring::signature::{
     EcdsaKeyPair, KeyPair, UnparsedPublicKey, ECDSA_P256_SHA256_FIXED,
     ECDSA_P256_SHA256_FIXED_SIGNING,
