@@ -162,8 +162,12 @@ pub fn generate_ingestion_sample(
 mod tests {
     use super::*;
     use crate::{
-        default_ingestor_private_key_raw, idl::Header, transport::LocalFileTransport,
-        DEFAULT_FACILITATOR_ECIES_PRIVATE_KEY, DEFAULT_PHA_ECIES_PRIVATE_KEY,
+        idl::Header,
+        test_utils::{
+            default_ingestor_private_key_raw, DEFAULT_FACILITATOR_ECIES_PRIVATE_KEY,
+            DEFAULT_PHA_ECIES_PRIVATE_KEY,
+        },
+        transport::LocalFileTransport,
     };
     use std::path::PathBuf;
 

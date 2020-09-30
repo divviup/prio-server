@@ -305,9 +305,11 @@ impl<'a, H: Header, P: Packet> BatchWriter<'a, H, P> {
 mod tests {
     use super::*;
     use crate::{
-        default_facilitator_signing_public_key, default_ingestor_private_key,
-        default_ingestor_public_key,
         idl::{IngestionDataSharePacket, IngestionHeader},
+        test_utils::{
+            default_facilitator_signing_public_key, default_ingestor_private_key,
+            default_ingestor_public_key,
+        },
         transport::LocalFileTransport,
     };
 

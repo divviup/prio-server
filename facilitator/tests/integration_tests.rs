@@ -2,13 +2,15 @@ use chrono::NaiveDateTime;
 use facilitator::{
     aggregation::BatchAggregator,
     batch::{BatchIO, BatchReader},
-    default_facilitator_signing_private_key, default_ingestor_private_key,
-    default_ingestor_private_key_raw, default_pha_signing_private_key,
     idl::{IngestionDataSharePacket, SumPart},
     intake::BatchIntaker,
     sample::generate_ingestion_sample,
+    test_utils::{
+        default_facilitator_signing_private_key, default_ingestor_private_key,
+        default_ingestor_private_key_raw, default_pha_signing_private_key,
+        DEFAULT_FACILITATOR_ECIES_PRIVATE_KEY, DEFAULT_PHA_ECIES_PRIVATE_KEY,
+    },
     transport::LocalFileTransport,
-    DEFAULT_FACILITATOR_ECIES_PRIVATE_KEY, DEFAULT_PHA_ECIES_PRIVATE_KEY,
 };
 use prio::{encrypt::PrivateKey, util::reconstruct_shares};
 use ring::signature::{
