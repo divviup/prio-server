@@ -8,6 +8,7 @@ use prio::{finite_field::Field, server::VerificationMessage};
 use serde::{Deserialize, Serialize};
 use std::convert::TryFrom;
 use std::io::{Read, Write};
+use std::num::TryFromIntError;
 use uuid::Uuid;
 
 const INGESTION_HEADER_SCHEMA: &str = include_str!("../../avro-schema/ingestion-header.avsc");
@@ -619,7 +620,8 @@ impl Packet for ValidationPacket {
 }
 
 impl TryFrom<&ValidationPacket> for VerificationMessage {
-    type Error = Error;
+    type Error = TryFromIntError;
+
     fn try_from(p: &ValidationPacket) -> Result<Self, Self::Error> {
         Ok(VerificationMessage {
             f_r: Field::from(u32::try_from(p.f_r)?),
@@ -645,7 +647,7 @@ pub struct SumPart {
 }
 
 impl SumPart {
-    pub fn sum(&self) -> Result<Vec<Field>, Error> {
+    pub fn sum(&self) -> Result<Vec<Field>, TryFromIntError> {
         self.sum
             .iter()
             .map(|i| Ok(Field::from(u32::try_from(*i)?)))
