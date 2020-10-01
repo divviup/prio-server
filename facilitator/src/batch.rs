@@ -1,8 +1,9 @@
 use crate::{
     idl::{Header, Packet},
     transport::Transport,
-    DigestWriter, Error, SidecarWriter, DATE_FORMAT,
+    DigestWriter, SidecarWriter, DATE_FORMAT,
 };
+use anyhow::{anyhow, Context, Result};
 use avro_rs::{Reader, Schema, Writer};
 use chrono::NaiveDateTime;
 use ring::{
@@ -99,7 +100,7 @@ pub trait BatchIO<'a, H, P>: Sized {
         batch_id: &Uuid,
         date: &NaiveDateTime,
         transport: &'a mut dyn Transport,
-    ) -> Result<Self, Error> {
+    ) -> Result<Self> {
         Self::new(
             Batch::new_ingestion(aggregation_name, batch_id, date),
             transport,
@@ -112,7 +113,7 @@ pub trait BatchIO<'a, H, P>: Sized {
         date: &NaiveDateTime,
         is_first: bool,
         transport: &'a mut dyn Transport,
-    ) -> Result<Self, Error> {
+    ) -> Result<Self> {
         Self::new(
             Batch::new_validation(aggregation_name, batch_id, date, is_first),
             transport,
@@ -125,7 +126,7 @@ pub trait BatchIO<'a, H, P>: Sized {
         aggregation_end: &NaiveDateTime,
         is_first: bool,
         transport: &'a mut dyn Transport,
-    ) -> Result<Self, Error> {
+    ) -> Result<Self> {
         Self::new(
             Batch::new_sum(
                 aggregation_name,
@@ -137,7 +138,7 @@ pub trait BatchIO<'a, H, P>: Sized {
         )
     }
 
-    fn new(batch: Batch, transport: &'a mut dyn Transport) -> Result<Self, Error>;
+    fn new(batch: Batch, transport: &'a mut dyn Transport) -> Result<Self>;
 }
 
 /// Allows reading files, including signature validation, from an ingestion or
@@ -153,7 +154,7 @@ pub struct BatchReader<'a, H, P> {
 }
 
 impl<'a, H: Header, P: Packet> BatchIO<'a, H, P> for BatchReader<'a, H, P> {
-    fn new(batch: Batch, transport: &'a mut dyn Transport) -> Result<Self, Error> {
+    fn new(batch: Batch, transport: &'a mut dyn Transport) -> Result<Self> {
         Ok(BatchReader {
             batch: batch,
             transport: transport,
@@ -167,30 +168,29 @@ impl<'a, H: Header, P: Packet> BatchIO<'a, H, P> for BatchReader<'a, H, P> {
 impl<'a, H: Header, P: Packet> BatchReader<'a, H, P> {
     /// Return the parsed header from this batch, but only if its signature is
     /// valid.
-    pub fn header(&self, key: &UnparsedPublicKey<Vec<u8>>) -> Result<H, Error> {
+    pub fn header(&self, key: &UnparsedPublicKey<Vec<u8>>) -> Result<H> {
         let mut signature = Vec::new();
         self.transport
             .get(self.batch.signature_key())?
             .read_to_end(&mut signature)
-            .map_err(|e| Error::IoError("failed to read signature".to_owned(), e))?;
+            .context("failed to read signature")?;
 
         let mut header_buf = Vec::new();
         self.transport
             .get(self.batch.header_key())?
             .read_to_end(&mut header_buf)
-            .map_err(|e| Error::IoError("failed to read header from transport".to_owned(), e))?;
+            .context("failed to read header from transport")?;
 
-        key.verify(&header_buf, &signature).map_err(|e| {
-            Error::CryptographyUnspecifiedError("invalid signature on header".to_owned(), e)
-        })?;
+        key.verify(&header_buf, &signature)
+            .context("invalid signature on header")?;
 
-        H::read(Cursor::new(header_buf))
+        Ok(H::read(Cursor::new(header_buf))?)
     }
 
     /// Return an avro_rs::Reader that yields the packets in the packet file,
     /// but only if the whole file's digest matches the packet_file_digest field
     /// in the provided header. The header is assumed to be trusted.
-    pub fn packet_file_reader(&self, header: &H) -> Result<Reader<Cursor<Vec<u8>>>, Error> {
+    pub fn packet_file_reader(&self, header: &H) -> Result<Reader<Cursor<Vec<u8>>>> {
         // Fetch packet file to validate its digest. It could be quite large so
         // so our intuition would be to stream the packets from the transport
         // and into a hasher and into the validation step, so that we wouldn't
@@ -209,18 +209,16 @@ impl<'a, H: Header, P: Packet> BatchReader<'a, H, P> {
         let mut sidecar_writer = SidecarWriter::new(entire_packet_file, digest_writer);
 
         std::io::copy(&mut packet_file_reader, &mut sidecar_writer)
-            .map_err(|e| Error::IoError("failed to load packet file".to_owned(), e))?;
+            .context("failed to load packet file")?;
 
         // ... then verify the digest over it ...
         if header.packet_file_digest().as_slice() != sidecar_writer.sidecar.finish().as_ref() {
-            return Err(Error::MalformedDataPacketError(
-                "packet file digest does not match header".to_owned(),
-            ));
+            return Err(anyhow!("packet file digest does not match header"));
         }
 
         // ... then return a packet reader.
         Reader::with_schema(&self.packet_schema, Cursor::new(sidecar_writer.writer))
-            .map_err(|e| Error::AvroError("failed to create Avro reader for packets".to_owned(), e))
+            .context("failed to create Avro reader for packets")
     }
 }
 
@@ -236,7 +234,7 @@ pub struct BatchWriter<'a, H, P> {
 }
 
 impl<'a, H: Header, P: Packet> BatchIO<'a, H, P> for BatchWriter<'a, H, P> {
-    fn new(batch: Batch, transport: &'a mut dyn Transport) -> Result<Self, Error> {
+    fn new(batch: Batch, transport: &'a mut dyn Transport) -> Result<Self> {
         Ok(BatchWriter {
             batch: batch,
             transport: transport,
@@ -251,16 +249,14 @@ impl<'a, H: Header, P: Packet> BatchWriter<'a, H, P> {
     /// Encode the provided header into Avro, sign that representation with the
     /// provided key and write the header into the batch. Returns the signature
     /// on success.
-    pub fn put_header(&mut self, header: &H, key: &EcdsaKeyPair) -> Result<Signature, Error> {
+    pub fn put_header(&mut self, header: &H, key: &EcdsaKeyPair) -> Result<Signature> {
         let mut sidecar_writer =
             SidecarWriter::new(self.transport.put(self.batch.header_key())?, Vec::new());
         header.write(&mut sidecar_writer)?;
 
         let header_signature = key
             .sign(&SystemRandom::new(), &sidecar_writer.sidecar)
-            .map_err(|e| {
-                Error::CryptographyUnspecifiedError("failed to sign header file".to_owned(), e)
-            })?;
+            .context("failed to sign header file")?;
         Ok(header_signature)
     }
 
@@ -270,9 +266,9 @@ impl<'a, H: Header, P: Packet> BatchWriter<'a, H, P> {
     /// The operation should return Ok(()) when it has finished successfully or
     /// some Err() otherwise. packet_file_writer returns the digest of all the
     /// content written by the operation.
-    pub fn packet_file_writer<F>(&mut self, operation: F) -> Result<Digest, Error>
+    pub fn packet_file_writer<F>(&mut self, operation: F) -> Result<Digest>
     where
-        F: FnOnce(&mut Writer<SidecarWriter<Box<dyn Write>, DigestWriter>>) -> Result<(), Error>,
+        F: FnOnce(&mut Writer<SidecarWriter<Box<dyn Write>, DigestWriter>>) -> Result<()>,
     {
         let mut writer = Writer::new(
             &self.packet_schema,
@@ -286,18 +282,18 @@ impl<'a, H: Header, P: Packet> BatchWriter<'a, H, P> {
 
         Ok(writer
             .into_inner()
-            .map_err(|e| Error::AvroError("failed to flush writer".to_owned(), e))?
+            .context("failed to flush writer")?
             .sidecar
             .finish())
     }
 
     /// Constructs a signature structure from the provided buffers and writes it
     /// to the batch's signature file
-    pub fn put_signature(&mut self, signature: &Signature) -> Result<(), Error> {
+    pub fn put_signature(&mut self, signature: &Signature) -> Result<()> {
         self.transport
             .put(self.batch.signature_key())?
             .write_all(signature.as_ref())
-            .map_err(|e| Error::IoError("failed to write signature".to_owned(), e))
+            .context("failed to write signature")
     }
 }
 
@@ -311,6 +307,7 @@ mod tests {
             default_ingestor_public_key,
         },
         transport::LocalFileTransport,
+        Error,
     };
 
     fn roundtrip_batch<'a>(
