@@ -1,4 +1,3 @@
-use prio::encrypt::EncryptError;
 use ring::digest;
 use std::io::Write;
 use std::num::TryFromIntError;
@@ -15,30 +14,25 @@ pub const DATE_FORMAT: &str = "%Y/%m/%d/%H/%M";
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
+    /// Compatibility enum entry to ease migration.
+    #[error(transparent)]
+    // TODO(yuriks): The `From` impl should stay disabled while not updating errors, to avoid
+    //   accidentally wrapping an `EofError` inside `AnyhowError`, which would then get missed when
+    //   code tries to pattern-match against it. I don't trust our current test coverage enough to
+    //   detect all cases where that happens and leads to incorrect behavior.
+    //   Later on, `anyhow` downcasting with `Error::is` can be used to check for `EofError`.
+    AnyhowError(/*#[from]*/ anyhow::Error),
+
     #[error("avro error: {0}")]
     AvroError(String, #[source] avro_rs::Error),
     #[error("malformed header: {0}")]
     MalformedHeaderError(String),
-    #[error("malformed signature: {0}")]
-    MalformedSignatureError(String),
     #[error("malformed data packet: {0}")]
     MalformedDataPacketError(String),
     #[error("end of file")]
     EofError,
     #[error("I/O error: {0}")]
     IoError(String, #[source] std::io::Error),
-    #[error("libprio error: {0}")]
-    LibPrioError(String, #[source] Option<EncryptError>),
-    #[error("facilitator error: {0}")]
-    FacilitatorError(String),
-    #[error("illegal argument: {0}")]
-    IllegalArgumentError(String),
-    #[error("crypto error: {0}")]
-    CryptographyError(String, #[source] ring::error::KeyRejected),
-    #[error("crypto error: {0}")]
-    CryptographyUnspecifiedError(String, #[source] ring::error::Unspecified),
-    #[error("peer validation error: {0}")]
-    PeerValidationError(String),
     #[error("failed to convert value: {0}")]
     ConversionError(#[from] TryFromIntError),
 }

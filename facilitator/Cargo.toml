@@ -6,6 +6,7 @@ edition = "2018"
 build = "build.rs"
 
 [dependencies]
+anyhow = "1.0"
 avro-rs = "0.11.0"
 base64 = "0.12.3"
 chrono = "0.4"

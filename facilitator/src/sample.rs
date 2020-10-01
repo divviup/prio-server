@@ -2,8 +2,8 @@ use crate::{
     batch::{BatchIO, BatchWriter},
     idl::{IngestionDataSharePacket, IngestionHeader, Packet},
     transport::Transport,
-    Error,
 };
+use anyhow::{anyhow, Context, Result};
 use chrono::NaiveDateTime;
 use prio::{
     client::Client,
@@ -29,17 +29,14 @@ pub fn generate_ingestion_sample(
     epsilon: f64,
     batch_start_time: i64,
     batch_end_time: i64,
-) -> Result<Vec<Field>, Error> {
+) -> Result<Vec<Field>> {
     if dim <= 0 {
-        return Err(Error::IllegalArgumentError(
-            "dimension must be an integer greater than zero".to_owned(),
-        ));
+        return Err(anyhow!("dimension must be an integer greater than zero"));
     }
 
     let ingestor_key_pair =
-        EcdsaKeyPair::from_pkcs8(&ECDSA_P256_SHA256_FIXED_SIGNING, ingestor_key).map_err(|e| {
-            Error::CryptographyError("failed to parse ingestor key pair".to_owned(), e)
-        })?;
+        EcdsaKeyPair::from_pkcs8(&ECDSA_P256_SHA256_FIXED_SIGNING, ingestor_key)
+            .context("failed to parse ingestor key pair")?;
 
     let mut pha_ingestion_batch: BatchWriter<'_, IngestionHeader, IngestionDataSharePacket> =
         BatchWriter::new_ingestion(aggregation_name, batch_uuid, date, pha_transport)?;
@@ -59,12 +56,7 @@ pub fn generate_ingestion_sample(
         PublicKey::from(pha_key),
         PublicKey::from(facilitator_key),
     )
-    .ok_or_else(|| {
-        Error::LibPrioError(
-            "failed to create client (bad dimension parameter?)".to_owned(),
-            None,
-        )
-    })?;
+    .context("failed to create client (bad dimension parameter?)")?;
 
     let mut reference_sum = vec![Field::from(0); dim as usize];
 
@@ -86,10 +78,9 @@ pub fn generate_ingestion_sample(
                             *r += *d
                         }
 
-                        let (pha_share, facilitator_share) =
-                            client.encode_simple(&data).map_err(|e| {
-                                Error::LibPrioError("failed to encode data".to_owned(), Some(e))
-                            })?;
+                        let (pha_share, facilitator_share) = client
+                            .encode_simple(&data)
+                            .context("failed to encode data")?;
 
                         let r_pit = fake_server.choose_eval_at();
                         let packet_uuid = Uuid::new_v4();
@@ -136,7 +127,7 @@ pub fn generate_ingestion_sample(
                 &ingestor_key_pair,
             )?;
 
-            facilitator_ingestion_batch.put_signature(&facilitator_header_signature)
+            Ok(facilitator_ingestion_batch.put_signature(&facilitator_header_signature)?)
         })?;
 
     let pha_header_signature = pha_ingestion_batch.put_header(

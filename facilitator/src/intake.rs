@@ -4,6 +4,7 @@ use crate::{
     transport::Transport,
     Error,
 };
+use anyhow::{anyhow, Context, Result};
 use chrono::NaiveDateTime;
 use prio::{encrypt::PrivateKey, finite_field::Field, server::Server};
 use ring::signature::{EcdsaKeyPair, UnparsedPublicKey};
@@ -33,7 +34,7 @@ impl<'a> BatchIntaker<'a> {
         share_processor_ecies_key: &'a PrivateKey,
         share_processor_signing_key: &'a EcdsaKeyPair,
         ingestor_key: &'a UnparsedPublicKey<Vec<u8>>,
-    ) -> Result<BatchIntaker<'a>, Error> {
+    ) -> Result<BatchIntaker<'a>> {
         Ok(BatchIntaker {
             ingestion_batch: BatchReader::new_ingestion(
                 aggregation_name.clone(),
@@ -58,13 +59,13 @@ impl<'a> BatchIntaker<'a> {
     /// Fetches the ingestion batch, validates the signatures over its header
     /// and packet file, then computes validation shares and sends them to the
     /// peer share processor.
-    pub fn generate_validation_share(&mut self) -> Result<(), Error> {
+    pub fn generate_validation_share(&mut self) -> Result<()> {
         let ingestion_header = self.ingestion_batch.header(&self.ingestor_key)?;
         if ingestion_header.bins <= 0 {
-            return Err(Error::MalformedHeaderError(format!(
+            return Err(anyhow!(
                 "invalid bins/dimension value {}",
                 ingestion_header.bins
-            )));
+            ));
         }
 
         let mut server = Server::new(
@@ -85,36 +86,23 @@ impl<'a> BatchIntaker<'a> {
                     {
                         Ok(p) => p,
                         Err(Error::EofError) => return Ok(()),
-                        Err(e) => return Err(e),
+                        Err(e) => return Err(e.into()),
                     };
 
-                    let r_pit = match u32::try_from(packet.r_pit) {
-                        Ok(v) => v,
-                        Err(s) => {
-                            return Err(Error::MalformedDataPacketError(format!(
-                                "illegal r_pit value {} ({})",
-                                packet.r_pit, s
-                            )))
-                        }
-                    };
+                    let r_pit = u32::try_from(packet.r_pit)
+                        .with_context(|| format!("illegal r_pit value {}", packet.r_pit))?;
 
                     // TODO(timg): if this fails for a non-empty subset of the
                     // ingestion packets, do we abort handling of the entire
                     // batch (as implemented currently) or should we record it
                     // as an invalid UUID and emit a validation batch for the
                     //  other packets?
-                    let validation_message = match server.generate_verification_message(
-                        Field::from(r_pit),
-                        &packet.encrypted_payload,
-                    ) {
-                        Some(m) => m,
-                        None => {
-                            return Err(Error::LibPrioError(
-                                "failed to construct validation message".to_owned(),
-                                None,
-                            ))
-                        }
-                    };
+                    let validation_message = server
+                        .generate_verification_message(
+                            Field::from(r_pit),
+                            &packet.encrypted_payload,
+                        )
+                        .context("failed to construct validation message")?;
 
                     let packet = ValidationPacket {
                         uuid: packet.uuid,

@@ -7,6 +7,7 @@ use crate::{
     transport::Transport,
     Error,
 };
+use anyhow::{anyhow, Context, Result};
 use chrono::NaiveDateTime;
 use prio::{encrypt::PrivateKey, server::VerificationMessage};
 use ring::signature::{EcdsaKeyPair, KeyPair, UnparsedPublicKey, ECDSA_P256_SHA256_FIXED};
@@ -42,7 +43,7 @@ impl<'a> BatchAggregator<'a> {
         share_processor_signing_key: &'a EcdsaKeyPair,
         peer_share_processor_key: &'a UnparsedPublicKey<Vec<u8>>,
         share_processor_ecies_key: &'a PrivateKey,
-    ) -> Result<BatchAggregator<'a>, Error> {
+    ) -> Result<BatchAggregator<'a>> {
         Ok(BatchAggregator {
             is_first: is_first,
             aggregation_name: aggregation_name,
@@ -67,10 +68,7 @@ impl<'a> BatchAggregator<'a> {
 
     /// Compute the sum part for all the provided batch IDs and write it out to
     /// the aggregation transport.
-    pub fn generate_sum_part(
-        &mut self,
-        batch_ids: &Vec<(Uuid, NaiveDateTime)>,
-    ) -> Result<(), Error> {
+    pub fn generate_sum_part(&mut self, batch_ids: &Vec<(Uuid, NaiveDateTime)>) -> Result<()> {
         let share_processor_public_key = UnparsedPublicKey::new(
             &ECDSA_P256_SHA256_FIXED,
             Vec::from(self.share_processor_signing_key.public_key().as_ref()),
@@ -137,7 +135,7 @@ impl<'a> BatchAggregator<'a> {
         &mut self,
         batch_id: &Uuid,
         batch_date: &NaiveDateTime,
-    ) -> Result<IngestionHeader, Error> {
+    ) -> Result<IngestionHeader> {
         let ingestion_batch: BatchReader<'_, IngestionHeader, IngestionDataSharePacket> =
             BatchReader::new_ingestion(
                 self.aggregation_name,
@@ -159,7 +157,7 @@ impl<'a> BatchAggregator<'a> {
         share_processor_public_key: &UnparsedPublicKey<Vec<u8>>,
         server: &mut prio::server::Server,
         invalid_uuids: &mut Vec<Uuid>,
-    ) -> Result<(), Error> {
+    ) -> Result<()> {
         let ingestion_batch: BatchReader<'_, IngestionHeader, IngestionDataSharePacket> =
             BatchReader::new_ingestion(
                 self.aggregation_name,
@@ -190,17 +188,20 @@ impl<'a> BatchAggregator<'a> {
 
         // Make sure all the parameters in the headers line up
         if !peer_validation_header.check_parameters(&own_validation_header) {
-            return Err(Error::PeerValidationError(format!(
+            return Err(anyhow!(
                 "validation headers do not match. Peer: {:?}\nOwn: {:?}",
-                peer_validation_header, own_validation_header
-            )));
+                peer_validation_header,
+                own_validation_header
+            ));
         }
         if !ingestion_header.check_parameters(&peer_validation_header) {
-            return Err(Error::PeerValidationError(format!(
+            return Err(anyhow!(
                 "ingestion header does not match peer validation header. Ingestion: {:?}\nPeer:{:?}",
-                ingestion_header, peer_validation_header
-            )));
+                ingestion_header,
+                peer_validation_header
+            ));
         }
+
         let mut peer_validation_packet_reader =
             peer_validation_batch.packet_file_reader(&peer_validation_header)?;
         let mut own_validation_packet_reader =
@@ -212,19 +213,19 @@ impl<'a> BatchAggregator<'a> {
                 match ValidationPacket::read(&mut peer_validation_packet_reader) {
                     Ok(p) => Some(p),
                     Err(Error::EofError) => None,
-                    Err(e) => return Err(e),
+                    Err(e) => return Err(e.into()),
                 };
             let own_validation_packet =
                 match ValidationPacket::read(&mut own_validation_packet_reader) {
                     Ok(p) => Some(p),
                     Err(Error::EofError) => None,
-                    Err(e) => return Err(e),
+                    Err(e) => return Err(e.into()),
                 };
             let ingestion_packet =
                 match IngestionDataSharePacket::read(&mut ingestion_packet_reader) {
                     Ok(p) => Some(p),
                     Err(Error::EofError) => None,
-                    Err(e) => return Err(e),
+                    Err(e) => return Err(e.into()),
                 };
 
             // All three packet files should contain the same number of packets,
@@ -238,9 +239,9 @@ impl<'a> BatchAggregator<'a> {
                 (Some(a), Some(b), Some(c)) => (a, b, c),
                 (None, None, None) => break,
                 (_, _, _) => {
-                    return Err(Error::PeerValidationError(
-                        "unexpected early EOF when checking peer validations".to_owned(),
-                    ))
+                    return Err(anyhow!(
+                        "unexpected early EOF when checking peer validations"
+                    ));
                 }
             };
 
@@ -260,7 +261,11 @@ impl<'a> BatchAggregator<'a> {
                 || peer_validation_packet.uuid != ingestion_packet.uuid
                 || own_validation_packet.uuid != ingestion_packet.uuid
             {
-                return Err(Error::PeerValidationError(format!("mismatch between peer validation, own validation and ingestion packet UUIDs: {} {} {}", peer_validation_packet.uuid, own_validation_packet.uuid, ingestion_packet.uuid)));
+                return Err(anyhow!(
+                    "mismatch between peer validation, own validation and ingestion packet UUIDs: {} {} {}",
+                    peer_validation_packet.uuid,
+                    own_validation_packet.uuid,
+                    ingestion_packet.uuid));
             }
 
             if !server
@@ -269,9 +274,7 @@ impl<'a> BatchAggregator<'a> {
                     &VerificationMessage::try_from(peer_validation_packet)?,
                     &VerificationMessage::try_from(own_validation_packet)?,
                 )
-                .map_err(|e| {
-                    Error::LibPrioError("failed to validate packets".to_owned(), Some(e))
-                })?
+                .context("failed to validate packets")?
             {
                 invalid_uuids.push(peer_validation_packet.uuid);
             }

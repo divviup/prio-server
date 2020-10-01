@@ -1,4 +1,3 @@
-use crate::Error;
 use ring::signature::{
     EcdsaKeyPair, KeyPair, UnparsedPublicKey, ECDSA_P256_SHA256_FIXED,
     ECDSA_P256_SHA256_FIXED_SIGNING,
@@ -33,7 +32,6 @@ pub fn default_ingestor_private_key() -> EcdsaKeyPair {
         &ECDSA_P256_SHA256_FIXED_SIGNING,
         &default_ingestor_private_key_raw(),
     )
-    .map_err(|e| Error::CryptographyError("failed to parse ingestor key pair".to_owned(), e))
     // Since we know DEFAULT_INGESTOR_PRIVATE_KEY is valid, it
     // is ok to unwrap() here.
     .unwrap()
@@ -58,7 +56,6 @@ pub fn default_facilitator_signing_private_key() -> EcdsaKeyPair {
         &ECDSA_P256_SHA256_FIXED_SIGNING,
         &default_facilitator_signing_private_key_raw(),
     )
-    .map_err(|e| Error::CryptographyError("failed to parse ingestor key pair".to_owned(), e))
     .unwrap()
 }
 

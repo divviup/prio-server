@@ -1,5 +1,6 @@
 use std::{path::Path, str::FromStr};
 
+use anyhow::{anyhow, Context};
 use chrono::{prelude::Utc, NaiveDateTime};
 use clap::{App, Arg, ArgMatches, SubCommand};
 use prio::encrypt::PrivateKey;
@@ -19,7 +20,7 @@ use facilitator::{
         DEFAULT_PHA_SIGNING_PRIVATE_KEY,
     },
     transport::LocalFileTransport,
-    Error, DATE_FORMAT,
+    DATE_FORMAT,
 };
 
 fn num_validator<F: FromStr>(s: String) -> Result<(), String> {
@@ -42,7 +43,7 @@ fn uuid_validator(s: String) -> Result<(), String> {
     Uuid::parse_str(&s).map(|_| ()).map_err(|e| e.to_string())
 }
 
-fn main() -> Result<(), Error> {
+fn main() -> Result<(), anyhow::Error> {
     let matches = App::new("facilitator")
         .about("Prio data share processor")
         // Environment variables are injected via build.rs
@@ -536,18 +537,11 @@ fn main() -> Result<(), Error> {
             let share_processor_key_bytes =
                 base64::decode(sub_matches.value_of("share-processor-private-key").unwrap())
                     .unwrap();
-            let share_processor_key = match EcdsaKeyPair::from_pkcs8(
+            let share_processor_key = EcdsaKeyPair::from_pkcs8(
                 &ECDSA_P256_SHA256_FIXED_SIGNING,
                 &share_processor_key_bytes,
-            ) {
-                Ok(priv_key) => priv_key,
-                Err(e) => {
-                    return Err(Error::CryptographyError(
-                        "failed to parse value for share-processor-private-key".to_owned(),
-                        e,
-                    ))
-                }
-            };
+            )
+            .context("failed to parse value for share-processor-private-key")?;
 
             let mut batch_intaker = BatchIntaker::new(
                 &sub_matches.value_of("aggregation-id").unwrap(),
@@ -588,18 +582,11 @@ fn main() -> Result<(), Error> {
             let share_processor_key_bytes =
                 base64::decode(sub_matches.value_of("share-processor-private-key").unwrap())
                     .unwrap();
-            let share_processor_key = match EcdsaKeyPair::from_pkcs8(
+            let share_processor_key = EcdsaKeyPair::from_pkcs8(
                 &ECDSA_P256_SHA256_FIXED_SIGNING,
                 &share_processor_key_bytes,
-            ) {
-                Ok(priv_key) => priv_key,
-                Err(e) => {
-                    return Err(Error::CryptographyError(
-                        "failed to parse value for share-processor-private-key".to_owned(),
-                        e,
-                    ))
-                }
-            };
+            )
+            .context("failed to parse value for share-processor-private-key")?;
             let share_processor_ecies_key =
                 PrivateKey::from_base64(sub_matches.value_of("ecies-private-key").unwrap())
                     .unwrap();
@@ -615,8 +602,8 @@ fn main() -> Result<(), Error> {
                 .map(|s| NaiveDateTime::parse_from_str(&s, DATE_FORMAT).unwrap())
                 .collect();
             if batch_ids.len() != batch_dates.len() {
-                return Err(Error::IllegalArgumentError(
-                    "must provide same number of batch-id and batch-date values".to_owned(),
+                return Err(anyhow!(
+                    "must provide same number of batch-id and batch-date values"
                 ));
             }
 
