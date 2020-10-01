@@ -1,6 +1,5 @@
 use ring::digest;
 use std::io::Write;
-use std::num::TryFromIntError;
 
 pub mod aggregation;
 pub mod batch;
@@ -33,8 +32,6 @@ pub enum Error {
     EofError,
     #[error("I/O error: {0}")]
     IoError(String, #[source] std::io::Error),
-    #[error("failed to convert value: {0}")]
-    ConversionError(#[from] TryFromIntError),
 }
 
 pub struct DigestWriter {
