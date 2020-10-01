@@ -13,27 +13,34 @@ pub mod transport;
 
 pub const DATE_FORMAT: &str = "%Y/%m/%d/%H/%M";
 
-#[derive(Debug)]
+#[derive(Debug, thiserror::Error)]
 pub enum Error {
-    AvroError(String, avro_rs::Error),
+    #[error("avro error: {0}")]
+    AvroError(String, #[source] avro_rs::Error),
+    #[error("malformed header: {0}")]
     MalformedHeaderError(String),
+    #[error("malformed signature: {0}")]
     MalformedSignatureError(String),
+    #[error("malformed data packet: {0}")]
     MalformedDataPacketError(String),
+    #[error("end of file")]
     EofError,
-    IoError(String, std::io::Error),
-    LibPrioError(String, Option<EncryptError>),
+    #[error("I/O error: {0}")]
+    IoError(String, #[source] std::io::Error),
+    #[error("libprio error: {0}")]
+    LibPrioError(String, #[source] Option<EncryptError>),
+    #[error("facilitator error: {0}")]
     FacilitatorError(String),
+    #[error("illegal argument: {0}")]
     IllegalArgumentError(String),
-    CryptographyError(String, ring::error::KeyRejected),
-    CryptographyUnspecifiedError(String, ring::error::Unspecified),
+    #[error("crypto error: {0}")]
+    CryptographyError(String, #[source] ring::error::KeyRejected),
+    #[error("crypto error: {0}")]
+    CryptographyUnspecifiedError(String, #[source] ring::error::Unspecified),
+    #[error("peer validation error: {0}")]
     PeerValidationError(String),
-    ConversionError(String),
-}
-
-impl From<TryFromIntError> for Error {
-    fn from(e: TryFromIntError) -> Self {
-        Error::ConversionError(format!("failed to convert value: {}", e))
-    }
+    #[error("failed to convert value: {0}")]
+    ConversionError(#[from] TryFromIntError),
 }
 
 pub struct DigestWriter {
