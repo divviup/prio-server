@@ -10,11 +10,12 @@ avro-rs = "0.11.0"
 base64 = "0.12.3"
 chrono = "0.4"
 clap = "2.33.3"
-prio = "0.1.1"
+prio = "0.2"
 rand = "0.7"
-ring = "0.16.15"
+ring = { version = "0.16.15", features = ["std"] }
 serde = { version = "1.0", features = ["derive"] }
 tempfile = "3.1.0"
+thiserror = "1.0"
 uuid = { version = "0.8", features = ["serde", "v4"] }
 
 [build-dependencies]

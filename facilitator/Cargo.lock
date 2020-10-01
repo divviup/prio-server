@@ -231,6 +231,7 @@ dependencies = [
  "ring",
  "serde",
  "tempfile",
+ "thiserror",
  "uuid",
  "vergen",
 ]
@@ -403,15 +404,16 @@ checksum = "c36fa947111f5c62a733b652544dd0016a43ce89619538a8ef92724a6f501a20"
 
 [[package]]
 name = "prio"
-version = "0.1.1"
+version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b5c79b23b9310503f986942f40111447d57cacf58c7c130aebf0efdbc4880345"
+checksum = "74c293e32d9ab6c9afadf14e14d76df204f17618f4b74b38fa2adb18b352fbf2"
 dependencies = [
  "aes-ctr",
  "aes-gcm",
  "base64",
  "rand 0.7.3",
  "ring",
+ "thiserror",
 ]
 
 [[package]]
