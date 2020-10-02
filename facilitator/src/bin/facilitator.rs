@@ -1,4 +1,4 @@
-use anyhow::{anyhow, Context};
+use anyhow::{anyhow, Context, Result};
 use chrono::{prelude::Utc, NaiveDateTime};
 use clap::{App, Arg, ArgMatches, SubCommand};
 use prio::encrypt::PrivateKey;
@@ -43,6 +43,41 @@ fn uuid_validator(s: String) -> Result<(), String> {
     Uuid::parse_str(&s).map(|_| ()).map_err(|e| e.to_string())
 }
 
+enum StoragePath<'a> {
+    RegionAndBucket(&'a str, &'a str),
+    LocalPath(&'a str),
+}
+
+fn parse_path<'a>(s: &'a str) -> Result<StoragePath<'a>> {
+    match s.strip_prefix("s3://") {
+        Some(region_and_bucket) => {
+            if !region_and_bucket.contains("/") {
+                return Err(anyhow!(
+                    "S3 storage must be like \"s3://{region}/{bucket name}\""
+                ));
+            }
+
+            // All we require is that the string contain a region and a bucket name.
+            // Further validation of bucket names is left to Amazon servers.
+            let bucket = region_and_bucket
+                .split('/')
+                .next()
+                .context("S3 storage must be like \"s3://{region}/{bucket name}\"")?;
+            Ok(StoragePath::RegionAndBucket(
+                &bucket,
+                &region_and_bucket[bucket.len() + 1..],
+            ))
+        }
+        None => Ok(StoragePath::LocalPath(s)),
+    }
+}
+
+fn path_validator(s: String) -> Result<(), String> {
+    parse_path(s.as_ref())
+        .map(|_| ())
+        .map_err(|e| e.to_string())
+}
+
 fn main() -> Result<(), anyhow::Error> {
     let matches = App::new("facilitator")
         .about("Prio data share processor")
@@ -67,11 +102,12 @@ fn main() -> Result<(), anyhow::Error> {
                         .long("pha-output")
                         .value_name("DIR")
                         .default_value(".")
+                        .validator(path_validator)
                         .help(
                             "Storage to write sample data for the PHA \
                             (aka first server) into. May be either a local \
                             filesystem path or an S3 bucket, formatted as \
-                            \"s3://bucket-name\"",
+                            \"s3://{region}-{bucket-name}\"",
                         ),
                 )
                 .arg(
@@ -79,11 +115,12 @@ fn main() -> Result<(), anyhow::Error> {
                         .long("facilitator-output")
                         .value_name("DIR")
                         .default_value(".")
+                        .validator(path_validator)
                         .help(
                             "Storage to write sample data for the \
                             facilitator (aka second server) into. May be \
                             either a local filesystem path or an S3 bucket, \
-                            formatted as \"s3://bucket-name\"",
+                            formatted as \"s3://{region}-{bucket-name}\"",
                         ),
                 )
                 .arg(
@@ -296,10 +333,11 @@ fn main() -> Result<(), anyhow::Error> {
                         .long("ingestion-bucket")
                         .value_name("DIR")
                         .default_value(".")
+                        .validator(path_validator)
                         .help(
                             "Directory containing ingestion data. May be \
                             either a local filesystem path or an S3 bucket, \
-                            formatted as \"s3://bucket-name\"",
+                            formatted as \"s3://{region}-{bucket-name}\"",
                         ),
                 )
                 .arg(
@@ -307,11 +345,12 @@ fn main() -> Result<(), anyhow::Error> {
                         .long("validation-bucket")
                         .value_name("DIR")
                         .default_value(".")
+                        .validator(path_validator)
                         .help(
                             "Peer validation bucket into which to write \
                             validation shares. May be either a local \
                             filesystem path or an S3 bucket, formatted as \
-                            \"s3://bucket-name\"",
+                            \"s3://{region}-{bucket-name}\"",
                         ),
                 ),
         )
@@ -383,10 +422,11 @@ fn main() -> Result<(), anyhow::Error> {
                         .long("ingestion-bucket")
                         .value_name("DIR")
                         .default_value(".")
+                        .validator(path_validator)
                         .help(
                             "Directory containing ingestion data. May be \
                             either a local filesystem path or an S3 bucket, \
-                            formatted as \"s3://bucket-name\"",
+                            formatted as \"s3://{region}-{bucket-name}\"",
                         ),
                 )
                 .arg(
@@ -394,11 +434,12 @@ fn main() -> Result<(), anyhow::Error> {
                         .long("own-validation-bucket")
                         .value_name("DIR")
                         .default_value(".")
+                        .validator(path_validator)
                         .help(
                             "Bucket in which this share processor's validation \
                             shares were written. May be either a local \
                             filesystem path or an S3 bucket, formatted as \
-                            \"s3://bucket-name\"",
+                            \"s3://{region}-{bucket-name}\"",
                         ),
                 )
                 .arg(
@@ -406,11 +447,12 @@ fn main() -> Result<(), anyhow::Error> {
                         .long("peer-validation-bucket")
                         .value_name("DIR")
                         .default_value(".")
+                        .validator(path_validator)
                         .help(
                             "Bucket in which the peer share processor's \
                             validation shares were written. May be either a \
                             local filesystem path or an S3 bucket, formatted \
-                            as \"s3://bucket-name\"",
+                            as \"s3://{region}-{bucket-name}\"",
                         ),
                 )
                 .arg(
@@ -418,7 +460,12 @@ fn main() -> Result<(), anyhow::Error> {
                         .long("aggregation-bucket")
                         .value_name("DIR")
                         .default_value(".")
-                        .help("Bucket into which sum parts are to be written."),
+                        .validator(path_validator)
+                        .help(
+                            "Bucket into which sum parts are to be written. May be either a \
+                            local filesystem path or an S3 bucket, formatted \
+                            as \"s3://{region}-{bucket-name}\"",
+                        ),
                 )
                 .arg(
                     Arg::with_name("ecies-private-key")
@@ -491,9 +538,9 @@ fn main() -> Result<(), anyhow::Error> {
         // various parameters are present and valid, so it is safe to use
         // unwrap() here.
         ("generate-ingestion-sample", Some(sub_matches)) => {
-            let mut pha_transport = transport_for_output_path("pha-output", sub_matches);
+            let mut pha_transport = transport_for_output_path("pha-output", sub_matches)?;
             let mut facilitator_transport =
-                transport_for_output_path("facilitator-output", sub_matches);
+                transport_for_output_path("facilitator-output", sub_matches)?;
 
             generate_ingestion_sample(
                 &mut *pha_transport,
@@ -545,9 +592,9 @@ fn main() -> Result<(), anyhow::Error> {
         }
         ("batch-intake", Some(sub_matches)) => {
             let mut ingestion_transport =
-                transport_for_output_path("ingestion-bucket", sub_matches);
+                transport_for_output_path("ingestion-bucket", sub_matches)?;
             let mut validation_transport =
-                transport_for_output_path("validation-bucket", sub_matches);
+                transport_for_output_path("validation-bucket", sub_matches)?;
 
             let share_processor_ecies_key =
                 PrivateKey::from_base64(sub_matches.value_of("ecies-private-key").unwrap())
@@ -585,13 +632,13 @@ fn main() -> Result<(), anyhow::Error> {
         }
         ("aggregate", Some(sub_matches)) => {
             let mut ingestion_transport =
-                transport_for_output_path("ingestion-bucket", sub_matches);
+                transport_for_output_path("ingestion-bucket", sub_matches)?;
             let mut own_validation_transport =
-                transport_for_output_path("own-validation-bucket", sub_matches);
+                transport_for_output_path("own-validation-bucket", sub_matches)?;
             let mut peer_validation_transport =
-                transport_for_output_path("peer-validation-bucket", sub_matches);
+                transport_for_output_path("peer-validation-bucket", sub_matches)?;
             let mut aggregation_transport =
-                transport_for_output_path("aggregation-bucket", sub_matches);
+                transport_for_output_path("aggregation-bucket", sub_matches)?;
 
             let ingestor_pub_key = public_key_from_arg("ingestor-public-key", sub_matches);
             let peer_share_processor_pub_key =
@@ -664,10 +711,15 @@ fn public_key_from_arg(arg: &str, matches: &ArgMatches) -> UnparsedPublicKey<Vec
     }
 }
 
-fn transport_for_output_path(arg: &str, matches: &ArgMatches) -> Box<dyn Transport> {
-    let path = matches.value_of(arg).unwrap();
-    match path.strip_prefix("s3://") {
-        Some(bucket) => Box::new(S3Transport::new(Region::UsWest2, bucket.to_string())),
-        None => Box::new(LocalFileTransport::new(Path::new(path).to_path_buf())),
+fn transport_for_output_path(arg: &str, matches: &ArgMatches) -> Result<Box<dyn Transport>> {
+    let path = parse_path(matches.value_of(arg).unwrap())?;
+    match path {
+        StoragePath::RegionAndBucket(region, bucket) => Ok(Box::new(S3Transport::new(
+            Region::from_str(region)?,
+            bucket.to_string(),
+        ))),
+        StoragePath::LocalPath(path) => Ok(Box::new(LocalFileTransport::new(
+            Path::new(path).to_path_buf(),
+        ))),
     }
 }
