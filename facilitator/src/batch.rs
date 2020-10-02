@@ -13,14 +13,13 @@ use ring::{
 };
 use std::io::{Cursor, Read, Write};
 use std::marker::PhantomData;
-use std::path::{Path, PathBuf};
 use uuid::Uuid;
 
 /// Manages the paths to the different files in a batch
 pub struct Batch {
-    header_path: PathBuf,
-    signature_path: PathBuf,
-    packet_file_path: PathBuf,
+    header_path: String,
+    signature_path: String,
+    packet_file_path: String,
 }
 
 impl Batch {
@@ -51,46 +50,52 @@ impl Batch {
         aggregation_end: &NaiveDateTime,
         is_first: bool,
     ) -> Batch {
-        let batch_path = PathBuf::new().join(aggregation_name).join(format!(
-            "{}-{}",
-            aggregation_start.format(DATE_FORMAT),
-            aggregation_end.format(DATE_FORMAT)
-        ));
+        let batch_path = format!(
+            "{}/{}",
+            aggregation_name,
+            format!(
+                "{}-{}",
+                aggregation_start.format(DATE_FORMAT),
+                aggregation_end.format(DATE_FORMAT)
+            )
+        );
         let filename = format!("sum_{}", if is_first { 0 } else { 1 });
 
         Batch {
-            header_path: batch_path.with_extension(&filename),
-            signature_path: batch_path.with_extension(format!("{}.sig", &filename)),
-            packet_file_path: batch_path.with_extension(format!(
-                "invalid_uuid_{}.avro",
+            header_path: format!("{}.{}", batch_path, filename),
+            signature_path: format!("{}.{}.sig", batch_path, filename),
+            packet_file_path: format!(
+                "{}.invalid_uuid_{}.avro",
+                batch_path,
                 if is_first { 0 } else { 1 }
-            )),
+            ),
         }
     }
 
     fn new(aggregation_name: &str, batch_id: &Uuid, date: &NaiveDateTime, filename: &str) -> Batch {
-        let batch_path = PathBuf::new()
-            .join(aggregation_name)
-            .join(date.format(DATE_FORMAT).to_string())
-            .join(batch_id.to_hyphenated().to_string());
-
+        let batch_path = format!(
+            "{}/{}/{}",
+            aggregation_name,
+            date.format(DATE_FORMAT),
+            batch_id.to_hyphenated()
+        );
         Batch {
-            header_path: batch_path.with_extension(filename),
-            signature_path: batch_path.with_extension(format!("{}.sig", filename)),
-            packet_file_path: batch_path.with_extension(format!("{}.avro", filename)),
+            header_path: format!("{}.{}", batch_path, filename),
+            signature_path: format!("{}.{}.sig", batch_path, filename),
+            packet_file_path: format!("{}.{}.avro", batch_path, filename),
         }
     }
 
-    fn header_key(&self) -> &Path {
-        self.header_path.as_path()
+    fn header_key(&self) -> &str {
+        self.header_path.as_ref()
     }
 
-    fn signature_key(&self) -> &Path {
-        self.signature_path.as_path()
+    fn signature_key(&self) -> &str {
+        self.signature_path.as_ref()
     }
 
-    fn packet_file_key(&self) -> &Path {
-        self.packet_file_path.as_path()
+    fn packet_file_key(&self) -> &str {
+        self.packet_file_path.as_ref()
     }
 }
 
@@ -313,7 +318,7 @@ mod tests {
     fn roundtrip_batch<'a>(
         aggregation_name: String,
         batch_id: Uuid,
-        base_path: PathBuf,
+        base_path: String,
         filenames: &[String],
         batch_writer: &mut BatchWriter<'a, IngestionHeader, IngestionDataSharePacket>,
         batch_reader: &BatchReader<'a, IngestionHeader, IngestionDataSharePacket>,
@@ -386,7 +391,7 @@ mod tests {
         // Verify file layout is as expected
         for extension in filenames {
             transport
-                .get(&base_path.with_extension(extension))
+                .get(format!("{}.{}", base_path, extension).as_ref())
                 .expect(&format!("could not get batch file {}", extension));
         }
 
@@ -450,10 +455,12 @@ mod tests {
         let batch_reader: BatchReader<'_, IngestionHeader, IngestionDataSharePacket> =
             BatchReader::new_ingestion(&aggregation_name, &batch_id, &date, &mut read_transport)
                 .unwrap();
-        let base_path = PathBuf::new()
-            .join(aggregation_name)
-            .join(date.format(DATE_FORMAT).to_string())
-            .join(batch_id.to_hyphenated().to_string());
+        let base_path = format!(
+            "{}/{}/{}",
+            aggregation_name,
+            date.format(DATE_FORMAT),
+            batch_id.to_hyphenated()
+        );
         let read_key = if keys_match {
             default_ingestor_public_key()
         } else {
@@ -525,10 +532,12 @@ mod tests {
                 &mut read_transport,
             )
             .unwrap();
-        let base_path = PathBuf::new()
-            .join(aggregation_name)
-            .join(date.format(DATE_FORMAT).to_string())
-            .join(batch_id.to_hyphenated().to_string());
+        let base_path = format!(
+            "{}/{}/{}",
+            aggregation_name,
+            date.format(DATE_FORMAT),
+            batch_id.to_hyphenated()
+        );
         let first_filenames = &[
             "validity_0".to_owned(),
             "validity_0.avro".to_owned(),
@@ -611,11 +620,12 @@ mod tests {
                 &mut read_transport,
             )
             .unwrap();
-        let batch_path = PathBuf::new().join(aggregation_name).join(format!(
-            "{}-{}",
+        let batch_path = format!(
+            "{}/{}-{}",
+            aggregation_name,
             start.format(DATE_FORMAT),
             end.format(DATE_FORMAT)
-        ));
+        );
         let first_filenames = &[
             "sum_0".to_owned(),
             "invalid_uuid_0.avro".to_owned(),
