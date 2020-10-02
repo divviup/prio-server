@@ -160,7 +160,6 @@ mod tests {
         },
         transport::LocalFileTransport,
     };
-    use std::path::PathBuf;
 
     #[test]
     #[ignore]
@@ -187,12 +186,10 @@ mod tests {
             100,
         );
         assert!(res.is_ok(), "error writing sample data {:?}", res.err());
-        let mut expected_path =
-            PathBuf::from("fake-aggregation/fake-date").join(batch_uuid.to_string());
+        let expected_path = format!("fake-aggregation/fake-date/{}.batch", batch_uuid);
 
         let transports = &[pha_transport, facilitator_transport];
         for transport in transports {
-            expected_path.set_extension("batch");
             let reader = transport.get(&expected_path);
             assert!(res.is_ok(), "error reading header back {:?}", res.err());
 

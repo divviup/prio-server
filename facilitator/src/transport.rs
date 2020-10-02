@@ -9,7 +9,7 @@ use std::boxed::Box;
 use std::fs::{create_dir_all, File};
 use std::io::{Read, Write};
 use std::mem::{replace, take};
-use std::path::{Path, PathBuf};
+use std::path::{PathBuf, MAIN_SEPARATOR};
 use std::pin::Pin;
 use tokio::{
     io::{AsyncRead, AsyncReadExt},
@@ -21,10 +21,10 @@ use tokio::{
 pub trait Transport {
     /// Returns an std::io::Read instance from which the contents of the value
     /// of the provided key may be read.
-    fn get(&self, key: &Path) -> Result<Box<dyn Read>>;
+    fn get(&self, key: &str) -> Result<Box<dyn Read>>;
     /// Returns an std::io::Write instance into which the contents of the value
     /// may be written.
-    fn put(&mut self, key: &Path) -> Result<Box<dyn Write>>;
+    fn put(&mut self, key: &str) -> Result<Box<dyn Write>>;
 }
 
 /// A transport implementation backed by the local filesystem.
@@ -38,18 +38,25 @@ impl LocalFileTransport {
     pub fn new(directory: PathBuf) -> LocalFileTransport {
         LocalFileTransport { directory }
     }
+
+    /// Callers will construct keys using "/" as a separator. This function
+    /// attempts to convert the provided key into a relative path valid for the
+    /// current platform.
+    fn relative_path(key: &str) -> PathBuf {
+        PathBuf::from(key.replace("/", &MAIN_SEPARATOR.to_string()))
+    }
 }
 
 impl Transport for LocalFileTransport {
-    fn get(&self, key: &Path) -> Result<Box<dyn Read>> {
-        let path = self.directory.join(key);
+    fn get(&self, key: &str) -> Result<Box<dyn Read>> {
+        let path = self.directory.join(LocalFileTransport::relative_path(key));
         let f =
             File::open(path.as_path()).with_context(|| format!("opening {}", path.display()))?;
         Ok(Box::new(f))
     }
 
-    fn put(&mut self, key: &Path) -> Result<Box<dyn Write>> {
-        let path = self.directory.join(key);
+    fn put(&mut self, key: &str) -> Result<Box<dyn Write>> {
+        let path = self.directory.join(LocalFileTransport::relative_path(key));
         if let Some(parent) = path.parent() {
             create_dir_all(parent)
                 .with_context(|| format!("creating parent directories {}", parent.display()))?;
@@ -96,24 +103,16 @@ impl S3Transport {
             client_provider,
         }
     }
-
-    /// Convert Path to key suitable for use in S3 API.
-    fn s3_key(key: &Path) -> Result<String> {
-        Ok(key
-            .to_str()
-            .context("failed to convert path to string")?
-            .to_string())
-    }
 }
 
 impl Transport for S3Transport {
-    fn get(&self, key: &Path) -> Result<Box<dyn Read>> {
+    fn get(&self, key: &str) -> Result<Box<dyn Read>> {
         let mut runtime = basic_runtime()?;
         let client = (self.client_provider)(&self.region);
         let get_output = runtime
             .block_on(client.get_object(GetObjectRequest {
                 bucket: self.bucket.to_owned(),
-                key: S3Transport::s3_key(key)?,
+                key: key.to_string(),
                 ..Default::default()
             }))
             .context("error getting S3 object")?;
@@ -123,12 +122,11 @@ impl Transport for S3Transport {
         Ok(Box::new(StreamingBodyReader::new(body, runtime)))
     }
 
-    fn put(&mut self, key: &Path) -> Result<Box<dyn Write>> {
-        println!("doing put for {}", key.display());
+    fn put(&mut self, key: &str) -> Result<Box<dyn Write>> {
         Ok(Box::new(MultipartUploadWriter::new(
             self.region.clone(),
             self.bucket.to_owned(),
-            S3Transport::s3_key(key)?,
+            key.to_string(),
             // Set buffer size to 5 MB, which is the minimum required by Amazon
             // https://docs.aws.amazon.com/AmazonS3/latest/dev/qfacts.html
             5_242_880,
@@ -375,17 +373,14 @@ mod tests {
         let tempdir = tempfile::TempDir::new().unwrap();
         let mut file_transport = LocalFileTransport::new(tempdir.path().to_path_buf());
         let content = vec![1, 2, 3, 4, 5, 6, 7, 8];
-        let path = Path::new("path");
-        let path2 = Path::new("path2");
-        let complex_path = Path::new("path3/with/separators");
 
         {
-            let ret = file_transport.get(&path2);
+            let ret = file_transport.get("path2");
             assert!(ret.is_err(), "unexpected return value {:?}", ret.err());
         }
 
-        for path in &[path, complex_path] {
-            let writer = file_transport.put(&path);
+        for path in &["path", "path3/with/separators"] {
+            let writer = file_transport.put(path);
             assert!(writer.is_ok(), "unexpected error {:?}", writer.err());
 
             writer
@@ -393,7 +388,7 @@ mod tests {
                 .write_all(&content)
                 .expect("failed to write");
 
-            let reader = file_transport.get(&path);
+            let reader = file_transport.get(path);
             assert!(reader.is_ok(), "create reader failed: {:?}", reader.err());
 
             let mut content_again = Vec::new();
@@ -521,9 +516,6 @@ mod tests {
             },
         )
         .expect_err("expected error");
-        for cause in err.chain() {
-            println!("error {:?}", cause);
-        }
         assert!(
             err.is::<rusoto_core::RusotoError<CreateMultipartUploadError>>(),
             "found unexpected error {:?}",
@@ -672,7 +664,7 @@ mod tests {
                 )
             });
 
-        let ret = transport.get(&Path::new(TEST_KEY));
+        let ret = transport.get(TEST_KEY);
         assert!(ret.is_err(), "unexpected return value {:?}", ret.err());
 
         let transport =
@@ -688,7 +680,7 @@ mod tests {
             });
 
         let mut reader = transport
-            .get(&Path::new(TEST_KEY))
+            .get(TEST_KEY)
             .expect("unexpected error getting reader");
         let mut content = Vec::new();
         reader.read_to_end(&mut content).expect("failed to read");
@@ -733,7 +725,7 @@ mod tests {
             });
 
         let mut writer = transport
-            .put(&Path::new(TEST_KEY))
+            .put(TEST_KEY)
             .expect("unexpected error getting writer");
         writer.write_all(b"fake-content").expect("failed to write");
     }
