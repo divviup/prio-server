@@ -13,7 +13,7 @@ use std::path::{Path, PathBuf};
 use std::pin::Pin;
 use tokio::{
     io::{AsyncRead, AsyncReadExt},
-    runtime::Runtime,
+    runtime::{Builder, Runtime},
 };
 
 /// A transport moves object in and out of some data store, such as a cloud
@@ -36,9 +36,7 @@ impl LocalFileTransport {
     /// Creates a LocalFileTransport under the specified path. The key parameter
     /// provided to `put` or `get` will be interpreted as a relative path.
     pub fn new(directory: PathBuf) -> LocalFileTransport {
-        LocalFileTransport {
-            directory: directory,
-        }
+        LocalFileTransport { directory }
     }
 }
 
@@ -62,6 +60,15 @@ impl Transport for LocalFileTransport {
     }
 }
 
+/// Constructs a basic runtime suitable for use in our single threaded context
+fn basic_runtime() -> Result<Runtime> {
+    Builder::new()
+        .basic_scheduler()
+        .enable_all()
+        .build()
+        .context("failed to create runtime")
+}
+
 /// Implementation of Transport that reads and writes objects from Amazon S3.
 /// Credentials for authenticating to AWS are automatically sourced from
 /// environment variables or ~/.aws/credentials.
@@ -75,20 +82,18 @@ pub struct S3Transport {
 
 impl S3Transport {
     pub fn new(region: Region, bucket: String) -> S3Transport {
-        S3Transport::new_with_client_provider(region, bucket, |region| {
-            S3Client::new(region.clone())
-        })
+        S3Transport::new_with_client(region, bucket, |region| S3Client::new(region.clone()))
     }
 
-    fn new_with_client_provider(
+    fn new_with_client(
         region: Region,
         bucket: String,
         client_provider: fn(&Region) -> S3Client,
     ) -> S3Transport {
         S3Transport {
-            region: region,
-            bucket: bucket,
-            client_provider: client_provider,
+            region,
+            bucket,
+            client_provider,
         }
     }
 
@@ -103,7 +108,7 @@ impl S3Transport {
 
 impl Transport for S3Transport {
     fn get(&self, key: &Path) -> Result<Box<dyn Read>> {
-        let mut runtime = Runtime::new().context("failed to create runtime")?;
+        let mut runtime = basic_runtime()?;
         let client = (self.client_provider)(&self.region);
         let get_output = runtime
             .block_on(client.get_object(GetObjectRequest {
@@ -151,10 +156,6 @@ impl StreamingBodyReader {
 
 impl Read for StreamingBodyReader {
     fn read(&mut self, buf: &mut [u8]) -> Result<usize, std::io::Error> {
-        if buf.is_empty() {
-            return Ok(0);
-        }
-
         self.runtime.block_on(self.body_reader.read(buf))
     }
 }
@@ -194,7 +195,7 @@ impl MultipartUploadWriter {
         buffer_capacity: usize,
         client_provider: fn(&Region) -> S3Client,
     ) -> Result<MultipartUploadWriter> {
-        let mut runtime = Runtime::new().context("failed to create runtime")?;
+        let mut runtime = basic_runtime()?;
         let client = client_provider(&region);
 
         let create_output = runtime
@@ -660,10 +661,8 @@ mod tests {
 
     #[test]
     fn roundtrip_s3_transport() {
-        let transport = S3Transport::new_with_client_provider(
-            Region::UsWest2,
-            TEST_BUCKET.to_string(),
-            |region| {
+        let transport =
+            S3Transport::new_with_client(Region::UsWest2, TEST_BUCKET.to_string(), |region| {
                 S3Client::new_with(
                     // Failed GetObject request
                     MockRequestDispatcher::with_status(404)
@@ -671,16 +670,13 @@ mod tests {
                     MockCredentialsProvider,
                     region.clone(),
                 )
-            },
-        );
+            });
 
         let ret = transport.get(&Path::new(TEST_KEY));
         assert!(ret.is_err(), "unexpected return value {:?}", ret.err());
 
-        let transport = S3Transport::new_with_client_provider(
-            Region::UsWest2,
-            TEST_BUCKET.to_string(),
-            |region| {
+        let transport =
+            S3Transport::new_with_client(Region::UsWest2, TEST_BUCKET.to_string(), |region| {
                 S3Client::new_with(
                     // Successful GetObject request
                     MockRequestDispatcher::with_status(200)
@@ -689,8 +685,7 @@ mod tests {
                     MockCredentialsProvider,
                     region.clone(),
                 )
-            },
-        );
+            });
 
         let mut reader = transport
             .get(&Path::new(TEST_KEY))
@@ -699,10 +694,8 @@ mod tests {
         reader.read_to_end(&mut content).expect("failed to read");
         assert_eq!(Vec::from("fake-content"), content);
 
-        let mut transport = S3Transport::new_with_client_provider(
-            Region::UsWest2,
-            TEST_BUCKET.to_string(),
-            |region| {
+        let mut transport =
+            S3Transport::new_with_client(Region::UsWest2, TEST_BUCKET.to_string(), |region| {
                 let requests = vec![
                     // Response to CreateMultipartUpload
                     MockRequestDispatcher::with_status(200)
@@ -737,8 +730,7 @@ mod tests {
                     MockCredentialsProvider,
                     region.clone(),
                 )
-            },
-        );
+            });
 
         let mut writer = transport
             .put(&Path::new(TEST_KEY))

@@ -491,11 +491,13 @@ fn main() -> Result<(), anyhow::Error> {
         // various parameters are present and valid, so it is safe to use
         // unwrap() here.
         ("generate-ingestion-sample", Some(sub_matches)) => {
+            let mut pha_transport = transport_for_output_path("pha-output", sub_matches);
+            let mut facilitator_transport =
+                transport_for_output_path("facilitator-output", sub_matches);
+
             generate_ingestion_sample(
-                &mut *transport_for_output_path(sub_matches.value_of("pha-output").unwrap()),
-                &mut *transport_for_output_path(
-                    sub_matches.value_of("facilitator-output").unwrap(),
-                ),
+                &mut *pha_transport,
+                &mut *facilitator_transport,
                 &sub_matches
                     .value_of("batch-id")
                     .map_or_else(|| Uuid::new_v4(), |v| Uuid::parse_str(v).unwrap()),
@@ -543,9 +545,9 @@ fn main() -> Result<(), anyhow::Error> {
         }
         ("batch-intake", Some(sub_matches)) => {
             let mut ingestion_transport =
-                transport_for_output_path(sub_matches.value_of("ingestion-bucket").unwrap());
+                transport_for_output_path("ingestion-bucket", sub_matches);
             let mut validation_transport =
-                transport_for_output_path(sub_matches.value_of("validation-bucket").unwrap());
+                transport_for_output_path("validation-bucket", sub_matches);
 
             let share_processor_ecies_key =
                 PrivateKey::from_base64(sub_matches.value_of("ecies-private-key").unwrap())
@@ -583,13 +585,13 @@ fn main() -> Result<(), anyhow::Error> {
         }
         ("aggregate", Some(sub_matches)) => {
             let mut ingestion_transport =
-                transport_for_output_path(sub_matches.value_of("ingestion-bucket").unwrap());
+                transport_for_output_path("ingestion-bucket", sub_matches);
             let mut own_validation_transport =
-                transport_for_output_path(sub_matches.value_of("own-validation-bucket").unwrap());
+                transport_for_output_path("own-validation-bucket", sub_matches);
             let mut peer_validation_transport =
-                transport_for_output_path(sub_matches.value_of("peer-validation-bucket").unwrap());
+                transport_for_output_path("peer-validation-bucket", sub_matches);
             let mut aggregation_transport =
-                transport_for_output_path(sub_matches.value_of("aggregation-bucket").unwrap());
+                transport_for_output_path("aggregation-bucket", sub_matches);
 
             let ingestor_pub_key = public_key_from_arg("ingestor-public-key", sub_matches);
             let peer_share_processor_pub_key =
@@ -662,7 +664,8 @@ fn public_key_from_arg(arg: &str, matches: &ArgMatches) -> UnparsedPublicKey<Vec
     }
 }
 
-fn transport_for_output_path(path: &str) -> Box<dyn Transport> {
+fn transport_for_output_path(arg: &str, matches: &ArgMatches) -> Box<dyn Transport> {
+    let path = matches.value_of(arg).unwrap();
     match path.strip_prefix("s3://") {
         Some(bucket) => Box::new(S3Transport::new(Region::UsWest2, bucket.to_string())),
         None => Box::new(LocalFileTransport::new(Path::new(path).to_path_buf())),
