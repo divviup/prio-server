@@ -12,6 +12,8 @@ base64 = "0.12.3"
 chrono = "0.4"
 clap = "2.33.3"
 derivative = "2.1.1"
+hyper = "0.13.8"
+hyper-rustls = "0.21.0"
 prio = "0.2"
 rand = "0.7"
 ring = { version = "0.16.15", features = ["std"] }

@@ -1,3 +1,5 @@
+use crate::transport::TransportWriter;
+use anyhow::Result;
 use ring::digest;
 use std::io::Write;
 
@@ -32,6 +34,8 @@ pub enum Error {
     EofError,
 }
 
+/// An implementation of transport::TransportWriter that computes a SHA256
+/// digest over the content it is provided.
 pub struct DigestWriter {
     context: digest::Context,
 }
@@ -43,6 +47,7 @@ impl DigestWriter {
         }
     }
 
+    /// Consumes the DigestWriter and returns the computed SHA256 hash.
     fn finish(self) -> digest::Digest {
         self.context.finish()
     }
@@ -59,12 +64,33 @@ impl Write for DigestWriter {
     }
 }
 
+impl TransportWriter for DigestWriter {
+    fn complete_upload(&mut self) -> Result<()> {
+        Ok(())
+    }
+
+    fn cancel_upload(&mut self) -> Result<()> {
+        Ok(())
+    }
+}
+
 /// MemoryWriter is a trait we apply to std::io::Write implementations that are
 /// backed by memory and are assumed to not fail or perform short writes in any
 /// circumstance short of ENOMEM.
-pub trait MemoryWriter: Write {}
+pub trait MemoryWriter: TransportWriter {}
 
 impl MemoryWriter for DigestWriter {}
+
+impl TransportWriter for Vec<u8> {
+    fn complete_upload(&mut self) -> Result<()> {
+        Ok(())
+    }
+
+    fn cancel_upload(&mut self) -> Result<()> {
+        Ok(())
+    }
+}
+
 impl MemoryWriter for Vec<u8> {}
 
 /// SidecarWriter wraps an std::io::Write, but also writes any buffers passed to
@@ -72,12 +98,12 @@ impl MemoryWriter for Vec<u8> {}
 /// implements std::io::Write is that SidecarWriter::write assumes that short
 /// writes to the sidecar can't happen, so we use the trait to ensure that this
 /// property holds.
-pub struct SidecarWriter<W: Write, M: MemoryWriter> {
+pub struct SidecarWriter<W: TransportWriter, M: MemoryWriter> {
     writer: W,
     sidecar: M,
 }
 
-impl<W: Write, M: MemoryWriter> SidecarWriter<W, M> {
+impl<W: TransportWriter, M: MemoryWriter> SidecarWriter<W, M> {
     fn new(writer: W, sidecar: M) -> SidecarWriter<W, M> {
         SidecarWriter {
             writer: writer,
@@ -86,7 +112,7 @@ impl<W: Write, M: MemoryWriter> SidecarWriter<W, M> {
     }
 }
 
-impl<W: Write, M: MemoryWriter> Write for SidecarWriter<W, M> {
+impl<W: TransportWriter, M: MemoryWriter> Write for SidecarWriter<W, M> {
     fn write(&mut self, buf: &[u8]) -> Result<usize, std::io::Error> {
         // We might get a short write into whatever writer is, so make sure the
         // sidecar writer doesn't get ahead in that case.
@@ -96,6 +122,19 @@ impl<W: Write, M: MemoryWriter> Write for SidecarWriter<W, M> {
     }
 
     fn flush(&mut self) -> Result<(), std::io::Error> {
-        self.writer.flush()
+        self.writer.flush()?;
+        self.sidecar.flush()
+    }
+}
+
+impl<W: TransportWriter, M: MemoryWriter> TransportWriter for SidecarWriter<W, M> {
+    fn complete_upload(&mut self) -> Result<()> {
+        self.writer.complete_upload()?;
+        self.sidecar.complete_upload()
+    }
+
+    fn cancel_upload(&mut self) -> Result<()> {
+        self.writer.cancel_upload()?;
+        self.sidecar.cancel_upload()
     }
 }

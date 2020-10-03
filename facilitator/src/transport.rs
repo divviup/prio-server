@@ -1,5 +1,7 @@
 use anyhow::{Context, Result};
 use derivative::Derivative;
+use hyper_rustls::HttpsConnector;
+use rusoto_core::credential::DefaultCredentialsProvider;
 use rusoto_core::{ByteStream, Region};
 use rusoto_s3::{
     AbortMultipartUploadRequest, CompleteMultipartUploadRequest, CompletedMultipartUpload,
@@ -11,10 +13,35 @@ use std::io::{Read, Write};
 use std::mem::{replace, take};
 use std::path::{PathBuf, MAIN_SEPARATOR};
 use std::pin::Pin;
+use std::time::Duration;
 use tokio::{
     io::{AsyncRead, AsyncReadExt},
     runtime::{Builder, Runtime},
 };
+
+/// A TransportWriter extends std::io::Write but adds methods that explicitly
+/// allow callers to complete or cancel an upload.
+pub trait TransportWriter: Write {
+    /// Complete an upload operation, flushing any buffered writes and cleaning
+    /// up any related resources. Callers must call this method or cancel_upload
+    /// when they are done with the TransportWriter.
+    fn complete_upload(&mut self) -> Result<()>;
+
+    /// Cancel an upload operation, cleaning up any related resources. Callers
+    /// must call this method or complete_upload when  they are done with the
+    /// Transportwriter.
+    fn cancel_upload(&mut self) -> Result<()>;
+}
+
+impl<T: TransportWriter + ?Sized> TransportWriter for Box<T> {
+    fn complete_upload(&mut self) -> Result<()> {
+        (**self).complete_upload()
+    }
+
+    fn cancel_upload(&mut self) -> Result<()> {
+        (**self).cancel_upload()
+    }
+}
 
 /// A transport moves object in and out of some data store, such as a cloud
 /// object store like Amazon S3, or local files, or buffers in memory.
@@ -24,7 +51,7 @@ pub trait Transport {
     fn get(&self, key: &str) -> Result<Box<dyn Read>>;
     /// Returns an std::io::Write instance into which the contents of the value
     /// may be written.
-    fn put(&mut self, key: &str) -> Result<Box<dyn Write>>;
+    fn put(&mut self, key: &str) -> Result<Box<dyn TransportWriter>>;
 }
 
 /// A transport implementation backed by the local filesystem.
@@ -55,7 +82,7 @@ impl Transport for LocalFileTransport {
         Ok(Box::new(f))
     }
 
-    fn put(&mut self, key: &str) -> Result<Box<dyn Write>> {
+    fn put(&mut self, key: &str) -> Result<Box<dyn TransportWriter>> {
         let path = self.directory.join(LocalFileTransport::relative_path(key));
         if let Some(parent) = path.parent() {
             create_dir_all(parent)
@@ -63,7 +90,34 @@ impl Transport for LocalFileTransport {
         }
         let f =
             File::create(path.as_path()).with_context(|| format!("creating {}", path.display()))?;
-        Ok(Box::new(f))
+        Ok(Box::new(LocalFileTransportWriter { file: f }))
+    }
+}
+
+/// TransportWriter implementation vended by put method on LocalFileTransport.
+struct LocalFileTransportWriter {
+    file: File,
+}
+
+impl Write for LocalFileTransportWriter {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        self.file.write(buf)
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        self.file.flush()
+    }
+}
+
+impl TransportWriter for LocalFileTransportWriter {
+    fn complete_upload(&mut self) -> Result<()> {
+        // This method is a no-op for local files
+        Ok(())
+    }
+
+    fn cancel_upload(&mut self) -> Result<()> {
+        // This method is a no-op for local files
+        Ok(())
     }
 }
 
@@ -77,9 +131,6 @@ fn basic_runtime() -> Result<Runtime> {
 }
 
 /// Implementation of Transport that reads and writes objects from Amazon S3.
-/// Credentials for authenticating to AWS are automatically sourced from
-/// environment variables or ~/.aws/credentials.
-/// https://github.com/rusoto/rusoto/blob/master/AWS-CREDENTIALS.md
 pub struct S3Transport {
     region: Region,
     bucket: String,
@@ -89,7 +140,33 @@ pub struct S3Transport {
 
 impl S3Transport {
     pub fn new(region: Region, bucket: String) -> S3Transport {
-        S3Transport::new_with_client(region, bucket, |region| S3Client::new(region.clone()))
+        S3Transport::new_with_client(region, bucket, |region| {
+            // Rusoto uses Hyper which uses connection pools. The default
+            // timeout for those connections is 90 seconds[1]. Amazon S3's API
+            // closes idle client connections after 20 seconds[2]. If we use a
+            // default client via S3Client::new, this mismatch causes uploads to
+            // fail when Hyper tries to re-use a connection that has been idle
+            // too long. Until this is fixed in Rusoto[3], we construct our own
+            // HTTP client dispatcher whose underlying hyper::Client is
+            // configured to timeout idle connections after 10 seconds.
+            //
+            // [1]: https://docs.rs/hyper/0.13.8/hyper/client/struct.Builder.html#method.pool_idle_timeout
+            // [2]: https://aws.amazon.com/premiumsupport/knowledge-center/s3-socket-connection-timeout-error/
+            // [3]: https://github.com/rusoto/rusoto/issues/1686
+            //
+            // Credentials for authenticating to AWS are automatically sourced
+            // from environment variables or ~/.aws/credentials.
+            // https://github.com/rusoto/rusoto/blob/master/AWS-CREDENTIALS.md
+            let credentials_provider =
+                DefaultCredentialsProvider::new().expect("failed to create credentials provider");
+
+            let mut builder = hyper::Client::builder();
+            builder.pool_idle_timeout(Duration::from_secs(10));
+            let connector = HttpsConnector::new();
+            let http_client = rusoto_core::HttpClient::from_builder(builder, connector);
+
+            S3Client::new_with(http_client, credentials_provider, region.clone())
+        })
     }
 
     fn new_with_client(
@@ -122,7 +199,7 @@ impl Transport for S3Transport {
         Ok(Box::new(StreamingBodyReader::new(body, runtime)))
     }
 
-    fn put(&mut self, key: &str) -> Result<Box<dyn Write>> {
+    fn put(&mut self, key: &str) -> Result<Box<dyn TransportWriter>> {
         Ok(Box::new(MultipartUploadWriter::new(
             self.region.clone(),
             self.bucket.to_owned(),
@@ -158,13 +235,13 @@ impl Read for StreamingBodyReader {
     }
 }
 
-/// MultipartUploadWriter is an std::io::Write implementation that uses AWS S3
+/// MultipartUploadWriter is a TransportWriter implementation that uses AWS S3
 /// multi part uploads to permit streaming of objects into S3. On creation, it
 /// initiates a multipart upload. It maintains a memory buffer into which it
 /// writes the buffers passed by std::io::Write::write, and when there is more
 /// than buffer_capacity bytes in it, performs an UploadPart call. On
-/// std::io::Write::flush, it calls CompleteMultipartUpload to finish the
-/// upload. If any part of the upload fails, it cleans up by calling
+/// TransportWrite::complete_upload, it calls CompleteMultipartUpload to finish
+/// the upload. If any part of the upload fails, it cleans up by calling
 /// AbortMultipartUpload as otherwise we would be billed for partial uploads.
 /// https://docs.aws.amazon.com/AmazonS3/latest/dev/uploadobjusingmpu.html
 #[derive(Derivative)]
@@ -253,14 +330,15 @@ impl MultipartUploadWriter {
                     ..Default::default()
                 }),
             )
+            // Can't use anyhow here because we must return std::io::Result
             .map_err(|e| {
                 // Clean up botched uploads
-                if let Err(abort) = self.abort_upload() {
+                if let Err(cancel) = self.cancel_upload() {
                     return std::io::Error::new(
                         std::io::ErrorKind::Other,
                         format!(
                             "error uploading part: {:?}\n\tAND failure aborting: {:?}",
-                            e, abort
+                            e, cancel
                         ),
                     );
                 }
@@ -274,12 +352,12 @@ impl MultipartUploadWriter {
             e_tag: Some(upload_output.e_tag.ok_or_else(|| {
                 // This error seems improbable but the e_tag field is an
                 // Optional so we have to do this dance.
-                if let Err(abort) = self.abort_upload() {
+                if let Err(cancel) = self.cancel_upload() {
                     return std::io::Error::new(
                         std::io::ErrorKind::Other,
                         format!(
                             "no ETag in UploadPartOutput AND failure aborting: {:?}",
-                            abort
+                            cancel
                         ),
                     );
                 }
@@ -291,27 +369,6 @@ impl MultipartUploadWriter {
             part_number: Some(part_number),
         };
         self.completed_parts.push(completed_part);
-        Ok(())
-    }
-
-    fn abort_upload(&mut self) -> std::io::Result<()> {
-        // There's nothing useful in the output so discard it
-        self.runtime
-            .block_on(
-                self.client
-                    .abort_multipart_upload(AbortMultipartUploadRequest {
-                        bucket: self.bucket.to_string(),
-                        key: self.key.to_string(),
-                        upload_id: self.upload_id.clone(),
-                        ..Default::default()
-                    }),
-            )
-            .map_err(|e| {
-                std::io::Error::new(
-                    std::io::ErrorKind::Other,
-                    format!("error completing upload: {:?}", e),
-                )
-            })?;
         Ok(())
     }
 }
@@ -329,6 +386,12 @@ impl Write for MultipartUploadWriter {
     }
 
     fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+}
+
+impl TransportWriter for MultipartUploadWriter {
+    fn complete_upload(&mut self) -> Result<()> {
         // Write last part, if any
         self.upload_part()?;
 
@@ -353,7 +416,20 @@ impl Write for MultipartUploadWriter {
                     format!("error completing upload: {:?}", e),
                 )
             })?;
+        Ok(())
+    }
 
+    fn cancel_upload(&mut self) -> Result<()> {
+        // There's nothing useful in the output so discard it
+        self.runtime.block_on(
+            self.client
+                .abort_multipart_upload(AbortMultipartUploadRequest {
+                    bucket: self.bucket.to_string(),
+                    key: self.key.to_string(),
+                    upload_id: self.upload_id.clone(),
+                    ..Default::default()
+                }),
+        )?;
         Ok(())
     }
 }
@@ -644,11 +720,11 @@ mod tests {
         writer.write(&[0; 25]).expect("unexpected error");
         // Flush will cause writer to UploadPart the last part and then complete
         // upload
-        writer.flush().expect("unexpected error");
+        writer.complete_upload().expect("unexpected error");
         // The buffer is empty now, so another flush will not cause an
         // UploadPart call
-        writer.flush().expect("unexpected error");
-        writer.flush().expect_err("unexpected error");
+        writer.complete_upload().expect("unexpected error");
+        writer.complete_upload().expect_err("unexpected error");
     }
 
     #[test]
@@ -716,6 +792,10 @@ mod tests {
    <ETag>fake-etag</ETag>
 </CompleteMultipartUploadResult>"#,
                         ),
+                    // Response to AbortMultipartUpload, expected because of
+                    // cancel_upload call
+                    MockRequestDispatcher::with_status(204)
+                        .with_request_checker(is_abort_multipart_upload_request),
                 ];
                 S3Client::new_with(
                     MultipleMockRequestDispatcher::new(requests),
@@ -728,5 +808,7 @@ mod tests {
             .put(TEST_KEY)
             .expect("unexpected error getting writer");
         writer.write_all(b"fake-content").expect("failed to write");
+        writer.complete_upload().expect("failed to complete upload");
+        writer.cancel_upload().expect("failed to cancel upload");
     }
 }

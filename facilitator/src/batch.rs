@@ -1,6 +1,6 @@
 use crate::{
     idl::{Header, Packet},
-    transport::Transport,
+    transport::{Transport, TransportWriter},
     DigestWriter, SidecarWriter, DATE_FORMAT,
 };
 use anyhow::{anyhow, Context, Result};
@@ -258,7 +258,9 @@ impl<'a, H: Header, P: Packet> BatchWriter<'a, H, P> {
         let mut sidecar_writer =
             SidecarWriter::new(self.transport.put(self.batch.header_key())?, Vec::new());
         header.write(&mut sidecar_writer)?;
-        sidecar_writer.flush().context("failed to flush writer")?;
+        sidecar_writer
+            .complete_upload()
+            .context("failed to complete batch header upload")?;
 
         let header_signature = key
             .sign(&SystemRandom::new(), &sidecar_writer.sidecar)
@@ -274,7 +276,7 @@ impl<'a, H: Header, P: Packet> BatchWriter<'a, H, P> {
     /// content written by the operation.
     pub fn packet_file_writer<F>(&mut self, operation: F) -> Result<Digest>
     where
-        F: FnOnce(&mut Writer<SidecarWriter<Box<dyn Write>, DigestWriter>>) -> Result<()>,
+        F: FnOnce(&mut Writer<SidecarWriter<Box<dyn TransportWriter>, DigestWriter>>) -> Result<()>,
     {
         let mut writer = Writer::new(
             &self.packet_schema,
@@ -284,10 +286,17 @@ impl<'a, H: Header, P: Packet> BatchWriter<'a, H, P> {
             ),
         );
 
-        operation(&mut writer)?;
-
+        let result = operation(&mut writer);
         let mut sidecar_writer = writer.into_inner().context("failed to flush Avro writer")?;
-        sidecar_writer.flush().context("failed to flush writer")?;
+
+        if let Err(e) = result {
+            sidecar_writer.cancel_upload().context(format!("{}", e))?;
+            return Err(e);
+        }
+
+        sidecar_writer
+            .complete_upload()
+            .context("failed to complete packet file upload")?;
         Ok(sidecar_writer.sidecar.finish())
     }
 
@@ -298,7 +307,9 @@ impl<'a, H: Header, P: Packet> BatchWriter<'a, H, P> {
         writer
             .write_all(signature.as_ref())
             .context("failed to write signature")?;
-        writer.flush().context("failed to flush signature")
+        writer
+            .complete_upload()
+            .context("failed to complete signature upload")
     }
 }
 
