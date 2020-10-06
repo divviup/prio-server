@@ -20,6 +20,12 @@ jobs:
     - uses: actions/checkout@v2
     - name: Lint
       run: cargo fmt --message-format human -- --check
+    - uses: actions-rs/clippy-check@v1
+      with:
+        # https://docs.github.com/actions/reference/authentication-in-a-workflow
+        token: ${{ secrets.GITHUB_TOKEN }}
+        # working-directory only applies to run actions
+        args: --manifest-path facilitator/Cargo.toml
     - name: Build
       run: cargo build --verbose
     - name: Run tests
