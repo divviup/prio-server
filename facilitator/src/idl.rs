@@ -72,14 +72,15 @@ pub struct IngestionHeader {
 }
 
 impl IngestionHeader {
+    #[allow(clippy::float_cmp)]
     pub fn check_parameters(&self, validation_header: &ValidationHeader) -> bool {
-        return self.batch_uuid == validation_header.batch_uuid
+        self.batch_uuid == validation_header.batch_uuid
             && self.name == validation_header.name
             && self.bins == validation_header.bins
             && self.epsilon == validation_header.epsilon
             && self.prime == validation_header.prime
             && self.number_of_servers == validation_header.number_of_servers
-            && self.hamming_weight == validation_header.hamming_weight;
+            && self.hamming_weight == validation_header.hamming_weight
     }
 }
 
@@ -112,7 +113,7 @@ impl Header for IngestionHeader {
             }
             None => return Err(Error::EofError),
         };
-        if let Some(_) = reader.next() {
+        if reader.next().is_some() {
             return Err(Error::MalformedHeaderError(
                 "excess header in reader".to_owned(),
             ));
@@ -406,14 +407,15 @@ pub struct ValidationHeader {
 }
 
 impl ValidationHeader {
+    #[allow(clippy::float_cmp)]
     pub fn check_parameters(&self, validation_header: &ValidationHeader) -> bool {
-        return self.batch_uuid == validation_header.batch_uuid
+        self.batch_uuid == validation_header.batch_uuid
             && self.name == validation_header.name
             && self.bins == validation_header.bins
             && self.epsilon == validation_header.epsilon
             && self.prime == validation_header.prime
             && self.number_of_servers == validation_header.number_of_servers
-            && self.hamming_weight == validation_header.hamming_weight;
+            && self.hamming_weight == validation_header.hamming_weight
     }
 }
 
@@ -449,7 +451,7 @@ impl Header for ValidationHeader {
             }
             None => return Err(Error::EofError),
         };
-        if let Some(_) = reader.next() {
+        if reader.next().is_some() {
             return Err(Error::MalformedHeaderError(
                 "excess header in reader".to_owned(),
             ));
@@ -545,7 +547,7 @@ impl Header for ValidationHeader {
         record.put(
             "hamming_weight",
             Value::Union(Box::new(
-                self.hamming_weight.map_or(Value::Null, |v| Value::Int(v)),
+                self.hamming_weight.map_or(Value::Null, Value::Int),
             )),
         );
         record.put(
@@ -685,7 +687,7 @@ impl Header for SumPart {
             }
             None => return Err(Error::EofError),
         };
-        if let Some(_) = reader.next() {
+        if reader.next().is_some() {
             return Err(Error::MalformedHeaderError(
                 "excess header in reader".to_owned(),
             ));

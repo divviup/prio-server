@@ -48,10 +48,10 @@ enum StoragePath<'a> {
     LocalPath(&'a str),
 }
 
-fn parse_path<'a>(s: &'a str) -> Result<StoragePath<'a>> {
+fn parse_path(s: &str) -> Result<StoragePath> {
     match s.strip_prefix("s3://") {
         Some(region_and_bucket) => {
-            if !region_and_bucket.contains("/") {
+            if !region_and_bucket.contains('/') {
                 return Err(anyhow!(
                     "S3 storage must be like \"s3://{region}/{bucket name}\""
                 ));
@@ -545,7 +545,7 @@ fn main() -> Result<(), anyhow::Error> {
                 &mut *facilitator_transport,
                 &sub_matches
                     .value_of("batch-id")
-                    .map_or_else(|| Uuid::new_v4(), |v| Uuid::parse_str(v).unwrap()),
+                    .map_or_else(Uuid::new_v4, |v| Uuid::parse_str(v).unwrap()),
                 &sub_matches.value_of("aggregation-id").unwrap(),
                 &sub_matches.value_of("date").map_or_else(
                     || Utc::now().naive_utc(),
@@ -613,7 +613,7 @@ fn main() -> Result<(), anyhow::Error> {
                 &sub_matches.value_of("aggregation-id").unwrap(),
                 &sub_matches
                     .value_of("batch-id")
-                    .map_or_else(|| Uuid::new_v4(), |v| Uuid::parse_str(v).unwrap()),
+                    .map_or_else(Uuid::new_v4, |v| Uuid::parse_str(v).unwrap()),
                 &sub_matches.value_of("date").map_or_else(
                     || Utc::now().naive_utc(),
                     |v| NaiveDateTime::parse_from_str(&v, DATE_FORMAT).unwrap(),
@@ -669,6 +669,7 @@ fn main() -> Result<(), anyhow::Error> {
                 ));
             }
 
+            let batch_info: Vec<_> = batch_ids.into_iter().zip(batch_dates).collect();
             BatchAggregator::new(
                 &sub_matches.value_of("aggregation-id").unwrap(),
                 &sub_matches.value_of("aggregation-start").map_or_else(
@@ -689,7 +690,7 @@ fn main() -> Result<(), anyhow::Error> {
                 &peer_share_processor_pub_key,
                 &share_processor_ecies_key,
             )?
-            .generate_sum_part(&batch_ids.into_iter().zip(batch_dates).collect())?;
+            .generate_sum_part(&batch_info)?;
             Ok(())
         }
         (_, _) => Ok(()),

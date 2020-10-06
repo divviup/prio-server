@@ -68,7 +68,7 @@ impl<'a> BatchAggregator<'a> {
 
     /// Compute the sum part for all the provided batch IDs and write it out to
     /// the aggregation transport.
-    pub fn generate_sum_part(&mut self, batch_ids: &Vec<(Uuid, NaiveDateTime)>) -> Result<()> {
+    pub fn generate_sum_part(&mut self, batch_ids: &[(Uuid, NaiveDateTime)]) -> Result<()> {
         let share_processor_public_key = UnparsedPublicKey::new(
             &ECDSA_P256_SHA256_FIXED,
             Vec::from(self.share_processor_signing_key.public_key().as_ref()),
