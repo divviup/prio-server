@@ -187,7 +187,7 @@ impl Header for IngestionHeader {
             epsilon: epsilon.unwrap(),
             prime: prime.unwrap(),
             number_of_servers: number_of_servers.unwrap(),
-            hamming_weight: hamming_weight,
+            hamming_weight,
             batch_start_time: batch_start_time.unwrap(),
             batch_end_time: batch_end_time.unwrap(),
             packet_file_digest: packet_file_digest.unwrap(),
@@ -342,8 +342,8 @@ impl Packet for IngestionDataSharePacket {
             encrypted_payload: encrypted_payload.unwrap(),
             encryption_key_id: encryption_key_id.unwrap(),
             r_pit: r_pit.unwrap(),
-            version_configuration: version_configuration,
-            device_nonce: device_nonce,
+            version_configuration,
+            device_nonce,
         })
     }
 
@@ -518,7 +518,7 @@ impl Header for ValidationHeader {
             epsilon: epsilon.unwrap(),
             prime: prime.unwrap(),
             number_of_servers: number_of_servers.unwrap(),
-            hamming_weight: hamming_weight,
+            hamming_weight,
             packet_file_digest: packet_file_digest.unwrap(),
         })
     }
@@ -795,7 +795,7 @@ impl Header for SumPart {
             epsilon: epsilon.unwrap(),
             prime: prime.unwrap(),
             number_of_servers: number_of_servers.unwrap(),
-            hamming_weight: hamming_weight,
+            hamming_weight,
             sum: sum.unwrap(),
             aggregation_start_time: aggregation_start_time.unwrap(),
             aggregation_end_time: aggregation_end_time.unwrap(),

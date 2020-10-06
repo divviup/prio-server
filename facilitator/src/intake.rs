@@ -49,10 +49,10 @@ impl<'a> BatchIntaker<'a> {
                 is_first,
                 validation_transport,
             )?,
-            is_first: is_first,
-            share_processor_ecies_key: share_processor_ecies_key,
-            share_processor_signing_key: share_processor_signing_key,
-            ingestor_key: ingestor_key,
+            is_first,
+            share_processor_ecies_key,
+            share_processor_signing_key,
+            ingestor_key,
         })
     }
 

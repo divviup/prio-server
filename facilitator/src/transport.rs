@@ -209,7 +209,7 @@ impl StreamingBodyReader {
     fn new(body: ByteStream, runtime: Runtime) -> StreamingBodyReader {
         StreamingBodyReader {
             body_reader: Box::pin(body.into_async_read()),
-            runtime: runtime,
+            runtime,
         }
     }
 }
@@ -269,10 +269,10 @@ impl MultipartUploadWriter {
             .context("error creating multipart upload")?;
 
         Ok(MultipartUploadWriter {
-            runtime: runtime,
-            client: client,
-            bucket: bucket,
-            key: key,
+            runtime,
+            client,
+            bucket,
+            key,
             upload_id: create_output
                 .upload_id
                 .context("no upload ID in CreateMultipartUploadResponse")?,
@@ -280,7 +280,7 @@ impl MultipartUploadWriter {
             // Upload parts must be at least buffer_capacity, but it's fine if
             // they're bigger, so overprovision the buffer to make it unlikely
             // that the caller will overflow it.
-            minimum_upload_part_size: minimum_upload_part_size,
+            minimum_upload_part_size,
             buffer: Vec::with_capacity(minimum_upload_part_size * 2),
         })
     }

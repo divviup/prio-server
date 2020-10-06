@@ -160,8 +160,8 @@ pub struct BatchReader<'a, H, P> {
 impl<'a, H: Header, P: Packet> BatchIO<'a, H, P> for BatchReader<'a, H, P> {
     fn new(batch: Batch, transport: &'a mut dyn Transport) -> Result<Self> {
         Ok(BatchReader {
-            batch: batch,
-            transport: transport,
+            batch,
+            transport,
             packet_schema: P::schema(),
             phantom_header: PhantomData,
             phantom_packet: PhantomData,
@@ -240,8 +240,8 @@ pub struct BatchWriter<'a, H, P> {
 impl<'a, H: Header, P: Packet> BatchIO<'a, H, P> for BatchWriter<'a, H, P> {
     fn new(batch: Batch, transport: &'a mut dyn Transport) -> Result<Self> {
         Ok(BatchWriter {
-            batch: batch,
-            transport: transport,
+            batch,
+            transport,
             packet_schema: P::schema(),
             phantom_header: PhantomData,
             phantom_packet: PhantomData,

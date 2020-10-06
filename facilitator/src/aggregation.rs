@@ -45,13 +45,13 @@ impl<'a> BatchAggregator<'a> {
         share_processor_ecies_key: &'a PrivateKey,
     ) -> Result<BatchAggregator<'a>> {
         Ok(BatchAggregator {
-            is_first: is_first,
-            aggregation_name: aggregation_name,
-            aggregation_start: aggregation_start,
-            aggregation_end: aggregation_end,
-            own_validation_transport: own_validation_transport,
-            peer_validation_transport: peer_validation_transport,
-            ingestion_transport: ingestion_transport,
+            is_first,
+            aggregation_name,
+            aggregation_start,
+            aggregation_end,
+            own_validation_transport,
+            peer_validation_transport,
+            ingestion_transport,
             aggregation_batch: BatchWriter::new_sum(
                 aggregation_name,
                 aggregation_start,
@@ -59,10 +59,10 @@ impl<'a> BatchAggregator<'a> {
                 is_first,
                 aggregation_transport,
             )?,
-            ingestor_key: ingestor_key,
-            share_processor_signing_key: share_processor_signing_key,
-            peer_share_processor_key: peer_share_processor_key,
-            share_processor_ecies_key: share_processor_ecies_key,
+            ingestor_key,
+            share_processor_signing_key,
+            peer_share_processor_key,
+            share_processor_ecies_key,
         })
     }
 
@@ -118,7 +118,7 @@ impl<'a> BatchAggregator<'a> {
                 prime: ingestion_header.prime,
                 number_of_servers: ingestion_header.number_of_servers,
                 hamming_weight: ingestion_header.hamming_weight,
-                sum: sum,
+                sum,
                 aggregation_start_time: self.aggregation_start.timestamp_millis(),
                 aggregation_end_time: self.aggregation_end.timestamp_millis(),
                 packet_file_digest: invalid_packets_digest.as_ref().to_vec(),
