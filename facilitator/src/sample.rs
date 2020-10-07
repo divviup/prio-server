@@ -113,7 +113,7 @@ pub fn generate_ingestion_sample(
 
             let facilitator_header_signature = facilitator_ingestion_batch.put_header(
                 &IngestionHeader {
-                    batch_uuid: batch_uuid.clone(),
+                    batch_uuid: *batch_uuid,
                     name: aggregation_name.to_owned(),
                     bins: dim,
                     epsilon: epsilon,
@@ -132,7 +132,7 @@ pub fn generate_ingestion_sample(
 
     let pha_header_signature = pha_ingestion_batch.put_header(
         &IngestionHeader {
-            batch_uuid: batch_uuid.clone(),
+            batch_uuid: *batch_uuid,
             name: aggregation_name.to_owned(),
             bins: dim,
             epsilon: epsilon,
