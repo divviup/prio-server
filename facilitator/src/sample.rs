@@ -1,5 +1,5 @@
 use crate::{
-    batch::{BatchIO, BatchWriter},
+    batch::{Batch, BatchWriter},
     idl::{IngestionDataSharePacket, IngestionHeader, Packet},
     transport::Transport,
 };
@@ -39,12 +39,18 @@ pub fn generate_ingestion_sample(
             .context("failed to parse ingestor key pair")?;
 
     let mut pha_ingestion_batch: BatchWriter<'_, IngestionHeader, IngestionDataSharePacket> =
-        BatchWriter::new_ingestion(aggregation_name, batch_uuid, date, pha_transport)?;
+        BatchWriter::new(
+            Batch::new_ingestion(aggregation_name, batch_uuid, date),
+            pha_transport,
+        );
     let mut facilitator_ingestion_batch: BatchWriter<
         '_,
         IngestionHeader,
         IngestionDataSharePacket,
-    > = BatchWriter::new_ingestion(aggregation_name, batch_uuid, date, facilitator_transport)?;
+    > = BatchWriter::new(
+        Batch::new_ingestion(aggregation_name, batch_uuid, date),
+        facilitator_transport,
+    );
 
     // Generate random data packets and write into data share packets
     let mut thread_rng = thread_rng();

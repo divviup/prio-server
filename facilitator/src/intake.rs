@@ -1,5 +1,5 @@
 use crate::{
-    batch::{BatchIO, BatchReader, BatchWriter},
+    batch::{Batch, BatchReader, BatchWriter},
     idl::{IngestionDataSharePacket, IngestionHeader, Packet, ValidationHeader, ValidationPacket},
     transport::Transport,
     Error,
@@ -36,19 +36,14 @@ impl<'a> BatchIntaker<'a> {
         ingestor_key: &'a UnparsedPublicKey<Vec<u8>>,
     ) -> Result<BatchIntaker<'a>> {
         Ok(BatchIntaker {
-            ingestion_batch: BatchReader::new_ingestion(
-                aggregation_name,
-                batch_id,
-                date,
+            ingestion_batch: BatchReader::new(
+                Batch::new_ingestion(aggregation_name, batch_id, date),
                 ingestion_transport,
-            )?,
-            validation_batch: BatchWriter::new_validation(
-                aggregation_name,
-                batch_id,
-                date,
-                is_first,
+            ),
+            validation_batch: BatchWriter::new(
+                Batch::new_validation(aggregation_name, batch_id, date, is_first),
                 validation_transport,
-            )?,
+            ),
             is_first,
             share_processor_ecies_key,
             share_processor_signing_key,

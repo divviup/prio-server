@@ -1,7 +1,7 @@
 use chrono::NaiveDateTime;
 use facilitator::{
     aggregation::BatchAggregator,
-    batch::{BatchIO, BatchReader},
+    batch::{Batch, BatchReader},
     idl::{IngestionDataSharePacket, SumPart},
     intake::BatchIntaker,
     sample::generate_ingestion_sample,
@@ -230,14 +230,10 @@ fn end_to_end() {
     );
 
     let pha_aggregation_batch_reader: BatchReader<'_, SumPart, IngestionDataSharePacket> =
-        BatchReader::new_sum(
-            &aggregation_name,
-            &start_date,
-            &end_date,
-            true,
+        BatchReader::new(
+            Batch::new_sum(&aggregation_name, &start_date, &end_date, true),
             &mut aggregation_transport,
-        )
-        .unwrap();
+        );
     let pha_sum_part = pha_aggregation_batch_reader.header(&pha_pub_signing_key);
     assert!(
         pha_sum_part.is_ok(),
@@ -254,14 +250,10 @@ fn end_to_end() {
     );
 
     let facilitator_aggregation_batch_reader: BatchReader<'_, SumPart, IngestionDataSharePacket> =
-        BatchReader::new_sum(
-            &aggregation_name,
-            &start_date,
-            &end_date,
-            false,
+        BatchReader::new(
+            Batch::new_sum(&aggregation_name, &start_date, &end_date, false),
             &mut aggregation_transport,
-        )
-        .unwrap();
+        );
     let facilitator_sum_part =
         facilitator_aggregation_batch_reader.header(&facilitator_pub_signing_key);
     assert!(
