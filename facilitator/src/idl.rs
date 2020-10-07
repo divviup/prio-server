@@ -45,6 +45,7 @@ pub trait Packet: Sized {
     /// reader for each packet. The Reader must have been created with the
     /// schema returned from Packet::schema.
     fn write<W: Write>(&self, writer: &mut Writer<W>) -> Result<(), Error>;
+
     fn schema_raw() -> &'static str;
 
     /// Creates an avro_rs::Schema from the packet schema. For constructing the
