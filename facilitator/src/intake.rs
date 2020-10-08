@@ -37,7 +37,7 @@ impl<'a> BatchIntaker<'a> {
     ) -> Result<BatchIntaker<'a>> {
         Ok(BatchIntaker {
             ingestion_batch: BatchReader::new_ingestion(
-                aggregation_name.clone(),
+                aggregation_name,
                 batch_id,
                 date,
                 ingestion_transport,
