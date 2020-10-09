@@ -24,6 +24,7 @@ pub struct BatchIntaker<'a> {
 }
 
 impl<'a> BatchIntaker<'a> {
+    #[allow(clippy::too_many_arguments)] // Grandfathered in
     pub fn new(
         aggregation_name: &str,
         batch_id: &Uuid,

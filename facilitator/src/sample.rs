@@ -15,6 +15,7 @@ use rand::{thread_rng, Rng};
 use ring::signature::{EcdsaKeyPair, ECDSA_P256_SHA256_FIXED_SIGNING};
 use uuid::Uuid;
 
+#[allow(clippy::too_many_arguments)] // Grandfathered in
 pub fn generate_ingestion_sample(
     pha_transport: &mut dyn Transport,
     facilitator_transport: &mut dyn Transport,

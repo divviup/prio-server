@@ -30,6 +30,7 @@ pub struct BatchAggregator<'a> {
 }
 
 impl<'a> BatchAggregator<'a> {
+    #[allow(clippy::too_many_arguments)] // Grandfathered in
     pub fn new(
         aggregation_name: &'a str,
         aggregation_start: &'a NaiveDateTime,
