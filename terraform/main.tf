@@ -10,6 +10,15 @@ variable "gcp_project" {
   type = string
 }
 
+variable "aws_region" {
+  type = string
+}
+
+variable "aws_profile" {
+  type    = string
+  default = "leuswest2"
+}
+
 variable "machine_type" {
   type    = string
   default = "e2.small"
@@ -54,6 +63,13 @@ provider "google-beta" {
   project = var.gcp_project
 }
 
+provider "aws" {
+  # aws_s3_bucket resources will be created in the region specified here
+  # https://github.com/hashicorp/terraform/issues/12512
+  region  = var.aws_region
+  profile = var.aws_profile
+}
+
 provider "kubernetes" {
   host                   = module.gke.cluster_endpoint
   cluster_ca_certificate = base64decode(module.gke.certificate_authority_data)
@@ -66,18 +82,19 @@ module "gke" {
   environment     = var.environment
   resource_prefix = local.resource_prefix
   gcp_region      = var.gcp_region
+  gcp_project     = var.gcp_project
   machine_type    = var.machine_type
 }
 
-module "kubernetes" {
+module "facilitator" {
   for_each                  = toset(var.peer_share_processor_names)
-  source                    = "./modules/kubernetes/"
-  peer_share_processor_name = each.key
+  source                    = "./modules/facilitator"
   environment               = var.environment
+  peer_share_processor_name = each.key
+  gcp_project               = var.gcp_project
 
   depends_on = [module.gke]
 }
-
 output "gke_kubeconfig" {
   value = "Run this command to update your kubectl config: gcloud container clusters get-credentials ${module.gke.cluster_name} --region ${var.gcp_region}"
 }
