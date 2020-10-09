@@ -33,4 +33,6 @@ uuid = { version = "0.8", features = ["serde", "v4"] }
 vergen = "3"
 
 [dev-dependencies]
+assert_matches = "1.4.0"
 rusoto_mock = { version = "0.45.0", default_features = false, features = ["rustls"] }
+serde_test = "1.0"
