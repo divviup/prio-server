@@ -2,19 +2,20 @@ use crate::Error;
 use anyhow::{Context, Result};
 use derivative::Derivative;
 use hyper_rustls::HttpsConnector;
-use rusoto_core::credential::DefaultCredentialsProvider;
-use rusoto_core::{ByteStream, Region};
+use rusoto_core::{credential::DefaultCredentialsProvider, ByteStream, Region};
 use rusoto_s3::{
     AbortMultipartUploadRequest, CompleteMultipartUploadRequest, CompletedMultipartUpload,
     CompletedPart, CreateMultipartUploadRequest, GetObjectRequest, S3Client, UploadPartRequest, S3,
 };
-use std::boxed::Box;
-use std::fs::{create_dir_all, File};
-use std::io::{Read, Write};
-use std::mem;
-use std::path::{PathBuf, MAIN_SEPARATOR};
-use std::pin::Pin;
-use std::time::Duration;
+use std::{
+    boxed::Box,
+    fs::{create_dir_all, File},
+    io::{Read, Write},
+    mem,
+    path::{PathBuf, MAIN_SEPARATOR},
+    pin::Pin,
+    time::Duration,
+};
 use tokio::{
     io::{AsyncRead, AsyncReadExt},
     runtime::{Builder, Runtime},

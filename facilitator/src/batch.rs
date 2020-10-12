@@ -11,8 +11,10 @@ use ring::{
     rand::SystemRandom,
     signature::{EcdsaKeyPair, Signature, UnparsedPublicKey},
 };
-use std::io::{Cursor, Read, Write};
-use std::marker::PhantomData;
+use std::{
+    io::{Cursor, Read, Write},
+    marker::PhantomData,
+};
 use uuid::Uuid;
 
 /// Manages the paths to the different files in a batch

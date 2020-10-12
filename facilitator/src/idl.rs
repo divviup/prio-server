@@ -6,9 +6,11 @@ use avro_rs::{
 };
 use prio::{finite_field::Field, server::VerificationMessage};
 use serde::{Deserialize, Serialize};
-use std::convert::TryFrom;
-use std::io::{Read, Write};
-use std::num::TryFromIntError;
+use std::{
+    convert::TryFrom,
+    io::{Read, Write},
+    num::TryFromIntError,
+};
 use uuid::Uuid;
 
 const INGESTION_HEADER_SCHEMA: &str = include_str!("../../avro-schema/ingestion-header.avsc");
