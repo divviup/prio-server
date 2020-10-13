@@ -439,6 +439,7 @@ dependencies = [
  "derivative",
  "hyper",
  "hyper-rustls 0.21.0",
+ "pem",
  "prio",
  "rand 0.7.3",
  "reqwest",
@@ -448,6 +449,7 @@ dependencies = [
  "rusoto_s3",
  "rusoto_sts",
  "serde",
+ "serde_json",
  "tempfile",
  "thiserror",
  "tokio",
@@ -1032,6 +1034,17 @@ name = "openssl-probe"
 version = "0.1.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "77af24da69f9d9341038eba93a073b1fdaaa1b788221b00a69bce9e762cb32de"
+
+[[package]]
+name = "pem"
+version = "0.8.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "59698ea79df9bf77104aefd39cc3ec990cb9693fb59c3b0a70ddf2646fdffb4b"
+dependencies = [
+ "base64 0.12.3",
+ "once_cell",
+ "regex",
+]
 
 [[package]]
 name = "percent-encoding"
