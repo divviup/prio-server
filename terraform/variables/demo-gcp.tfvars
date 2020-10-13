@@ -4,3 +4,5 @@ gcp_project                = "prio-bringup-290620"
 machine_type               = "e2-small"
 peer_share_processor_names = ["test-pha-1", "test-pha-2"]
 aws_region                 = "us-west-1"
+# Graciously donated by jrenken
+manifest_domain = "portcull.is"

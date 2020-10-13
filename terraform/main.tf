@@ -28,8 +28,9 @@ variable "peer_share_processor_names" {
   type = list(string)
 }
 
-locals {
-  resource_prefix = "prio-${var.environment}"
+variable "manifest_domain" {
+  type        = string
+  description = "Domain (plus optional relative path) to which this environment's global and specific manifests should be uploaded."
 }
 
 terraform {
@@ -77,10 +78,17 @@ provider "kubernetes" {
   load_config_file       = false
 }
 
+module "manifest" {
+  source      = "./modules/manifest"
+  environment = var.environment
+  gcp_region  = var.gcp_region
+  domain      = var.manifest_domain
+}
+
 module "gke" {
   source          = "./modules/gke"
   environment     = var.environment
-  resource_prefix = local.resource_prefix
+  resource_prefix = "prio-${var.environment}"
   gcp_region      = var.gcp_region
   gcp_project     = var.gcp_project
   machine_type    = var.machine_type
@@ -95,6 +103,11 @@ module "data_share_processors" {
 
   depends_on = [module.gke]
 }
+
+output "manifest_bucket" {
+  value = module.manifest.bucket
+}
+
 output "gke_kubeconfig" {
   value = "Run this command to update your kubectl config: gcloud container clusters get-credentials ${module.gke.cluster_name} --region ${var.gcp_region}"
 }
