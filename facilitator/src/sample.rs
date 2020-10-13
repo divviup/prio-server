@@ -1,5 +1,5 @@
 use crate::{
-    batch::{BatchIO, BatchWriter},
+    batch::{Batch, BatchWriter},
     idl::{IngestionDataSharePacket, IngestionHeader, Packet},
     transport::Transport,
 };
@@ -15,6 +15,7 @@ use rand::{thread_rng, Rng};
 use ring::signature::{EcdsaKeyPair, ECDSA_P256_SHA256_FIXED_SIGNING};
 use uuid::Uuid;
 
+#[allow(clippy::too_many_arguments)] // Grandfathered in
 pub fn generate_ingestion_sample(
     pha_transport: &mut dyn Transport,
     facilitator_transport: &mut dyn Transport,
@@ -39,12 +40,18 @@ pub fn generate_ingestion_sample(
             .context("failed to parse ingestor key pair")?;
 
     let mut pha_ingestion_batch: BatchWriter<'_, IngestionHeader, IngestionDataSharePacket> =
-        BatchWriter::new_ingestion(aggregation_name, batch_uuid, date, pha_transport)?;
+        BatchWriter::new(
+            Batch::new_ingestion(aggregation_name, batch_uuid, date),
+            pha_transport,
+        );
     let mut facilitator_ingestion_batch: BatchWriter<
         '_,
         IngestionHeader,
         IngestionDataSharePacket,
-    > = BatchWriter::new_ingestion(aggregation_name, batch_uuid, date, facilitator_transport)?;
+    > = BatchWriter::new(
+        Batch::new_ingestion(aggregation_name, batch_uuid, date),
+        facilitator_transport,
+    );
 
     // Generate random data packets and write into data share packets
     let mut thread_rng = thread_rng();
@@ -116,12 +123,12 @@ pub fn generate_ingestion_sample(
                     batch_uuid: *batch_uuid,
                     name: aggregation_name.to_owned(),
                     bins: dim,
-                    epsilon: epsilon,
+                    epsilon,
                     prime: MODULUS as i64,
                     number_of_servers: 2,
                     hamming_weight: None,
-                    batch_start_time: batch_start_time,
-                    batch_end_time: batch_end_time,
+                    batch_start_time,
+                    batch_end_time,
                     packet_file_digest: facilitator_packet_file_digest.as_ref().to_vec(),
                 },
                 &ingestor_key_pair,
@@ -135,12 +142,12 @@ pub fn generate_ingestion_sample(
             batch_uuid: *batch_uuid,
             name: aggregation_name.to_owned(),
             bins: dim,
-            epsilon: epsilon,
+            epsilon,
             prime: MODULUS as i64,
             number_of_servers: 2,
             hamming_weight: None,
-            batch_start_time: batch_start_time,
-            batch_end_time: batch_end_time,
+            batch_start_time,
+            batch_end_time,
             packet_file_digest: pha_packet_file_digest.as_ref().to_vec(),
         },
         &ingestor_key_pair,

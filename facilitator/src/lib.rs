@@ -72,10 +72,7 @@ pub struct SidecarWriter<T: Write, W: Write> {
 
 impl<T: Write, W: Write> SidecarWriter<T, W> {
     fn new(writer: T, sidecar: W) -> SidecarWriter<T, W> {
-        SidecarWriter {
-            writer: writer,
-            sidecar: sidecar,
-        }
+        SidecarWriter { writer, sidecar }
     }
 }
 

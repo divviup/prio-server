@@ -6,9 +6,11 @@ use avro_rs::{
 };
 use prio::{finite_field::Field, server::VerificationMessage};
 use serde::{Deserialize, Serialize};
-use std::convert::TryFrom;
-use std::io::{Read, Write};
-use std::num::TryFromIntError;
+use std::{
+    convert::TryFrom,
+    io::{Read, Write},
+    num::TryFromIntError,
+};
 use uuid::Uuid;
 
 const INGESTION_HEADER_SCHEMA: &str = include_str!("../../avro-schema/ingestion-header.avsc");
@@ -43,6 +45,7 @@ pub trait Packet: Sized {
     /// reader for each packet. The Reader must have been created with the
     /// schema returned from Packet::schema.
     fn write<W: Write>(&self, writer: &mut Writer<W>) -> Result<(), Error>;
+
     fn schema_raw() -> &'static str;
 
     /// Creates an avro_rs::Schema from the packet schema. For constructing the
@@ -70,14 +73,15 @@ pub struct IngestionHeader {
 }
 
 impl IngestionHeader {
+    #[allow(clippy::float_cmp)]
     pub fn check_parameters(&self, validation_header: &ValidationHeader) -> bool {
-        return self.batch_uuid == validation_header.batch_uuid
+        self.batch_uuid == validation_header.batch_uuid
             && self.name == validation_header.name
             && self.bins == validation_header.bins
             && self.epsilon == validation_header.epsilon
             && self.prime == validation_header.prime
             && self.number_of_servers == validation_header.number_of_servers
-            && self.hamming_weight == validation_header.hamming_weight;
+            && self.hamming_weight == validation_header.hamming_weight
     }
 }
 
@@ -110,7 +114,7 @@ impl Header for IngestionHeader {
             }
             None => return Err(Error::EofError),
         };
-        if let Some(_) = reader.next() {
+        if reader.next().is_some() {
             return Err(Error::MalformedHeaderError(
                 "excess header in reader".to_owned(),
             ));
@@ -185,7 +189,7 @@ impl Header for IngestionHeader {
             epsilon: epsilon.unwrap(),
             prime: prime.unwrap(),
             number_of_servers: number_of_servers.unwrap(),
-            hamming_weight: hamming_weight,
+            hamming_weight,
             batch_start_time: batch_start_time.unwrap(),
             batch_end_time: batch_end_time.unwrap(),
             packet_file_digest: packet_file_digest.unwrap(),
@@ -340,8 +344,8 @@ impl Packet for IngestionDataSharePacket {
             encrypted_payload: encrypted_payload.unwrap(),
             encryption_key_id: encryption_key_id.unwrap(),
             r_pit: r_pit.unwrap(),
-            version_configuration: version_configuration,
-            device_nonce: device_nonce,
+            version_configuration,
+            device_nonce,
         })
     }
 
@@ -404,14 +408,15 @@ pub struct ValidationHeader {
 }
 
 impl ValidationHeader {
+    #[allow(clippy::float_cmp)]
     pub fn check_parameters(&self, validation_header: &ValidationHeader) -> bool {
-        return self.batch_uuid == validation_header.batch_uuid
+        self.batch_uuid == validation_header.batch_uuid
             && self.name == validation_header.name
             && self.bins == validation_header.bins
             && self.epsilon == validation_header.epsilon
             && self.prime == validation_header.prime
             && self.number_of_servers == validation_header.number_of_servers
-            && self.hamming_weight == validation_header.hamming_weight;
+            && self.hamming_weight == validation_header.hamming_weight
     }
 }
 
@@ -447,7 +452,7 @@ impl Header for ValidationHeader {
             }
             None => return Err(Error::EofError),
         };
-        if let Some(_) = reader.next() {
+        if reader.next().is_some() {
             return Err(Error::MalformedHeaderError(
                 "excess header in reader".to_owned(),
             ));
@@ -516,7 +521,7 @@ impl Header for ValidationHeader {
             epsilon: epsilon.unwrap(),
             prime: prime.unwrap(),
             number_of_servers: number_of_servers.unwrap(),
-            hamming_weight: hamming_weight,
+            hamming_weight,
             packet_file_digest: packet_file_digest.unwrap(),
         })
     }
@@ -543,7 +548,7 @@ impl Header for ValidationHeader {
         record.put(
             "hamming_weight",
             Value::Union(Box::new(
-                self.hamming_weight.map_or(Value::Null, |v| Value::Int(v)),
+                self.hamming_weight.map_or(Value::Null, Value::Int),
             )),
         );
         record.put(
@@ -683,7 +688,7 @@ impl Header for SumPart {
             }
             None => return Err(Error::EofError),
         };
-        if let Some(_) = reader.next() {
+        if reader.next().is_some() {
             return Err(Error::MalformedHeaderError(
                 "excess header in reader".to_owned(),
             ));
@@ -793,7 +798,7 @@ impl Header for SumPart {
             epsilon: epsilon.unwrap(),
             prime: prime.unwrap(),
             number_of_servers: number_of_servers.unwrap(),
-            hamming_weight: hamming_weight,
+            hamming_weight,
             sum: sum.unwrap(),
             aggregation_start_time: aggregation_start_time.unwrap(),
             aggregation_end_time: aggregation_end_time.unwrap(),

@@ -2,19 +2,20 @@ use crate::Error;
 use anyhow::{Context, Result};
 use derivative::Derivative;
 use hyper_rustls::HttpsConnector;
-use rusoto_core::credential::DefaultCredentialsProvider;
-use rusoto_core::{ByteStream, Region};
+use rusoto_core::{credential::DefaultCredentialsProvider, ByteStream, Region};
 use rusoto_s3::{
     AbortMultipartUploadRequest, CompleteMultipartUploadRequest, CompletedMultipartUpload,
     CompletedPart, CreateMultipartUploadRequest, GetObjectRequest, S3Client, UploadPartRequest, S3,
 };
-use std::boxed::Box;
-use std::fs::{create_dir_all, File};
-use std::io::{Read, Write};
-use std::mem;
-use std::path::{PathBuf, MAIN_SEPARATOR};
-use std::pin::Pin;
-use std::time::Duration;
+use std::{
+    boxed::Box,
+    fs::{create_dir_all, File},
+    io::{Read, Write},
+    mem,
+    path::{PathBuf, MAIN_SEPARATOR},
+    pin::Pin,
+    time::Duration,
+};
 use tokio::{
     io::{AsyncRead, AsyncReadExt},
     runtime::{Builder, Runtime},
@@ -208,7 +209,7 @@ impl StreamingBodyReader {
     fn new(body: ByteStream, runtime: Runtime) -> StreamingBodyReader {
         StreamingBodyReader {
             body_reader: Box::pin(body.into_async_read()),
-            runtime: runtime,
+            runtime,
         }
     }
 }
@@ -268,10 +269,10 @@ impl MultipartUploadWriter {
             .context("error creating multipart upload")?;
 
         Ok(MultipartUploadWriter {
-            runtime: runtime,
-            client: client,
-            bucket: bucket,
-            key: key,
+            runtime,
+            client,
+            bucket,
+            key,
             upload_id: create_output
                 .upload_id
                 .context("no upload ID in CreateMultipartUploadResponse")?,
@@ -279,7 +280,7 @@ impl MultipartUploadWriter {
             // Upload parts must be at least buffer_capacity, but it's fine if
             // they're bigger, so overprovision the buffer to make it unlikely
             // that the caller will overflow it.
-            minimum_upload_part_size: minimum_upload_part_size,
+            minimum_upload_part_size,
             buffer: Vec::with_capacity(minimum_upload_part_size * 2),
         })
     }
@@ -315,22 +316,22 @@ impl MultipartUploadWriter {
                 }),
             )
             .context("failed to upload_part")
-            .or_else(|e| {
+            .map_err(|e| {
                 // Clean up botched uploads
                 if let Err(cancel) = self.cancel_upload() {
-                    return Err(cancel.context(e));
+                    return cancel.context(e);
                 }
-                Err(e)
+                e
             })?;
 
         let e_tag = upload_output
             .e_tag
             .context("no ETag in UploadPartOutput")
-            .or_else(|e| {
+            .map_err(|e| {
                 if let Err(cancel) = self.cancel_upload() {
-                    return Err(cancel.context(e));
+                    return cancel.context(e);
                 }
-                Err(e)
+                e
             })?;
 
         let completed_part = CompletedPart {

@@ -11,8 +11,10 @@ use ring::{
     rand::SystemRandom,
     signature::{EcdsaKeyPair, Signature, UnparsedPublicKey},
 };
-use std::io::{Cursor, Read, Write};
-use std::marker::PhantomData;
+use std::{
+    io::{Cursor, Read, Write},
+    marker::PhantomData,
+};
 use uuid::Uuid;
 
 /// Manages the paths to the different files in a batch
@@ -24,12 +26,12 @@ pub struct Batch {
 
 impl Batch {
     /// Creates a Batch representing an ingestion batch
-    fn new_ingestion(aggregation_name: &str, batch_id: &Uuid, date: &NaiveDateTime) -> Batch {
+    pub fn new_ingestion(aggregation_name: &str, batch_id: &Uuid, date: &NaiveDateTime) -> Batch {
         Batch::new(aggregation_name, batch_id, date, "batch")
     }
 
     /// Creates a Batch representing a validation batch
-    fn new_validation(
+    pub fn new_validation(
         aggregation_name: &str,
         batch_id: &Uuid,
         date: &NaiveDateTime,
@@ -44,7 +46,7 @@ impl Batch {
     }
 
     // Creates a batch representing a sum part batch
-    fn new_sum(
+    pub fn new_sum(
         aggregation_name: &str,
         aggregation_start: &NaiveDateTime,
         aggregation_end: &NaiveDateTime,
@@ -96,53 +98,6 @@ impl Batch {
     }
 }
 
-pub trait BatchIO<'a, H, P>: Sized {
-    fn new_ingestion(
-        aggregation_name: &str,
-        batch_id: &Uuid,
-        date: &NaiveDateTime,
-        transport: &'a mut dyn Transport,
-    ) -> Result<Self> {
-        Self::new(
-            Batch::new_ingestion(aggregation_name, batch_id, date),
-            transport,
-        )
-    }
-
-    fn new_validation(
-        aggregation_name: &str,
-        batch_id: &Uuid,
-        date: &NaiveDateTime,
-        is_first: bool,
-        transport: &'a mut dyn Transport,
-    ) -> Result<Self> {
-        Self::new(
-            Batch::new_validation(aggregation_name, batch_id, date, is_first),
-            transport,
-        )
-    }
-
-    fn new_sum(
-        aggregation_name: &str,
-        aggregation_start: &NaiveDateTime,
-        aggregation_end: &NaiveDateTime,
-        is_first: bool,
-        transport: &'a mut dyn Transport,
-    ) -> Result<Self> {
-        Self::new(
-            Batch::new_sum(
-                aggregation_name,
-                aggregation_start,
-                aggregation_end,
-                is_first,
-            ),
-            transport,
-        )
-    }
-
-    fn new(batch: Batch, transport: &'a mut dyn Transport) -> Result<Self>;
-}
-
 /// Allows reading files, including signature validation, from an ingestion or
 /// validation batch containing a header, a packet file and a signature.
 pub struct BatchReader<'a, H, P> {
@@ -151,23 +106,21 @@ pub struct BatchReader<'a, H, P> {
     packet_schema: Schema,
     // These next two fields are not real and are used because not using H and P
     // in the struct definition is an error.
-    phantom_header: PhantomData<&'a H>,
-    phantom_packet: PhantomData<&'a P>,
-}
-
-impl<'a, H: Header, P: Packet> BatchIO<'a, H, P> for BatchReader<'a, H, P> {
-    fn new(batch: Batch, transport: &'a mut dyn Transport) -> Result<Self> {
-        Ok(BatchReader {
-            batch: batch,
-            transport: transport,
-            packet_schema: P::schema(),
-            phantom_header: PhantomData,
-            phantom_packet: PhantomData,
-        })
-    }
+    phantom_header: PhantomData<*const H>,
+    phantom_packet: PhantomData<*const P>,
 }
 
 impl<'a, H: Header, P: Packet> BatchReader<'a, H, P> {
+    pub fn new(batch: Batch, transport: &'a mut dyn Transport) -> Self {
+        BatchReader {
+            batch,
+            transport,
+            packet_schema: P::schema(),
+            phantom_header: PhantomData,
+            phantom_packet: PhantomData,
+        }
+    }
+
     /// Return the parsed header from this batch, but only if its signature is
     /// valid.
     pub fn header(&self, key: &UnparsedPublicKey<Vec<u8>>) -> Result<H> {
@@ -231,23 +184,21 @@ pub struct BatchWriter<'a, H, P> {
     batch: Batch,
     transport: &'a mut dyn Transport,
     packet_schema: Schema,
-    phantom_header: PhantomData<&'a H>,
-    phantom_packet: PhantomData<&'a P>,
-}
-
-impl<'a, H: Header, P: Packet> BatchIO<'a, H, P> for BatchWriter<'a, H, P> {
-    fn new(batch: Batch, transport: &'a mut dyn Transport) -> Result<Self> {
-        Ok(BatchWriter {
-            batch: batch,
-            transport: transport,
-            packet_schema: P::schema(),
-            phantom_header: PhantomData,
-            phantom_packet: PhantomData,
-        })
-    }
+    phantom_header: PhantomData<*const H>,
+    phantom_packet: PhantomData<*const P>,
 }
 
 impl<'a, H: Header, P: Packet> BatchWriter<'a, H, P> {
+    pub fn new(batch: Batch, transport: &'a mut dyn Transport) -> Self {
+        BatchWriter {
+            batch,
+            transport,
+            packet_schema: P::schema(),
+            phantom_header: PhantomData,
+            phantom_packet: PhantomData,
+        }
+    }
+
     /// Encode the provided header into Avro, sign that representation with the
     /// provided key and write the header into the batch. Returns the signature
     /// on success.
@@ -465,11 +416,15 @@ mod tests {
         let date = NaiveDateTime::from_timestamp(2234567890, 654321);
 
         let mut batch_writer: BatchWriter<'_, IngestionHeader, IngestionDataSharePacket> =
-            BatchWriter::new_ingestion(&aggregation_name, &batch_id, &date, &mut write_transport)
-                .unwrap();
+            BatchWriter::new(
+                Batch::new_ingestion(&aggregation_name, &batch_id, &date),
+                &mut write_transport,
+            );
         let batch_reader: BatchReader<'_, IngestionHeader, IngestionDataSharePacket> =
-            BatchReader::new_ingestion(&aggregation_name, &batch_id, &date, &mut read_transport)
-                .unwrap();
+            BatchReader::new(
+                Batch::new_ingestion(&aggregation_name, &batch_id, &date),
+                &mut read_transport,
+            );
         let base_path = format!(
             "{}/{}/{}",
             aggregation_name,
@@ -530,23 +485,15 @@ mod tests {
         let date = NaiveDateTime::from_timestamp(2234567890, 654321);
 
         let mut batch_writer: BatchWriter<'_, IngestionHeader, IngestionDataSharePacket> =
-            BatchWriter::new_validation(
-                &aggregation_name,
-                &batch_id,
-                &date,
-                is_first,
+            BatchWriter::new(
+                Batch::new_validation(&aggregation_name, &batch_id, &date, is_first),
                 &mut write_transport,
-            )
-            .unwrap();
+            );
         let batch_reader: BatchReader<'_, IngestionHeader, IngestionDataSharePacket> =
-            BatchReader::new_validation(
-                &aggregation_name,
-                &batch_id,
-                &date,
-                is_first,
+            BatchReader::new(
+                Batch::new_validation(&aggregation_name, &batch_id, &date, is_first),
                 &mut read_transport,
-            )
-            .unwrap();
+            );
         let base_path = format!(
             "{}/{}/{}",
             aggregation_name,
@@ -618,23 +565,15 @@ mod tests {
         let end = NaiveDateTime::from_timestamp(2234567890, 654321);
 
         let mut batch_writer: BatchWriter<'_, IngestionHeader, IngestionDataSharePacket> =
-            BatchWriter::new_sum(
-                &aggregation_name,
-                &start,
-                &end,
-                is_first,
+            BatchWriter::new(
+                Batch::new_sum(&aggregation_name, &start, &end, is_first),
                 &mut write_transport,
-            )
-            .unwrap();
+            );
         let batch_reader: BatchReader<'_, IngestionHeader, IngestionDataSharePacket> =
-            BatchReader::new_sum(
-                &aggregation_name,
-                &start,
-                &end,
-                is_first,
+            BatchReader::new(
+                Batch::new_sum(&aggregation_name, &start, &end, is_first),
                 &mut read_transport,
-            )
-            .unwrap();
+            );
         let batch_path = format!(
             "{}/{}-{}",
             aggregation_name,

@@ -1,5 +1,5 @@
 use crate::{
-    batch::{BatchIO, BatchReader, BatchWriter},
+    batch::{Batch, BatchReader, BatchWriter},
     idl::{
         IngestionDataSharePacket, IngestionHeader, InvalidPacket, Packet, SumPart,
         ValidationHeader, ValidationPacket,
@@ -30,6 +30,7 @@ pub struct BatchAggregator<'a> {
 }
 
 impl<'a> BatchAggregator<'a> {
+    #[allow(clippy::too_many_arguments)] // Grandfathered in
     pub fn new(
         aggregation_name: &'a str,
         aggregation_start: &'a NaiveDateTime,
@@ -45,30 +46,32 @@ impl<'a> BatchAggregator<'a> {
         share_processor_ecies_key: &'a PrivateKey,
     ) -> Result<BatchAggregator<'a>> {
         Ok(BatchAggregator {
-            is_first: is_first,
-            aggregation_name: aggregation_name,
-            aggregation_start: aggregation_start,
-            aggregation_end: aggregation_end,
-            own_validation_transport: own_validation_transport,
-            peer_validation_transport: peer_validation_transport,
-            ingestion_transport: ingestion_transport,
-            aggregation_batch: BatchWriter::new_sum(
-                aggregation_name,
-                aggregation_start,
-                aggregation_end,
-                is_first,
+            is_first,
+            aggregation_name,
+            aggregation_start,
+            aggregation_end,
+            own_validation_transport,
+            peer_validation_transport,
+            ingestion_transport,
+            aggregation_batch: BatchWriter::new(
+                Batch::new_sum(
+                    aggregation_name,
+                    aggregation_start,
+                    aggregation_end,
+                    is_first,
+                ),
                 aggregation_transport,
-            )?,
-            ingestor_key: ingestor_key,
-            share_processor_signing_key: share_processor_signing_key,
-            peer_share_processor_key: peer_share_processor_key,
-            share_processor_ecies_key: share_processor_ecies_key,
+            ),
+            ingestor_key,
+            share_processor_signing_key,
+            peer_share_processor_key,
+            share_processor_ecies_key,
         })
     }
 
     /// Compute the sum part for all the provided batch IDs and write it out to
     /// the aggregation transport.
-    pub fn generate_sum_part(&mut self, batch_ids: &Vec<(Uuid, NaiveDateTime)>) -> Result<()> {
+    pub fn generate_sum_part(&mut self, batch_ids: &[(Uuid, NaiveDateTime)]) -> Result<()> {
         let share_processor_public_key = UnparsedPublicKey::new(
             &ECDSA_P256_SHA256_FIXED,
             Vec::from(self.share_processor_signing_key.public_key().as_ref()),
@@ -118,7 +121,7 @@ impl<'a> BatchAggregator<'a> {
                 prime: ingestion_header.prime,
                 number_of_servers: ingestion_header.number_of_servers,
                 hamming_weight: ingestion_header.hamming_weight,
-                sum: sum,
+                sum,
                 aggregation_start_time: self.aggregation_start.timestamp_millis(),
                 aggregation_end_time: self.aggregation_end.timestamp_millis(),
                 packet_file_digest: invalid_packets_digest.as_ref().to_vec(),
@@ -137,12 +140,10 @@ impl<'a> BatchAggregator<'a> {
         batch_date: &NaiveDateTime,
     ) -> Result<IngestionHeader> {
         let ingestion_batch: BatchReader<'_, IngestionHeader, IngestionDataSharePacket> =
-            BatchReader::new_ingestion(
-                self.aggregation_name,
-                batch_id,
-                batch_date,
+            BatchReader::new(
+                Batch::new_ingestion(self.aggregation_name, batch_id, batch_date),
                 self.ingestion_transport,
-            )?;
+            );
         let ingestion_header = ingestion_batch.header(&self.ingestor_key)?;
         Ok(ingestion_header)
     }
@@ -159,28 +160,20 @@ impl<'a> BatchAggregator<'a> {
         invalid_uuids: &mut Vec<Uuid>,
     ) -> Result<()> {
         let ingestion_batch: BatchReader<'_, IngestionHeader, IngestionDataSharePacket> =
-            BatchReader::new_ingestion(
-                self.aggregation_name,
-                batch_id,
-                batch_date,
+            BatchReader::new(
+                Batch::new_ingestion(self.aggregation_name, batch_id, batch_date),
                 self.ingestion_transport,
-            )?;
+            );
         let own_validation_batch: BatchReader<'_, ValidationHeader, ValidationPacket> =
-            BatchReader::new_validation(
-                self.aggregation_name,
-                batch_id,
-                batch_date,
-                self.is_first,
+            BatchReader::new(
+                Batch::new_validation(self.aggregation_name, batch_id, batch_date, self.is_first),
                 self.own_validation_transport,
-            )?;
+            );
         let peer_validation_batch: BatchReader<'_, ValidationHeader, ValidationPacket> =
-            BatchReader::new_validation(
-                self.aggregation_name,
-                batch_id,
-                batch_date,
-                !self.is_first,
+            BatchReader::new(
+                Batch::new_validation(self.aggregation_name, batch_id, batch_date, !self.is_first),
                 self.peer_validation_transport,
-            )?;
+            );
         let peer_validation_header =
             peer_validation_batch.header(&self.peer_share_processor_key)?;
         let own_validation_header = own_validation_batch.header(share_processor_public_key)?;
