@@ -219,6 +219,7 @@ fn main() -> Result<(), anyhow::Error> {
                 .arg(
                     Arg::with_name("ingestor-private-key")
                         .long("ingestor-private-key")
+                        .env("INGESTION_BATCH_SIGNING_KEY")
                         .value_name("B64")
                         .help(
                             "Base64 encoded ECDSA P256 private key for the \

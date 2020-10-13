@@ -115,6 +115,46 @@ resource "google_service_account_iam_binding" "workflow_manager_token" {
   ]
 }
 
+resource "kubernetes_secret" "batch_signing_key" {
+  metadata {
+    name      = "${var.environment}-${var.peer_share_processor_name}-batch-signing-key"
+    namespace = var.peer_share_processor_name
+  }
+
+  data = {
+    # We want this to be a Terraform resource that can be managed and destroyed
+    # by this module, but we do not want the cleartext private key to appear in
+    # the TF statefile. So we set a dummy value here, and will update the value
+    # later using kubectl. We use lifecycle.ignore_changes so that Terraform
+    # won't blow away the replaced value on subsequent applies.
+    signing_key = "not-a-real-key"
+  }
+
+  lifecycle {
+    ignore_changes = [
+      data["signing_key"]
+    ]
+  }
+}
+
+resource "kubernetes_secret" "ingestion_packet_decryption_key" {
+  metadata {
+    name      = "${var.environment}-${var.peer_share_processor_name}-ingestion-packet-decryption-key"
+    namespace = var.peer_share_processor_name
+  }
+
+  data = {
+    # See comment on batch_signing_key, above, about the initial value here.
+    decryption_key = "not-a-real-key"
+  }
+
+  lifecycle {
+    ignore_changes = [
+      data["decryption_key"]
+    ]
+  }
+}
+
 resource "kubernetes_cron_job" "workflow_manager" {
   metadata {
     name      = "${var.environment}-workflow-manager"
@@ -149,6 +189,24 @@ resource "kubernetes_cron_job" "workflow_manager" {
                 name  = "AWS_ROLE_ARN"
                 value = var.ingestion_bucket_role
               }
+              env {
+                name = "BATCH_SIGNING_KEY"
+                value_from {
+                  secret_key_ref {
+                    name = kubernetes_secret.batch_signing_key.metadata[0].name
+                    key  = "signing_key"
+                  }
+                }
+              }
+              env {
+                name = "INGESTION_PACKET_DECRYPTION_KEY"
+                value_from {
+                  secret_key_ref {
+                    name = kubernetes_secret.ingestion_packet_decryption_key.metadata[0].name
+                    key  = "decryption_key"
+                  }
+                }
+              }
             }
             # If we use any other restart policy, then when the job is finally
             # deemed to be a failure, Kubernetes will destroy the job, pod and
@@ -169,4 +227,12 @@ resource "kubernetes_cron_job" "workflow_manager" {
 
 output "service_account_unique_id" {
   value = google_service_account.workflow_manager.unique_id
+}
+
+output "batch_signing_key" {
+  value = kubernetes_secret.batch_signing_key.metadata[0].name
+}
+
+output "ingestion_packet_decryption_key" {
+  value = kubernetes_secret.ingestion_packet_decryption_key.metadata[0].name
 }
