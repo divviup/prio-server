@@ -1,6 +1,6 @@
 # Prio server Terraform module
 
-This Terraform module manages a [GKE cluster](https://cloud.google.com/kubernetes-engine/docs) which hosts a Prio data share processor. We create one cluster and one node pool in each region in which we operate, and then run each PHA's facilitator instance in its own Kubernetes namespace. Each facilitator consists of a [Kubernetes CronJob](https://kubernetes.io/docs/concepts/workloads/controllers/cron-jobs/) that runs a workflow manager.
+This Terraform module manages a [GKE cluster](https://cloud.google.com/kubernetes-engine/docs) which hosts a Prio data share processor. We create one cluster and one node pool in each region in which we operate, and then run each PHA's data share processor instance in its own Kubernetes namespace. Each data share processor consists of a [Kubernetes CronJob](https://kubernetes.io/docs/concepts/workloads/controllers/cron-jobs/) that runs a workflow manager.
 
 You will need these tools:
 
@@ -22,7 +22,7 @@ If you're having problems, check `gcloud config list` and `kubectl config curren
 
 ## New clusters
 
-To add a facilitator to support a new PHA in an existing region, add their PHA name to the `peer_share_processor_names` variable in the relevant `variables/<environment>.tfvars` file. To bring up a whole new cluster, drop a `your-new-environment.tfvars` file in `variables`, fill in the required variables and use `ENV=your-new-environment make apply` to deploy it. Multiple environments may be deployed to the same GCP region.
+To add a data share processor to support a new PHA in an existing region, add their PHA name to the `peer_share_processor_names` variable in the relevant `variables/<environment>.tfvars` file. To bring up a whole new cluster, drop a `your-new-environment.tfvars` file in `variables`, fill in the required variables and use `ENV=your-new-environment make apply` to deploy it. Multiple environments may be deployed to the same GCP region.
 
 ## kubectl configuration
 

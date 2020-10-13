@@ -86,9 +86,9 @@ module "gke" {
   machine_type    = var.machine_type
 }
 
-module "facilitator" {
+module "data_share_processors" {
   for_each                  = toset(var.peer_share_processor_names)
-  source                    = "./modules/facilitator"
+  source                    = "./modules/data_share_processor"
   environment               = var.environment
   peer_share_processor_name = each.key
   gcp_project               = var.gcp_project

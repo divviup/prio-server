@@ -11,14 +11,14 @@ variable "gcp_project" {
 }
 
 # This is the role in AWS we use to construct policy on the S3 buckets. It is
-# configured to allow access to the GCP service account for this facilitator via
-# Web Identity Federation
+# configured to allow access to the GCP service account for this data share
+# processor via Web Identity Federation
 # https://docs.aws.amazon.com/IAM/latest/UserGuide/id_roles_providers_oidc.html
 resource "aws_iam_role" "bucket_role" {
   name = "prio-${var.environment}-${var.peer_share_processor_name}-bucket-role"
-  # We currently use a single role per facilitator to gate read/write access to
-  # all buckets. We could use audiences to define more roles for read/write on
-  # each of the ingestion, validation and sum part buckets.
+  # We currently use a single role per data share processor to gate read/write
+  # access to all buckets. We could use audiences to define more roles for
+  # read/write on each of the ingestion, validation and sum part buckets.
   # https://docs.aws.amazon.com/IAM/latest/UserGuide/reference_policies_iam-condition-keys.html
   assume_role_policy = <<ROLE
 {

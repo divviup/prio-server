@@ -12,7 +12,9 @@ variable "container_registry" {
 }
 
 variable "workflow_manager_image" {
-  type    = string
+  type = string
+  # This should be "prio-data-share-processor" but we have not yet renamed the
+  # container image
   default = "prio-facilitator"
 }
 
@@ -33,7 +35,7 @@ variable "ingestion_bucket_role" {
   type = string
 }
 
-# Each facilitator is created in its own namespace
+# Each data share processor is created in its own namespace
 resource "kubernetes_namespace" "namespace" {
   metadata {
     name = var.peer_share_processor_name
@@ -53,7 +55,7 @@ resource "kubernetes_namespace" "namespace" {
 # [1] https://cloud.google.com/kubernetes-engine/docs/how-to/workload-identity
 # [2] https://kubernetes.io/docs/tasks/configure-pod-container/configure-service-account/#service-account-token-volume-projection
 
-# For each facilitator, we first create a GCP service account.
+# For each data share processor, we first create a GCP service account.
 resource "google_service_account" "workflow_manager" {
   provider = google-beta
   # The Account ID must be unique across the whole GCP project, and not just the
