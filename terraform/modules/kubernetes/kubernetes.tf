@@ -1,4 +1,4 @@
-variable "peer_share_processor_name" {
+variable "data_share_processor_name" {
   type = string
 }
 
@@ -40,7 +40,7 @@ data "aws_caller_identity" "current" {}
 # Each data share processor is created in its own namespace
 resource "kubernetes_namespace" "namespace" {
   metadata {
-    name = var.peer_share_processor_name
+    name = var.data_share_processor_name
     annotations = {
       environment = var.environment
     }
@@ -65,7 +65,7 @@ resource "google_service_account" "workflow_manager" {
   # environment and PHA name to get something unique. Instead, we generate a
   # random string.
   account_id   = "prio-${random_string.account_id.result}"
-  display_name = "prio-${var.environment}-${var.peer_share_processor_name}-workflow-manager"
+  display_name = "prio-${var.environment}-${var.data_share_processor_name}-workflow-manager"
 }
 
 resource "random_string" "account_id" {
@@ -121,8 +121,8 @@ resource "google_service_account_iam_binding" "workflow_manager_token" {
 
 resource "kubernetes_secret" "batch_signing_key" {
   metadata {
-    name      = "${var.environment}-${var.peer_share_processor_name}-batch-signing-key"
-    namespace = var.peer_share_processor_name
+    name      = "${var.environment}-${var.data_share_processor_name}-batch-signing-key"
+    namespace = var.data_share_processor_name
   }
 
   data = {
@@ -143,8 +143,8 @@ resource "kubernetes_secret" "batch_signing_key" {
 
 resource "kubernetes_secret" "ingestion_packet_decryption_key" {
   metadata {
-    name      = "${var.environment}-${var.peer_share_processor_name}-ingestion-packet-decryption-key"
-    namespace = var.peer_share_processor_name
+    name      = "${var.environment}-${var.data_share_processor_name}-ingestion-packet-decryption-key"
+    namespace = var.data_share_processor_name
   }
 
   data = {
@@ -162,7 +162,7 @@ resource "kubernetes_secret" "ingestion_packet_decryption_key" {
 resource "kubernetes_cron_job" "workflow_manager" {
   metadata {
     name      = "${var.environment}-workflow-manager"
-    namespace = var.peer_share_processor_name
+    namespace = var.data_share_processor_name
 
     annotations = {
       environment = var.environment

@@ -28,9 +28,18 @@ variable "peer_share_processor_names" {
   type = list(string)
 }
 
+variable "ingestors" {
+  type        = map(string)
+  description = "Map of ingestor names to the URL where their global manifest may be found."
+}
+
 variable "manifest_domain" {
   type        = string
   description = "Domain (plus optional relative path) to which this environment's global and specific manifests should be uploaded."
+}
+
+variable "peer_share_processor_manifest_domain" {
+  type = string
 }
 
 terraform {
@@ -95,12 +104,42 @@ module "gke" {
   machine_type    = var.machine_type
 }
 
+# For each peer data share processor, we will receive ingestion batches from two
+# ingestion servers. We create a distinct data share processor instance for each
+# (peer, ingestor) pair.
+# First, we fetch the ingestor global manifests, which yields a map of ingestor
+# name => HTTP content.
+data "http" "ingestor_global_manifests" {
+  for_each = var.ingestors
+  url      = "https://${each.value}/global-manifest.json"
+}
+
+# Then we fetch the single global manifest for all the peer share processors.
+data "http" "peer_share_processor_global_manifest" {
+  url = "https://${var.peer_share_processor_manifest_domain}/global-manifest.json"
+}
+
+# Now, we take the set product of peer share processor names x ingestor names to
+# get the config values for all the data share processors we need to create.
+locals {
+  peer_ingestor_pairs = {
+    for pair in setproduct(toset(var.peer_share_processor_names), keys(var.ingestors)) :
+    "${pair[0]}-${pair[1]}" => {
+      ingestor_aws_role_arn           = lookup(jsondecode(data.http.ingestor_global_manifests[pair[1]].body), "aws-iam-entity", "")
+      ingestor_gcp_service_account_id = lookup(jsondecode(data.http.ingestor_global_manifests[pair[1]].body), "google-service-account", "")
+    }
+  }
+}
+
 module "data_share_processors" {
-  for_each                  = toset(var.peer_share_processor_names)
-  source                    = "./modules/data_share_processor"
-  environment               = var.environment
-  peer_share_processor_name = each.key
-  gcp_project               = var.gcp_project
+  for_each                            = local.peer_ingestor_pairs
+  source                              = "./modules/data_share_processor"
+  environment                         = var.environment
+  data_share_processor_name           = each.key
+  gcp_project                         = var.gcp_project
+  ingestor_aws_role_arn               = each.value.ingestor_aws_role_arn
+  ingestor_google_service_account_id  = each.value.ingestor_gcp_service_account_id
+  peer_share_processor_aws_account_id = jsondecode(data.http.peer_share_processor_global_manifest.body).aws-account-id
 
   depends_on = [module.gke]
 }
@@ -111,4 +150,8 @@ output "manifest_bucket" {
 
 output "gke_kubeconfig" {
   value = "Run this command to update your kubectl config: gcloud container clusters get-credentials ${module.gke.cluster_name} --region ${var.gcp_region}"
+}
+
+output "specific_manifests" {
+  value = { for v in module.data_share_processors : v.data_share_processor_name => v.specific_manifest }
 }
