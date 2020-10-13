@@ -13,8 +13,8 @@ variable "gcp_project" {
 data "aws_caller_identity" "current" {}
 
 # This is the role in AWS we use to construct policy on the S3 buckets. It is
-# configured to allow access to the GCP service account for this facilitator via
-# Web Identity Federation
+# configured to allow access to the GCP service account for this data share
+# processor via Web Identity Federation
 # https://docs.aws.amazon.com/IAM/latest/UserGuide/id_roles_providers_oidc.html
 resource "aws_iam_role" "bucket_role" {
   name = "prio-${var.environment}-${var.peer_share_processor_name}-bucket-role"
