@@ -38,7 +38,7 @@
                 "null",
                 "bytes"
             ],
-            "doc": "SHA256 hash of the BAA certificate issued to the client device. This would be populated only in cases where ingestion cannot fully address spam/abuse."
+            "doc": "Rolling daily unique identifier of client device. This would be populated only in cases where ingestion cannot fully address spam/abuse."
         }
     ]
 }
