@@ -6,6 +6,7 @@ pub mod aggregation;
 pub mod batch;
 pub mod idl;
 pub mod intake;
+pub mod manifest;
 pub mod sample;
 pub mod test_utils;
 pub mod transport;
