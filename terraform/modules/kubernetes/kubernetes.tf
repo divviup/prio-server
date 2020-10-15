@@ -33,6 +33,8 @@ variable "ingestion_bucket_role" {
   type = string
 }
 
+data "aws_caller_identity" "current" {}
+
 # Each facilitator is created in its own namespace
 resource "kubernetes_namespace" "namespace" {
   metadata {
@@ -57,7 +59,7 @@ resource "kubernetes_namespace" "namespace" {
 resource "google_service_account" "execution_manager" {
   provider = google-beta
   # The Account ID must be unique across the whole GCP project, and not just the
-  # namespace. It must also be less than 30 characters, so we can't concatenate
+  # namespace. It must also be fewer than 30 characters, so we can't concatenate
   # environment and PHA name to get something unique. Instead, we generate a
   # random string.
   account_id   = "prio-${random_string.account_id.result}"
@@ -75,7 +77,7 @@ resource "random_string" "account_id" {
 # service account above.
 resource "kubernetes_service_account" "execution_manager" {
   metadata {
-    name      = "${var.peer_share_processor_name}-execution-manager"
+    name      = "execution-manager"
     namespace = var.peer_share_processor_name
     annotations = {
       environment = var.environment
@@ -139,6 +141,7 @@ resource "kubernetes_cron_job" "execution_manager" {
               # Write sample data to exercise writing into S3.
               args = [
                 "generate-ingestion-sample",
+                "--s3-use-credentials-from-gke-metadata",
                 "--aggregation-id", "fake-1",
                 "--batch-id", "eb03ef04-5f05-4a64-95b2-ca1b841b6885",
                 "--date", "2020/09/11/21/11",
@@ -148,6 +151,10 @@ resource "kubernetes_cron_job" "execution_manager" {
               env {
                 name  = "AWS_ROLE_ARN"
                 value = var.ingestion_bucket_role
+              }
+              env {
+                name  = "AWS_ACCOUNT_ID"
+                value = data.aws_caller_identity.current.account_id
               }
             }
             # If we use any other restart policy, then when the job is finally

@@ -2,9 +2,10 @@ use crate::Error;
 use anyhow::{Context, Result};
 use derivative::Derivative;
 use hyper_rustls::HttpsConnector;
-use reqwest::blocking::Client;
 use rusoto_core::{
-    credential::{DefaultCredentialsProvider, Variable},
+    credential::{
+        AutoRefreshingProvider, CredentialsError, DefaultCredentialsProvider, Secret, Variable,
+    },
     ByteStream, Region,
 };
 use rusoto_s3::{
@@ -14,6 +15,7 @@ use rusoto_s3::{
 use rusoto_sts::WebIdentityProvider;
 use std::{
     boxed::Box,
+    env,
     fs::{create_dir_all, File},
     io::{Read, Write},
     mem,
@@ -33,6 +35,14 @@ use tokio::{
 // the *Kubernetes* service account, not the GCP one.
 // See terraform/modules/gke/gke.tf and terraform/modules/kuberenetes/kubernetes.tf
 const METADATA_SERVICE_TOKEN_URL: &str = "http://metadata.google.internal:80/computeMetadata/v1/instance/service-accounts/default/identity";
+
+// When running in GCP, we are provided the AWS account ID that owns our buckets
+// via environment variable.
+const AWS_ACCOUNT_ID_ENVIRONMENT_VARIABLE: &str = "AWS_ACCOUNT_ID";
+
+// When running in GCP, we are provided the AWS role to assume via environment
+// variable.
+const AWS_ROLE_ARN_ENVIRONMENT_VARIABLE: &str = "AWS_ROLE_ARN";
 
 /// A TransportWriter extends std::io::Write but adds methods that explicitly
 /// allow callers to complete or cancel an upload.
@@ -130,18 +140,18 @@ fn basic_runtime() -> Result<Runtime> {
 pub struct S3Transport {
     region: Region,
     bucket: String,
-    use_ambient_credentials: bool,
+    use_gke_metadata_credentials: bool,
     // client_provider allows injection of mock S3Client for testing purposes
     client_provider: fn(&Region, bool) -> Result<S3Client>,
 }
 
 impl S3Transport {
-    pub fn new(region: Region, use_ambient_credentials: bool, bucket: String) -> S3Transport {
+    pub fn new(region: Region, use_gke_metadata_credentials: bool, bucket: String) -> S3Transport {
         S3Transport::new_with_client(
             region,
             bucket,
-            use_ambient_credentials,
-            |region, use_ambient_credentials| {
+            use_gke_metadata_credentials,
+            |region, use_gke_metadata_credentials| {
                 // Rusoto uses Hyper which uses connection pools. The default
                 // timeout for those connections is 90 seconds[1]. Amazon S3's
                 // API closes idle client connections after 20 seconds[2]. If we
@@ -161,51 +171,80 @@ impl S3Transport {
                 let connector = HttpsConnector::new();
                 let http_client = rusoto_core::HttpClient::from_builder(builder, connector);
 
-                if use_ambient_credentials {
-                    // Credentials for authenticating to AWS are automatically
-                    // sourced from environment variables or ~/.aws/credentials.
-                    // https://github.com/rusoto/rusoto/blob/master/AWS-CREDENTIALS.md
-                    let credentials_provider = DefaultCredentialsProvider::new()
-                        .context("failed to create credentials provider")?;
+                if use_gke_metadata_credentials {
+                    // When running in GKE, the token used to authenticate to
+                    // AWS S3 is made available via the instance metadata
+                    // service. See terraform/modules/kubernetes/kubernetes.tf
+                    // for discussion.
+                    // This dynamic variable lets us provide a callback for
+                    // fetching tokens, allowing Rusoto to automatically get new
+                    // credentials if they expire (which they do every hour).
+                    let oidc_token_variable = Variable::dynamic(|| {
+                        let aws_account_id = env::var(AWS_ACCOUNT_ID_ENVIRONMENT_VARIABLE)
+                            .map_err(|e| {
+                                CredentialsError::new(format!(
+                                    "could not read {} from environment: {}",
+                                    AWS_ACCOUNT_ID_ENVIRONMENT_VARIABLE, e
+                                ))
+                            })?;
+                        // We use ureq for this request because it is designed
+                        // to use purely synchronous Rust. Ironically, we are in
+                        // the context of an async runtime when this callback is
+                        // invoked, but because the closure is not declared
+                        // async, we cannot use .await to work with Futures.
+                        let response = ureq::get(METADATA_SERVICE_TOKEN_URL)
+                            .query(
+                                "audience",
+                                format!("sts.amazonaws.com/{}", aws_account_id).as_ref(),
+                            )
+                            .set("Metadata-Flavor", "Google")
+                            // By default, ureq will wait forever to connect or
+                            // read.
+                            .timeout_connect(10_000) // ten seconds
+                            .timeout_read(10_000) // ten seconds
+                            .call();
+                        if response.error() {
+                            return Err(CredentialsError::new(format!(
+                                "failed to fetch auth token from metadata service: {:?}",
+                                response
+                            )));
+                        }
+                        let token = response.into_string().map_err(|e| {
+                            CredentialsError::new(format!(
+                                "failed to fetch auth token from metadata service: {}",
+                                e
+                            ))
+                        })?;
+                        Ok(Secret::from(token))
+                    });
+
+                    let credentials_provider =
+                        AutoRefreshingProvider::new(WebIdentityProvider::new(
+                            oidc_token_variable,
+                            // The AWS role that we are assuming is provided via
+                            // environment variable. See
+                            // terraform/modules/kubernetes/kubernetes.tf
+                            Variable::from_env_var(AWS_ROLE_ARN_ENVIRONMENT_VARIABLE),
+                            // The role ARN we assume is already bound to a
+                            // specific facilitator instance, so we don't get
+                            // much from further scoping the role assumption,
+                            // unless we eventually introduce something like a
+                            // job ID that could then show up in AWS-side logs.
+                            // https://docs.aws.amazon.com/credref/latest/refdocs/setting-global-role_session_name.html
+                            Some(Variable::from_env_var_optional("AWS_ROLE_SESSION_NAME")),
+                        ))?;
+
                     Ok(S3Client::new_with(
                         http_client,
                         credentials_provider,
                         region.clone(),
                     ))
                 } else {
-                    // When running in GKE, the token used to authenticate to
-                    // AWS S3 is made available via the instance metadata
-                    // service. See terraform/modules/kubernetes/kubernetes.tf
-                    // for discussion.
-                    let token = Client::new()
-                        .get(METADATA_SERVICE_TOKEN_URL)
-                        // The audience query parameter is required by the GKE
-                        // metadata service, but since our role assumption
-                        // policy doesn't check `aud`, it doesn't matter what
-                        // audience we put here (see
-                        // terraform/modules/facilitator/facilitator.tf).
-                        .query(&[("audience", "something")])
-                        .header("Metadata-Flavor", "Google")
-                        .send()
-                        .context("failed to fetch auth token from metadata service")?
-                        .text()
-                        .context("failed to unwrap metadata token")?;
-
-                    let credentials_provider = WebIdentityProvider::new(
-                        Variable::with_value(token),
-                        // The AWS role that we are assuming is provided via
-                        // environment variable. See
-                        // terraform/modules/kubernetes/kubernetes.tf
-                        Variable::from_env_var("AWS_ROLE_ARN"),
-                        // The role ARN we assume is already bound to a
-                        // specific facilitator instance, so we don't get much
-                        // from further scoping the role assumption, unless we
-                        // eventually introduce something like a job ID that
-                        // could then show up in AWS-side logs.
-                        // https://docs.aws.amazon.com/credref/latest/refdocs/setting-global-role_session_name.html
-                        Some(Variable::from_env_var_optional("AWS_ROLE_SESSION_NAME")),
-                    );
-
+                    // Credentials for authenticating to AWS are automatically
+                    // sourced from environment variables or ~/.aws/credentials.
+                    // https://github.com/rusoto/rusoto/blob/master/AWS-CREDENTIALS.md
+                    let credentials_provider = DefaultCredentialsProvider::new()
+                        .context("failed to create credentials provider")?;
                     Ok(S3Client::new_with(
                         http_client,
                         credentials_provider,
@@ -219,13 +258,13 @@ impl S3Transport {
     fn new_with_client(
         region: Region,
         bucket: String,
-        use_ambient_credentials: bool,
+        use_gke_metadata_credentials: bool,
         client_provider: fn(&Region, bool) -> Result<S3Client>,
     ) -> S3Transport {
         S3Transport {
             region,
             bucket,
-            use_ambient_credentials,
+            use_gke_metadata_credentials,
             client_provider,
         }
     }
@@ -234,7 +273,7 @@ impl S3Transport {
 impl Transport for S3Transport {
     fn get(&self, key: &str) -> Result<Box<dyn Read>> {
         let mut runtime = basic_runtime()?;
-        let client = (self.client_provider)(&self.region, self.use_ambient_credentials)?;
+        let client = (self.client_provider)(&self.region, self.use_gke_metadata_credentials)?;
         let get_output = runtime
             .block_on(client.get_object(GetObjectRequest {
                 bucket: self.bucket.to_owned(),
@@ -252,7 +291,7 @@ impl Transport for S3Transport {
         Ok(Box::new(MultipartUploadWriter::new(
             self.region.clone(),
             self.bucket.to_owned(),
-            self.use_ambient_credentials,
+            self.use_gke_metadata_credentials,
             key.to_string(),
             // Set buffer size to 5 MB, which is the minimum required by Amazon
             // https://docs.aws.amazon.com/AmazonS3/latest/dev/qfacts.html
@@ -316,13 +355,13 @@ impl MultipartUploadWriter {
     fn new(
         region: Region,
         bucket: String,
-        use_ambient_credentials: bool,
+        use_gke_metadata_credentials: bool,
         key: String,
         minimum_upload_part_size: usize,
         client_provider: fn(&Region, bool) -> Result<S3Client>,
     ) -> Result<MultipartUploadWriter> {
         let mut runtime = basic_runtime()?;
-        let client = client_provider(&region, use_ambient_credentials)?;
+        let client = client_provider(&region, use_gke_metadata_credentials)?;
 
         let create_output = runtime
             .block_on(

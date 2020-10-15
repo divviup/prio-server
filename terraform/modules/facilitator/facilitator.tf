@@ -10,6 +10,8 @@ variable "gcp_project" {
   type = string
 }
 
+data "aws_caller_identity" "current" {}
+
 # This is the role in AWS we use to construct policy on the S3 buckets. It is
 # configured to allow access to the GCP service account for this facilitator via
 # Web Identity Federation
@@ -17,8 +19,9 @@ variable "gcp_project" {
 resource "aws_iam_role" "bucket_role" {
   name = "prio-${var.environment}-${var.peer_share_processor_name}-bucket-role"
   # We currently use a single role per facilitator to gate read/write access to
-  # all buckets. We could use audiences to define more roles for read/write on
-  # each of the ingestion, validation and sum part buckets.
+  # all buckets. We could define more GCP service accounts and corresponding AWS
+  # IAM roles for read/write on each of the ingestion, validation and sum part
+  # buckets.
   # https://docs.aws.amazon.com/IAM/latest/UserGuide/reference_policies_iam-condition-keys.html
   assume_role_policy = <<ROLE
 {
@@ -32,7 +35,8 @@ resource "aws_iam_role" "bucket_role" {
       "Action": "sts:AssumeRoleWithWebIdentity",
       "Condition": {
         "StringEquals": {
-          "accounts.google.com:sub": "${module.kubernetes.service_account_unique_id}"
+          "accounts.google.com:sub": "${module.kubernetes.service_account_unique_id}",
+          "accounts.google.com:aud": "sts.amazonaws.com/${data.aws_caller_identity.current.account_id}"
         }
       }
     }

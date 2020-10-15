@@ -64,7 +64,8 @@ provider "google-beta" {
 }
 
 provider "aws" {
-  # aws_s3_bucket resources will be created in the region specified here
+  # aws_s3_bucket resources will be created in the region specified in this
+  # provider.
   # https://github.com/hashicorp/terraform/issues/12512
   region  = var.aws_region
   profile = var.aws_profile
