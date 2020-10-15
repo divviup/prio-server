@@ -649,6 +649,7 @@ pub struct SumPart {
     pub aggregation_start_time: i64,
     pub aggregation_end_time: i64,
     pub packet_file_digest: Vec<u8>,
+    pub total_individual_clients: i64,
 }
 
 impl SumPart {

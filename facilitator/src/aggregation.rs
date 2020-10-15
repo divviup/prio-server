@@ -112,6 +112,9 @@ impl<'a> BatchAggregator<'a> {
             .map(|f| u32::from(*f) as i64)
             .collect();
 
+        let total_individual_clients = server
+            .total_shares().len() as i64;
+
         let sum_signature = self.aggregation_batch.put_header(
             &SumPart {
                 batch_uuids: batch_ids.iter().map(|pair| pair.0).collect(),
@@ -125,6 +128,7 @@ impl<'a> BatchAggregator<'a> {
                 aggregation_start_time: self.aggregation_start.timestamp_millis(),
                 aggregation_end_time: self.aggregation_end.timestamp_millis(),
                 packet_file_digest: invalid_packets_digest.as_ref().to_vec(),
+                total_individual_clients,
             },
             &self.share_processor_signing_key,
         )?;
