@@ -7,7 +7,7 @@ build = "build.rs"
 
 [dependencies]
 anyhow = "1.0"
-avro-rs = "0.11.0"
+avro-rs = { version = "0.11.0", features = ["snappy"] }
 base64 = "0.12.3"
 chrono = "0.4"
 clap = "2.33.3"
