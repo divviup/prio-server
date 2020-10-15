@@ -74,11 +74,14 @@ type TerraformOutput struct {
 		Value string
 	} `json:"manifest_bucket"`
 	SpecificManifests struct {
-		Value map[string]SpecificManifest
+		Value map[string]struct {
+			KubernetesNamespace string           `json:"kubernetes-namespace"`
+			SpecificManifest    SpecificManifest `json:"specific-manifest"`
+		}
 	} `json:"specific_manifests"`
 }
 
-func generateKeyPair(dataShareProcessorName, keyName string) (*ecdsa.PrivateKey, error) {
+func generateKeyPair(namespace, keyName string) (*ecdsa.PrivateKey, error) {
 	ecdsaKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	if err != nil {
 		return nil, fmt.Errorf("failed to generate ECDSA P256 key: %w", err)
@@ -98,7 +101,7 @@ func generateKeyPair(dataShareProcessorName, keyName string) (*ecdsa.PrivateKey,
 	// We can't provide the base64 encoding of the key to --from-literal because
 	// then kubectl would base64 the base64, so we have to write the b64 to a
 	// temp file and then provide that to --from-file.
-	log.Printf("updating Kubernetes secret %s/%s", dataShareProcessorName, keyName)
+	log.Printf("updating Kubernetes secret %s/%s", namespace, keyName)
 	tempFile, err := ioutil.TempFile("", "pkcs8-private-key-")
 	if err != nil {
 		return nil, fmt.Errorf("failed to create temp file: %v", err)
@@ -112,7 +115,7 @@ func generateKeyPair(dataShareProcessorName, keyName string) (*ecdsa.PrivateKey,
 	}
 
 	secretArgument := fmt.Sprintf("--from-file=signing_key=%s", tempFile.Name())
-	kubectlCreate := exec.Command("kubectl", "-n", dataShareProcessorName, "create",
+	kubectlCreate := exec.Command("kubectl", "-n", namespace, "create",
 		"secret", "generic", keyName, secretArgument, "--dry-run=client", "-o=json")
 	kubectlApply := exec.Command("kubectl", "apply", "-f", "-")
 	read, write := io.Pipe()
@@ -143,15 +146,15 @@ func main() {
 		log.Fatalf("failed to parse specific manifests: %v", err)
 	}
 
-	for dataShareProcessorName, manifest := range terraformOutput.SpecificManifests.Value {
+	for dataShareProcessorName, manifestWrapper := range terraformOutput.SpecificManifests.Value {
 		newBatchSigningPublicKeys := map[string]BatchSigningPublicKey{}
-		for name, batchSigningPublicKey := range manifest.BatchSigningPublicKeys {
+		for name, batchSigningPublicKey := range manifestWrapper.SpecificManifest.BatchSigningPublicKeys {
 			if batchSigningPublicKey.PublicKey != "" {
 				newBatchSigningPublicKeys[name] = batchSigningPublicKey
 				continue
 			}
 			log.Printf("generating ECDSA P256 key %s", name)
-			privateKey, err := generateKeyPair(dataShareProcessorName, name)
+			privateKey, err := generateKeyPair(manifestWrapper.KubernetesNamespace, name)
 			if err != nil {
 				log.Fatalf("%s", err)
 			}
@@ -172,16 +175,16 @@ func main() {
 			}
 		}
 
-		manifest.BatchSigningPublicKeys = newBatchSigningPublicKeys
+		manifestWrapper.SpecificManifest.BatchSigningPublicKeys = newBatchSigningPublicKeys
 
 		newCertificates := map[string]PacketEncryptionCertificate{}
-		for name, packetEncryptionCertificate := range manifest.PacketEncryptionCertificates {
+		for name, packetEncryptionCertificate := range manifestWrapper.SpecificManifest.PacketEncryptionCertificates {
 			if packetEncryptionCertificate.Certificate != "" {
 				newCertificates[name] = packetEncryptionCertificate
 				continue
 			}
 			log.Printf("generating and certifying P256 key %s", name)
-			_, err := generateKeyPair(dataShareProcessorName, name)
+			_, err := generateKeyPair(manifestWrapper.KubernetesNamespace, name)
 			if err != nil {
 				log.Fatalf("%s", err)
 			}
@@ -190,7 +193,7 @@ func main() {
 			newCertificates[name] = PacketEncryptionCertificate{Certificate: "TODO get certificate"}
 		}
 
-		manifest.PacketEncryptionCertificates = newCertificates
+		manifestWrapper.SpecificManifest.PacketEncryptionCertificates = newCertificates
 
 		// Put the specific manifests into the manifest bucket. Users of this
 		// tool already need to have gsutil and valid Google Cloud credentials
@@ -210,9 +213,9 @@ func main() {
 		// never be able to get started.
 		go func() {
 			defer stdin.Close()
-			log.Printf("uploading manifest %+v", manifest)
+			log.Printf("uploading manifest %+v", manifestWrapper.SpecificManifest)
 			manifestEncoder := json.NewEncoder(stdin)
-			if err := manifestEncoder.Encode(manifest); err != nil {
+			if err := manifestEncoder.Encode(manifestWrapper.SpecificManifest); err != nil {
 				log.Fatalf("failed to encode manifest into gsutil stdin: %v", err)
 			}
 		}()

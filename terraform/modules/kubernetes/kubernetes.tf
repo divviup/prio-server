@@ -35,17 +35,15 @@ variable "ingestion_bucket_role" {
   type = string
 }
 
-data "aws_caller_identity" "current" {}
-
-# Each data share processor is created in its own namespace
-resource "kubernetes_namespace" "namespace" {
-  metadata {
-    name = var.data_share_processor_name
-    annotations = {
-      environment = var.environment
-    }
-  }
+variable "kubernetes_namespace" {
+  type = string
 }
+
+variable "packet_decryption_key_kubernetes_secret" {
+  type = string
+}
+
+data "aws_caller_identity" "current" {}
 
 # Workload identity[1] lets us map GCP service accounts to Kubernetes service
 # accounts. We need this so that pods can use GCP API, but also AWS APIs like S3
@@ -80,7 +78,7 @@ resource "random_string" "account_id" {
 resource "kubernetes_service_account" "workflow_manager" {
   metadata {
     name      = "workflow-manager"
-    namespace = var.peer_share_processor_name
+    namespace = var.kubernetes_namespace
     annotations = {
       environment = var.environment
       # This annotation is necessary for the Kubernetes-GCP service account
@@ -95,7 +93,7 @@ resource "kubernetes_service_account" "workflow_manager" {
 # account in GCP-level policies, below. See step 5 in
 # https://cloud.google.com/kubernetes-engine/docs/how-to/workload-identity#authenticating_to
 locals {
-  service_account = "serviceAccount:${var.gcp_project}.svc.id.goog[${kubernetes_namespace.namespace.metadata[0].name}/${kubernetes_service_account.workflow_manager.metadata[0].name}]"
+  service_account = "serviceAccount:${var.gcp_project}.svc.id.goog[${var.kubernetes_namespace}/${kubernetes_service_account.workflow_manager.metadata[0].name}]"
 }
 
 # Allows the Kubernetes service account to impersonate the GCP service account.
@@ -122,7 +120,7 @@ resource "google_service_account_iam_binding" "workflow_manager_token" {
 resource "kubernetes_secret" "batch_signing_key" {
   metadata {
     name      = "${var.environment}-${var.data_share_processor_name}-batch-signing-key"
-    namespace = var.data_share_processor_name
+    namespace = var.kubernetes_namespace
   }
 
   data = {
@@ -141,28 +139,10 @@ resource "kubernetes_secret" "batch_signing_key" {
   }
 }
 
-resource "kubernetes_secret" "ingestion_packet_decryption_key" {
-  metadata {
-    name      = "${var.environment}-${var.data_share_processor_name}-ingestion-packet-decryption-key"
-    namespace = var.data_share_processor_name
-  }
-
-  data = {
-    # See comment on batch_signing_key, above, about the initial value here.
-    decryption_key = "not-a-real-key"
-  }
-
-  lifecycle {
-    ignore_changes = [
-      data["decryption_key"]
-    ]
-  }
-}
-
 resource "kubernetes_cron_job" "workflow_manager" {
   metadata {
-    name      = "${var.environment}-workflow-manager"
-    namespace = var.data_share_processor_name
+    name      = "${var.environment}-${var.data_share_processor_name}-workflow-manager"
+    namespace = var.kubernetes_namespace
 
     annotations = {
       environment = var.environment
@@ -211,7 +191,7 @@ resource "kubernetes_cron_job" "workflow_manager" {
                 name = "INGESTION_PACKET_DECRYPTION_KEY"
                 value_from {
                   secret_key_ref {
-                    name = kubernetes_secret.ingestion_packet_decryption_key.metadata[0].name
+                    name = var.packet_decryption_key_kubernetes_secret
                     key  = "decryption_key"
                   }
                 }
@@ -240,8 +220,4 @@ output "service_account_unique_id" {
 
 output "batch_signing_key" {
   value = kubernetes_secret.batch_signing_key.metadata[0].name
-}
-
-output "ingestion_packet_decryption_key" {
-  value = kubernetes_secret.ingestion_packet_decryption_key.metadata[0].name
 }
