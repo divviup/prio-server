@@ -19,10 +19,12 @@ rand = "0.7"
 ring = { version = "0.16.15", features = ["std"] }
 rusoto_core = { version = "0.45.0", default_features = false, features = ["rustls"] }
 rusoto_s3 = { version = "0.45.0", default_features = false, features = ["rustls"] }
+rusoto_sts = { version = "0.45.0", default_features = false, features = ["rustls"] }
 serde = { version = "1.0", features = ["derive"] }
 tempfile = "3.1.0"
 thiserror = "1.0"
 tokio = { version = "0.2", features = ["rt-core", "io-util"] }
+ureq = "1.5.1"
 uuid = { version = "0.8", features = ["serde", "v4"] }
 
 [build-dependencies]

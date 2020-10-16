@@ -10,6 +10,10 @@ variable "gcp_region" {
   type = string
 }
 
+variable "gcp_project" {
+  type = string
+}
+
 variable "machine_type" {
   type = string
 }
@@ -38,6 +42,12 @@ resource "google_container_cluster" "cluster" {
     cluster_ipv4_cidr_block  = ""
     services_ipv4_cidr_block = ""
   }
+  # Enables workload identity, which enables containers to authenticate as GCP
+  # service accounts which may then be used to authenticate to AWS S3.
+  # https://cloud.google.com/kubernetes-engine/docs/how-to/workload-identity
+  workload_identity_config {
+    identity_namespace = "${var.gcp_project}.svc.id.goog"
+  }
 }
 
 resource "google_container_node_pool" "worker_nodes" {
@@ -59,6 +69,11 @@ resource "google_container_node_pool" "worker_nodes" {
       "logging-write",
       "monitoring"
     ]
+    # Configures nodes to obtain workload identity from GKE metadata service
+    # https://cloud.google.com/kubernetes-engine/docs/how-to/workload-identity
+    workload_metadata_config {
+      node_metadata = "GKE_METADATA_SERVER"
+    }
   }
 }
 
