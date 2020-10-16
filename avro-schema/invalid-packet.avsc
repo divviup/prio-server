@@ -8,6 +8,12 @@
             "type": "string",
             "logicalType": "uuid",
             "doc": "UUID of the packet that failed validation."
+        },
+        {
+            "name": "failure_reason",
+            "type": "enum",
+            "doc": "The failure reason for dropping the packet.",
+            "symbols": ["INVALID_PARAMETERS", "INVALID_CIPHERTEXT", "INVALID_PACKET", "MISSING_PEER_VALIDATION", "INVALID_PROOF"]
         }
     ]
 }
