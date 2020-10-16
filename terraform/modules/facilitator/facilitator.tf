@@ -22,6 +22,10 @@ resource "aws_iam_role" "bucket_role" {
   # all buckets. We could define more GCP service accounts and corresponding AWS
   # IAM roles for read/write on each of the ingestion, validation and sum part
   # buckets.
+  # Since azp is set in the auth token Google generates, we must check oaud in
+  # the role assumption policy, and the value must match what we request when
+  # requesting tokens from the GKE metadata service in
+  # S3Transport::new_with_client
   # https://docs.aws.amazon.com/IAM/latest/UserGuide/reference_policies_iam-condition-keys.html
   assume_role_policy = <<ROLE
 {
@@ -36,7 +40,7 @@ resource "aws_iam_role" "bucket_role" {
       "Condition": {
         "StringEquals": {
           "accounts.google.com:sub": "${module.kubernetes.service_account_unique_id}",
-          "accounts.google.com:aud": "sts.amazonaws.com/${data.aws_caller_identity.current.account_id}"
+          "accounts.google.com:oaud": "sts.amazonaws.com/${data.aws_caller_identity.current.account_id}"
         }
       }
     }
