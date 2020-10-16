@@ -865,10 +865,19 @@ impl Header for SumPart {
         Ok(())
     }
 }
+#[derive(Debug, Deserialize, Serialize, PartialEq, Eq)]
+pub enum FailureReason {
+    INVALID_PARAMETERS,
+    INVALID_CIPHERTEXT,
+    INVALID_PACKET,
+    MISSING_PEER_VALIDATION,
+    INVALID_PROOF,
+}
 
 #[derive(Debug, Deserialize, Serialize, PartialEq, Eq)]
 pub struct InvalidPacket {
     pub uuid: Uuid,
+    pub failure_reason: FailureReason,
 }
 
 impl Packet for InvalidPacket {
@@ -1135,12 +1144,15 @@ mod tests {
         let packets = &[
             InvalidPacket {
                 uuid: Uuid::new_v4(),
+                failure_reason: FailureReason::INVALID_CIPHERTEXT,
             },
             InvalidPacket {
                 uuid: Uuid::new_v4(),
+                failure_reason: FailureReason::INVALID_CIPHERTEXT,
             },
             InvalidPacket {
                 uuid: Uuid::new_v4(),
+                failure_reason: FailureReason::INVALID_CIPHERTEXT,
             },
         ];
 

@@ -13,6 +13,7 @@ use prio::{encrypt::PrivateKey, server::VerificationMessage};
 use ring::signature::{EcdsaKeyPair, KeyPair, UnparsedPublicKey, ECDSA_P256_SHA256_FIXED};
 use std::convert::TryFrom;
 use uuid::Uuid;
+use crate::idl::FailureReason;
 
 pub struct BatchAggregator<'a> {
     is_first: bool,
@@ -101,7 +102,10 @@ impl<'a> BatchAggregator<'a> {
             self.aggregation_batch
                 .packet_file_writer(|mut packet_file_writer| {
                     for invalid_uuid in invalid_uuids {
-                        InvalidPacket { uuid: invalid_uuid }.write(&mut packet_file_writer)?
+                        InvalidPacket {
+                            uuid: invalid_uuid,
+                            failure_reason: FailureReason::INVALID_PROOF,
+                        }.write(&mut packet_file_writer)?
                     }
                     Ok(())
                 })?;
