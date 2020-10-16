@@ -1,7 +1,7 @@
 use crate::{
     batch::{Batch, BatchReader, BatchWriter},
     idl::{
-        IngestionDataSharePacket, IngestionHeader, InvalidPacket, Packet, SumPart,
+        FailureReason, IngestionDataSharePacket, IngestionHeader, InvalidPacket, Packet, SumPart,
         ValidationHeader, ValidationPacket,
     },
     transport::Transport,
@@ -13,7 +13,6 @@ use prio::{encrypt::PrivateKey, server::VerificationMessage};
 use ring::signature::{EcdsaKeyPair, KeyPair, UnparsedPublicKey, ECDSA_P256_SHA256_FIXED};
 use std::convert::TryFrom;
 use uuid::Uuid;
-use crate::idl::FailureReason;
 
 pub struct BatchAggregator<'a> {
     is_first: bool,
@@ -105,7 +104,8 @@ impl<'a> BatchAggregator<'a> {
                         InvalidPacket {
                             uuid: invalid_uuid,
                             failure_reason: FailureReason::INVALID_PROOF,
-                        }.write(&mut packet_file_writer)?
+                        }
+                        .write(&mut packet_file_writer)?
                     }
                     Ok(())
                 })?;
