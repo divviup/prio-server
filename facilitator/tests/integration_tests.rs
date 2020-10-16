@@ -293,9 +293,11 @@ fn end_to_end() {
     );
 
     assert_eq!(
-        reconstructed.len() as i64, facilitator_sum_part.total_individual_clients,
+        reconstructed.len() as i64,
+        facilitator_sum_part.total_individual_clients,
         "Total individual clients does not match the length of sum\n\
         \ttotal individual clients: {}\n\tlength of sum: {}",
-        facilitator_sum_part.total_individual_clients, reconstructed.len()
+        facilitator_sum_part.total_individual_clients,
+        reconstructed.len()
     );
 }

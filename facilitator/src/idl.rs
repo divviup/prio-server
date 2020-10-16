@@ -768,9 +768,7 @@ impl Header for SumPart {
                     aggregation_end_time = Some(v)
                 }
                 ("packet_file_digest", Value::Bytes(v)) => packet_file_digest = Some(v),
-                ("total_individual_clients", Value::Long(v)) => {
-                    total_individual_clients = Some(v)
-                }
+                ("total_individual_clients", Value::Long(v)) => total_individual_clients = Some(v),
                 (f, v) => {
                     return Err(Error::MalformedHeaderError(format!(
                         "unexpected field {} -> {:?} in record",
@@ -861,7 +859,7 @@ impl Header for SumPart {
         );
         record.put(
             "total_individual_clients",
-            Value::Long(self.total_individual_clients)
+            Value::Long(self.total_individual_clients),
         );
 
         writer.append(record).map_err(|e| {
@@ -1115,7 +1113,7 @@ mod tests {
                 aggregation_start_time: 789456123,
                 aggregation_end_time: 789456321,
                 packet_file_digest: vec![1, 2, 3],
-                total_individual_clients: 2
+                total_individual_clients: 2,
             },
             SumPart {
                 batch_uuids: vec![Uuid::new_v4()],
@@ -1129,7 +1127,7 @@ mod tests {
                 aggregation_start_time: 789456123,
                 aggregation_end_time: 789456321,
                 packet_file_digest: vec![7, 8, 9],
-                total_individual_clients: 2
+                total_individual_clients: 2,
             },
         ];
 
