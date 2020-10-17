@@ -31,10 +31,14 @@ variable "packet_decryption_key_kubernetes_secret" {
 }
 
 locals {
-  resource_prefix                  = "${var.environment}-${var.data_share_processor_name}"
-  ingestion_bucket_writer_role_arn = var.ingestor_google_service_account_id != "" ? aws_iam_role.ingestor_bucket_writer_role[0].arn : var.ingestor_aws_role_arn
-  ingestion_bucket_name            = "prio-${local.resource_prefix}-ingestion"
-  peer_validation_bucket_name      = "prio-${local.resource_prefix}-peer-validation"
+  resource_prefix = "prio-${var.environment}-${var.data_share_processor_name}"
+  ingestion_bucket_writer_role_arn = var.ingestor_google_service_account_id != "" ? (
+    aws_iam_role.ingestor_bucket_writer_role[0].arn
+    ) : (
+    var.ingestor_aws_role_arn
+  )
+  ingestion_bucket_name       = "${local.resource_prefix}-ingestion"
+  peer_validation_bucket_name = "${local.resource_prefix}-peer-validation"
 }
 
 data "aws_caller_identity" "current" {}
@@ -44,7 +48,7 @@ data "aws_caller_identity" "current" {}
 # processor via Web Identity Federation
 # https://docs.aws.amazon.com/IAM/latest/UserGuide/id_roles_providers_oidc.html
 resource "aws_iam_role" "bucket_role" {
-  name = "prio-${local.resource_prefix}-bucket-role"
+  name = "${local.resource_prefix}-bucket-role"
   # We currently use a single role per facilitator to gate read/write access to
   # all buckets. We could define more GCP service accounts and corresponding AWS
   # IAM roles for read/write on each of the ingestion, validation and sum part
@@ -74,6 +78,7 @@ resource "aws_iam_role" "bucket_role" {
   ]
 }
 ROLE
+
   tags = {
     environment = "prio-${var.environment}"
   }
@@ -85,7 +90,7 @@ ROLE
 # resources (c.f. lots of StackOverflow questions and GitHub issues).
 resource "aws_iam_role" "ingestor_bucket_writer_role" {
   count              = var.ingestor_google_service_account_id != "" ? 1 : 0
-  name               = "prio-${local.resource_prefix}-bucket-writer"
+  name               = "${local.resource_prefix}-bucket-writer"
   assume_role_policy = <<ROLE
 {
   "Version": "2012-10-17",
@@ -105,6 +110,7 @@ resource "aws_iam_role" "ingestor_bucket_writer_role" {
   ]
 }
 ROLE
+
   tags = {
     environment = "prio-${var.environment}"
   }
@@ -153,6 +159,7 @@ resource "aws_s3_bucket" "ingestion_bucket" {
   ]
 }
 POLICY
+
   tags = {
     environment = var.environment
   }
@@ -205,6 +212,7 @@ resource "aws_s3_bucket" "peer_validation_bucket" {
   ]
 }
 POLICY
+
   tags = {
     environment = var.environment
   }

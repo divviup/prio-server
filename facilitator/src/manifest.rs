@@ -3,9 +3,7 @@ use ring::signature::{UnparsedPublicKey, ECDSA_P256_SHA256_FIXED};
 use serde::Deserialize;
 use serde_json::from_reader;
 use std::collections::HashMap;
-use std::fs::File;
 use std::io::Read;
-use std::path::Path;
 
 // See discussion in SpecificManifest::batch_signing_public_key
 const ECDSA_P256_SPKI_PREFIX: &[u8] = &[
@@ -16,10 +14,10 @@ const ECDSA_P256_SPKI_PREFIX: &[u8] = &[
 /// Represents the description of a batch signing public key in a specific
 /// manifest.
 #[derive(Debug, Deserialize, PartialEq)]
+#[serde(rename_all = "kebab-case")]
 struct BatchSigningPublicKey {
     /// The PEM-armored base64 encoding of the ASN.1 encoding of the PKIX
     /// SubjectPublicKeyInfo structure of an ECDSA P256 key.
-    #[serde(rename = "public-key")]
     public_key: String,
     /// The ISO 8601 encoded UTC date at which this key expires.
     expiration: String,
@@ -37,24 +35,21 @@ struct PacketEncryptionCertificate {
 /// specification.
 /// https://docs.google.com/document/d/1MdfM3QT63ISU70l63bwzTrxr93Z7Tv7EDjLfammzo6Q/edit#heading=h.3j8dgxqo5h68
 #[derive(Debug, Deserialize, PartialEq)]
+#[serde(rename_all = "kebab-case")]
 struct SpecificManifest {
     /// Format version of the manifest. Versions besides the currently supported
     /// one are rejected.
     format: u32,
     /// Region and name of the ingestion S3 bucket owned by this data share
     /// processor.
-    #[serde(rename = "ingestion-bucket")]
     ingestion_bucket: String,
     /// Region and name of the peer validation S3 bucket owned by this data
     /// share processor.
-    #[serde(rename = "peer-validation-bucket")]
     peer_validation_bucket: String,
     /// Keys used by this data share processor to sign batches.
-    #[serde(rename = "batch-signing-public-keys")]
     batch_signing_public_keys: HashMap<String, BatchSigningPublicKey>,
     /// Certificates containing public keys that should be used to encrypt
     /// ingestion share packets intended for this data share processor.
-    #[serde(rename = "packet-encryption-certificates")]
     packet_encryption_certificates: HashMap<String, PacketEncryptionCertificate>,
 }
 
@@ -74,10 +69,6 @@ impl SpecificManifest {
             return Err(anyhow!("failed to fetch specific manifest: {:?}", response));
         }
         SpecificManifest::from_reader(response.into_reader())
-    }
-
-    fn from_file(path: &Path) -> Result<SpecificManifest> {
-        SpecificManifest::from_reader(File::open(path).context("failed to open manifest file")?)
     }
 
     fn from_reader<R: Read>(reader: R) -> Result<SpecificManifest> {
@@ -111,10 +102,19 @@ impl SpecificManifest {
                 "key for identifier {} is not a PEM encoded public key"
             ));
         }
-        if pem.contents.len() < ECDSA_P256_SPKI_PREFIX.len() {
-            return Err(anyhow!("PEM contents not long enough to contain ASN.1 encoded ECDSA P256 SubjectPublicKeyInfo"));
+
+        // An ECDSA P256 public key in this encoding will always be 26 bytes of
+        // prefix + 65 bytes of key = 91 bytes total. e.g.,
+        // https://lapo.it/asn1js/#MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgD______________________________________________________________________________________w
+        if pem.contents.len() != 91 {
+            return Err(anyhow!(
+                "PEM contents are wrong size for ASN.1 encoded ECDSA P256 SubjectPublicKeyInfo"
+            ));
         }
-        if &pem.contents[..ECDSA_P256_SPKI_PREFIX.len()] != ECDSA_P256_SPKI_PREFIX {
+
+        let (prefix, key) = pem.contents.split_at(ECDSA_P256_SPKI_PREFIX.len());
+
+        if prefix != ECDSA_P256_SPKI_PREFIX {
             return Err(anyhow!(
                 "PEM contents are not ASN.1 encoded ECDSA P256 SubjectPublicKeyInfo"
             ));
@@ -122,7 +122,7 @@ impl SpecificManifest {
 
         Ok(UnparsedPublicKey::new(
             &ECDSA_P256_SHA256_FIXED,
-            Vec::from(&pem.contents[ECDSA_P256_SPKI_PREFIX.len()..]),
+            Vec::from(key),
         ))
     }
 }

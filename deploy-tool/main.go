@@ -46,7 +46,7 @@ type PacketEncryptionCertificate struct {
 // https://docs.google.com/document/d/1MdfM3QT63ISU70l63bwzTrxr93Z7Tv7EDjLfammzo6Q/edit#heading=h.3j8dgxqo5h68
 type SpecificManifest struct {
 	// Format is the version of the manifest.
-	Format float64 `json:"format"`
+	Format int64 `json:"format"`
 	// IngestionBucket is the region+name of the bucket that the data share
 	// processor which owns the manifest reads ingestion batches from.
 	IngestionBucket string `json:"ingestion-bucket"`
@@ -81,7 +81,11 @@ type TerraformOutput struct {
 	} `json:"specific_manifests"`
 }
 
-func generateKeyPair(namespace, keyName string) (*ecdsa.PrivateKey, error) {
+// generateAndDeployKeyPair generates an ECDSA P256 key pair and stores the
+// base64 encoded PKCS#8 encoding of that key in a Kubernetes secret with the
+// provided keyName, in the provided namespace. Returns the private key so the
+// caller may use it to populate specific manifests.
+func generateAndDeployKeyPair(namespace, keyName string) (*ecdsa.PrivateKey, error) {
 	ecdsaKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	if err != nil {
 		return nil, fmt.Errorf("failed to generate ECDSA P256 key: %w", err)
@@ -154,7 +158,7 @@ func main() {
 				continue
 			}
 			log.Printf("generating ECDSA P256 key %s", name)
-			privateKey, err := generateKeyPair(manifestWrapper.KubernetesNamespace, name)
+			privateKey, err := generateAndDeployKeyPair(manifestWrapper.KubernetesNamespace, name)
 			if err != nil {
 				log.Fatalf("%s", err)
 			}
@@ -169,9 +173,14 @@ func main() {
 				Bytes: []byte(pkixPublic),
 			}
 
+			expiration := time.
+				Now().
+				AddDate(0, 0, 90). // key expires in 90 days
+				UTC().
+				Format(time.RFC3339)
 			newBatchSigningPublicKeys[name] = BatchSigningPublicKey{
 				PublicKey:  string(pem.EncodeToMemory(&block)),
-				Expiration: time.Now().UTC().Format(time.RFC3339),
+				Expiration: expiration,
 			}
 		}
 
@@ -184,7 +193,7 @@ func main() {
 				continue
 			}
 			log.Printf("generating and certifying P256 key %s", name)
-			_, err := generateKeyPair(manifestWrapper.KubernetesNamespace, name)
+			_, err := generateAndDeployKeyPair(manifestWrapper.KubernetesNamespace, name)
 			if err != nil {
 				log.Fatalf("%s", err)
 			}
@@ -199,7 +208,7 @@ func main() {
 		// tool already need to have gsutil and valid Google Cloud credentials
 		// to be able to use the Makefile, so execing out to gsutil saves us the
 		// trouble of pulling in the gcloud SDK.
-		destination := fmt.Sprintf("gs://%s/%s.json",
+		destination := fmt.Sprintf("gs://%s/%s-manifest.json",
 			terraformOutput.ManifestBucket.Value, dataShareProcessorName)
 		log.Printf("uploading specific manifest %s", destination)
 		gsutil := exec.Command("gsutil", "-h",
