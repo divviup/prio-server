@@ -77,7 +77,7 @@ resource "random_string" "account_id" {
 # service account above.
 resource "kubernetes_service_account" "workflow_manager" {
   metadata {
-    name      = "workflow-manager"
+    name      = "${var.data_share_processor_name}-workflow-manager"
     namespace = var.kubernetes_namespace
     annotations = {
       environment = var.environment

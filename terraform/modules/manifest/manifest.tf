@@ -50,12 +50,12 @@ resource "google_storage_bucket_object" "global_manifest" {
   name         = "global-manifest.json"
   bucket       = google_storage_bucket.manifests.name
   content_type = "application/json"
-  content      = <<MANIFEST
-{
-  "format": 0,
-  "aws-account-id": "${data.aws_caller_identity.current.account_id}"
-}
-MANIFEST
+  content      = jsonencode({
+    format = 0
+    server-identity = {
+      aws-account-id = data.aws_caller_identity.current.account_id
+    }
+  })
 }
 
 # Now we configure an external HTTPS load balancer backed by the bucket.

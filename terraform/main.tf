@@ -143,13 +143,14 @@ resource "kubernetes_secret" "ingestion_packet_decryption_keys" {
   }
 
   data = {
-    # See comment on batch_signing_key, above, about the initial value here.
+    # See comment on batch_signing_key, in modules/kubernetes/kubernetes.tf,
+    # about the initial value and the lifecycle block here.
     decryption_key = "not-a-real-key"
   }
 
   lifecycle {
     ignore_changes = [
-      data["decryption_key"]
+      data
     ]
   }
 }
@@ -162,8 +163,8 @@ locals {
     "${pair[0]}-${pair[1]}" => {
       kubernetes_namespace                    = kubernetes_namespace.namespaces[pair[0]].metadata[0].name
       packet_decryption_key_kubernetes_secret = kubernetes_secret.ingestion_packet_decryption_keys[pair[0]].metadata[0].name
-      ingestor_aws_role_arn                   = lookup(jsondecode(data.http.ingestor_global_manifests[pair[1]].body), "aws-iam-entity", "")
-      ingestor_gcp_service_account_id         = lookup(jsondecode(data.http.ingestor_global_manifests[pair[1]].body), "google-service-account", "")
+      ingestor_aws_role_arn                   = lookup(jsondecode(data.http.ingestor_global_manifests[pair[1]].body).server-identity, "aws-iam-entity", "")
+      ingestor_gcp_service_account_id         = lookup(jsondecode(data.http.ingestor_global_manifests[pair[1]].body).server-identity, "google-service-account", "")
     }
   }
 }
@@ -176,7 +177,7 @@ module "data_share_processors" {
   gcp_project                             = var.gcp_project
   ingestor_aws_role_arn                   = each.value.ingestor_aws_role_arn
   ingestor_google_service_account_id      = each.value.ingestor_gcp_service_account_id
-  peer_share_processor_aws_account_id     = jsondecode(data.http.peer_share_processor_global_manifest.body).aws-account-id
+  peer_share_processor_aws_account_id     = jsondecode(data.http.peer_share_processor_global_manifest.body).server-identity.aws-account-id
   kubernetes_namespace                    = each.value.kubernetes_namespace
   packet_decryption_key_kubernetes_secret = each.value.packet_decryption_key_kubernetes_secret
 
