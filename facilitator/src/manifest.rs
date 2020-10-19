@@ -2,8 +2,7 @@ use anyhow::{anyhow, Context, Result};
 use ring::signature::{UnparsedPublicKey, ECDSA_P256_SHA256_FIXED};
 use serde::Deserialize;
 use serde_json::from_reader;
-use std::collections::HashMap;
-use std::io::Read;
+use std::{collections::HashMap, io::Read};
 
 // See discussion in SpecificManifest::batch_signing_public_key
 const ECDSA_P256_SPKI_PREFIX: &[u8] = &[
