@@ -17,14 +17,31 @@ pub const DEFAULT_INGESTOR_PRIVATE_KEY: &str =
     "MIGHAgEAMBMGByqGSM49AgEGCCqGSM49AwEHBG0wawIBAQQggoa08rQR90Asvhy5b\
     WIgFBDeGaO8FnVEF3PVpNVmDGChRANCAAQ2mZfm4UC73PkWsYz3Uub6UTIAFQCPGxo\
     uP1O1PlmntOpfLYdvyZDCuenAzv1oCfyToolNArNjwo/+harNn1fs";
+// We have selected PEM armored, ASN.1 encoded PKIX SubjectPublicKeyInfo
+// structures as the means of exchanging public keys with peer servers. However,
+// no Rust crate that we have found gives us an easy way to obtain a PKIX SPKI
+// from the PKCS#8 document format that ring uses for private key serialization.
+// This constant and the other _SUBJECT_PUBLIC_KEY_INFO constants were obtained
+// by placing the corresponding _PRIVATE_KEY constants into a PEM block, and
+// then `openssl ec -inform PEM -outform PEM -in /path/to/PEM/PKCS#8/document
+// -pubout`.
+pub const DEFAULT_INGESTOR_SUBJECT_PUBLIC_KEY_INFO: &str =
+    "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAENpmX5uFAu9z5FrGM91Lm+lEyABUA\
+    jxsaLj9TtT5Zp7TqXy2Hb8mQwrnpwM79aAn8k6KJTQKzY8KP/oWqzZ9X7A==";
 pub const DEFAULT_FACILITATOR_SIGNING_PRIVATE_KEY: &str =
     "MIGHAgEAMBMGByqGSM49AgEGCCqGSM49AwEHBG0wawIBAQQgeSa+S+tmLupnAEyFK\
     dVuKB99y09YEqW41+8pwP4cTkahRANCAASy7FHcLGnRudVHWga/j2k9nQ3lMvuGE01\
     Q7DEyjyCuuw9YmB3dHvYcRUnxVRI/nF5LvneGim0dC7F1fuRAPeXI";
+pub const DEFAULT_FACILITATOR_SUBJECT_PUBLIC_KEY_INFO: &str =
+    "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEsuxR3Cxp0bnVR1oGv49pPZ0N5TL7\
+    hhNNUOwxMo8grrsPWJgd3R72HEVJ8VUSP5xeS753hoptHQuxdX7kQD3lyA==";
 pub const DEFAULT_PHA_SIGNING_PRIVATE_KEY: &str =
     "MIGHAgEAMBMGByqGSM49AgEGCCqGSM49AwEHBG0wawIBAQQg1BQjH71U37XLfWqe+\
     /xP8iUrMiHpmUtbj3UfDkhFIrShRANCAAQgqHcxxwTVx1IXimcRv5TQyYZh+ShDM6X\
     ZqJonoP1m52oN0aLID1hJSrfKJrnqdgmHmaT4eXNNf4C5+g1HZt+u";
+pub const DEFAULT_PHA_SUBJECT_PUBLIC_KEY_INFO: &str =
+    "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEIKh3MccE1cdSF4pnEb+U0MmGYfko\
+    QzOl2aiaJ6D9ZudqDdGiyA9YSUq3yia56nYJh5mk+HlzTX+AufoNR2bfrg==";
 
 /// Constructs an EcdsaKeyPair from the default ingestor server.
 pub fn default_ingestor_private_key() -> EcdsaKeyPair {

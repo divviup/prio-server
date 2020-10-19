@@ -28,8 +28,18 @@ variable "peer_share_processor_names" {
   type = list(string)
 }
 
-locals {
-  resource_prefix = "prio-${var.environment}"
+variable "ingestors" {
+  type        = map(string)
+  description = "Map of ingestor names to the URL where their global manifest may be found."
+}
+
+variable "manifest_domain" {
+  type        = string
+  description = "Domain (plus optional relative path) to which this environment's global and specific manifests should be uploaded."
+}
+
+variable "peer_share_processor_manifest_domain" {
+  type = string
 }
 
 terraform {
@@ -78,24 +88,114 @@ provider "kubernetes" {
   load_config_file       = false
 }
 
+module "manifest" {
+  source      = "./modules/manifest"
+  environment = var.environment
+  gcp_region  = var.gcp_region
+  domain      = var.manifest_domain
+}
+
 module "gke" {
   source          = "./modules/gke"
   environment     = var.environment
-  resource_prefix = local.resource_prefix
+  resource_prefix = "prio-${var.environment}"
   gcp_region      = var.gcp_region
   gcp_project     = var.gcp_project
   machine_type    = var.machine_type
 }
 
-module "facilitator" {
-  for_each                  = toset(var.peer_share_processor_names)
-  source                    = "./modules/facilitator"
-  environment               = var.environment
-  peer_share_processor_name = each.key
-  gcp_project               = var.gcp_project
+# For each peer data share processor, we will receive ingestion batches from two
+# ingestion servers. We create a distinct data share processor instance for each
+# (peer, ingestor) pair.
+# First, we fetch the ingestor global manifests, which yields a map of ingestor
+# name => HTTP content.
+data "http" "ingestor_global_manifests" {
+  for_each = var.ingestors
+  url      = "https://${each.value}/global-manifest.json"
+}
+
+# Then we fetch the single global manifest for all the peer share processors.
+data "http" "peer_share_processor_global_manifest" {
+  url = "https://${var.peer_share_processor_manifest_domain}/global-manifest.json"
+}
+
+# While we create a distinct data share processor for each (ingestor, peer data
+# share processor) pair, we only create one packet decryption key for each peer
+# data share processor, and use it for all ingestors. Since the secret must be
+# in a namespace and accessible from both data share processors, that means both
+# data share processors must be in a single Kubernetes namespace, which we
+# create here and pass into the data share processor module.
+resource "kubernetes_namespace" "namespaces" {
+  for_each = toset(var.peer_share_processor_names)
+  metadata {
+    name = each.key
+    annotations = {
+      environment = var.environment
+    }
+  }
+}
+
+resource "kubernetes_secret" "ingestion_packet_decryption_keys" {
+  for_each = toset(var.peer_share_processor_names)
+  metadata {
+    name      = "${var.environment}-${each.key}-ingestion-packet-decryption-key"
+    namespace = kubernetes_namespace.namespaces[each.key].metadata[0].name
+  }
+
+  data = {
+    # See comment on batch_signing_key, in modules/kubernetes/kubernetes.tf,
+    # about the initial value and the lifecycle block here.
+    decryption_key = "not-a-real-key"
+  }
+
+  lifecycle {
+    ignore_changes = [
+      data
+    ]
+  }
+}
+
+# Now, we take the set product of peer share processor names x ingestor names to
+# get the config values for all the data share processors we need to create.
+locals {
+  peer_ingestor_pairs = {
+    for pair in setproduct(toset(var.peer_share_processor_names), keys(var.ingestors)) :
+    "${pair[0]}-${pair[1]}" => {
+      kubernetes_namespace                    = kubernetes_namespace.namespaces[pair[0]].metadata[0].name
+      packet_decryption_key_kubernetes_secret = kubernetes_secret.ingestion_packet_decryption_keys[pair[0]].metadata[0].name
+      ingestor_aws_role_arn                   = lookup(jsondecode(data.http.ingestor_global_manifests[pair[1]].body).server-identity, "aws-iam-entity", "")
+      ingestor_gcp_service_account_id         = lookup(jsondecode(data.http.ingestor_global_manifests[pair[1]].body).server-identity, "google-service-account", "")
+    }
+  }
+}
+
+module "data_share_processors" {
+  for_each                                = local.peer_ingestor_pairs
+  source                                  = "./modules/data_share_processor"
+  environment                             = var.environment
+  data_share_processor_name               = each.key
+  gcp_project                             = var.gcp_project
+  ingestor_aws_role_arn                   = each.value.ingestor_aws_role_arn
+  ingestor_google_service_account_id      = each.value.ingestor_gcp_service_account_id
+  peer_share_processor_aws_account_id     = jsondecode(data.http.peer_share_processor_global_manifest.body).server-identity.aws-account-id
+  kubernetes_namespace                    = each.value.kubernetes_namespace
+  packet_decryption_key_kubernetes_secret = each.value.packet_decryption_key_kubernetes_secret
 
   depends_on = [module.gke]
 }
+
+output "manifest_bucket" {
+  value = module.manifest.bucket
+}
+
 output "gke_kubeconfig" {
   value = "Run this command to update your kubectl config: gcloud container clusters get-credentials ${module.gke.cluster_name} --region ${var.gcp_region}"
+}
+
+output "specific_manifests" {
+  value = { for v in module.data_share_processors : v.data_share_processor_name => {
+    kubernetes-namespace = v.kubernetes_namespace
+    specific-manifest    = v.specific_manifest
+    }
+  }
 }
