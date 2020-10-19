@@ -5,6 +5,7 @@ import (
 	"crypto/elliptic"
 	"crypto/rand"
 	"crypto/x509"
+	"deploy-tool/cert"
 	"encoding/base64"
 	"encoding/json"
 	"encoding/pem"
@@ -193,13 +194,17 @@ func main() {
 				continue
 			}
 			log.Printf("generating and certifying P256 key %s", name)
-			_, err := generateAndDeployKeyPair(manifestWrapper.KubernetesNamespace, name)
+			privKey, err := generateAndDeployKeyPair(manifestWrapper.KubernetesNamespace, name)
 			if err != nil {
 				log.Fatalf("%s", err)
 			}
 
-			// TODO(timg) get certificate over the key, insert it here
-			newCertificates[name] = PacketEncryptionCertificate{Certificate: "TODO get certificate"}
+			certificate, err := cert.IssueCertificate(manifestWrapper.KubernetesNamespace, privKey)
+			if err != nil {
+				log.Fatalf("%s", err)
+			}
+
+			newCertificates[name] = PacketEncryptionCertificate{Certificate: certificate}
 		}
 
 		manifestWrapper.SpecificManifest.PacketEncryptionCertificates = newCertificates
