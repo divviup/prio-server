@@ -122,6 +122,17 @@ fn main() -> Result<(), anyhow::Error> {
                         ),
                 )
                 .arg(
+                    Arg::with_name("s3-use-credentials-from-gke-metadata")
+                        .long("s3-use-credentials-from-gke-metadata")
+                        .help(
+                            "If present, authentication to S3 will try to use \
+                            an OIDC auth token obtained from the GKE metadata \
+                            service and the AWS_ROLE_ARN environment variable. \
+                            If omitted, uses credentials found in environment \
+                            variables or ~/.aws/.",
+                        ),
+                )
+                .arg(
                     Arg::with_name("aggregation-id")
                         .long("aggregation-id")
                         .value_name("ID")
@@ -208,6 +219,7 @@ fn main() -> Result<(), anyhow::Error> {
                 .arg(
                     Arg::with_name("ingestor-private-key")
                         .long("ingestor-private-key")
+                        .env("INGESTION_BATCH_SIGNING_KEY")
                         .value_name("B64")
                         .help(
                             "Base64 encoded ECDSA P256 private key for the \
@@ -350,6 +362,17 @@ fn main() -> Result<(), anyhow::Error> {
                             filesystem path or an S3 bucket, formatted as \
                             \"s3://{region}/{bucket-name}\"",
                         ),
+                )
+                .arg(
+                    Arg::with_name("s3-use-credentials-from-gke-metadata")
+                        .long("s3-use-credentials-from-gke-metadata")
+                        .help(
+                            "If present, authentication to S3 will try to use \
+                            an OIDC auth token obtained from the GKE metadata \
+                            service and the AWS_ROLE_ARN environment variable. \
+                            If omitted, uses credentials found in environment \
+                            variables or ~/.aws/.",
+                        ),
                 ),
         )
         .subcommand(
@@ -463,6 +486,17 @@ fn main() -> Result<(), anyhow::Error> {
                             "Bucket into which sum parts are to be written. May be either a \
                             local filesystem path or an S3 bucket, formatted \
                             as \"s3://{region}/{bucket-name}\"",
+                        ),
+                )
+                .arg(
+                    Arg::with_name("s3-use-credentials-from-gke-metadata")
+                        .long("s3-use-credentials-from-gke-metadata")
+                        .help(
+                            "If present, authentication to S3 will try to use \
+                            an OIDC auth token obtained from the GKE metadata \
+                            service and the AWS_ROLE_ARN environment variable. \
+                            If omitted, uses credentials found in environment \
+                            variables or ~/.aws/.",
                         ),
                 )
                 .arg(
@@ -715,6 +749,7 @@ fn transport_for_output_path(arg: &str, matches: &ArgMatches) -> Result<Box<dyn 
     match path {
         StoragePath::S3Path { region, bucket } => Ok(Box::new(S3Transport::new(
             Region::from_str(region)?,
+            matches.is_present("s3-use-credentials-from-gke-metadata"),
             bucket.to_string(),
         ))),
         StoragePath::LocalPath(path) => Ok(Box::new(LocalFileTransport::new(

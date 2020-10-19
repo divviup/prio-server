@@ -32,7 +32,7 @@ prep: ## Prepare a new workspace (environment) if needed, configure the tfstate 
 		exit 1; \
 	 fi
 	@echo "$(BOLD)Verifying that the storage bucket $(STORAGE_BUCKET_URL) for remote state exists$(RESET)"
-	@if ! gsutil ls -b  $(STORAGE_BUCKET_URL) > /dev/null 2>&1 ; then \
+	@if ! gsutil ls -b $(STORAGE_BUCKET_URL) > /dev/null 2>&1 ; then \
 		echo "$(BOLD)Storage bucket $(STORAGE_BUCKET_URL) was not found, creating new bucket with versioning enabled to store tfstate$(RESET)"; \
 		gsutil mb -l $(REGION) $(STORAGE_BUCKET_URL) > /dev/null 2>&1 ; \
 		gsutil versioning set on $(STORAGE_BUCKET_URL) > /dev/null 2>&1 ; \
@@ -88,6 +88,7 @@ apply: prep ## Have terraform do the things. This will cost money.
 		-input=false \
 		-refresh=true \
 		-var-file="$(VARS)"
+	@terraform output --json | go run ../deploy-tool/main.go
 
 .PHONY: apply-target
 apply-target: prep ## Have terraform do the things for a specific resource. This will cost money.
