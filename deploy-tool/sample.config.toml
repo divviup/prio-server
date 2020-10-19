@@ -1,0 +1,15 @@
+# DNS provider settings
+[dns]
+provider = "cloudflare" # options: cloudflare,
+
+    [dns.cloudflare]
+    api_key = "API_KEY"
+
+# ACME settings
+[acme]
+email = "test@example.com"
+ca = "https://acme-staging-v02.api.letsencrypt.org/directory"
+subscriber_agreement = true
+
+[storage]
+driver = "kubernetes" # options: kubernetes, filesystem,
