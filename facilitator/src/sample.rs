@@ -170,6 +170,7 @@ mod tests {
 
     #[test]
     #[ignore]
+    #[allow(clippy::float_cmp)] // No arithmetic done on floats
     fn write_sample() {
         let tempdir = tempfile::TempDir::new().unwrap();
         let batch_uuid = Uuid::new_v4();

@@ -667,14 +667,14 @@ mod tests {
         .expect("failed to create multipart upload writer");
 
         // First write will fail due to HTTP 401
-        writer.write(&[0; 51]).unwrap_err();
+        writer.write_all(&[0; 51]).unwrap_err();
         // Second write will fail because response is missing ETag
-        writer.write(&[0; 51]).unwrap_err();
+        writer.write_all(&[0; 51]).unwrap_err();
         // Third write will work
-        writer.write(&[0; 51]).unwrap();
+        writer.write_all(&[0; 51]).unwrap();
         // This write will put some content in the buffer, but not enough to
         // cause an UploadPart
-        writer.write(&[0; 25]).unwrap();
+        writer.write_all(&[0; 25]).unwrap();
         // Flush will cause writer to UploadPart the last part and then complete
         // upload
         writer.complete_upload().unwrap();
