@@ -23,13 +23,9 @@ func GetACMEDNSProvider() (certmagic.ACMEDNSProvider, error) {
 }
 
 func getDNSProvider() string {
-	dnsProvider := os.Getenv("D_DNS_PROVIDER")
-
-	return dnsProvider
+	return os.Getenv("D_DNS_PROVIDER")
 }
 
 func getAPIToken() string {
-	apiToken := os.Getenv("D_API_TOKEN")
-
-	return apiToken
+	return os.Getenv("D_API_TOKEN")
 }

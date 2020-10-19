@@ -20,7 +20,6 @@ import (
 // D_DNS_PROVIDER, expecting a DNS provider, e.g. "cloudflare" - this is used for the DNS challenge
 // D_API_TOKEN, expecting an API token for the DNS provider - this is used to authenticate to the DNS provider
 func IssueCertificate(site string, privKey *ecdsa.PrivateKey) (string, error) {
-
 	if getUserCATermsAgreement() == false {
 		return "", fmt.Errorf("let's encrypt CA terms were not agreed to")
 	}
@@ -54,11 +53,10 @@ func IssueCertificate(site string, privKey *ecdsa.PrivateKey) (string, error) {
 
 	issued, err := acme.Issuer.Issue(context.Background(), csr)
 	if err != nil {
-		return "", fmt.Errorf("error when getting the certificate signing request: %v", err)
+		return "", fmt.Errorf("error when issuing the certificate: %v", err)
 	}
 
 	return string(issued.Certificate), nil
-
 }
 
 // getCSR creates an x509 CertificateRequest which includes the site this certificate will be used for
