@@ -218,6 +218,10 @@ output "service_account_unique_id" {
   value = google_service_account.workflow_manager.unique_id
 }
 
+output "service_account_email" {
+  value = "serviceAccount:${google_service_account.workflow_manager.email}"
+}
+
 output "batch_signing_key" {
   value = kubernetes_secret.batch_signing_key.metadata[0].name
 }

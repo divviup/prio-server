@@ -237,6 +237,10 @@ output "kubernetes_namespace" {
   value = var.kubernetes_namespace
 }
 
+output "service_account_email" {
+  value = module.kubernetes.service_account_email
+}
+
 output "specific_manifest" {
   value = {
     format                 = 0
