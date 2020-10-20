@@ -3,8 +3,8 @@ use chrono::{prelude::Utc, NaiveDateTime};
 use clap::{App, Arg, ArgMatches, SubCommand};
 use prio::encrypt::PrivateKey;
 use ring::signature::{
-    EcdsaKeyPair, KeyPair, UnparsedPublicKey, ECDSA_P256_SHA256_FIXED,
-    ECDSA_P256_SHA256_FIXED_SIGNING,
+    EcdsaKeyPair, KeyPair, UnparsedPublicKey, ECDSA_P256_SHA256_ASN1,
+    ECDSA_P256_SHA256_ASN1_SIGNING,
 };
 use rusoto_core::Region;
 use std::{path::Path, str::FromStr};
@@ -20,7 +20,7 @@ use facilitator::{
         DEFAULT_PHA_SIGNING_PRIVATE_KEY,
     },
     transport::{LocalFileTransport, S3Transport, Transport},
-    DATE_FORMAT,
+    BatchSigningKey, DATE_FORMAT,
 };
 
 fn num_validator<F: FromStr>(s: String) -> Result<(), String> {
@@ -233,6 +233,19 @@ fn main() -> Result<(), anyhow::Error> {
                         .default_value(DEFAULT_INGESTOR_PRIVATE_KEY)
                         .hide_default_value(true)
                         .validator(b64_validator),
+                )
+                .arg(
+                    Arg::with_name("ingestor-private-key-identifier")
+                        .long("ingestor-private-key-identifier")
+                        .env("INGESTION_BATCH_SIGNING_KEY_ID")
+                        .value_name("ID")
+                        .help(
+                            "Identifier for the batch signing key, \
+                            corresponding to an entry in the ingestor global \
+                            manifest.",
+                        )
+                        .default_value("default-ingestor-batch-signing-key")
+                        .hide_default_value(true),
                 )
                 .arg(
                     Arg::with_name("epsilon")
@@ -573,6 +586,11 @@ fn main() -> Result<(), anyhow::Error> {
             let mut pha_transport = transport_for_output_path("pha-output", sub_matches)?;
             let mut facilitator_transport =
                 transport_for_output_path("facilitator-output", sub_matches)?;
+            let ingestor_batch_signing_key = batch_signing_key_from_arg(
+                "ingestor-private-key",
+                "ingestor-private-key-identifier",
+                sub_matches,
+            )?;
 
             generate_ingestion_sample(
                 &mut *pha_transport,
@@ -593,7 +611,7 @@ fn main() -> Result<(), anyhow::Error> {
                         .unwrap(),
                 )
                 .unwrap(),
-                &base64::decode(sub_matches.value_of("ingestor-private-key").unwrap()).unwrap(),
+                &ingestor_batch_signing_key,
                 sub_matches
                     .value_of("dimension")
                     .unwrap()
@@ -634,14 +652,11 @@ fn main() -> Result<(), anyhow::Error> {
 
             let ingestor_pub_key = public_key_from_arg("ingestor-public-key", sub_matches);
 
-            let share_processor_key_bytes =
-                base64::decode(sub_matches.value_of("share-processor-private-key").unwrap())
-                    .unwrap();
-            let share_processor_key = EcdsaKeyPair::from_pkcs8(
-                &ECDSA_P256_SHA256_FIXED_SIGNING,
-                &share_processor_key_bytes,
-            )
-            .context("failed to parse value for share-processor-private-key")?;
+            let share_processor_key = batch_signing_key_from_arg(
+                "share-processor-private-key",
+                "share-processor-private-key-identifier",
+                sub_matches,
+            )?;
 
             let mut batch_intaker = BatchIntaker::new(
                 &sub_matches.value_of("aggregation-id").unwrap(),
@@ -675,14 +690,11 @@ fn main() -> Result<(), anyhow::Error> {
             let ingestor_pub_key = public_key_from_arg("ingestor-public-key", sub_matches);
             let peer_share_processor_pub_key =
                 public_key_from_arg("peer-share-processor-public-key", sub_matches);
-            let share_processor_key_bytes =
-                base64::decode(sub_matches.value_of("share-processor-private-key").unwrap())
-                    .unwrap();
-            let share_processor_key = EcdsaKeyPair::from_pkcs8(
-                &ECDSA_P256_SHA256_FIXED_SIGNING,
-                &share_processor_key_bytes,
-            )
-            .context("failed to parse value for share-processor-private-key")?;
+            let share_processor_key = batch_signing_key_from_arg(
+                "share-processor-private-key",
+                "share-processor-private-key-identifier",
+                sub_matches,
+            )?;
             let share_processor_ecies_key =
                 PrivateKey::from_base64(sub_matches.value_of("ecies-private-key").unwrap())
                     .unwrap();
@@ -735,13 +747,26 @@ fn public_key_from_arg(arg: &str, matches: &ArgMatches) -> UnparsedPublicKey<Vec
     // UnparsedPublicKey::new doesn't return an error, so try parsing the
     // argument as a private key first.
     let key_bytes = base64::decode(matches.value_of(arg).unwrap()).unwrap();
-    match EcdsaKeyPair::from_pkcs8(&ECDSA_P256_SHA256_FIXED_SIGNING, &key_bytes) {
+    match EcdsaKeyPair::from_pkcs8(&ECDSA_P256_SHA256_ASN1_SIGNING, &key_bytes) {
         Ok(priv_key) => UnparsedPublicKey::new(
-            &ECDSA_P256_SHA256_FIXED,
+            &ECDSA_P256_SHA256_ASN1,
             Vec::from(priv_key.public_key().as_ref()),
         ),
-        Err(_) => UnparsedPublicKey::new(&ECDSA_P256_SHA256_FIXED, key_bytes),
+        Err(_) => UnparsedPublicKey::new(&ECDSA_P256_SHA256_ASN1, key_bytes),
     }
+}
+
+fn batch_signing_key_from_arg(
+    private_key_arg: &str,
+    private_key_identifier_arg: &str,
+    matches: &ArgMatches,
+) -> Result<BatchSigningKey> {
+    let key_bytes = base64::decode(matches.value_of(private_key_arg).unwrap()).unwrap();
+    let key_identifier = matches.value_of(private_key_identifier_arg).unwrap();
+    Ok(BatchSigningKey {
+        key: EcdsaKeyPair::from_pkcs8(&ECDSA_P256_SHA256_ASN1_SIGNING, &key_bytes)?,
+        identifier: key_identifier.to_owned(),
+    })
 }
 
 fn transport_for_output_path(arg: &str, matches: &ArgMatches) -> Result<Box<dyn Transport>> {
