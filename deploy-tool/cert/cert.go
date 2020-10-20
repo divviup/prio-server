@@ -15,10 +15,6 @@ import (
 
 // IssueCertificate asks the Let's Encrypt ACMEApiEndpoint to validate and sign a certificate for a site using the DNS01 strategy
 func IssueCertificate(deployConfig config.DeployConfig, site string, privKey *ecdsa.PrivateKey) (string, error) {
-	if deployConfig.ACME.SubscriberAgreement == false {
-		return "", fmt.Errorf("let's encrypt ACMEApiEndpoint terms were not agreed to")
-	}
-
 	dnsProvider, err := dns.GetACMEDNSProvider(deployConfig)
 
 	if err != nil {
@@ -29,7 +25,7 @@ func IssueCertificate(deployConfig config.DeployConfig, site string, privKey *ec
 		DNSProvider: dnsProvider,
 	}
 
-	certmagic.DefaultACME.Agreed = true
+	certmagic.DefaultACME.Agreed = deployConfig.ACME.SubscriberAgreement
 	certmagic.DefaultACME.Email = deployConfig.ACME.Email
 	certmagic.DefaultACME.CA = deployConfig.ACME.ACMEApiEndpoint
 

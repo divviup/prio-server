@@ -84,7 +84,7 @@ func (s *KubernetesSecretStorage) Load(key string) ([]byte, error) {
 	}
 
 	data, ok := secret.Data[dataKey]
-	if ok {
+	if !ok {
 		return nil, fmt.Errorf("the data key %s was not included in the secret's data", dataKey)
 	}
 

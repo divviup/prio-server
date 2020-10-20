@@ -20,7 +20,7 @@ type CloudflareConfig struct {
 }
 
 type ACMEConfig struct {
-	Email               string
+	Email               string `default:"enpa-prio-ops@letsencrypt.org"`
 	ACMEApiEndpoint     string `toml:"acme_api_endpoint" default:"https://acme-v02.api.letsencrypt.org/directory"`
 	SubscriberAgreement bool   `toml:"subscriber_agreement"`
 }
