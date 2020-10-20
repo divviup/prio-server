@@ -284,4 +284,20 @@ fn end_to_end() {
             facilitator sum: {:?}\nreconstructed sum: {:?}\nreference sum: {:?}",
         pha_sum_fields, facilitator_sum_fields, reconstructed, reference_sum
     );
+
+    assert_eq!(
+        facilitator_sum_part.total_individual_clients, pha_sum_part.total_individual_clients,
+        "facilitator sum part total individual clients does not match the pha sum part total individual clients\n\
+        \tfacilitator clients: {}\n\tpha clients: {}",
+        facilitator_sum_part.total_individual_clients, pha_sum_part.total_individual_clients
+    );
+
+    assert_eq!(
+        reconstructed.len() as i64,
+        facilitator_sum_part.total_individual_clients,
+        "Total individual clients does not match the length of sum\n\
+        \ttotal individual clients: {}\n\tlength of sum: {}",
+        facilitator_sum_part.total_individual_clients,
+        reconstructed.len()
+    );
 }

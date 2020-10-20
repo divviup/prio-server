@@ -24,8 +24,8 @@ jobs:
       with:
         # https://docs.github.com/actions/reference/authentication-in-a-workflow
         token: ${{ secrets.GITHUB_TOKEN }}
-        # working-directory only applies to run actions
-        args: --manifest-path facilitator/Cargo.toml
+        # working-directory only applies to run actions, so path to Cargo.toml needs to be manually specified
+        args: --manifest-path facilitator/Cargo.toml --all-targets
     - name: Build
       run: cargo build --verbose
     - name: Run tests

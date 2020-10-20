@@ -649,6 +649,7 @@ pub struct SumPart {
     pub aggregation_start_time: i64,
     pub aggregation_end_time: i64,
     pub packet_file_digest: Vec<u8>,
+    pub total_individual_clients: i64,
 }
 
 impl SumPart {
@@ -705,6 +706,7 @@ impl Header for SumPart {
         let mut aggregation_start_time = None;
         let mut aggregation_end_time = None;
         let mut packet_file_digest = None;
+        let mut total_individual_clients = None;
 
         for tuple in record {
             match (tuple.0.as_str(), tuple.1) {
@@ -766,6 +768,7 @@ impl Header for SumPart {
                     aggregation_end_time = Some(v)
                 }
                 ("packet_file_digest", Value::Bytes(v)) => packet_file_digest = Some(v),
+                ("total_individual_clients", Value::Long(v)) => total_individual_clients = Some(v),
                 (f, v) => {
                     return Err(Error::MalformedHeaderError(format!(
                         "unexpected field {} -> {:?} in record",
@@ -803,6 +806,7 @@ impl Header for SumPart {
             aggregation_start_time: aggregation_start_time.unwrap(),
             aggregation_end_time: aggregation_end_time.unwrap(),
             packet_file_digest: packet_file_digest.unwrap(),
+            total_individual_clients: total_individual_clients.unwrap(),
         })
     }
 
@@ -852,6 +856,10 @@ impl Header for SumPart {
         record.put(
             "packet_file_digest",
             Value::Bytes(self.packet_file_digest.clone()),
+        );
+        record.put(
+            "total_individual_clients",
+            Value::Long(self.total_individual_clients),
         );
 
         writer.append(record).map_err(|e| {
@@ -1105,6 +1113,7 @@ mod tests {
                 aggregation_start_time: 789456123,
                 aggregation_end_time: 789456321,
                 packet_file_digest: vec![1, 2, 3],
+                total_individual_clients: 2,
             },
             SumPart {
                 batch_uuids: vec![Uuid::new_v4()],
@@ -1118,6 +1127,7 @@ mod tests {
                 aggregation_start_time: 789456123,
                 aggregation_end_time: 789456321,
                 packet_file_digest: vec![7, 8, 9],
+                total_individual_clients: 2,
             },
         ];
 

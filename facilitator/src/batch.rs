@@ -281,6 +281,7 @@ mod tests {
         Error,
     };
 
+    #[allow(clippy::too_many_arguments)] // Grandfathered in
     fn roundtrip_batch<'a>(
         aggregation_name: String,
         batch_id: Uuid,
@@ -336,7 +337,7 @@ mod tests {
 
         let header = IngestionHeader {
             batch_uuid: batch_id,
-            name: aggregation_name.to_owned(),
+            name: aggregation_name,
             bins: 2,
             epsilon: 1.601,
             prime: 17,
@@ -358,7 +359,7 @@ mod tests {
         for extension in filenames {
             transport
                 .get(&format!("{}.{}", base_path, extension))
-                .expect(&format!("could not get batch file {}", extension));
+                .unwrap_or_else(|_| panic!("could not get batch file {}", extension));
         }
 
         let header_again = batch_reader.header(read_key);

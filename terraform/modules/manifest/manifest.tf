@@ -10,6 +10,10 @@ variable "domain" {
   type = string
 }
 
+variable "sum_part_bucket_service_account_email" {
+  type = string
+}
+
 data "aws_caller_identity" "current" {}
 
 # Make a bucket where we will store global and specific manifests and from which
@@ -53,7 +57,8 @@ resource "google_storage_bucket_object" "global_manifest" {
   content = jsonencode({
     format = 0
     server-identity = {
-      aws-account-id = data.aws_caller_identity.current.account_id
+      aws-account-id            = tonumber(data.aws_caller_identity.current.account_id)
+      gcp-service-account-email = var.sum_part_bucket_service_account_email
     }
   })
 }
