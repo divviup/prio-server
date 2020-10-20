@@ -92,7 +92,7 @@ impl BatchSignature {
             }
             None => return Err(Error::EofError),
         };
-        if let Some(_) = reader.next() {
+        if reader.next().is_some() {
             return Err(Error::MalformedHeaderError(
                 "excess value in reader".to_owned(),
             ));
