@@ -1,5 +1,5 @@
 use crate::{
-    idl::{Header, Packet},
+    idl::{BatchSignature, Header, Packet},
     transport::{Transport, TransportWriter},
     DigestWriter, SidecarWriter, DATE_FORMAT,
 };
@@ -12,7 +12,7 @@ use ring::{
     signature::{EcdsaKeyPair, Signature, UnparsedPublicKey},
 };
 use std::{
-    io::{Cursor, Read, Write},
+    io::{Cursor, Read},
     marker::PhantomData,
 };
 use uuid::Uuid;
@@ -124,11 +124,7 @@ impl<'a, H: Header, P: Packet> BatchReader<'a, H, P> {
     /// Return the parsed header from this batch, but only if its signature is
     /// valid.
     pub fn header(&self, key: &UnparsedPublicKey<Vec<u8>>) -> Result<H> {
-        let mut signature = Vec::new();
-        self.transport
-            .get(self.batch.signature_key())?
-            .read_to_end(&mut signature)
-            .context("failed to read signature")?;
+        let signature = BatchSignature::read(self.transport.get(self.batch.signature_key())?)?;
 
         let mut header_buf = Vec::new();
         self.transport
@@ -136,7 +132,7 @@ impl<'a, H: Header, P: Packet> BatchReader<'a, H, P> {
             .read_to_end(&mut header_buf)
             .context("failed to read header from transport")?;
 
-        key.verify(&header_buf, &signature)
+        key.verify(&header_buf, &signature.batch_header_signature)
             .context("invalid signature on header")?;
 
         Ok(H::read(Cursor::new(header_buf))?)
@@ -257,10 +253,14 @@ impl<'a, H: Header, P: Packet> BatchWriter<'a, H, P> {
 
     /// Constructs a signature structure from the provided buffers and writes it
     /// to the batch's signature file
-    pub fn put_signature(&mut self, signature: &Signature) -> Result<()> {
+    pub fn put_signature(&mut self, signature: &Signature, key_identifier: &str) -> Result<()> {
+        let batch_signature = BatchSignature {
+            batch_header_signature: signature.as_ref().to_vec(),
+            key_identifier: key_identifier.to_string(),
+        };
         let mut writer = self.transport.put(self.batch.signature_key())?;
-        writer
-            .write_all(signature.as_ref())
+        batch_signature
+            .write(&mut writer)
             .context("failed to write signature")?;
         writer
             .complete_upload()
@@ -352,7 +352,7 @@ mod tests {
             .put_header(&header, write_key)
             .expect("failed to write header");
 
-        let res = batch_writer.put_signature(&header_signature);
+        let res = batch_writer.put_signature(&header_signature, "key-identifier");
         assert!(res.is_ok(), "failed to put signature: {:?}", res.err());
 
         // Verify file layout is as expected
@@ -449,7 +449,7 @@ mod tests {
             &mut batch_writer,
             &batch_reader,
             &mut verify_transport,
-            &default_ingestor_private_key(),
+            &default_ingestor_private_key().key,
             &read_key,
             keys_match,
         )
@@ -528,7 +528,7 @@ mod tests {
             &mut batch_writer,
             &batch_reader,
             &mut verify_transport,
-            &default_ingestor_private_key(),
+            &default_ingestor_private_key().key,
             &read_key,
             keys_match,
         )
@@ -608,7 +608,7 @@ mod tests {
             &mut batch_writer,
             &batch_reader,
             &mut verify_transport,
-            &default_ingestor_private_key(),
+            &default_ingestor_private_key().key,
             &read_key,
             keys_match,
         )

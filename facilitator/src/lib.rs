@@ -1,5 +1,5 @@
 use anyhow::Result;
-use ring::digest;
+use ring::{digest, signature::EcdsaKeyPair};
 use std::io::Write;
 
 pub mod aggregation;
@@ -90,4 +90,15 @@ impl<T: Write, W: Write> Write for SidecarWriter<T, W> {
         self.writer.flush()?;
         self.sidecar.flush()
     }
+}
+
+/// This struct represents a key used by this data share processor to sign
+/// batches (ingestion, validation or sum part).
+pub struct BatchSigningKey {
+    /// The ECDSA P256 key pair to use when signing batches.
+    pub key: EcdsaKeyPair,
+    /// The key identifier to be inserted into signature structures, which
+    /// must correspond to a batch-signing-key in the data share processor's
+    /// specific manifest.
+    pub identifier: String,
 }

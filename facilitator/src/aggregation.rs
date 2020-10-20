@@ -5,12 +5,12 @@ use crate::{
         ValidationHeader, ValidationPacket,
     },
     transport::Transport,
-    Error,
+    BatchSigningKey, Error,
 };
 use anyhow::{anyhow, Context, Result};
 use chrono::NaiveDateTime;
 use prio::{encrypt::PrivateKey, server::VerificationMessage};
-use ring::signature::{EcdsaKeyPair, KeyPair, UnparsedPublicKey, ECDSA_P256_SHA256_FIXED};
+use ring::signature::{KeyPair, UnparsedPublicKey, ECDSA_P256_SHA256_ASN1};
 use std::convert::TryFrom;
 use uuid::Uuid;
 
@@ -24,7 +24,7 @@ pub struct BatchAggregator<'a> {
     ingestion_transport: &'a mut dyn Transport,
     aggregation_batch: BatchWriter<'a, SumPart, InvalidPacket>,
     ingestor_key: &'a UnparsedPublicKey<Vec<u8>>,
-    share_processor_signing_key: &'a EcdsaKeyPair,
+    share_processor_signing_key: &'a BatchSigningKey,
     peer_share_processor_key: &'a UnparsedPublicKey<Vec<u8>>,
     share_processor_ecies_key: &'a PrivateKey,
 }
@@ -41,7 +41,7 @@ impl<'a> BatchAggregator<'a> {
         peer_validation_transport: &'a mut dyn Transport,
         aggregation_transport: &'a mut dyn Transport,
         ingestor_key: &'a UnparsedPublicKey<Vec<u8>>,
-        share_processor_signing_key: &'a EcdsaKeyPair,
+        share_processor_signing_key: &'a BatchSigningKey,
         peer_share_processor_key: &'a UnparsedPublicKey<Vec<u8>>,
         share_processor_ecies_key: &'a PrivateKey,
     ) -> Result<BatchAggregator<'a>> {
@@ -73,8 +73,8 @@ impl<'a> BatchAggregator<'a> {
     /// the aggregation transport.
     pub fn generate_sum_part(&mut self, batch_ids: &[(Uuid, NaiveDateTime)]) -> Result<()> {
         let share_processor_public_key = UnparsedPublicKey::new(
-            &ECDSA_P256_SHA256_FIXED,
-            Vec::from(self.share_processor_signing_key.public_key().as_ref()),
+            &ECDSA_P256_SHA256_ASN1,
+            Vec::from(self.share_processor_signing_key.key.public_key().as_ref()),
         );
         let mut invalid_uuids = Vec::new();
 
@@ -129,10 +129,11 @@ impl<'a> BatchAggregator<'a> {
                 packet_file_digest: invalid_packets_digest.as_ref().to_vec(),
                 total_individual_clients,
             },
-            &self.share_processor_signing_key,
+            &self.share_processor_signing_key.key,
         )?;
 
-        self.aggregation_batch.put_signature(&sum_signature)
+        self.aggregation_batch
+            .put_signature(&sum_signature, &self.share_processor_signing_key.identifier)
     }
 
     /// Fetch the ingestion header from one of the batches so various parameters

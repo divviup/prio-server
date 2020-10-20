@@ -1,0 +1,17 @@
+{
+    "namespace": "org.abetterinternet.prio.v1",
+    "type": "record",
+    "name": "PrioBatchSignature",
+    "fields": [
+        {
+            "name": "batch_header_signature",
+            "type": "bytes",
+            "doc": "The signature of the Avro encoded header object in this batch, in ASN.1 DER encoded Ecdsa-Sig-Value format (as described in RFC 3279 section 2.2.3)."
+        },
+        {
+            "name": "key_identifier",
+            "type": "string",
+            "doc": "identifier of the key used to sign this batch. Can be used to look up trusted public key in a peer's global or specific manifest file."
+        }
+    ]
+}

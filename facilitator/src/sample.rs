@@ -2,6 +2,7 @@ use crate::{
     batch::{Batch, BatchWriter},
     idl::{IngestionDataSharePacket, IngestionHeader, Packet},
     transport::Transport,
+    BatchSigningKey,
 };
 use anyhow::{anyhow, Context, Result};
 use chrono::NaiveDateTime;
@@ -12,7 +13,6 @@ use prio::{
     server::Server,
 };
 use rand::{thread_rng, Rng};
-use ring::signature::{EcdsaKeyPair, ECDSA_P256_SHA256_FIXED_SIGNING};
 use uuid::Uuid;
 
 #[allow(clippy::too_many_arguments)] // Grandfathered in
@@ -24,7 +24,7 @@ pub fn generate_ingestion_sample(
     date: &NaiveDateTime,
     pha_key: &PrivateKey,
     facilitator_key: &PrivateKey,
-    ingestor_key: &[u8],
+    ingestor_signing_key: &BatchSigningKey,
     dim: i32,
     packet_count: usize,
     epsilon: f64,
@@ -34,10 +34,6 @@ pub fn generate_ingestion_sample(
     if dim <= 0 {
         return Err(anyhow!("dimension must be an integer greater than zero"));
     }
-
-    let ingestor_key_pair =
-        EcdsaKeyPair::from_pkcs8(&ECDSA_P256_SHA256_FIXED_SIGNING, ingestor_key)
-            .context("failed to parse ingestor key pair")?;
 
     let mut pha_ingestion_batch: BatchWriter<'_, IngestionHeader, IngestionDataSharePacket> =
         BatchWriter::new(
@@ -131,10 +127,13 @@ pub fn generate_ingestion_sample(
                     batch_end_time,
                     packet_file_digest: facilitator_packet_file_digest.as_ref().to_vec(),
                 },
-                &ingestor_key_pair,
+                &ingestor_signing_key.key,
             )?;
 
-            Ok(facilitator_ingestion_batch.put_signature(&facilitator_header_signature)?)
+            Ok(facilitator_ingestion_batch.put_signature(
+                &facilitator_header_signature,
+                &ingestor_signing_key.identifier,
+            )?)
         })?;
 
     let pha_header_signature = pha_ingestion_batch.put_header(
@@ -150,9 +149,9 @@ pub fn generate_ingestion_sample(
             batch_end_time,
             packet_file_digest: pha_packet_file_digest.as_ref().to_vec(),
         },
-        &ingestor_key_pair,
+        &ingestor_signing_key.key,
     )?;
-    pha_ingestion_batch.put_signature(&pha_header_signature)?;
+    pha_ingestion_batch.put_signature(&pha_header_signature, &ingestor_signing_key.identifier)?;
     Ok(reference_sum)
 }
 
@@ -162,7 +161,7 @@ mod tests {
     use crate::{
         idl::Header,
         test_utils::{
-            default_ingestor_private_key_raw, DEFAULT_FACILITATOR_ECIES_PRIVATE_KEY,
+            default_ingestor_private_key, DEFAULT_FACILITATOR_ECIES_PRIVATE_KEY,
             DEFAULT_PHA_ECIES_PRIVATE_KEY,
         },
         transport::LocalFileTransport,
@@ -186,7 +185,7 @@ mod tests {
             &NaiveDateTime::from_timestamp(1234567890, 654321),
             &PrivateKey::from_base64(DEFAULT_PHA_ECIES_PRIVATE_KEY).unwrap(),
             &PrivateKey::from_base64(DEFAULT_FACILITATOR_ECIES_PRIVATE_KEY).unwrap(),
-            &default_ingestor_private_key_raw(),
+            &default_ingestor_private_key(),
             10,
             10,
             0.11,

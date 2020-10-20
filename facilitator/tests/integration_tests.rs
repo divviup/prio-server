@@ -6,17 +6,14 @@ use facilitator::{
     intake::BatchIntaker,
     sample::generate_ingestion_sample,
     test_utils::{
-        default_facilitator_signing_private_key, default_ingestor_private_key,
-        default_ingestor_private_key_raw, default_pha_signing_private_key,
-        DEFAULT_FACILITATOR_ECIES_PRIVATE_KEY, DEFAULT_PHA_ECIES_PRIVATE_KEY,
+        default_facilitator_signing_private_key, default_facilitator_signing_public_key,
+        default_ingestor_private_key, default_ingestor_public_key, default_pha_signing_private_key,
+        default_pha_signing_public_key, DEFAULT_FACILITATOR_ECIES_PRIVATE_KEY,
+        DEFAULT_PHA_ECIES_PRIVATE_KEY,
     },
     transport::LocalFileTransport,
 };
 use prio::{encrypt::PrivateKey, util::reconstruct_shares};
-use ring::signature::{
-    EcdsaKeyPair, KeyPair, UnparsedPublicKey, ECDSA_P256_SHA256_FIXED,
-    ECDSA_P256_SHA256_FIXED_SIGNING,
-};
 use uuid::Uuid;
 
 #[test]
@@ -43,27 +40,9 @@ fn end_to_end() {
     let pha_ecies_key = PrivateKey::from_base64(DEFAULT_PHA_ECIES_PRIVATE_KEY).unwrap();
     let facilitator_ecies_key =
         PrivateKey::from_base64(DEFAULT_FACILITATOR_ECIES_PRIVATE_KEY).unwrap();
-    let ingestor_pub_key = UnparsedPublicKey::new(
-        &ECDSA_P256_SHA256_FIXED,
-        default_ingestor_private_key()
-            .public_key()
-            .as_ref()
-            .to_vec(),
-    );
-    let pha_signing_key = EcdsaKeyPair::from_pkcs8(
-        &ECDSA_P256_SHA256_FIXED_SIGNING,
-        &default_pha_signing_private_key(),
-    )
-    .unwrap();
-    let pha_pub_signing_key = UnparsedPublicKey::new(
-        &ECDSA_P256_SHA256_FIXED,
-        pha_signing_key.public_key().as_ref().to_vec(),
-    );
-    let facilitator_signing_key = default_facilitator_signing_private_key();
-    let facilitator_pub_signing_key = UnparsedPublicKey::new(
-        &ECDSA_P256_SHA256_FIXED,
-        facilitator_signing_key.public_key().as_ref().to_vec(),
-    );
+    let ingestor_pub_key = default_ingestor_public_key();
+    let pha_pub_signing_key = default_pha_signing_public_key();
+    let facilitator_pub_signing_key = default_facilitator_signing_public_key();
 
     let batch_1_reference_sum = generate_ingestion_sample(
         &mut pha_ingest_transport,
@@ -73,7 +52,7 @@ fn end_to_end() {
         &date,
         &pha_ecies_key,
         &facilitator_ecies_key,
-        &default_ingestor_private_key_raw(),
+        &default_ingestor_private_key(),
         10,
         10,
         0.11,
@@ -94,7 +73,7 @@ fn end_to_end() {
         &date,
         &pha_ecies_key,
         &facilitator_ecies_key,
-        &default_ingestor_private_key_raw(),
+        &default_ingestor_private_key(),
         10,
         10,
         0.11,
@@ -107,6 +86,7 @@ fn end_to_end() {
         batch_2_reference_sum.err()
     );
 
+    let pha_signing_key = default_pha_signing_private_key();
     let res = BatchIntaker::new(
         &aggregation_name,
         &batch_1_uuid,
@@ -145,6 +125,7 @@ fn end_to_end() {
         res.err()
     );
 
+    let facilitator_signing_key = default_facilitator_signing_private_key();
     let res = BatchIntaker::new(
         &aggregation_name,
         &batch_1_uuid,
