@@ -6,12 +6,12 @@ use ring::signature::{
     EcdsaKeyPair, KeyPair, UnparsedPublicKey, ECDSA_P256_SHA256_ASN1,
     ECDSA_P256_SHA256_ASN1_SIGNING,
 };
-use rusoto_core::Region;
-use std::{path::Path, str::FromStr};
+use std::str::FromStr;
 use uuid::Uuid;
 
 use facilitator::{
     aggregation::BatchAggregator,
+    config::StoragePath,
     intake::BatchIntaker,
     sample::generate_ingestion_sample,
     test_utils::{
@@ -43,35 +43,8 @@ fn uuid_validator(s: String) -> Result<(), String> {
     Uuid::parse_str(&s).map(|_| ()).map_err(|e| e.to_string())
 }
 
-enum StoragePath<'a> {
-    S3Path { region: &'a str, bucket: &'a str },
-    LocalPath(&'a str),
-}
-
-fn parse_path(s: &str) -> Result<StoragePath> {
-    match s.strip_prefix("s3://") {
-        Some(region_and_bucket) => {
-            if !region_and_bucket.contains('/') {
-                return Err(anyhow!(
-                    "S3 storage must be like \"s3://{region}/{bucket name}\""
-                ));
-            }
-
-            // All we require is that the string contain a region and a bucket name.
-            // Further validation of bucket names is left to Amazon servers.
-            let mut components = region_and_bucket.splitn(2, '/');
-            let region = components.next().context("S3 URL missing region")?;
-            let bucket = components.next().context("S3 URL missing bucket name")?;
-            // splitn will only return 2 so it should never have more
-            assert!(components.next().is_none());
-            Ok(StoragePath::S3Path { region, bucket })
-        }
-        None => Ok(StoragePath::LocalPath(s)),
-    }
-}
-
 fn path_validator(s: String) -> Result<(), String> {
-    parse_path(s.as_ref())
+    StoragePath::from_str(&s)
         .map(|_| ())
         .map_err(|e| e.to_string())
 }
@@ -770,15 +743,12 @@ fn batch_signing_key_from_arg(
 }
 
 fn transport_for_output_path(arg: &str, matches: &ArgMatches) -> Result<Box<dyn Transport>> {
-    let path = parse_path(matches.value_of(arg).unwrap())?;
+    let path = StoragePath::from_str(matches.value_of(arg).unwrap())?;
     match path {
-        StoragePath::S3Path { region, bucket } => Ok(Box::new(S3Transport::new(
-            Region::from_str(region)?,
+        StoragePath::S3Path(path) => Ok(Box::new(S3Transport::new(
+            path,
             matches.is_present("s3-use-credentials-from-gke-metadata"),
-            bucket.to_string(),
         ))),
-        StoragePath::LocalPath(path) => Ok(Box::new(LocalFileTransport::new(
-            Path::new(path).to_path_buf(),
-        ))),
+        StoragePath::LocalPath(path) => Ok(Box::new(LocalFileTransport::new(path))),
     }
 }

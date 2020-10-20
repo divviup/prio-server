@@ -1,4 +1,5 @@
 use crate::{
+    config::S3Path,
     transport::{Transport, TransportWriter},
     Error,
 };
@@ -52,18 +53,16 @@ fn basic_runtime() -> Result<Runtime> {
 
 /// Implementation of Transport that reads and writes objects from Amazon S3.
 pub struct S3Transport {
-    region: Region,
-    bucket: String,
+    path: S3Path,
     use_gke_metadata_credentials: bool,
     // client_provider allows injection of mock S3Client for testing purposes
     client_provider: fn(&Region, bool) -> Result<S3Client>,
 }
 
 impl S3Transport {
-    pub fn new(region: Region, use_gke_metadata_credentials: bool, bucket: String) -> S3Transport {
+    pub fn new(path: S3Path, use_gke_metadata_credentials: bool) -> S3Transport {
         S3Transport::new_with_client(
-            region,
-            bucket,
+            path,
             use_gke_metadata_credentials,
             |region, use_gke_metadata_credentials| {
                 // Rusoto uses Hyper which uses connection pools. The default
@@ -170,14 +169,12 @@ impl S3Transport {
     }
 
     fn new_with_client(
-        region: Region,
-        bucket: String,
+        path: S3Path,
         use_gke_metadata_credentials: bool,
         client_provider: fn(&Region, bool) -> Result<S3Client>,
     ) -> S3Transport {
         S3Transport {
-            region,
-            bucket,
+            path: path.ensure_directory_prefix(),
             use_gke_metadata_credentials,
             client_provider,
         }
@@ -187,11 +184,11 @@ impl S3Transport {
 impl Transport for S3Transport {
     fn get(&self, key: &str) -> Result<Box<dyn Read>> {
         let mut runtime = basic_runtime()?;
-        let client = (self.client_provider)(&self.region, self.use_gke_metadata_credentials)?;
+        let client = (self.client_provider)(&self.path.region, self.use_gke_metadata_credentials)?;
         let get_output = runtime
             .block_on(client.get_object(GetObjectRequest {
-                bucket: self.bucket.to_owned(),
-                key: key.to_string(),
+                bucket: self.path.bucket.to_owned(),
+                key: [&self.path.key, key].concat(),
                 ..Default::default()
             }))
             .context("error getting S3 object")?;
@@ -203,14 +200,12 @@ impl Transport for S3Transport {
 
     fn put(&mut self, key: &str) -> Result<Box<dyn TransportWriter>> {
         Ok(Box::new(MultipartUploadWriter::new(
-            self.region.clone(),
-            self.bucket.to_owned(),
-            self.use_gke_metadata_credentials,
-            key.to_string(),
+            self.path.bucket.to_owned(),
+            [&self.path.key, key].concat(),
             // Set buffer size to 5 MB, which is the minimum required by Amazon
             // https://docs.aws.amazon.com/AmazonS3/latest/dev/qfacts.html
             5_242_880,
-            self.client_provider,
+            (self.client_provider)(&self.path.region, self.use_gke_metadata_credentials)?,
         )?))
     }
 }
@@ -267,15 +262,12 @@ impl MultipartUploadWriter {
     /// allow smaller values for testing purposes. Larger values are also
     /// acceptable but smaller values prevent excessive memory usage.
     fn new(
-        region: Region,
         bucket: String,
-        use_gke_metadata_credentials: bool,
         key: String,
         minimum_upload_part_size: usize,
-        client_provider: fn(&Region, bool) -> Result<S3Client>,
+        client: S3Client,
     ) -> Result<MultipartUploadWriter> {
         let mut runtime = basic_runtime()?;
-        let client = client_provider(&region, use_gke_metadata_credentials)?;
 
         let create_output = runtime
             .block_on(
@@ -532,19 +524,15 @@ mod tests {
     #[test]
     fn multipart_upload_create_fails() {
         let err = MultipartUploadWriter::new(
-            Region::UsWest2,
             String::from(TEST_BUCKET),
-            false,
             String::from(TEST_KEY),
             50,
-            |region, _| {
-                Ok(S3Client::new_with(
-                    MockRequestDispatcher::with_status(401)
-                        .with_request_checker(is_create_multipart_upload_request),
-                    MockCredentialsProvider,
-                    region.clone(),
-                ))
-            },
+            S3Client::new_with(
+                MockRequestDispatcher::with_status(401)
+                    .with_request_checker(is_create_multipart_upload_request),
+                MockCredentialsProvider,
+                Region::UsWest2,
+            ),
         )
         .expect_err("expected error");
         assert!(
@@ -559,26 +547,22 @@ mod tests {
         // Response body format from
         // https://docs.aws.amazon.com/AmazonS3/latest/API/API_Operations_Amazon_Simple_Storage_Service.html
         MultipartUploadWriter::new(
-            Region::UsWest2,
             String::from(TEST_BUCKET),
-            false,
             String::from(TEST_KEY),
             50,
-            |region, _| {
-                Ok(S3Client::new_with(
-                    MockRequestDispatcher::with_status(200)
-                        .with_body(
-                            r#"<?xml version="1.0" encoding="UTF-8"?>
+            S3Client::new_with(
+                MockRequestDispatcher::with_status(200)
+                    .with_body(
+                        r#"<?xml version="1.0" encoding="UTF-8"?>
 <InitiateMultipartUploadResult>
    <Bucket>fake-bucket</Bucket>
    <Key>fake-key</Key>
 </InitiateMultipartUploadResult>"#,
-                        )
-                        .with_request_checker(is_create_multipart_upload_request),
-                    MockCredentialsProvider,
-                    region.clone(),
-                ))
-            },
+                    )
+                    .with_request_checker(is_create_multipart_upload_request),
+                MockCredentialsProvider,
+                Region::UsWest2,
+            ),
         )
         .expect_err("expected error");
     }
@@ -587,13 +571,8 @@ mod tests {
     fn multipart_upload() {
         // Response body format from
         // https://docs.aws.amazon.com/AmazonS3/latest/API/API_Operations_Amazon_Simple_Storage_Service.html
-        let mut writer = MultipartUploadWriter::new(
-            Region::UsWest2,
-            String::from(TEST_BUCKET),
-            false,
-            String::from(TEST_KEY),
-            50,
-            |region, _| {
+        let mut writer =
+            MultipartUploadWriter::new(String::from(TEST_BUCKET), String::from(TEST_KEY), 50, {
                 let requests = vec![
                     // Response to CreateMultipartUpload
                     MockRequestDispatcher::with_status(200)
@@ -657,14 +636,13 @@ mod tests {
                     MockRequestDispatcher::with_status(400)
                         .with_request_checker(is_complete_multipart_upload_request),
                 ];
-                Ok(S3Client::new_with(
+                S3Client::new_with(
                     MultipleMockRequestDispatcher::new(requests),
                     MockCredentialsProvider,
-                    region.clone(),
-                ))
-            },
-        )
-        .expect("failed to create multipart upload writer");
+                    Region::UsWest2,
+                )
+            })
+            .expect("failed to create multipart upload writer");
 
         // First write will fail due to HTTP 401
         writer.write_all(&[0; 51]).unwrap_err();
@@ -686,39 +664,34 @@ mod tests {
 
     #[test]
     fn roundtrip_s3_transport() {
-        let transport = S3Transport::new_with_client(
-            Region::UsWest2,
-            TEST_BUCKET.to_string(),
-            false,
-            |region, _| {
-                Ok(S3Client::new_with(
-                    // Failed GetObject request
-                    MockRequestDispatcher::with_status(404)
-                        .with_request_checker(is_get_object_request),
-                    MockCredentialsProvider,
-                    region.clone(),
-                ))
-            },
-        );
+        let s3_path = S3Path {
+            region: Region::UsWest2,
+            bucket: TEST_BUCKET.into(),
+            key: "".into(),
+        };
+
+        let transport = S3Transport::new_with_client(s3_path.clone(), false, |region, _| {
+            Ok(S3Client::new_with(
+                // Failed GetObject request
+                MockRequestDispatcher::with_status(404).with_request_checker(is_get_object_request),
+                MockCredentialsProvider,
+                region.clone(),
+            ))
+        });
 
         let ret = transport.get(TEST_KEY);
         assert!(ret.is_err(), "unexpected return value {:?}", ret.err());
 
-        let transport = S3Transport::new_with_client(
-            Region::UsWest2,
-            TEST_BUCKET.to_string(),
-            false,
-            |region, _| {
-                Ok(S3Client::new_with(
-                    // Successful GetObject request
-                    MockRequestDispatcher::with_status(200)
-                        .with_request_checker(is_get_object_request)
-                        .with_body("fake-content"),
-                    MockCredentialsProvider,
-                    region.clone(),
-                ))
-            },
-        );
+        let transport = S3Transport::new_with_client(s3_path.clone(), false, |region, _| {
+            Ok(S3Client::new_with(
+                // Successful GetObject request
+                MockRequestDispatcher::with_status(200)
+                    .with_request_checker(is_get_object_request)
+                    .with_body("fake-content"),
+                MockCredentialsProvider,
+                region.clone(),
+            ))
+        });
 
         let mut reader = transport
             .get(TEST_KEY)
@@ -727,51 +700,46 @@ mod tests {
         reader.read_to_end(&mut content).expect("failed to read");
         assert_eq!(Vec::from("fake-content"), content);
 
-        let mut transport = S3Transport::new_with_client(
-            Region::UsWest2,
-            TEST_BUCKET.to_string(),
-            false,
-            |region, _| {
-                let requests = vec![
-                    // Response to CreateMultipartUpload
-                    MockRequestDispatcher::with_status(200)
-                        .with_body(
-                            r#"<?xml version="1.0" encoding="UTF-8"?>
+        let mut transport = S3Transport::new_with_client(s3_path, false, |region, _| {
+            let requests = vec![
+                // Response to CreateMultipartUpload
+                MockRequestDispatcher::with_status(200)
+                    .with_body(
+                        r#"<?xml version="1.0" encoding="UTF-8"?>
 <InitiateMultipartUploadResult>
    <Bucket>fake-bucket</Bucket>
    <Key>fake-key</Key>
    <UploadId>upload-id</UploadId>
 </InitiateMultipartUploadResult>"#,
-                        )
-                        .with_request_checker(is_create_multipart_upload_request),
-                    // Well formed response to UploadPart
-                    MockRequestDispatcher::with_status(200)
-                        .with_request_checker(is_upload_part_request)
-                        .with_header("ETag", "fake-etag"),
-                    // Well formed response to CompleteMultipartUpload
-                    MockRequestDispatcher::with_status(200)
-                        .with_request_checker(is_complete_multipart_upload_request)
-                        .with_body(
-                            r#"<?xml version="1.0" encoding="UTF-8"?>
+                    )
+                    .with_request_checker(is_create_multipart_upload_request),
+                // Well formed response to UploadPart
+                MockRequestDispatcher::with_status(200)
+                    .with_request_checker(is_upload_part_request)
+                    .with_header("ETag", "fake-etag"),
+                // Well formed response to CompleteMultipartUpload
+                MockRequestDispatcher::with_status(200)
+                    .with_request_checker(is_complete_multipart_upload_request)
+                    .with_body(
+                        r#"<?xml version="1.0" encoding="UTF-8"?>
 <CompleteMultipartUploadResult>
    <Location>string</Location>
    <Bucket>fake-bucket</Bucket>
    <Key>fake-key</Key>
    <ETag>fake-etag</ETag>
 </CompleteMultipartUploadResult>"#,
-                        ),
-                    // Response to AbortMultipartUpload, expected because of
-                    // cancel_upload call
-                    MockRequestDispatcher::with_status(204)
-                        .with_request_checker(is_abort_multipart_upload_request),
-                ];
-                Ok(S3Client::new_with(
-                    MultipleMockRequestDispatcher::new(requests),
-                    MockCredentialsProvider,
-                    region.clone(),
-                ))
-            },
-        );
+                    ),
+                // Response to AbortMultipartUpload, expected because of
+                // cancel_upload call
+                MockRequestDispatcher::with_status(204)
+                    .with_request_checker(is_abort_multipart_upload_request),
+            ];
+            Ok(S3Client::new_with(
+                MultipleMockRequestDispatcher::new(requests),
+                MockCredentialsProvider,
+                region.clone(),
+            ))
+        });
 
         let mut writer = transport.put(TEST_KEY).unwrap();
         writer.write_all(b"fake-content").unwrap();
