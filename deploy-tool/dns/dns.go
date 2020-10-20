@@ -2,6 +2,7 @@ package dns
 
 import (
 	"deploy-tool/config"
+	"deploy-tool/dns/gcloud"
 	"fmt"
 	"github.com/caddyserver/certmagic"
 	"github.com/libdns/cloudflare"
@@ -13,11 +14,19 @@ func GetACMEDNSProvider(deployConfig config.DeployConfig) (certmagic.ACMEDNSProv
 	switch strings.ToLower(deployConfig.DNS.Provider) {
 	case "cloudflare":
 		if deployConfig.DNS.CloudflareConfig == nil {
-			return nil, fmt.Errorf("cloudflare configuration of the configuration was nil")
+			return nil, fmt.Errorf("cloudflare configuration of the configuration file was nil")
 		}
 		provider := &cloudflare.Provider{
 			APIToken: deployConfig.DNS.CloudflareConfig.APIKey,
 		}
+
+		return provider, nil
+
+	case "gcp":
+		if deployConfig.DNS.GCPConfig == nil {
+			return nil, fmt.Errorf("gcp configuration of the configuration file was nil")
+		}
+		provider, _ := gcloud.NewProvider(deployConfig.DNS.GCPConfig.Project)
 
 		return provider, nil
 	}

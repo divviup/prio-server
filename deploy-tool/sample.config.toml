@@ -5,6 +5,9 @@ provider = "cloudflare" # options: cloudflare,
 [dns.cloudflare]
 api_key = "API_KEY"
 
+[dns.gcp]
+project = "project"
+
 # ACME settings
 [acme]
 email = "test@example.com"

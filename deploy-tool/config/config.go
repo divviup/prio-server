@@ -13,6 +13,11 @@ type DeployConfig struct {
 type DNSConfig struct {
 	Provider         string
 	CloudflareConfig *CloudflareConfig `toml:"cloudflare"`
+	GCPConfig        *GCPConfig        `toml:"gcp"`
+}
+
+type GCPConfig struct {
+	Project string
 }
 
 type CloudflareConfig struct {
