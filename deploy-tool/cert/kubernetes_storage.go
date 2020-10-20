@@ -43,7 +43,7 @@ var labelSelector = "manager=magiccert"
 var specialChars = regexp.MustCompile("[^a-zA-Z0-9_.-]+")
 
 func cleanKey(key string) string {
-	return fmt.Sprintf("cm.k8s.%v", specialChars.ReplaceAllString(key, ""))
+	return fmt.Sprintf("acme.%v", specialChars.ReplaceAllString(key, ""))
 }
 
 var dataKey = "value"
