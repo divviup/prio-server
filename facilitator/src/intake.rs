@@ -2,12 +2,12 @@ use crate::{
     batch::{Batch, BatchReader, BatchWriter},
     idl::{IngestionDataSharePacket, IngestionHeader, Packet, ValidationHeader, ValidationPacket},
     transport::Transport,
-    Error,
+    BatchSigningKey, Error,
 };
 use anyhow::{anyhow, Context, Result};
 use chrono::NaiveDateTime;
 use prio::{encrypt::PrivateKey, finite_field::Field, server::Server};
-use ring::signature::{EcdsaKeyPair, UnparsedPublicKey};
+use ring::signature::UnparsedPublicKey;
 use std::convert::TryFrom;
 use uuid::Uuid;
 
@@ -19,7 +19,7 @@ pub struct BatchIntaker<'a> {
     validation_batch: BatchWriter<'a, ValidationHeader, ValidationPacket>,
     is_first: bool,
     share_processor_ecies_key: &'a PrivateKey,
-    share_processor_signing_key: &'a EcdsaKeyPair,
+    batch_signing_key: &'a BatchSigningKey,
     ingestor_key: &'a UnparsedPublicKey<Vec<u8>>,
 }
 
@@ -33,7 +33,7 @@ impl<'a> BatchIntaker<'a> {
         validation_transport: &'a mut dyn Transport,
         is_first: bool,
         share_processor_ecies_key: &'a PrivateKey,
-        share_processor_signing_key: &'a EcdsaKeyPair,
+        batch_signing_key: &'a BatchSigningKey,
         ingestor_key: &'a UnparsedPublicKey<Vec<u8>>,
     ) -> Result<BatchIntaker<'a>> {
         Ok(BatchIntaker {
@@ -47,7 +47,7 @@ impl<'a> BatchIntaker<'a> {
             ),
             is_first,
             share_processor_ecies_key,
-            share_processor_signing_key,
+            batch_signing_key,
             ingestor_key,
         })
     }
@@ -121,11 +121,12 @@ impl<'a> BatchIntaker<'a> {
                 hamming_weight: ingestion_header.hamming_weight,
                 packet_file_digest: packet_file_digest.as_ref().to_vec(),
             },
-            &self.share_processor_signing_key,
+            &self.batch_signing_key.key,
         )?;
 
         // Construct and write out signature
-        self.validation_batch.put_signature(&header_signature)
+        self.validation_batch
+            .put_signature(&header_signature, &self.batch_signing_key.identifier)
     }
 }
 
@@ -136,12 +137,11 @@ mod tests {
         sample::generate_ingestion_sample,
         test_utils::{
             default_facilitator_signing_private_key, default_ingestor_private_key,
-            default_ingestor_private_key_raw, default_pha_signing_private_key,
+            default_ingestor_public_key, default_pha_signing_private_key,
             DEFAULT_FACILITATOR_ECIES_PRIVATE_KEY, DEFAULT_PHA_ECIES_PRIVATE_KEY,
         },
         transport::LocalFileTransport,
     };
-    use ring::signature::{KeyPair, ECDSA_P256_SHA256_FIXED, ECDSA_P256_SHA256_FIXED_SIGNING};
 
     #[test]
     fn share_validator() {
@@ -161,18 +161,8 @@ mod tests {
         let pha_ecies_key = PrivateKey::from_base64(DEFAULT_PHA_ECIES_PRIVATE_KEY).unwrap();
         let facilitator_ecies_key =
             PrivateKey::from_base64(DEFAULT_FACILITATOR_ECIES_PRIVATE_KEY).unwrap();
-        let ingestor_pub_key = UnparsedPublicKey::new(
-            &ECDSA_P256_SHA256_FIXED,
-            default_ingestor_private_key()
-                .public_key()
-                .as_ref()
-                .to_vec(),
-        );
-        let pha_signing_key = EcdsaKeyPair::from_pkcs8(
-            &ECDSA_P256_SHA256_FIXED_SIGNING,
-            &default_pha_signing_private_key(),
-        )
-        .unwrap();
+        let ingestor_pub_key = default_ingestor_public_key();
+        let pha_signing_key = default_pha_signing_private_key();
         let facilitator_signing_key = default_facilitator_signing_private_key();
 
         generate_ingestion_sample(
@@ -183,7 +173,7 @@ mod tests {
             &date,
             &pha_ecies_key,
             &facilitator_ecies_key,
-            &default_ingestor_private_key_raw(),
+            &default_ingestor_private_key(),
             10,
             10,
             0.11,

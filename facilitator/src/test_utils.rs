@@ -1,6 +1,7 @@
+use crate::BatchSigningKey;
 use ring::signature::{
-    EcdsaKeyPair, KeyPair, UnparsedPublicKey, ECDSA_P256_SHA256_FIXED,
-    ECDSA_P256_SHA256_FIXED_SIGNING,
+    EcdsaKeyPair, KeyPair, UnparsedPublicKey, ECDSA_P256_SHA256_ASN1,
+    ECDSA_P256_SHA256_ASN1_SIGNING,
 };
 
 /// Default keys used in testing and for sample data generation. These are
@@ -44,52 +45,70 @@ pub const DEFAULT_PHA_SUBJECT_PUBLIC_KEY_INFO: &str =
     QzOl2aiaJ6D9ZudqDdGiyA9YSUq3yia56nYJh5mk+HlzTX+AufoNR2bfrg==";
 
 /// Constructs an EcdsaKeyPair from the default ingestor server.
-pub fn default_ingestor_private_key() -> EcdsaKeyPair {
-    EcdsaKeyPair::from_pkcs8(
-        &ECDSA_P256_SHA256_FIXED_SIGNING,
-        &default_ingestor_private_key_raw(),
-    )
-    // Since we know DEFAULT_INGESTOR_PRIVATE_KEY is valid, it
-    // is ok to unwrap() here.
-    .unwrap()
-}
-
-pub fn default_ingestor_private_key_raw() -> Vec<u8> {
-    base64::decode(DEFAULT_INGESTOR_PRIVATE_KEY).unwrap()
+pub fn default_ingestor_private_key() -> BatchSigningKey {
+    BatchSigningKey {
+        key: EcdsaKeyPair::from_pkcs8(
+            &ECDSA_P256_SHA256_ASN1_SIGNING,
+            &base64::decode(DEFAULT_INGESTOR_PRIVATE_KEY).unwrap(),
+        )
+        // Since we know DEFAULT_INGESTOR_PRIVATE_KEY is valid, it
+        // is ok to unwrap() here.
+        .unwrap(),
+        identifier: "default-ingestor-signing-key".to_owned(),
+    }
 }
 
 pub fn default_ingestor_public_key() -> UnparsedPublicKey<Vec<u8>> {
     UnparsedPublicKey::new(
-        &ECDSA_P256_SHA256_FIXED,
+        &ECDSA_P256_SHA256_ASN1,
         default_ingestor_private_key()
+            .key
             .public_key()
             .as_ref()
             .to_vec(),
     )
 }
 
-pub fn default_facilitator_signing_private_key() -> EcdsaKeyPair {
-    EcdsaKeyPair::from_pkcs8(
-        &ECDSA_P256_SHA256_FIXED_SIGNING,
-        &default_facilitator_signing_private_key_raw(),
-    )
-    .unwrap()
-}
-
-pub fn default_facilitator_signing_private_key_raw() -> Vec<u8> {
-    base64::decode(DEFAULT_FACILITATOR_SIGNING_PRIVATE_KEY).unwrap()
+pub fn default_facilitator_signing_private_key() -> BatchSigningKey {
+    BatchSigningKey {
+        key: EcdsaKeyPair::from_pkcs8(
+            &ECDSA_P256_SHA256_ASN1_SIGNING,
+            &base64::decode(DEFAULT_FACILITATOR_SIGNING_PRIVATE_KEY).unwrap(),
+        )
+        .unwrap(),
+        identifier: "default-facilitator-signing-key".to_owned(),
+    }
 }
 
 pub fn default_facilitator_signing_public_key() -> UnparsedPublicKey<Vec<u8>> {
     UnparsedPublicKey::new(
-        &ECDSA_P256_SHA256_FIXED,
+        &ECDSA_P256_SHA256_ASN1,
         default_facilitator_signing_private_key()
+            .key
             .public_key()
             .as_ref()
             .to_vec(),
     )
 }
 
-pub fn default_pha_signing_private_key() -> Vec<u8> {
-    base64::decode(DEFAULT_PHA_SIGNING_PRIVATE_KEY).unwrap()
+pub fn default_pha_signing_private_key() -> BatchSigningKey {
+    BatchSigningKey {
+        key: EcdsaKeyPair::from_pkcs8(
+            &ECDSA_P256_SHA256_ASN1_SIGNING,
+            &base64::decode(DEFAULT_PHA_SIGNING_PRIVATE_KEY).unwrap(),
+        )
+        .unwrap(),
+        identifier: "default-pha-signing-key".to_owned(),
+    }
+}
+
+pub fn default_pha_signing_public_key() -> UnparsedPublicKey<Vec<u8>> {
+    UnparsedPublicKey::new(
+        &ECDSA_P256_SHA256_ASN1,
+        default_pha_signing_private_key()
+            .key
+            .public_key()
+            .as_ref()
+            .to_vec(),
+    )
 }

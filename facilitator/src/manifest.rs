@@ -1,5 +1,5 @@
 use anyhow::{anyhow, Context, Result};
-use ring::signature::{UnparsedPublicKey, ECDSA_P256_SHA256_FIXED};
+use ring::signature::{UnparsedPublicKey, ECDSA_P256_SHA256_ASN1};
 use serde::Deserialize;
 use serde_json::from_reader;
 use std::{collections::HashMap, io::Read};
@@ -120,7 +120,7 @@ impl SpecificManifest {
         }
 
         Ok(UnparsedPublicKey::new(
-            &ECDSA_P256_SHA256_FIXED,
+            &ECDSA_P256_SHA256_ASN1,
             Vec::from(key),
         ))
     }
@@ -189,6 +189,7 @@ mod tests {
         let batch_signing_key = manifest.batch_signing_public_key("fake-key-2").unwrap();
         let content = b"some content";
         let signature = default_ingestor_private_key()
+            .key
             .sign(&SystemRandom::new(), content)
             .unwrap();
         batch_signing_key
