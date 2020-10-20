@@ -166,9 +166,9 @@ mod tests {
         },
         transport::LocalFileTransport,
     };
+    use chrono::NaiveDate;
 
     #[test]
-    #[ignore]
     #[allow(clippy::float_cmp)] // No arithmetic done on floats
     fn write_sample() {
         let tempdir = tempfile::TempDir::new().unwrap();
@@ -182,7 +182,7 @@ mod tests {
             &mut facilitator_transport,
             &batch_uuid,
             "fake-aggregation",
-            &NaiveDateTime::from_timestamp(1234567890, 654321),
+            &NaiveDate::from_ymd(2009, 2, 13).and_hms(23, 31, 0),
             &PrivateKey::from_base64(DEFAULT_PHA_ECIES_PRIVATE_KEY).unwrap(),
             &PrivateKey::from_base64(DEFAULT_FACILITATOR_ECIES_PRIVATE_KEY).unwrap(),
             &default_ingestor_private_key(),
@@ -193,7 +193,7 @@ mod tests {
             100,
         );
         assert!(res.is_ok(), "error writing sample data {:?}", res.err());
-        let expected_path = format!("fake-aggregation/fake-date/{}.batch", batch_uuid);
+        let expected_path = format!("fake-aggregation/2009/02/13/23/31/{}.batch", batch_uuid);
 
         let transports = &[pha_transport, facilitator_transport];
         for transport in transports {
