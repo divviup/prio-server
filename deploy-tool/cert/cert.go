@@ -13,20 +13,10 @@ import (
 	"strings"
 )
 
-// IssueCertificate asks the Let's Encrypt CA to validate and sign a certificate for a site using the DNS01 strategy
-// This issue depends on multiple environment variables being set before being invoked:
-// D_CA_AGREE, expecting a value of "true" - checks to see if the user has agreed to the CA terms
-// D_CA_EMAIL, expecting an email address - this is used for the ACME account
-// D_DNS_PROVIDER, expecting a DNS provider, e.g. "cloudflare" - this is used for the DNS challenge
-// D_API_TOKEN, expecting an API token for the DNS provider - this is used to authenticate to the DNS provider
+// IssueCertificate asks the Let's Encrypt ACMEApiEndpoint to validate and sign a certificate for a site using the DNS01 strategy
 func IssueCertificate(deployConfig config.DeployConfig, site string, privKey *ecdsa.PrivateKey) (string, error) {
 	if deployConfig.ACME.SubscriberAgreement == false {
-		return "", fmt.Errorf("let's encrypt CA terms were not agreed to")
-	}
-
-	userEmail, err := getUserEmail(deployConfig)
-	if err != nil {
-		return "", fmt.Errorf("error when getting the user email: %v", err)
+		return "", fmt.Errorf("let's encrypt ACMEApiEndpoint terms were not agreed to")
 	}
 
 	dnsProvider, err := dns.GetACMEDNSProvider(deployConfig)
@@ -40,12 +30,14 @@ func IssueCertificate(deployConfig config.DeployConfig, site string, privKey *ec
 	}
 
 	certmagic.DefaultACME.Agreed = true
-	certmagic.DefaultACME.Email = userEmail
-	// TODO change this to default LE server
-	certmagic.DefaultACME.CA = certmagic.LetsEncryptStagingCA
+	certmagic.DefaultACME.Email = deployConfig.ACME.Email
+	certmagic.DefaultACME.CA = deployConfig.ACME.ACMEApiEndpoint
 
 	acme := certmagic.NewDefault()
-	acme.Storage = &certmagic.FileStorage{Path: "./deploy-tool-output"}
+	if err := setStorageDriver(deployConfig, acme); err != nil {
+		return "", err
+	}
+
 	csr, err := getCSR([]string{site}, privKey)
 	if err != nil {
 		return "", fmt.Errorf("error when getting the certificate signing request: %v", err)
@@ -57,6 +49,30 @@ func IssueCertificate(deployConfig config.DeployConfig, site string, privKey *ec
 	}
 
 	return string(issued.Certificate), nil
+}
+
+func setStorageDriver(deployConfig config.DeployConfig, acme *certmagic.Config) error {
+	switch strings.ToLower(deployConfig.Storage.Driver) {
+	case "filesystem":
+		if deployConfig.Storage.Filesystem == nil {
+			return fmt.Errorf("fileystem configuration was nil")
+		}
+
+		acme.Storage = &certmagic.FileStorage{Path: deployConfig.Storage.Filesystem.Path}
+	case "kubernetes":
+		if deployConfig.Storage.Kubernetes == nil {
+			return fmt.Errorf("kubernetes configuration was nil")
+		}
+
+		secretStorage, err := NewKubernetesSecretStorage(deployConfig.Storage.Kubernetes.Namespace)
+		if err != nil {
+			return err
+		}
+
+		acme.Storage = secretStorage
+
+	}
+	return nil
 }
 
 // getCSR creates an x509 CertificateRequest which includes the site this certificate will be used for
@@ -71,14 +87,4 @@ func getCSR(names []string, privateKey crypto.PrivateKey) (*x509.CertificateRequ
 	}
 
 	return x509.ParseCertificateRequest(csrDER)
-}
-
-// getUserEmail retrieves the email the user want's to associate with this certificate
-func getUserEmail(deployConfig config.DeployConfig) (string, error) {
-	email := deployConfig.ACME.Email
-	if strings.Contains(email, "@") == false {
-		return "", fmt.Errorf("invalid email address %s", email)
-	}
-
-	return email, nil
 }

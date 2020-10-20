@@ -12,7 +12,7 @@ type DeployConfig struct {
 
 type DNSConfig struct {
 	Provider         string
-	CloudflareConfig *CloudflareConfig `toml:"Cloudflare"`
+	CloudflareConfig *CloudflareConfig `toml:"cloudflare"`
 }
 
 type CloudflareConfig struct {
@@ -21,22 +21,32 @@ type CloudflareConfig struct {
 
 type ACMEConfig struct {
 	Email               string
-	CA                  string
-	SubscriberAgreement bool `toml:"subscriber_agreement"`
+	ACMEApiEndpoint     string `toml:"acme_api_endpoint" default:"https://acme-v02.api.letsencrypt.org/directory"`
+	SubscriberAgreement bool   `toml:"subscriber_agreement"`
 }
 
 type StorageConfig struct {
-	Driver string
+	Driver     string `default:"kubernetes"`
+	Filesystem *FilesystemConfig
+	Kubernetes *KubernetesConfig
+}
+
+type FilesystemConfig struct {
+	Path string `default:"./deploy_tool_output"`
+}
+
+type KubernetesConfig struct {
+	Namespace string `default:"prio-server"`
 }
 
 func Read(path string) (DeployConfig, error) {
 	var config DeployConfig
 
-	x, err := toml.LoadFile(path)
+	tree, err := toml.LoadFile(path)
 	if err != nil {
 		return config, err
 	}
-	err = x.Unmarshal(&config)
+	err = tree.Unmarshal(&config)
 
 	return config, err
 }

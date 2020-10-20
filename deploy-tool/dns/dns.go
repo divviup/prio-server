@@ -12,8 +12,7 @@ import (
 func GetACMEDNSProvider(deployConfig config.DeployConfig) (certmagic.ACMEDNSProvider, error) {
 	switch strings.ToLower(deployConfig.DNS.Provider) {
 	case "cloudflare":
-		cloudflareConfig := deployConfig.DNS.CloudflareConfig
-		if cloudflareConfig == nil {
+		if deployConfig.DNS.CloudflareConfig == nil {
 			return nil, fmt.Errorf("cloudflare configuration of the configuration was nil")
 		}
 		provider := &cloudflare.Provider{

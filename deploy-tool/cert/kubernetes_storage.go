@@ -8,13 +8,31 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
 	v1 "k8s.io/client-go/kubernetes/typed/core/v1"
+	"k8s.io/client-go/rest"
+	"os"
 	"regexp"
 	"strings"
 )
 
-type SecretStorage struct {
+type KubernetesSecretStorage struct {
 	Namespace  string
 	KubeClient *kubernetes.Clientset
+}
+
+func NewKubernetesSecretStorage(namespace string) (*KubernetesSecretStorage, error) {
+	config, err := rest.InClusterConfig()
+	if err != nil {
+		return nil, err
+	}
+	client, err := kubernetes.NewForConfig(config)
+	if err != nil {
+		return nil, err
+	}
+
+	return &KubernetesSecretStorage{
+		Namespace:  namespace,
+		KubeClient: client,
+	}, nil
 }
 
 var matchLabels = map[string]string{
@@ -30,7 +48,7 @@ func cleanKey(key string) string {
 
 var dataKey = "value"
 
-func (s *SecretStorage) Store(key string, value []byte) error {
+func (s *KubernetesSecretStorage) Store(key string, value []byte) error {
 	secret := &corev1.Secret{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:   cleanKey(key),
@@ -57,7 +75,7 @@ func (s *SecretStorage) Store(key string, value []byte) error {
 	return nil
 }
 
-func (s *SecretStorage) Load(key string) ([]byte, error) {
+func (s *KubernetesSecretStorage) Load(key string) ([]byte, error) {
 	secretsApi := s.getSecretsAPI()
 
 	secret, err := secretsApi.Get(context.Background(), cleanKey(key), metav1.GetOptions{})
@@ -65,28 +83,27 @@ func (s *SecretStorage) Load(key string) ([]byte, error) {
 		return nil, err
 	}
 
-	return secret.Data[dataKey], nil
-}
-
-func (s *SecretStorage) Delete(key string) error {
-	secretsApi := s.getSecretsAPI()
-
-	err := secretsApi.Delete(context.Background(), cleanKey(key), metav1.DeleteOptions{})
-
-	if err != nil {
-		return err
+	data, ok := secret.Data[dataKey]
+	if ok {
+		return nil, fmt.Errorf("the data key %s was not included in the secret's data", dataKey)
 	}
 
-	return nil
+	return data, nil
 }
 
-func (s *SecretStorage) Exists(key string) bool {
+func (s *KubernetesSecretStorage) Delete(key string) error {
+	secretsApi := s.getSecretsAPI()
+
+	return secretsApi.Delete(context.Background(), cleanKey(key), metav1.DeleteOptions{})
+}
+
+func (s *KubernetesSecretStorage) Exists(key string) bool {
 	secrets, err := s.getSecretsAPI().List(context.Background(), metav1.ListOptions{
 		FieldSelector: fmt.Sprintf("metadata.name=%v", cleanKey(key)),
 	})
 
 	if err != nil {
-		//TODO where should we log this?
+		_, _ = fmt.Fprintln(os.Stderr, err)
 		return false
 	}
 
@@ -99,7 +116,7 @@ func (s *SecretStorage) Exists(key string) bool {
 	return false
 }
 
-func (s *SecretStorage) List(prefix string, _ bool) ([]string, error) {
+func (s *KubernetesSecretStorage) List(prefix string, _ bool) ([]string, error) {
 	secretsApi := s.getSecretsAPI()
 
 	secrets, err := secretsApi.List(context.Background(), metav1.ListOptions{
@@ -120,7 +137,7 @@ func (s *SecretStorage) List(prefix string, _ bool) ([]string, error) {
 	return keys, nil
 }
 
-func (s *SecretStorage) Stat(key string) (certmagic.KeyInfo, error) {
+func (s *KubernetesSecretStorage) Stat(key string) (certmagic.KeyInfo, error) {
 	secretsApi := s.getSecretsAPI()
 
 	secret, err := secretsApi.Get(context.Background(), cleanKey(key), metav1.GetOptions{})
@@ -136,16 +153,16 @@ func (s *SecretStorage) Stat(key string) (certmagic.KeyInfo, error) {
 	}, nil
 }
 
-func (s *SecretStorage) Lock(ctx context.Context, key string) error {
+func (s *KubernetesSecretStorage) Lock(ctx context.Context, key string) error {
 	// Do we need this? If so how should we implement this?
 	return nil
 }
 
-func (s *SecretStorage) Unlock(key string) error {
-	// See SecretStorage#Lock
+func (s *KubernetesSecretStorage) Unlock(key string) error {
+	// See KubernetesSecretStorage#Lock
 	return nil
 }
 
-func (s *SecretStorage) getSecretsAPI() v1.SecretInterface {
+func (s *KubernetesSecretStorage) getSecretsAPI() v1.SecretInterface {
 	return s.KubeClient.CoreV1().Secrets(s.Namespace)
 }

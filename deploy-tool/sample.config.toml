@@ -2,14 +2,20 @@
 [dns]
 provider = "cloudflare" # options: cloudflare,
 
-    [dns.cloudflare]
-    api_key = "API_KEY"
+[dns.cloudflare]
+api_key = "API_KEY"
 
 # ACME settings
 [acme]
 email = "test@example.com"
-ca = "https://acme-staging-v02.api.letsencrypt.org/directory"
+acme_api_endpoint = "https://acme-staging-v02.api.letsencrypt.org/directory"
 subscriber_agreement = false
 
 [storage]
 driver = "kubernetes" # options: kubernetes, filesystem,
+
+[storage.filesystem]
+path = "./deploy_tool_output"
+
+[storage.kubernetes]
+namespace = "prio-server"

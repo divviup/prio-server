@@ -147,8 +147,8 @@ func generateAndDeployKeyPair(namespace, keyName string) (*ecdsa.PrivateKey, err
 // getConfigFilePath gets the configuration file path from the DEPLOY_CONFIG_PATH environment variable.
 // this function defaults to ./config.toml if that env variable is empty.
 func getConfigFilePath() string {
-	val := os.Getenv("DEPLOY_CONFIG_PATH")
-	if len(val) == 0 {
+	val, exists := os.LookupEnv("DEPLOY_CONFIG_PATH")
+	if !exists {
 		return "./config.toml"
 	}
 	return val
@@ -162,8 +162,7 @@ func main() {
 
 	var terraformOutput TerraformOutput
 
-	err = json.NewDecoder(os.Stdin).Decode(&terraformOutput)
-	if err != nil {
+	if err := json.NewDecoder(os.Stdin).Decode(&terraformOutput); err != nil {
 		log.Fatalf("failed to parse specific manifests: %v", err)
 	}
 

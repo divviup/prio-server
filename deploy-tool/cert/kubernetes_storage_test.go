@@ -31,8 +31,8 @@ func TestCleanKey(t *testing.T) {
 func TestStorageImplementationComplete(t *testing.T) {
 	acme := certmagic.NewDefault()
 
-	// Just a compile time check to see if we can use SecretStorage as a certmagic storage system.
-	acme.Storage = &SecretStorage{
+	// Just a compile time check to see if we can use KubernetesSecretStorage as a certmagic storage system.
+	acme.Storage = &KubernetesSecretStorage{
 		Namespace:  "",
 		KubeClient: nil,
 	}
