@@ -36,7 +36,7 @@ type FilesystemConfig struct {
 }
 
 type KubernetesConfig struct {
-	Namespace string `default:"prio-server"`
+	Namespace string `default:"key-rotator"`
 }
 
 func Read(path string) (DeployConfig, error) {
