@@ -13,6 +13,7 @@ use std::{
 };
 use uuid::Uuid;
 
+const BATCH_SIGNATURE_SCHEMA: &str = include_str!("../../avro-schema/batch-signature.avsc");
 const INGESTION_HEADER_SCHEMA: &str = include_str!("../../avro-schema/ingestion-header.avsc");
 const INGESTION_DATA_SHARE_PACKET_SCHEMA: &str =
     include_str!("../../avro-schema/ingestion-data-share-packet.avsc");
@@ -54,6 +55,116 @@ pub trait Packet: Sized {
     /// failure.
     fn schema() -> Schema {
         Schema::parse_str(Self::schema_raw()).unwrap()
+    }
+}
+
+/// The file containing signatures over the ingestion batch header and packet
+/// file.
+#[derive(Debug, Serialize, Deserialize, PartialEq)]
+pub struct BatchSignature {
+    pub batch_header_signature: Vec<u8>,
+    pub key_identifier: String,
+}
+
+impl BatchSignature {
+    /// Reads and parses one BatchSignature from the provided std::io::Read
+    /// instance.
+    pub fn read<R: Read>(reader: R) -> Result<BatchSignature, Error> {
+        let schema = Schema::parse_str(BATCH_SIGNATURE_SCHEMA).map_err(|e| {
+            Error::AvroError("failed to parse ingestion signature schema".to_owned(), e)
+        })?;
+        let mut reader = Reader::with_schema(&schema, reader)
+            .map_err(|e| Error::AvroError("failed to create Avro reader".to_owned(), e))?;
+
+        // We expect exactly one record and for it to be an ingestion signature
+        let record = match reader.next() {
+            Some(Ok(Value::Record(r))) => r,
+            Some(Ok(_)) => {
+                return Err(Error::MalformedHeaderError(
+                    "value is not a record".to_owned(),
+                ))
+            }
+            Some(Err(e)) => {
+                return Err(Error::AvroError(
+                    "failed to read record from Avro reader".to_owned(),
+                    e,
+                ));
+            }
+            None => return Err(Error::EofError),
+        };
+        if let Some(_) = reader.next() {
+            return Err(Error::MalformedHeaderError(
+                "excess value in reader".to_owned(),
+            ));
+        }
+
+        // Here we might wish to use from_value::<BatchSignature>(record) but
+        // avro_rs does not seem to recognize it as a Bytes and fails to
+        // deserialize it. The value we unwrapped from reader.next above is a
+        // vector of (String, avro_rs::Value) tuples, which we now iterate to
+        // find the struct members.
+        let mut batch_header_signature = None;
+        let mut key_identifier = None;
+
+        for tuple in record {
+            match (tuple.0.as_str(), tuple.1) {
+                ("batch_header_signature", Value::Bytes(v)) => batch_header_signature = Some(v),
+                ("key_identifier", Value::String(v)) => key_identifier = Some(v),
+                (f, _) => {
+                    return Err(Error::MalformedHeaderError(format!(
+                        "unexpected field {} in record",
+                        f
+                    )))
+                }
+            }
+        }
+
+        if batch_header_signature.is_none() || key_identifier.is_none() {
+            return Err(Error::MalformedHeaderError(
+                "missing fields in record".to_owned(),
+            ));
+        }
+
+        Ok(BatchSignature {
+            batch_header_signature: batch_header_signature.unwrap(),
+            key_identifier: key_identifier.unwrap(),
+        })
+    }
+
+    /// Serializes this signature into Avro format and writes it to the provided
+    /// std::io::Write instance.
+    pub fn write<W: Write>(&self, writer: &mut W) -> Result<(), Error> {
+        let schema = Schema::parse_str(BATCH_SIGNATURE_SCHEMA).map_err(|e| {
+            Error::AvroError("failed to parse ingestion signature schema".to_owned(), e)
+        })?;
+        let mut writer = Writer::new(&schema, writer);
+
+        let mut record = match Record::new(writer.schema()) {
+            Some(r) => r,
+            None => {
+                // avro_rs docs say this can only happen "if the `Schema is not
+                // a `Schema::Record` variant", which shouldn't ever happen, so
+                // panic for debugging
+                // https://docs.rs/avro-rs/0.11.0/avro_rs/types/struct.Record.html#method.new
+                panic!("Unable to create Record from ingestion signature schema");
+            }
+        };
+
+        record.put(
+            "batch_header_signature",
+            Value::Bytes(self.batch_header_signature.clone()),
+        );
+        record.put("key_identifier", Value::String(self.key_identifier.clone()));
+
+        writer.append(record).map_err(|e| {
+            Error::AvroError("failed to append record to Avro writer".to_owned(), e)
+        })?;
+
+        writer
+            .flush()
+            .map_err(|e| Error::AvroError("failed to flush Avro writer".to_owned(), e))?;
+
+        Ok(())
     }
 }
 
@@ -927,6 +1038,25 @@ impl Packet for InvalidPacket {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn roundtrip_batch_signature() {
+        let signature1 = BatchSignature {
+            batch_header_signature: vec![1u8, 2u8, 3u8, 4u8],
+            key_identifier: "my-cool-key".to_owned(),
+        };
+        let signature2 = BatchSignature {
+            batch_header_signature: vec![5u8, 6u8, 7u8, 9u8],
+            key_identifier: "my-other-key".to_owned(),
+        };
+
+        let mut record_vec = Vec::new();
+
+        signature1.write(&mut record_vec).unwrap();
+        let signature_again = BatchSignature::read(&record_vec[..]).unwrap();
+        assert_eq!(signature1, signature_again);
+        assert!(signature2 != signature_again);
+    }
 
     #[test]
     fn roundtrip_ingestion_header() {
