@@ -9,7 +9,7 @@ provider = "cloudflare" # options: cloudflare,
 [acme]
 email = "test@example.com"
 ca = "https://acme-staging-v02.api.letsencrypt.org/directory"
-subscriber_agreement = true
+subscriber_agreement = false
 
 [storage]
 driver = "kubernetes" # options: kubernetes, filesystem,

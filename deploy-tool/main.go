@@ -6,6 +6,7 @@ import (
 	"crypto/rand"
 	"crypto/x509"
 	"deploy-tool/cert"
+	"deploy-tool/config"
 	"encoding/base64"
 	"encoding/json"
 	"encoding/pem"
@@ -143,10 +144,25 @@ func generateAndDeployKeyPair(namespace, keyName string) (*ecdsa.PrivateKey, err
 	return ecdsaKey, nil
 }
 
+// getConfigFilePath gets the configuration file path from the DEPLOY_CONFIG_PATH environment variable.
+// this function defaults to ./config.toml if that env variable is empty.
+func getConfigFilePath() string {
+	val := os.Getenv("DEPLOY_CONFIG_PATH")
+	if len(val) == 0 {
+		return "./config.toml"
+	}
+	return val
+}
+
 func main() {
+	deployConfig, err := config.Read(getConfigFilePath())
+	if err != nil {
+		log.Fatalf("failed to parse config.toml: %v", err)
+	}
+
 	var terraformOutput TerraformOutput
 
-	err := json.NewDecoder(os.Stdin).Decode(&terraformOutput)
+	err = json.NewDecoder(os.Stdin).Decode(&terraformOutput)
 	if err != nil {
 		log.Fatalf("failed to parse specific manifests: %v", err)
 	}
@@ -199,7 +215,7 @@ func main() {
 				log.Fatalf("%s", err)
 			}
 
-			certificate, err := cert.IssueCertificate(manifestWrapper.KubernetesNamespace, privKey)
+			certificate, err := cert.IssueCertificate(deployConfig, manifestWrapper.KubernetesNamespace, privKey)
 			if err != nil {
 				log.Fatalf("%s", err)
 			}

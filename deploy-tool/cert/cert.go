@@ -6,10 +6,10 @@ import (
 	"crypto/ecdsa"
 	"crypto/rand"
 	"crypto/x509"
+	"deploy-tool/config"
 	"deploy-tool/dns"
 	"fmt"
 	"github.com/caddyserver/certmagic"
-	"os"
 	"strings"
 )
 
@@ -19,17 +19,17 @@ import (
 // D_CA_EMAIL, expecting an email address - this is used for the ACME account
 // D_DNS_PROVIDER, expecting a DNS provider, e.g. "cloudflare" - this is used for the DNS challenge
 // D_API_TOKEN, expecting an API token for the DNS provider - this is used to authenticate to the DNS provider
-func IssueCertificate(site string, privKey *ecdsa.PrivateKey) (string, error) {
-	if getUserCATermsAgreement() == false {
+func IssueCertificate(deployConfig config.DeployConfig, site string, privKey *ecdsa.PrivateKey) (string, error) {
+	if deployConfig.ACME.SubscriberAgreement == false {
 		return "", fmt.Errorf("let's encrypt CA terms were not agreed to")
 	}
 
-	userEmail, err := getUserEmail()
+	userEmail, err := getUserEmail(deployConfig)
 	if err != nil {
 		return "", fmt.Errorf("error when getting the user email: %v", err)
 	}
 
-	dnsProvider, err := dns.GetACMEDNSProvider()
+	dnsProvider, err := dns.GetACMEDNSProvider(deployConfig)
 
 	if err != nil {
 		return "", fmt.Errorf("error when getting the dns provider: %v", err)
@@ -73,21 +73,12 @@ func getCSR(names []string, privateKey crypto.PrivateKey) (*x509.CertificateRequ
 	return x509.ParseCertificateRequest(csrDER)
 }
 
-// getUserCATermsAgreement retrieves whether or not the user has agreed to the CA terms
-func getUserCATermsAgreement() bool {
-	val := os.Getenv("D_CA_AGREE")
-	if strings.ToLower(val) == "true" {
-		return true
-	}
-	return false
-}
-
 // getUserEmail retrieves the email the user want's to associate with this certificate
-func getUserEmail() (string, error) {
-	val := os.Getenv("D_CA_EMAIL")
-	if strings.Contains(val, "@") == false {
-		return "", fmt.Errorf("invalid email address %s", val)
+func getUserEmail(deployConfig config.DeployConfig) (string, error) {
+	email := deployConfig.ACME.Email
+	if strings.Contains(email, "@") == false {
+		return "", fmt.Errorf("invalid email address %s", email)
 	}
 
-	return val, nil
+	return email, nil
 }
