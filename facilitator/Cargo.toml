@@ -14,9 +14,11 @@ clap = "2.33.3"
 derivative = "2.1.1"
 hyper = "0.13.8"
 hyper-rustls = "0.21.0"
+once_cell = "1.4"
 pem = "0.8"
 prio = "0.2"
 rand = "0.7"
+regex = "1.4"
 ring = { version = "0.16.15", features = ["std"] }
 rusoto_core = { version = "0.45.0", default_features = false, features = ["rustls"] }
 rusoto_s3 = { version = "0.45.0", default_features = false, features = ["rustls"] }
