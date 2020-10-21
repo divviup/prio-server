@@ -30,6 +30,10 @@ variable "packet_decryption_key_kubernetes_secret" {
   type = string
 }
 
+variable "certificate_domain" {
+  type = string
+}
+
 locals {
   resource_prefix = "prio-${var.environment}-${var.data_share_processor_name}"
   ingestion_bucket_writer_role_arn = var.ingestor_google_service_account_id != "" ? (
@@ -235,6 +239,10 @@ output "data_share_processor_name" {
 
 output "kubernetes_namespace" {
   value = var.kubernetes_namespace
+}
+
+output "certificate_fqdn" {
+  value = "${var.kubernetes_namespace}.${var.certificate_domain}"
 }
 
 output "service_account_email" {
