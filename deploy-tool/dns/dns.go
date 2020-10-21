@@ -1,8 +1,8 @@
 package dns
 
 import (
-	"deploy-tool/config"
 	"fmt"
+	"github.com/abetterinternet/prio-server/deploy-tool/config"
 	"github.com/caddyserver/certmagic"
 	"github.com/libdns/cloudflare"
 	"strings"
