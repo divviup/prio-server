@@ -216,6 +216,7 @@ output "gke_kubeconfig" {
 output "specific_manifests" {
   value = { for v in module.data_share_processors : v.data_share_processor_name => {
     kubernetes-namespace = v.kubernetes_namespace
+    certificate_fqdn     = v.certificate_fqdn
     specific-manifest    = v.specific_manifest
     }
   }
