@@ -5,6 +5,8 @@ import (
 	"crypto/elliptic"
 	"crypto/rand"
 	"crypto/x509"
+	"deploy-tool/cert"
+	"deploy-tool/config"
 	"encoding/base64"
 	"encoding/json"
 	"encoding/pem"
@@ -142,11 +144,25 @@ func generateAndDeployKeyPair(namespace, keyName string) (*ecdsa.PrivateKey, err
 	return ecdsaKey, nil
 }
 
+// getConfigFilePath gets the configuration file path from the DEPLOY_CONFIG_PATH environment variable.
+// this function defaults to ./config.toml if that env variable is empty.
+func getConfigFilePath() string {
+	val, exists := os.LookupEnv("DEPLOY_CONFIG_PATH")
+	if !exists {
+		return "./config.toml"
+	}
+	return val
+}
+
 func main() {
+	deployConfig, err := config.Read(getConfigFilePath())
+	if err != nil {
+		log.Fatalf("failed to parse config.toml: %v", err)
+	}
+
 	var terraformOutput TerraformOutput
 
-	err := json.NewDecoder(os.Stdin).Decode(&terraformOutput)
-	if err != nil {
+	if err := json.NewDecoder(os.Stdin).Decode(&terraformOutput); err != nil {
 		log.Fatalf("failed to parse specific manifests: %v", err)
 	}
 
@@ -193,13 +209,17 @@ func main() {
 				continue
 			}
 			log.Printf("generating and certifying P256 key %s", name)
-			_, err := generateAndDeployKeyPair(manifestWrapper.KubernetesNamespace, name)
+			privKey, err := generateAndDeployKeyPair(manifestWrapper.KubernetesNamespace, name)
 			if err != nil {
 				log.Fatalf("%s", err)
 			}
 
-			// TODO(timg) get certificate over the key, insert it here
-			newCertificates[name] = PacketEncryptionCertificate{Certificate: "TODO get certificate"}
+			certificate, err := cert.IssueCertificate(deployConfig, manifestWrapper.KubernetesNamespace, privKey)
+			if err != nil {
+				log.Fatalf("%s", err)
+			}
+
+			newCertificates[name] = PacketEncryptionCertificate{Certificate: certificate}
 		}
 
 		manifestWrapper.SpecificManifest.PacketEncryptionCertificates = newCertificates
