@@ -6,9 +6,9 @@ import (
 	"crypto/ecdsa"
 	"crypto/rand"
 	"crypto/x509"
-	"deploy-tool/config"
-	"deploy-tool/dns"
 	"fmt"
+	"github.com/abetterinternet/prio-server/deploy-tool/config"
+	"github.com/abetterinternet/prio-server/deploy-tool/dns"
 	"github.com/caddyserver/certmagic"
 	"strings"
 )
