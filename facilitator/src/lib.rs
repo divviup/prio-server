@@ -11,6 +11,9 @@ pub mod manifest;
 pub mod sample;
 pub mod test_utils;
 pub mod transport;
+mod workflow;
+
+pub use workflow::{workflow_main, WorkflowArgs};
 
 pub const DATE_FORMAT: &str = "%Y/%m/%d/%H/%M";
 
