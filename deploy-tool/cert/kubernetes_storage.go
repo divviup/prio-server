@@ -43,7 +43,7 @@ var labelSelector = "manager=magiccert"
 var specialChars = regexp.MustCompile("[^a-zA-Z0-9_.-]+")
 
 func cleanKey(key string) string {
-	return fmt.Sprintf("cm.k8s.%v", specialChars.ReplaceAllString(key, ""))
+	return fmt.Sprintf("acme.%v", specialChars.ReplaceAllString(key, ""))
 }
 
 var dataKey = "value"
@@ -84,7 +84,7 @@ func (s *KubernetesSecretStorage) Load(key string) ([]byte, error) {
 	}
 
 	data, ok := secret.Data[dataKey]
-	if ok {
+	if !ok {
 		return nil, fmt.Errorf("the data key %s was not included in the secret's data", dataKey)
 	}
 
