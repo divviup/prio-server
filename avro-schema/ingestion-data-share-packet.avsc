@@ -16,7 +16,10 @@
         },
         {
             "name": "encryption_key_id",
-            "type": "string",
+            "type": [
+                "null",
+                "string"
+            ],
             "doc": "Encryption key identifier (e.g., to support key rotations)"
         },
         {
