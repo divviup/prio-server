@@ -8,7 +8,7 @@ import (
 )
 
 func TestCleanKey(t *testing.T) {
-	prefix := "cm.k8s."
+	prefix := "acme."
 	var tests = []struct {
 		in, out string
 	}{

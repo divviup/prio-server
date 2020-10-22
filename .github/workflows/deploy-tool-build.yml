@@ -1,0 +1,56 @@
+name: deploy-tool-ci-build
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+
+env:
+  GO111MODULE: on
+
+jobs:
+  deploy-tool:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v2
+    
+    - name: Setup go
+      uses: actions/setup-go@v1
+      with:
+        go-version: 1.15
+    
+    - name: Set GOPATH and PATH
+      run: |
+        echo "::set-env name=GOPATH::$(dirname $GITHUB_WORKSPACE)/deploy-tool"
+        echo "::add-path::$(dirname $GITHUB_WORKSPACE)/deploy-tool/bin"
+      shell: bash
+    
+    - name: Install golint
+      run: go get -v golang.org/x/lint/golint
+    
+    - name: Vet
+      run: go vet ./...
+      working-directory: deploy-tool
+    
+    - name: Test
+      run: go test -race --coverprofile=coverage.coverprofile --covermode=atomic ./...
+      working-directory: deploy-tool
+    
+    - name: Upload test coverage
+      if: success()
+      uses: codecov/codecov-action@v1
+      with:
+        fail_ci_if_error: false
+        token:
+  
+  deploy-tool-lint:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v2
+    - name: golangci-lint
+      uses: golangci/golangci-lint-action@v2
+      with:
+        version: v1.31
+        working-directory: deploy-tool

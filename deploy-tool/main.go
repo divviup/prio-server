@@ -118,7 +118,7 @@ func generateAndDeployKeyPair(namespace, keyName string) (*ecdsa.PrivateKey, err
 	defer os.Remove(tempFile.Name())
 
 	base64PrivateKey := base64.StdEncoding.EncodeToString(pkcs8PrivateKey)
-	if err := ioutil.WriteFile(tempFile.Name(), []byte(base64PrivateKey), 0644); err != nil {
+	if err := ioutil.WriteFile(tempFile.Name(), []byte(base64PrivateKey), 0600); err != nil {
 		return nil, fmt.Errorf("failed to write out PKCS#8 private key: %v", err)
 	}
 
@@ -188,7 +188,7 @@ func main() {
 
 			block := pem.Block{
 				Type:  "PUBLIC KEY",
-				Bytes: []byte(pkixPublic),
+				Bytes: pkixPublic,
 			}
 
 			expiration := time.
@@ -240,7 +240,7 @@ func main() {
 			log.Fatalf("could not get pipe to gsutil stdin: %v", err)
 		}
 
-		// Do this async becuase if we don't close gsutil's stdin, it will
+		// Do this async because if we don't close gsutil's stdin, it will
 		// never be able to get started.
 		go func() {
 			defer stdin.Close()
