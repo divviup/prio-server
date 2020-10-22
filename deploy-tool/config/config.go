@@ -18,6 +18,7 @@ type DNSConfig struct {
 	GCPConfig        *GCPConfig        `toml:"gcp"`
 }
 
+// GCPConfig is the GCP configuration structure
 type GCPConfig struct {
 	Project string
 }

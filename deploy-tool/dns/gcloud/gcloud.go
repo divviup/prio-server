@@ -3,14 +3,16 @@ package gcloud
 import (
 	"context"
 	"fmt"
+	"time"
+
 	"github.com/libdns/libdns"
 	"golang.org/x/oauth2/google"
 	"google.golang.org/api/dns/v1"
 	"google.golang.org/api/option"
-	"time"
 )
 
-type Provider struct {
+// GoogleDNSProvider is a structure that defines the google DNS provider implementation
+type GoogleDNSProvider struct {
 	service *dns.Service
 	project string
 }
@@ -19,7 +21,8 @@ const (
 	changeStatusDone = "done"
 )
 
-func NewProvider(project string) (*Provider, error) {
+// NewGoogleDNSProvider creates a new GoogleDNSProvider with the given project name
+func NewGoogleDNSProvider(project string) (*GoogleDNSProvider, error) {
 	client, err := google.DefaultClient(context.Background(), dns.NdevClouddnsReadwriteScope)
 	if err != nil {
 		return nil, err
@@ -30,7 +33,7 @@ func NewProvider(project string) (*Provider, error) {
 		return nil, err
 	}
 
-	return &Provider{
+	return &GoogleDNSProvider{
 		service: svc,
 		project: project,
 	}, nil
@@ -45,7 +48,8 @@ func convertRecordType(record libdns.Record) dns.ResourceRecordSet {
 	}
 }
 
-func (p *Provider) AppendRecords(ctx context.Context, zone string, recs []libdns.Record) ([]libdns.Record, error) {
+// AppendRecords appends DNS records to a given zone
+func (p *GoogleDNSProvider) AppendRecords(ctx context.Context, zone string, recs []libdns.Record) ([]libdns.Record, error) {
 	gcpRecords := make([]*dns.ResourceRecordSet, len(recs))
 
 	for idx, record := range recs {
@@ -64,9 +68,9 @@ func (p *Provider) AppendRecords(ctx context.Context, zone string, recs []libdns
 		return recs, nil
 	}
 
-	changeId := result.Id
+	changeID := result.Id
 	err = Poll("append records", 30*time.Second, 3*time.Second, func() (bool, error) {
-		result, err := p.service.Changes.Get(p.project, zone, changeId).Do()
+		result, err := p.service.Changes.Get(p.project, zone, changeID).Do()
 		if err != nil {
 			return false, err
 		}
@@ -84,7 +88,8 @@ func (p *Provider) AppendRecords(ctx context.Context, zone string, recs []libdns
 	return recs, nil
 }
 
-func (p *Provider) DeleteRecords(ctx context.Context, zone string, recs []libdns.Record) ([]libdns.Record, error) {
+// DeleteRecords deletes DNS records from a given zone
+func (p *GoogleDNSProvider) DeleteRecords(ctx context.Context, zone string, recs []libdns.Record) ([]libdns.Record, error) {
 	gcpRecords := make([]*dns.ResourceRecordSet, len(recs))
 
 	for idx, record := range recs {
@@ -103,9 +108,9 @@ func (p *Provider) DeleteRecords(ctx context.Context, zone string, recs []libdns
 		return recs, nil
 	}
 
-	changeId := result.Id
+	changeID := result.Id
 	err = Poll("delete records", 30*time.Second, 3*time.Second, func() (bool, error) {
-		result, err := p.service.Changes.Get(p.project, zone, changeId).Do()
+		result, err := p.service.Changes.Get(p.project, zone, changeID).Do()
 		if err != nil {
 			return false, err
 		}
@@ -123,6 +128,7 @@ func (p *Provider) DeleteRecords(ctx context.Context, zone string, recs []libdns
 	return recs, nil
 }
 
+// Poll is a blocking polling for a given function with a given name. The poller must return true for the polling code to stop. The poller may also return an optional error to be reported
 func Poll(job string, timeout, interval time.Duration, poller func() (bool, error)) error {
 	var lastErr error
 	timeUp := time.After(timeout)
