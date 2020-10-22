@@ -79,7 +79,7 @@ type TerraformOutput struct {
 	SpecificManifests struct {
 		Value map[string]struct {
 			KubernetesNamespace string           `json:"kubernetes-namespace"`
-			CertificateFQDN     string           `json:"certificate_fqdn"`
+			CertificateFQDN     string           `json:"certificate-fqdn"`
 			SpecificManifest    SpecificManifest `json:"specific-manifest"`
 		}
 	} `json:"specific_manifests"`
