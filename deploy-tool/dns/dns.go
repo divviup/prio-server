@@ -6,6 +6,7 @@ import (
 
 	"github.com/abetterinternet/prio-server/deploy-tool/config"
 	"github.com/abetterinternet/prio-server/dns/gcloud"
+	"github.com/abetterinternet/prio-server/deploy-tool/config"
 	"github.com/caddyserver/certmagic"
 	"github.com/libdns/cloudflare"
 )
