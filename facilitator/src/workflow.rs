@@ -5,6 +5,8 @@ use anyhow::Result;
 use std::path::{Path, PathBuf};
 use structopt::StructOpt;
 
+mod batch;
+
 mod config {
     use crate::config::{DayDuration, StoragePath};
     use anyhow::{ensure, Result};
