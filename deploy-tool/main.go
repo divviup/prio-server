@@ -5,8 +5,6 @@ import (
 	"crypto/elliptic"
 	"crypto/rand"
 	"crypto/x509"
-	"deploy-tool/cert"
-	"deploy-tool/config"
 	"encoding/base64"
 	"encoding/json"
 	"encoding/pem"
@@ -17,6 +15,9 @@ import (
 	"os"
 	"os/exec"
 	"time"
+
+	"github.com/abetterinternet/prio-server/deploy-tool/cert"
+	"github.com/abetterinternet/prio-server/deploy-tool/config"
 )
 
 // This tool consumes the output of `terraform apply`, generating keys and then
@@ -78,6 +79,7 @@ type TerraformOutput struct {
 	SpecificManifests struct {
 		Value map[string]struct {
 			KubernetesNamespace string           `json:"kubernetes-namespace"`
+			CertificateFQDN     string           `json:"certificate-fqdn"`
 			SpecificManifest    SpecificManifest `json:"specific-manifest"`
 		}
 	} `json:"specific_manifests"`
@@ -214,7 +216,7 @@ func main() {
 				log.Fatalf("%s", err)
 			}
 
-			certificate, err := cert.IssueCertificate(deployConfig, manifestWrapper.KubernetesNamespace, privKey)
+			certificate, err := cert.IssueCertificate(deployConfig, manifestWrapper.CertificateFQDN, privKey)
 			if err != nil {
 				log.Fatalf("%s", err)
 			}

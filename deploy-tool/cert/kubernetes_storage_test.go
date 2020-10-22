@@ -2,8 +2,9 @@ package cert
 
 import (
 	"fmt"
-	"github.com/caddyserver/certmagic"
 	"testing"
+
+	"github.com/caddyserver/certmagic"
 )
 
 func TestCleanKey(t *testing.T) {

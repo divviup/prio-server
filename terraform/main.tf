@@ -181,6 +181,7 @@ module "data_share_processors" {
   peer_share_processor_aws_account_id     = jsondecode(data.http.peer_share_processor_global_manifest.body).server-identity.aws-account-id
   kubernetes_namespace                    = each.value.kubernetes_namespace
   packet_decryption_key_kubernetes_secret = each.value.packet_decryption_key_kubernetes_secret
+  certificate_domain                      = "${var.environment}.certificates.${var.manifest_domain}"
 
   depends_on = [module.gke]
 }
@@ -215,6 +216,7 @@ output "gke_kubeconfig" {
 output "specific_manifests" {
   value = { for v in module.data_share_processors : v.data_share_processor_name => {
     kubernetes-namespace = v.kubernetes_namespace
+    certificate-fqdn     = v.certificate_fqdn
     specific-manifest    = v.specific_manifest
     }
   }

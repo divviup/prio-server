@@ -1,12 +1,13 @@
 package dns
 
 import (
-	"deploy-tool/config"
-	"deploy-tool/dns/gcloud"
 	"fmt"
+	"strings"
+
+	"github.com/abetterinternet/prio-server/deploy-tool/config"
+	"github.com/abetterinternet/prio-server/dns/gcloud"
 	"github.com/caddyserver/certmagic"
 	"github.com/libdns/cloudflare"
-	"strings"
 )
 
 // GetACMEDNSProvider configures an ACMEDNSProvider value to be used in cert generation

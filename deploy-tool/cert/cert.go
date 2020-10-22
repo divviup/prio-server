@@ -6,11 +6,12 @@ import (
 	"crypto/ecdsa"
 	"crypto/rand"
 	"crypto/x509"
-	"deploy-tool/config"
-	"deploy-tool/dns"
 	"fmt"
-	"github.com/caddyserver/certmagic"
 	"strings"
+
+	"github.com/abetterinternet/prio-server/deploy-tool/config"
+	"github.com/abetterinternet/prio-server/deploy-tool/dns"
+	"github.com/caddyserver/certmagic"
 )
 
 // IssueCertificate asks the Let's Encrypt ACMEApiEndpoint to validate and sign a certificate for a site using the DNS01 strategy
