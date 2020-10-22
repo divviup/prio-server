@@ -56,3 +56,35 @@ jobs:
       uses: docker/build-push-action@v2
       with:
         file: ./facilitator/Dockerfile
+  
+  build-deploy-tool:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v2
+    
+    - name: Setup go
+      uses: actions/setup-go@v1
+      with:
+        go-version: 1.15
+    
+    - name: Get dependencies
+      run: go get -v -t -d ./...
+      working_directory: deploy-tool
+    
+    - name: Get linter
+      run: go install golang.org/x/lint/golint
+    
+    - name: Vet
+      run: go vet ./...
+      working_directory: deploy-tool
+    
+    - name: Test
+      run: go test -race --coverprofile=coverage.coverprofile --covermode=atomic ./...
+      working_directory: deploy-tool
+    
+    - name: Upload test coverage
+      if: success()
+      uses: codecov/codecov-action@v1
+      with:
+        fail_ci_if_error: false
+        token:

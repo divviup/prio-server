@@ -1,3 +1,5 @@
 # Terraform
 terraform.tfstate*
 .terraform/
+variables/*
+!variables/demo-gcp.tfvars
