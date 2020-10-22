@@ -15,6 +15,16 @@ type DeployConfig struct {
 type DNSConfig struct {
 	Provider         string
 	CloudflareConfig *CloudflareConfig `toml:"cloudflare"`
+	GCPConfig        *GCPConfig        `toml:"gcp"`
+}
+
+// GCPConfig is the GCP configuration structure
+// The ZoneMapping is used to map a certmagic zone request to a GCP DNS Zone.
+// GCP DNS Zones can have arbitrary names. Certmagic Zones are the first level after the level the certificate is being issued for
+// Example: issuing certificate for a.b.c.example.com, the zone would be b.c.example.com
+type GCPConfig struct {
+	Project     string
+	ZoneMapping map[string]string `toml:"zone_mapping"`
 }
 
 // CloudflareConfig is the Cloudflare based DNS configuration - used only if Provider is set to cloudflare
