@@ -3,22 +3,25 @@ package cert
 import (
 	"context"
 	"fmt"
+	"os"
+	"regexp"
+	"strings"
+
 	"github.com/caddyserver/certmagic"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
 	v1 "k8s.io/client-go/kubernetes/typed/core/v1"
 	"k8s.io/client-go/rest"
-	"os"
-	"regexp"
-	"strings"
 )
 
+// KubernetesSecretStorage is a structure that defines the storage system for kubernetes
 type KubernetesSecretStorage struct {
 	Namespace  string
 	KubeClient *kubernetes.Clientset
 }
 
+// NewKubernetesSecretStorage creates a new KubernetesSecretStorage for the namespace specified
 func NewKubernetesSecretStorage(namespace string) (*KubernetesSecretStorage, error) {
 	config, err := rest.InClusterConfig()
 	if err != nil {
@@ -48,6 +51,7 @@ func cleanKey(key string) string {
 
 var dataKey = "value"
 
+// Store stores a key and value inside Kubernetes secret storage
 func (s *KubernetesSecretStorage) Store(key string, value []byte) error {
 	secret := &corev1.Secret{
 		ObjectMeta: metav1.ObjectMeta{
@@ -61,11 +65,11 @@ func (s *KubernetesSecretStorage) Store(key string, value []byte) error {
 
 	var err error
 
-	secretsApi := s.getSecretsAPI()
+	secretsAPI := s.getSecretsAPI()
 	if s.Exists(key) {
-		_, err = secretsApi.Update(context.Background(), secret, metav1.UpdateOptions{})
+		_, err = secretsAPI.Update(context.Background(), secret, metav1.UpdateOptions{})
 	} else {
-		_, err = secretsApi.Create(context.Background(), secret, metav1.CreateOptions{})
+		_, err = secretsAPI.Create(context.Background(), secret, metav1.CreateOptions{})
 	}
 
 	if err != nil {
@@ -75,10 +79,11 @@ func (s *KubernetesSecretStorage) Store(key string, value []byte) error {
 	return nil
 }
 
+// Load loads a key from kubernetes secret storage
 func (s *KubernetesSecretStorage) Load(key string) ([]byte, error) {
-	secretsApi := s.getSecretsAPI()
+	secretsAPI := s.getSecretsAPI()
 
-	secret, err := secretsApi.Get(context.Background(), cleanKey(key), metav1.GetOptions{})
+	secret, err := secretsAPI.Get(context.Background(), cleanKey(key), metav1.GetOptions{})
 	if err != nil {
 		return nil, err
 	}
@@ -91,12 +96,14 @@ func (s *KubernetesSecretStorage) Load(key string) ([]byte, error) {
 	return data, nil
 }
 
+// Delete deletes a key from kubernetes secret storage
 func (s *KubernetesSecretStorage) Delete(key string) error {
-	secretsApi := s.getSecretsAPI()
+	secretsAPI := s.getSecretsAPI()
 
-	return secretsApi.Delete(context.Background(), cleanKey(key), metav1.DeleteOptions{})
+	return secretsAPI.Delete(context.Background(), cleanKey(key), metav1.DeleteOptions{})
 }
 
+// Exists checks if a key exists in kubernetes secret storage
 func (s *KubernetesSecretStorage) Exists(key string) bool {
 	secrets, err := s.getSecretsAPI().List(context.Background(), metav1.ListOptions{
 		FieldSelector: fmt.Sprintf("metadata.name=%v", cleanKey(key)),
@@ -116,10 +123,11 @@ func (s *KubernetesSecretStorage) Exists(key string) bool {
 	return false
 }
 
+// List lists a keys starting with any given prefix in kubernetes secret storage
 func (s *KubernetesSecretStorage) List(prefix string, _ bool) ([]string, error) {
-	secretsApi := s.getSecretsAPI()
+	secretsAPI := s.getSecretsAPI()
 
-	secrets, err := secretsApi.List(context.Background(), metav1.ListOptions{
+	secrets, err := secretsAPI.List(context.Background(), metav1.ListOptions{
 		LabelSelector: labelSelector,
 	})
 
@@ -137,10 +145,11 @@ func (s *KubernetesSecretStorage) List(prefix string, _ bool) ([]string, error) 
 	return keys, nil
 }
 
+// Stat returns the information about a key from kubernetes secret storage
 func (s *KubernetesSecretStorage) Stat(key string) (certmagic.KeyInfo, error) {
-	secretsApi := s.getSecretsAPI()
+	secretsAPI := s.getSecretsAPI()
 
-	secret, err := secretsApi.Get(context.Background(), cleanKey(key), metav1.GetOptions{})
+	secret, err := secretsAPI.Get(context.Background(), cleanKey(key), metav1.GetOptions{})
 	if err != nil {
 		return certmagic.KeyInfo{}, err
 	}
@@ -153,11 +162,13 @@ func (s *KubernetesSecretStorage) Stat(key string) (certmagic.KeyInfo, error) {
 	}, nil
 }
 
+// Lock is not implemented
 func (s *KubernetesSecretStorage) Lock(ctx context.Context, key string) error {
 	// Do we need this? If so how should we implement this?
 	return nil
 }
 
+// Unlock is not implemented
 func (s *KubernetesSecretStorage) Unlock(key string) error {
 	// See KubernetesSecretStorage#Lock
 	return nil
