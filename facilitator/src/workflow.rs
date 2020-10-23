@@ -1,6 +1,7 @@
 // TODO: remove once things are less stubby
 #![allow(dead_code, unreachable_code, unused_variables)]
 
+use crate::workflow::batch::{find_complete_batches, IngestionBatchFileMetadata};
 use anyhow::Result;
 use std::path::{Path, PathBuf};
 use structopt::StructOpt;
@@ -112,12 +113,20 @@ fn dispatch_k8s_job_if_not_duplicate() -> Result<()> {
     todo!()
 }
 
-fn process_ingestion() -> Result<()> {
-    let file_list = todo!("list files in ingestion bucket");
-    let batches_to_run: Vec<()> = todo!("scan file_list and identify complete batches");
-    todo!("write .expected files in sum bucket");
+fn list_ingestion_bucket() -> Result<Vec<String>> {
+    Ok(vec![todo!()])
+}
 
-    for batch in &batches_to_run {
+fn process_ingestion() -> Result<()> {
+    let file_list = list_ingestion_bucket()?;
+    let complete_batches = find_complete_batches(file_list.iter().map(String::as_ref));
+    let batches_to_run = complete_batches
+        .iter()
+        .copied()
+        .map(IngestionBatchFileMetadata::parse_from_prefix);
+
+    for batch in batches_to_run {
+        todo!("write .expected files in sum bucket");
         // TODO: Intake map job dispatch
         //  - Inputs: `.batch`, `.batch.avro`, `.batch.sig`
         //  - validate batch and produce validation data

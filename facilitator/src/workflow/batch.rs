@@ -1,5 +1,6 @@
 use anyhow::Result;
 use chrono::{DateTime, Utc};
+use itertools::Itertools;
 use std::iter;
 use uuid::Uuid;
 
@@ -112,6 +113,41 @@ impl IngestionBatchFileMetadata {
     }
 }
 
+fn sorted_contains_all_of<T: Ord>(
+    sorted_haystack: impl IntoIterator<Item = T>,
+    sorted_needle: impl IntoIterator<Item = T>,
+) -> bool {
+    itertools::merge_join_by(sorted_haystack, sorted_needle, Ord::cmp).all(|x| !x.is_right())
+}
+
+/// Scans `files`, which must be an iterator returning a lexicographically sorted list of filenames,
+/// and identifies batches which have all required files present. Returns a list of the path
+/// prefixes for the valid batches, which can be parsed by
+/// [`IngestionBatchFileMetadata::parse_from_prefix`].
+pub fn find_complete_batches<'a>(files: impl Iterator<Item = &'a str>) -> Vec<&'a str> {
+    // Must be kept lexicographically sorted
+    const INGESTION_BATCH_INPUT_TYPES: [&str; 3] = [".batch", ".batch.avro", ".batch.sig"];
+
+    let batch_is_complete = |file_types| {
+        sorted_contains_all_of(file_types, INGESTION_BATCH_INPUT_TYPES.iter().copied())
+    };
+
+    let batches = files
+        .map(|p| split_path_extensions(p))
+        .group_by(|&(batch_key, _)| batch_key);
+
+    (&batches)
+        .into_iter()
+        .filter_map(|(batch_key, files)| {
+            let file_types = files.map(|(_, file_type)| file_type);
+            match batch_is_complete(file_types) {
+                true => Some(batch_key),
+                false => None,
+            }
+        })
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -194,6 +230,43 @@ mod tests {
             Err(IngestionBatchParseError::ExtraComponents(extra)) => {
                 assert_eq!(extra, "trailing/stuff".to_string());
             }
+        );
+    }
+
+    #[test]
+    fn test_find_complete_batches() {
+        let files = &[
+            "fake-aggregation/2020/10/10/20/30/6891ce17-623f-41f7-9c1d-20fc2f98248b.batch",
+            "fake-aggregation/2020/10/10/20/30/6891ce17-623f-41f7-9c1d-20fc2f98248b.batch.avro",
+            "fake-aggregation/2020/10/10/20/30/6891ce17-623f-41f7-9c1d-20fc2f98248b.batch.sig",
+        ];
+        assert_eq!(
+            find_complete_batches(files.iter().copied()),
+            vec!["fake-aggregation/2020/10/10/20/30/6891ce17-623f-41f7-9c1d-20fc2f98248b"]
+        );
+
+        // Missing file
+        let files = &[
+            "fake-aggregation/2020/10/10/20/30/6891ce17-623f-41f7-9c1d-20fc2f98248b.batch",
+            "fake-aggregation/2020/10/10/20/30/6891ce17-623f-41f7-9c1d-20fc2f98248b.batch.sig",
+        ];
+        assert_eq!(
+            find_complete_batches(files.iter().copied()),
+            Vec::<&str>::new()
+        );
+
+        // Extra files
+        let files = &[
+            "fake-aggregation/2020/10/10/20/30/6891ce17-623f-41f7-9c1d-20fc2f98248b.aaaa",
+            "fake-aggregation/2020/10/10/20/30/6891ce17-623f-41f7-9c1d-20fc2f98248b.batch",
+            "fake-aggregation/2020/10/10/20/30/6891ce17-623f-41f7-9c1d-20fc2f98248b.batch.avro",
+            "fake-aggregation/2020/10/10/20/30/6891ce17-623f-41f7-9c1d-20fc2f98248b.batch.foobar",
+            "fake-aggregation/2020/10/10/20/30/6891ce17-623f-41f7-9c1d-20fc2f98248b.batch.sig",
+            "fake-aggregation/2020/10/10/20/30/6891ce17-623f-41f7-9c1d-20fc2f98248b.something-else",
+        ];
+        assert_eq!(
+            find_complete_batches(files.iter().copied()),
+            vec!["fake-aggregation/2020/10/10/20/30/6891ce17-623f-41f7-9c1d-20fc2f98248b"]
         );
     }
 }
