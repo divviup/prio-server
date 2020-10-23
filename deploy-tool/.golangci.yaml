@@ -5,7 +5,6 @@ linters:
     - deadcode
     - depguard
     - dogsled
-    - dupl
     - errcheck
     - exhaustive
     - gochecknoinits
@@ -15,7 +14,6 @@ linters:
     - gofmt
     - goimports
     - golint
-    - gomnd
     - goprintffuncname
     - gosec
     - gosimple
