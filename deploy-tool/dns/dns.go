@@ -2,14 +2,16 @@ package dns
 
 import (
 	"fmt"
+	"strings"
+
 	"github.com/abetterinternet/prio-server/deploy-tool/config"
 	"github.com/caddyserver/certmagic"
 	"github.com/libdns/cloudflare"
-	"strings"
 )
 
 // GetACMEDNSProvider configures an ACMEDNSProvider value to be used in cert generation
 func GetACMEDNSProvider(deployConfig config.DeployConfig) (certmagic.ACMEDNSProvider, error) {
+	//nolint:gocritic
 	switch strings.ToLower(deployConfig.DNS.Provider) {
 	case "cloudflare":
 		if deployConfig.DNS.CloudflareConfig == nil {

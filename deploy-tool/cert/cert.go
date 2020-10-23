@@ -67,7 +67,6 @@ func setStorageDriver(deployConfig config.DeployConfig, acme *certmagic.Config) 
 		}
 
 		acme.Storage = secretStorage
-
 	}
 	return nil
 }
