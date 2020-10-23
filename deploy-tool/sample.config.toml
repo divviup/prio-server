@@ -5,6 +5,12 @@ provider = "cloudflare" # options: cloudflare,
 [dns.cloudflare]
 api_key = "API_KEY"
 
+[dns.gcp]
+project = "project"
+
+[dns.gcp.zone_mapping]
+"certmagic_zone" = "gcp_zone"
+
 # ACME settings
 [acme]
 email = "test@example.com"
