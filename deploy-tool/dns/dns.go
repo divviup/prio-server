@@ -12,6 +12,7 @@ import (
 
 // GetACMEDNSProvider configures an ACMEDNSProvider value to be used in cert generation
 func GetACMEDNSProvider(deployConfig config.DeployConfig) (certmagic.ACMEDNSProvider, error) {
+	//nolint:gocritic
 	switch strings.ToLower(deployConfig.DNS.Provider) {
 	case "cloudflare":
 		if deployConfig.DNS.CloudflareConfig == nil {
