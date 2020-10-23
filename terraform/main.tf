@@ -38,6 +38,10 @@ variable "manifest_domain" {
   description = "Domain (plus optional relative path) to which this environment's global and specific manifests should be uploaded."
 }
 
+variable "managed_dns_zone" {
+  type = map(string)
+}
+
 variable "peer_share_processor_manifest_domain" {
   type = string
 }
@@ -92,7 +96,7 @@ module "manifest" {
   source                                = "./modules/manifest"
   environment                           = var.environment
   gcp_region                            = var.gcp_region
-  domain                                = var.manifest_domain
+  managed_dns_zone                      = var.managed_dns_zone
   sum_part_bucket_service_account_email = google_service_account.sum_part_bucket_writer.email
 }
 
