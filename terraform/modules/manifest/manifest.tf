@@ -6,8 +6,8 @@ variable "gcp_region" {
   type = string
 }
 
-variable "domain" {
-  type = string
+variable "managed_dns_zone" {
+  type = map(string)
 }
 
 variable "sum_part_bucket_service_account_email" {
@@ -63,20 +63,41 @@ resource "google_storage_bucket_object" "global_manifest" {
   })
 }
 
+locals {
+  domain_name = "${var.environment}.${data.google_dns_managed_zone.manifests.dns_name}"
+}
+
 # Now we configure an external HTTPS load balancer backed by the bucket.
 resource "google_compute_managed_ssl_certificate" "manifests" {
   provider = google-beta
   name     = "prio-${var.environment}-manifests"
   managed {
-    domains = [var.domain]
+    domains = [local.domain_name]
   }
+}
+
+# We expect a managed DNS zone in which we can create subdomains for a given
+# env's manifest endpoint to already exist, outside of this Terraform module.
+data "google_dns_managed_zone" "manifests" {
+  provider = google-beta
+  name     = var.managed_dns_zone.name
+  # The managed zone is not necessarily in the same GCP project as this env, so
+  # we pass the project all the way from tfvars to here.
+  project = var.managed_dns_zone.gcp_project
+}
+
+# Create an A record from which this env's manifests will be served.
+resource "google_dns_record_set" "manifests" {
+  provider     = google-beta
+  name         = local.domain_name
+  managed_zone = data.google_dns_managed_zone.manifests.name
+  type         = "A"
+  ttl          = 300
+  rrdatas      = [google_compute_global_address.manifests.address]
 }
 
 # Reserve an external IP address for the load balancer.
 # https://cloud.google.com/cdn/docs/setting-up-cdn-with-bucket#ip-address
-# TODO(timg): we should have Terraform configure DNS for the manifest domain so
-# we can point it at this IP address, without which the managed certificate will
-# not work.
 resource "google_compute_global_address" "manifests" {
   provider = google-beta
   name     = "prio-${var.environment}-manifests"

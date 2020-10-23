@@ -4,10 +4,13 @@ gcp_project                = "prio-bringup-290620"
 machine_type               = "e2-small"
 peer_share_processor_names = ["test-pha-1", "test-pha-2"]
 aws_region                 = "us-west-1"
-# Graciously donated by jrenken
-manifest_domain = "portcull.is"
-ingestors = {
-  ingestor-1 = "portcull.is/ingestor-1"
-  ingestor-2 = "portcull.is/ingestor-2"
+manifest_domain            = "isrg-prio.org"
+managed_dns_zone = {
+  name        = "manifests"
+  gcp_project = "prio-bringup-290620"
 }
-peer_share_processor_manifest_domain = "portcull.is/pha-servers"
+ingestors = {
+  ingestor-1 = "storage.googleapis.com/prio-demo-gcp-manifests/ingestor-1"
+  ingestor-2 = "storage.googleapis.com/prio-demo-gcp-manifests/ingestor-2"
+}
+peer_share_processor_manifest_domain = "storage.googleapis.com/prio-demo-gcp-manifests/pha-servers"
