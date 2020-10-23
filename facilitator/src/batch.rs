@@ -303,7 +303,7 @@ mod tests {
             IngestionDataSharePacket {
                 uuid: Uuid::new_v4(),
                 encrypted_payload: vec![0u8, 1u8, 2u8, 3u8],
-                encryption_key_id: "fake-key-1".to_owned(),
+                encryption_key_id: Some("fake-key-1".to_owned()),
                 r_pit: 1,
                 version_configuration: Some("config-1".to_owned()),
                 device_nonce: None,
@@ -311,7 +311,7 @@ mod tests {
             IngestionDataSharePacket {
                 uuid: Uuid::new_v4(),
                 encrypted_payload: vec![4u8, 5u8, 6u8, 7u8],
-                encryption_key_id: "fake-key-2".to_owned(),
+                encryption_key_id: None,
                 r_pit: 2,
                 version_configuration: None,
                 device_nonce: Some(vec![8u8, 9u8, 10u8, 11u8]),
@@ -319,7 +319,7 @@ mod tests {
             IngestionDataSharePacket {
                 uuid: Uuid::new_v4(),
                 encrypted_payload: vec![8u8, 9u8, 10u8, 11u8],
-                encryption_key_id: "fake-key-3".to_owned(),
+                encryption_key_id: Some("fake-key-3".to_owned()),
                 r_pit: 3,
                 version_configuration: None,
                 device_nonce: None,
