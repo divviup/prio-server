@@ -27,7 +27,11 @@ func GetACMEDNSProvider(deployConfig config.DeployConfig) (certmagic.ACMEDNSProv
 		if deployConfig.DNS.GCPConfig == nil {
 			return nil, fmt.Errorf("gcp configuration of the configuration file was nil")
 		}
-		provider, _ := gcloud.NewGoogleDNSProvider(deployConfig.DNS.GCPConfig.Project, deployConfig.DNS.GCPConfig.ZoneMapping)
+		provider, err := gcloud.NewGoogleDNSProvider(deployConfig.DNS.GCPConfig.Project, deployConfig.DNS.GCPConfig.ZoneMapping)
+
+		if err != nil {
+			return nil, err
+		}
 
 		return provider, nil
 	}

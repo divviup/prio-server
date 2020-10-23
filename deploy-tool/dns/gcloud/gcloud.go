@@ -82,7 +82,7 @@ func (p *GoogleDNSProvider) AppendRecords(ctx context.Context, zone string, recs
 	}
 
 	changeID := result.Id
-	err = Poll("append records", 30*time.Second, 3*time.Second, func() (bool, error) {
+	err = poll("append records", 30*time.Second, 3*time.Second, func() (bool, error) {
 		result, err := p.service.Changes.Get(p.project, zone, changeID).Do()
 		if err != nil {
 			return false, err
@@ -123,7 +123,7 @@ func (p *GoogleDNSProvider) DeleteRecords(ctx context.Context, zone string, recs
 	}
 
 	changeID := result.Id
-	err = Poll("delete records", 30*time.Second, 3*time.Second, func() (bool, error) {
+	err = poll("delete records", 30*time.Second, 3*time.Second, func() (bool, error) {
 		result, err := p.service.Changes.Get(p.project, zone, changeID).Do()
 		if err != nil {
 			return false, err
@@ -142,8 +142,10 @@ func (p *GoogleDNSProvider) DeleteRecords(ctx context.Context, zone string, recs
 	return recs, nil
 }
 
-// Poll is a blocking polling for a given function with a given name. The poller must return true for the polling code to stop. The poller may also return an optional error to be reported
-func Poll(job string, timeout, interval time.Duration, poller func() (bool, error)) error {
+// poll is a blocking polling for a given function with a given name.
+// The poller must return true for the polling code to stop.
+// The poller may also return an optional error to be reported
+func poll(job string, timeout, interval time.Duration, poller func() (bool, error)) error {
 	var lastErr error
 	timeUp := time.After(timeout)
 
