@@ -27,9 +27,6 @@ jobs:
         echo "::add-path::$(dirname $GITHUB_WORKSPACE)/deploy-tool/bin"
       shell: bash
     
-    - name: Install golint
-      run: go get -v golang.org/x/lint/golint
-    
     - name: Vet
       run: go vet ./...
       working-directory: deploy-tool
