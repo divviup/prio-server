@@ -1,0 +1,133 @@
+// To build:
+// $ dot -Tsvg -O prio-workflow.gv
+
+digraph Prio {
+
+// Use better cluster-aware ranking algorithm
+newrank = true
+
+ingestor [shape=oval, label="Ingestor A"]
+
+subgraph cluster_facilitator {
+    label = "Facilitator (id 1)"
+    node [style="filled", color="#EE4266", fillcolor="#FCDAE1"]
+
+    {
+        node [shape=oval,style="filled,setlinewidth(3)"]
+        MapA_1 [label="Intake Map"]
+        MapB_1 [label="Validate/Sum Map"]
+        Reducer_1 [label="Multi-batch Reduce"]
+    }
+
+    {
+        node [shape=note]
+        batch_1 [label="\
+Ingestor A Bucket\n\
+{date}/{batch_id}.batch\l\
+{date}/{batch_id}.batch.avro\l\
+{date}/{batch_id}.batch.sig\l"]
+        batch_1_local [label="\
+Internal Bucket (copy)\n\
+{date}/{batch_id}.batch\l\
+{date}/{batch_id}.batch.avro\l\
+{date}/{batch_id}.batch.sig\l"]
+        validity_1_local [label="\
+Internal Bucket\n\
+{date}/{batch_id}.validity_1\l\
+{date}/{batch_id}.validity_1.avro\l\
+{date}/{batch_id}.validity_1.sig\l"]
+        validity_0 [label="\
+PHA 0 Bucket (copy)\n\
+{date}/{batch_id}.validity_0\l\
+{date}/{batch_id}.validity_0.avro\l\
+{date}/{batch_id}.validity_0.sig\l"]
+        sum_1 [label="\
+Internal Bucket\n\
+{date}/{batch_id}.sum_1\l\
+{date}/{batch_id}.invalid_uuid_1.avro\l"]
+    }
+}
+
+subgraph cluster_pha {
+    label = "PHA (id 0)"
+    node [style="filled", color="#FFD23F", fillcolor="#FFF6D8"]
+
+    {
+        node [shape=oval,style="filled,setlinewidth(3)"]
+        MapA_0 [label="Intake Map"]
+        MapB_0 [label="Validate/Sum Map"]
+        Reducer_0 [label="Multi-batch Reduce"]
+    }
+
+    {
+        node [shape=note,style="filled"]
+        batch_0 [label="\
+Ingestor A Bucket\n\
+{date}/{batch_id}.batch\l\
+{date}/{batch_id}.batch.avro\l\
+{date}/{batch_id}.batch.sig\l"]
+        batch_0_local [label="\
+Internal Bucket (copy)\n\
+{date}/{batch_id}.batch\l\
+{date}/{batch_id}.batch.avro\l\
+{date}/{batch_id}.batch.sig\l"]
+        validity_0_local [label="\
+Internal Bucket\n\
+{date}/{batch_id}.validity_0\l\
+{date}/{batch_id}.validity_0.avro\l\
+{date}/{batch_id}.validity_0.sig\l"]
+        validity_1 [label="\
+Facilitator 1 Bucket (copy)\n\
+{date}/{batch_id}.validity_1\l\
+{date}/{batch_id}.validity_1.avro\l\
+{date}/{batch_id}.validity_1.sig\l"]
+        sum_0 [label="\
+Internal Bucket\n\
+{date}/{batch_id}.sum_0\l\
+{date}/{batch_id}.invalid_uuid_0.avro\l"]
+    }
+}
+
+subgraph cluster_portal {
+    label = "Portal"
+    node [style="filled", color="#35C073", fillcolor="#D5F4E3"]
+
+    {
+        node [shape=oval,style="filled,setlinewidth(3)"]
+        ReducerP [label="Post-Reducer"]
+    }
+
+    {
+        node [shape=note,style="filled"]
+        sum_0_aggr [label="\
+PHA 0 Bucket\n\
+{date}-{date}.sum_0\l\
+{date}-{date}.invalid_uuid_0.avro\l\
+{date}-{date}.sum_0.sig\l"]
+        sum_1_aggr [label="\
+Facilitator 1 Bucket\n\
+{date}-{date}.sum_1\l\
+{date}-{date}.invalid_uuid_1.avro\l\
+{date}-{date}.sum_1.sig\l"]
+        sum_aggr [label="\
+Results\n\
+{date}-{date}.sum\l\
+{date}-{date}.invalid_uuid.avro\l"]
+    }
+}
+
+// Ingestor
+ingestor -> {batch_1 batch_0}
+
+// Facilitator
+batch_1 -> MapA_1 -> {batch_1_local validity_1_local validity_1}
+{batch_1_local validity_1_local validity_0} -> MapB_1 -> sum_1
+sum_1 -> Reducer_1 -> sum_1_aggr
+
+// PHA
+batch_0 -> MapA_0 -> {batch_0_local validity_0_local validity_0}
+{batch_0_local validity_0_local validity_1} -> MapB_0 -> sum_0
+sum_0 -> Reducer_0 -> sum_0_aggr
+{sum_0_aggr sum_1_aggr} -> ReducerP -> sum_aggr
+
+}
