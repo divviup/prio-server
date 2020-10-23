@@ -40,7 +40,6 @@ jobs:
       uses: codecov/codecov-action@v1
       with:
         fail_ci_if_error: false
-        token:
   
   deploy-tool-lint:
     runs-on: ubuntu-latest
