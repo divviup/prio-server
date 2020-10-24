@@ -88,7 +88,7 @@ apply: prep ## Have terraform do the things. This will cost money.
 		-input=false \
 		-refresh=true \
 		-var-file="$(VARS)"
-	@terraform output --json | go run ../deploy-tool/main.go
+	echo "If that succeeded, run 'terraform output --json | (cd ../deploy-tool/ ; go run main.go )'"
 
 .PHONY: apply-target
 apply-target: prep ## Have terraform do the things for a specific resource. This will cost money.
