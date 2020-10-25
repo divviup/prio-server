@@ -9,7 +9,10 @@ use crate::{
 };
 use anyhow::{anyhow, Context, Result};
 use chrono::NaiveDateTime;
-use prio::{encrypt::PrivateKey, server::VerificationMessage};
+use prio::{
+    encrypt::PrivateKey,
+    server::{Server, VerificationMessage},
+};
 use ring::signature::{KeyPair, UnparsedPublicKey, ECDSA_P256_SHA256_ASN1};
 use std::convert::TryFrom;
 use uuid::Uuid;
@@ -26,7 +29,7 @@ pub struct BatchAggregator<'a> {
     ingestor_key: &'a UnparsedPublicKey<Vec<u8>>,
     share_processor_signing_key: &'a BatchSigningKey,
     peer_share_processor_key: &'a UnparsedPublicKey<Vec<u8>>,
-    share_processor_ecies_key: &'a PrivateKey,
+    packet_decryption_keys: Vec<PrivateKey>,
 }
 
 impl<'a> BatchAggregator<'a> {
@@ -43,7 +46,7 @@ impl<'a> BatchAggregator<'a> {
         ingestor_key: &'a UnparsedPublicKey<Vec<u8>>,
         share_processor_signing_key: &'a BatchSigningKey,
         peer_share_processor_key: &'a UnparsedPublicKey<Vec<u8>>,
-        share_processor_ecies_key: &'a PrivateKey,
+        packet_decryption_keys: Vec<PrivateKey>,
     ) -> Result<BatchAggregator<'a>> {
         Ok(BatchAggregator {
             is_first,
@@ -65,7 +68,7 @@ impl<'a> BatchAggregator<'a> {
             ingestor_key,
             share_processor_signing_key,
             peer_share_processor_key,
-            share_processor_ecies_key,
+            packet_decryption_keys,
         })
     }
 
@@ -79,18 +82,24 @@ impl<'a> BatchAggregator<'a> {
         let mut invalid_uuids = Vec::new();
 
         let ingestion_header = self.ingestion_header(&batch_ids[0].0, &batch_ids[0].1)?;
-        let mut server = prio::server::Server::new(
-            ingestion_header.bins as usize,
-            self.is_first,
-            self.share_processor_ecies_key.clone(),
-        );
+
+        // Ideally, we would use the encryption_key_id in the ingestion packet
+        // to figure out which private key to use for decryption, but that field
+        // is optional. Instead we try all the keys we have available until one
+        // works.
+        // https://github.com/abetterinternet/prio-server/issues/73
+        let mut servers = self
+            .packet_decryption_keys
+            .iter()
+            .map(|k| Server::new(ingestion_header.bins as usize, self.is_first, k.clone()))
+            .collect::<Vec<Server>>();
 
         for batch_id in batch_ids {
             self.aggregate_share(
                 &batch_id.0,
                 &batch_id.1,
                 &share_processor_public_key,
-                &mut server,
+                &mut servers,
                 &mut invalid_uuids,
             )?;
         }
@@ -106,13 +115,28 @@ impl<'a> BatchAggregator<'a> {
                     Ok(())
                 })?;
 
-        let sum = server
+        // We have one Server for each packet decryption key, and each of those
+        // instances could contain some accumulated shares, depending on which
+        // key was used to encrypt an individual packet. We make a new Server
+        // instance into which we will aggregate them all together. It doesn't
+        // matter which private key we use here as we're not decrypting any
+        // packets with this Server instance, just accumulating data vectors.
+        let mut accumulator_server = Server::new(
+            ingestion_header.bins as usize,
+            self.is_first,
+            self.packet_decryption_keys[0].clone(),
+        );
+        for server in servers.iter() {
+            accumulator_server.merge_total_shares(server.total_shares());
+        }
+
+        let sum = accumulator_server
             .total_shares()
             .iter()
             .map(|f| u32::from(*f) as i64)
             .collect();
 
-        let total_individual_clients = server.total_shares().len() as i64;
+        let total_individual_clients = accumulator_server.total_shares().len() as i64;
 
         let sum_signature = self.aggregation_batch.put_header(
             &SumPart {
@@ -160,7 +184,7 @@ impl<'a> BatchAggregator<'a> {
         batch_id: &Uuid,
         batch_date: &NaiveDateTime,
         share_processor_public_key: &UnparsedPublicKey<Vec<u8>>,
-        server: &mut prio::server::Server,
+        servers: &mut Vec<Server>,
         invalid_uuids: &mut Vec<Uuid>,
     ) -> Result<()> {
         let mut ingestion_batch: BatchReader<'_, IngestionHeader, IngestionDataSharePacket> =
@@ -265,15 +289,34 @@ impl<'a> BatchAggregator<'a> {
                     ingestion_packet.uuid));
             }
 
-            if !server
-                .aggregate(
+            let mut did_aggregate_shares = false;
+            let mut last_err = None;
+            for server in servers.iter_mut() {
+                match server.aggregate(
                     &ingestion_packet.encrypted_payload,
                     &VerificationMessage::try_from(peer_validation_packet)?,
                     &VerificationMessage::try_from(own_validation_packet)?,
-                )
-                .context("failed to validate packets")?
-            {
-                invalid_uuids.push(peer_validation_packet.uuid);
+                ) {
+                    Ok(valid) => {
+                        if !valid {
+                            invalid_uuids.push(peer_validation_packet.uuid);
+                        }
+                        did_aggregate_shares = true;
+                        break;
+                    }
+                    Err(e) => {
+                        last_err = Some(Err(e));
+                        continue;
+                    }
+                }
+            }
+            if !did_aggregate_shares {
+                return last_err
+                    // Unwrap the optional, providing an error if it is None
+                    .context("unknown validation error")?
+                    // Wrap either the default error or what we got from
+                    // server.aggregate
+                    .context("failed to validate packets");
             }
         }
 
