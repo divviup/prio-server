@@ -82,7 +82,7 @@ output: prep ## Make Terraform print output variable(s).
 	@terraform output
 
 .PHONY: apply
-apply: prep ## Have terraform do the things. This will cost money.
+apply: .terraform/terraform.tfstate ## Have terraform do the things. This will cost money.
 	@terraform apply \
 		-lock=true \
 		-input=false \
