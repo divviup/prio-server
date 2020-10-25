@@ -34,6 +34,10 @@ variable "certificate_domain" {
   type = string
 }
 
+variable "sum_part_bucket_service_account_email" {
+  type = string
+}
+
 locals {
   resource_prefix = "prio-${var.environment}-${var.data_share_processor_name}"
   ingestion_bucket_writer_role_arn = var.ingestor_google_service_account_id != "" ? (
@@ -231,6 +235,7 @@ module "kubernetes" {
   ingestion_bucket_role                   = aws_iam_role.bucket_role.arn
   kubernetes_namespace                    = var.kubernetes_namespace
   packet_decryption_key_kubernetes_secret = var.packet_decryption_key_kubernetes_secret
+  sum_part_bucket_service_account_email   = var.sum_part_bucket_service_account_email
 }
 
 output "data_share_processor_name" {

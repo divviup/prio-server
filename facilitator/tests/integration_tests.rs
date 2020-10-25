@@ -210,7 +210,7 @@ fn end_to_end() {
         res.err()
     );
 
-    let pha_aggregation_batch_reader: BatchReader<'_, SumPart, IngestionDataSharePacket> =
+    let mut pha_aggregation_batch_reader: BatchReader<'_, SumPart, IngestionDataSharePacket> =
         BatchReader::new(
             Batch::new_sum(&aggregation_name, &start_date, &end_date, true),
             &mut aggregation_transport,
@@ -230,11 +230,14 @@ fn end_to_end() {
         "should get no invalid packet reader when all packets were OK"
     );
 
-    let facilitator_aggregation_batch_reader: BatchReader<'_, SumPart, IngestionDataSharePacket> =
-        BatchReader::new(
-            Batch::new_sum(&aggregation_name, &start_date, &end_date, false),
-            &mut aggregation_transport,
-        );
+    let mut facilitator_aggregation_batch_reader: BatchReader<
+        '_,
+        SumPart,
+        IngestionDataSharePacket,
+    > = BatchReader::new(
+        Batch::new_sum(&aggregation_name, &start_date, &end_date, false),
+        &mut aggregation_transport,
+    );
     let facilitator_sum_part =
         facilitator_aggregation_batch_reader.header(&facilitator_pub_signing_key);
     assert!(

@@ -195,7 +195,7 @@ mod tests {
         assert!(res.is_ok(), "error writing sample data {:?}", res.err());
         let expected_path = format!("fake-aggregation/2009/02/13/23/31/{}.batch", batch_uuid);
 
-        let transports = &[pha_transport, facilitator_transport];
+        let transports = &mut [pha_transport, facilitator_transport];
         for transport in transports {
             let reader = transport.get(&expected_path);
             assert!(res.is_ok(), "error reading header back {:?}", res.err());

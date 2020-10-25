@@ -143,7 +143,7 @@ impl<'a> BatchAggregator<'a> {
         batch_id: &Uuid,
         batch_date: &NaiveDateTime,
     ) -> Result<IngestionHeader> {
-        let ingestion_batch: BatchReader<'_, IngestionHeader, IngestionDataSharePacket> =
+        let mut ingestion_batch: BatchReader<'_, IngestionHeader, IngestionDataSharePacket> =
             BatchReader::new(
                 Batch::new_ingestion(self.aggregation_name, batch_id, batch_date),
                 self.ingestion_transport,
@@ -163,17 +163,17 @@ impl<'a> BatchAggregator<'a> {
         server: &mut prio::server::Server,
         invalid_uuids: &mut Vec<Uuid>,
     ) -> Result<()> {
-        let ingestion_batch: BatchReader<'_, IngestionHeader, IngestionDataSharePacket> =
+        let mut ingestion_batch: BatchReader<'_, IngestionHeader, IngestionDataSharePacket> =
             BatchReader::new(
                 Batch::new_ingestion(self.aggregation_name, batch_id, batch_date),
                 self.ingestion_transport,
             );
-        let own_validation_batch: BatchReader<'_, ValidationHeader, ValidationPacket> =
+        let mut own_validation_batch: BatchReader<'_, ValidationHeader, ValidationPacket> =
             BatchReader::new(
                 Batch::new_validation(self.aggregation_name, batch_id, batch_date, self.is_first),
                 self.own_validation_transport,
             );
-        let peer_validation_batch: BatchReader<'_, ValidationHeader, ValidationPacket> =
+        let mut peer_validation_batch: BatchReader<'_, ValidationHeader, ValidationPacket> =
             BatchReader::new(
                 Batch::new_validation(self.aggregation_name, batch_id, batch_date, !self.is_first),
                 self.peer_validation_transport,

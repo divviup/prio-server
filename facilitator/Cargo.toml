@@ -9,7 +9,7 @@ build = "build.rs"
 anyhow = "1.0"
 avro-rs = { version = "0.11.0", features = ["snappy"] }
 base64 = "0.12.3"
-chrono = "0.4"
+chrono = { version ="0.4", features = ["serde"] }
 clap = "2.33.3"
 derivative = "2.1.1"
 hyper = "0.13.8"
@@ -29,7 +29,8 @@ structopt = "0.3"
 tempfile = "3.1.0"
 thiserror = "1.0"
 tokio = { version = "0.2", features = ["rt-core", "io-util"] }
-ureq = "1.5.1"
+ureq = { version = "1.5.1", features = ["json"] }
+urlencoding = "1.1.1"
 uuid = { version = "0.8", features = ["serde", "v4"] }
 
 [build-dependencies]
@@ -37,5 +38,6 @@ vergen = "3"
 
 [dev-dependencies]
 assert_matches = "1.4.0"
+mockito = "0.27.0"
 rusoto_mock = { version = "0.45.0", default_features = false, features = ["rustls"] }
 serde_test = "1.0"

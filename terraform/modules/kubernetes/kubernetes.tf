@@ -43,6 +43,10 @@ variable "packet_decryption_key_kubernetes_secret" {
   type = string
 }
 
+variable "sum_part_bucket_service_account_email" {
+  type = string
+}
+
 data "aws_caller_identity" "current" {}
 
 # Workload identity[1] lets us map GCP service accounts to Kubernetes service

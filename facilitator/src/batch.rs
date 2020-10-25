@@ -123,7 +123,7 @@ impl<'a, H: Header, P: Packet> BatchReader<'a, H, P> {
 
     /// Return the parsed header from this batch, but only if its signature is
     /// valid.
-    pub fn header(&self, key: &UnparsedPublicKey<Vec<u8>>) -> Result<H> {
+    pub fn header(&mut self, key: &UnparsedPublicKey<Vec<u8>>) -> Result<H> {
         let signature = BatchSignature::read(self.transport.get(self.batch.signature_key())?)?;
 
         let mut header_buf = Vec::new();
@@ -141,7 +141,7 @@ impl<'a, H: Header, P: Packet> BatchReader<'a, H, P> {
     /// Return an avro_rs::Reader that yields the packets in the packet file,
     /// but only if the whole file's digest matches the packet_file_digest field
     /// in the provided header. The header is assumed to be trusted.
-    pub fn packet_file_reader(&self, header: &H) -> Result<Reader<Cursor<Vec<u8>>>> {
+    pub fn packet_file_reader(&mut self, header: &H) -> Result<Reader<Cursor<Vec<u8>>>> {
         // Fetch packet file to validate its digest. It could be quite large so
         // so our intuition would be to stream the packets from the transport
         // and into a hasher and into the validation step, so that we wouldn't
@@ -288,7 +288,7 @@ mod tests {
         base_path: String,
         filenames: &[String],
         batch_writer: &mut BatchWriter<'a, IngestionHeader, IngestionDataSharePacket>,
-        batch_reader: &BatchReader<'a, IngestionHeader, IngestionDataSharePacket>,
+        batch_reader: &mut BatchReader<'a, IngestionHeader, IngestionDataSharePacket>,
         transport: &mut LocalFileTransport,
         write_key: &EcdsaKeyPair,
         read_key: &UnparsedPublicKey<Vec<u8>>,
@@ -421,7 +421,7 @@ mod tests {
                 Batch::new_ingestion(&aggregation_name, &batch_id, &date),
                 &mut write_transport,
             );
-        let batch_reader: BatchReader<'_, IngestionHeader, IngestionDataSharePacket> =
+        let mut batch_reader: BatchReader<'_, IngestionHeader, IngestionDataSharePacket> =
             BatchReader::new(
                 Batch::new_ingestion(&aggregation_name, &batch_id, &date),
                 &mut read_transport,
@@ -447,7 +447,7 @@ mod tests {
                 "batch.sig".to_owned(),
             ],
             &mut batch_writer,
-            &batch_reader,
+            &mut batch_reader,
             &mut verify_transport,
             &default_ingestor_private_key().key,
             &read_key,
@@ -490,7 +490,7 @@ mod tests {
                 Batch::new_validation(&aggregation_name, &batch_id, &date, is_first),
                 &mut write_transport,
             );
-        let batch_reader: BatchReader<'_, IngestionHeader, IngestionDataSharePacket> =
+        let mut batch_reader: BatchReader<'_, IngestionHeader, IngestionDataSharePacket> =
             BatchReader::new(
                 Batch::new_validation(&aggregation_name, &batch_id, &date, is_first),
                 &mut read_transport,
@@ -526,7 +526,7 @@ mod tests {
                 second_filenames
             },
             &mut batch_writer,
-            &batch_reader,
+            &mut batch_reader,
             &mut verify_transport,
             &default_ingestor_private_key().key,
             &read_key,
@@ -570,7 +570,7 @@ mod tests {
                 Batch::new_sum(&aggregation_name, &start, &end, is_first),
                 &mut write_transport,
             );
-        let batch_reader: BatchReader<'_, IngestionHeader, IngestionDataSharePacket> =
+        let mut batch_reader: BatchReader<'_, IngestionHeader, IngestionDataSharePacket> =
             BatchReader::new(
                 Batch::new_sum(&aggregation_name, &start, &end, is_first),
                 &mut read_transport,
@@ -606,7 +606,7 @@ mod tests {
                 second_filenames
             },
             &mut batch_writer,
-            &batch_reader,
+            &mut batch_reader,
             &mut verify_transport,
             &default_ingestor_private_key().key,
             &read_key,
