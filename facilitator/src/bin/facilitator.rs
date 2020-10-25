@@ -49,16 +49,20 @@ fn path_validator(s: String) -> Result<(), String> {
         .map_err(|e| e.to_string())
 }
 
-trait StorageArgumentAdder {
+// Trait applied to clap::App to extend its builder pattern with some helpers
+// specific to our use case.
+trait AppArgumentAdder {
     fn add_storage_argument(
         self: Self,
         arg_name: &'static str,
         s3_arn_arg: &'static str,
         gcs_sa_to_impersonate_arg: &'static str,
     ) -> Self;
+
+    fn add_batch_signing_key_arguments(self: Self) -> Self;
 }
 
-impl<'a, 'b> StorageArgumentAdder for App<'a, 'b> {
+impl<'a, 'b> AppArgumentAdder for App<'a, 'b> {
     fn add_storage_argument(
         self: App<'a, 'b>,
         arg_name: &'static str,
@@ -109,6 +113,39 @@ impl<'a, 'b> StorageArgumentAdder for App<'a, 'b> {
                     used. Ignored if the corresponding path is not an S3 \
                     bucket.",
                 ),
+        )
+    }
+
+    fn add_batch_signing_key_arguments(self: App<'a, 'b>) -> App<'a, 'b> {
+        self.arg(
+            Arg::with_name("batch-signing-private-key")
+                .long("batch-signing-private-key")
+                .env("BATCH_SIGNING_PRIVATE_KEY")
+                .value_name("B64_PKCS8")
+                .help("Batch signing private key for this server")
+                .long_help(
+                    "Base64 encoded PKCS#8 document containing ECDSA P256 \
+                    batch signing private key to be used by this server when \
+                    sending messages to other servers. If not specified, a \
+                    fixed private key is used.",
+                )
+                .default_value(DEFAULT_FACILITATOR_SIGNING_PRIVATE_KEY)
+                .hide_default_value(true)
+                .validator(b64_validator),
+        )
+        .arg(
+            Arg::with_name("batch-signing-private-key-identifier")
+                .long("batch-signing-private-key-identifier")
+                .env("BATCH_SIGNING_PRIVATE_KEY_ID")
+                .value_name("ID")
+                .help("Batch signing private key identifier")
+                .long_help(
+                    "Identifier for the batch signing key, corresponding to an \
+                    entry in this server's global or specific manifest. Used \
+                    to construct PrioBatchSignature messages.",
+                )
+                .default_value("default-batch-signing-key-id")
+                .hide_default_value(true),
         )
     }
 }
@@ -222,37 +259,7 @@ fn main() -> Result<(), anyhow::Error> {
                         .hide_default_value(true)
                         .validator(b64_validator),
                 )
-                .arg(
-                    Arg::with_name("ingestor-private-key")
-                        .long("ingestor-private-key")
-                        .env("INGESTION_BATCH_SIGNING_KEY")
-                        .value_name("B64")
-                        .help(
-                            "Base64 encoded ECDSA P256 private key for the \
-                            ingestor server",
-                        )
-                        .long_help(
-                            "Base64 encoded ECDSA P256 private key for the \
-                            ingestor server. If not specified, a fixed private \
-                            key will be used.",
-                        )
-                        .default_value(DEFAULT_INGESTOR_PRIVATE_KEY)
-                        .hide_default_value(true)
-                        .validator(b64_validator),
-                )
-                .arg(
-                    Arg::with_name("ingestor-private-key-identifier")
-                        .long("ingestor-private-key-identifier")
-                        .env("INGESTION_BATCH_SIGNING_KEY_ID")
-                        .value_name("ID")
-                        .help(
-                            "Identifier for the batch signing key, \
-                            corresponding to an entry in the ingestor global \
-                            manifest.",
-                        )
-                        .default_value("default-ingestor-batch-signing-key")
-                        .hide_default_value(true),
-                )
+                .add_batch_signing_key_arguments()
                 .arg(
                     Arg::with_name("epsilon")
                         .long("epsilon")
@@ -339,33 +346,7 @@ fn main() -> Result<(), anyhow::Error> {
                         .hide_default_value(true)
                         .validator(b64_validator),
                 )
-                .arg(
-                    Arg::with_name("share-processor-private-key")
-                        .long("share-processor-private-key")
-                        .value_name("B64")
-                        .help("Base64 encoded share processor private key for the server")
-                        .long_help(
-                            "Base64 encoded ECDSA P256 share processor private \
-                            key. If not specified, a fixed private key will be \
-                            used.",
-                        )
-                        .default_value(DEFAULT_FACILITATOR_SIGNING_PRIVATE_KEY)
-                        .hide_default_value(true)
-                        .validator(b64_validator),
-                )
-                .arg(
-                    Arg::with_name("share-processor-private-key-identifier")
-                        .long("share-processor-private-key-identifier")
-                        .env("INGESTION_BATCH_SIGNING_KEY_ID")
-                        .value_name("ID")
-                        .help(
-                            "Identifier for the batch signing key, \
-                            corresponding to an entry in the ingestor global \
-                            manifest.",
-                        )
-                        .default_value("default-facilitator-batch-signing-key")
-                        .hide_default_value(true),
-                )
+                .add_batch_signing_key_arguments()
                 .arg(Arg::with_name("is-first").long("is-first").help(
                     "Whether this is the \"first\" server receiving a share, \
                     i.e., the PHA.",
@@ -491,20 +472,7 @@ fn main() -> Result<(), anyhow::Error> {
                         .hide_default_value(true)
                         .validator(b64_validator),
                 )
-                .arg(
-                    Arg::with_name("share-processor-private-key")
-                        .long("share-processor-private-key")
-                        .value_name("B64")
-                        .help("Base64 encoded share processor private key for the server")
-                        .long_help(
-                            "Base64 encoded ECDSA P256 share processor private \
-                            key. If not specified, a fixed private key will be \
-                            used.",
-                        )
-                        .default_value(DEFAULT_FACILITATOR_SIGNING_PRIVATE_KEY)
-                        .hide_default_value(true)
-                        .validator(b64_validator),
-                )
+                .add_batch_signing_key_arguments()
                 .arg(
                     Arg::with_name("peer-share-processor-public-key")
                         .long("peer-share-processor-public-key")
@@ -547,11 +515,7 @@ fn main() -> Result<(), anyhow::Error> {
                 "facilitator-output-gcp-sa-email",
                 sub_matches,
             )?;
-            let ingestor_batch_signing_key = batch_signing_key_from_arg(
-                "ingestor-private-key",
-                "ingestor-private-key-identifier",
-                sub_matches,
-            )?;
+            let ingestor_batch_signing_key = batch_signing_key_from_arg(sub_matches)?;
 
             generate_ingestion_sample(
                 &mut *pha_transport,
@@ -621,11 +585,7 @@ fn main() -> Result<(), anyhow::Error> {
 
             let ingestor_pub_key = public_key_from_arg("ingestor-public-key", sub_matches);
 
-            let share_processor_key = batch_signing_key_from_arg(
-                "share-processor-private-key",
-                "share-processor-private-key-identifier",
-                sub_matches,
-            )?;
+            let batch_signing_key = batch_signing_key_from_arg(sub_matches)?;
 
             let mut batch_intaker = BatchIntaker::new(
                 &sub_matches.value_of("aggregation-id").unwrap(),
@@ -640,7 +600,7 @@ fn main() -> Result<(), anyhow::Error> {
                 &mut *validation_transport,
                 sub_matches.is_present("is-first"),
                 &share_processor_ecies_key,
-                &share_processor_key,
+                &batch_signing_key,
                 &ingestor_pub_key,
             )?;
             batch_intaker.generate_validation_share()?;
@@ -675,11 +635,7 @@ fn main() -> Result<(), anyhow::Error> {
             let ingestor_pub_key = public_key_from_arg("ingestor-public-key", sub_matches);
             let peer_share_processor_pub_key =
                 public_key_from_arg("peer-share-processor-public-key", sub_matches);
-            let share_processor_key = batch_signing_key_from_arg(
-                "share-processor-private-key",
-                "share-processor-private-key-identifier",
-                sub_matches,
-            )?;
+            let batch_signing_key = batch_signing_key_from_arg(sub_matches)?;
             let share_processor_ecies_key =
                 PrivateKey::from_base64(sub_matches.value_of("ecies-private-key").unwrap())
                     .unwrap();
@@ -717,7 +673,7 @@ fn main() -> Result<(), anyhow::Error> {
                 &mut *peer_validation_transport,
                 &mut *aggregation_transport,
                 &ingestor_pub_key,
-                &share_processor_key,
+                &batch_signing_key,
                 &peer_share_processor_pub_key,
                 &share_processor_ecies_key,
             )?
@@ -741,13 +697,11 @@ fn public_key_from_arg(arg: &str, matches: &ArgMatches) -> UnparsedPublicKey<Vec
     }
 }
 
-fn batch_signing_key_from_arg(
-    private_key_arg: &str,
-    private_key_identifier_arg: &str,
-    matches: &ArgMatches,
-) -> Result<BatchSigningKey> {
-    let key_bytes = base64::decode(matches.value_of(private_key_arg).unwrap()).unwrap();
-    let key_identifier = matches.value_of(private_key_identifier_arg).unwrap();
+fn batch_signing_key_from_arg(matches: &ArgMatches) -> Result<BatchSigningKey> {
+    let key_bytes = base64::decode(matches.value_of("batch-signing-private-key").unwrap()).unwrap();
+    let key_identifier = matches
+        .value_of("batch-signing-private-key-identifier")
+        .unwrap();
     Ok(BatchSigningKey {
         key: EcdsaKeyPair::from_pkcs8(&ECDSA_P256_SHA256_ASN1_SIGNING, &key_bytes)?,
         identifier: key_identifier.to_owned(),
