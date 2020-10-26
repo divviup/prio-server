@@ -4,6 +4,12 @@ This is ISRG's implementation server components for [Prio](https://crypto.stanfo
 
 `avro-schema` contains [Avro](https://avro.apache.org/docs/current/index.html) schema definitions for interoperation with other actors in the Prio system. `facilitator` contains the Rust implementation of ISRG's Prio facilitation server. `terraform` contains a Terraform module for deploying data share processor servers.
 
+## Prio share processor workflow
+
+![Prio workflow diagram](docs/prio-workflow.gv.svg)
+
+This GitHub project implements the "facilitator" box in the diagram.
+
 ## Releases
 
 We use a GitHub Action to build Docker images and push them to [DockerHub](https://hub.docker.com/repository/docker/letsencrypt/prio-facilitator). To cut a release and push:

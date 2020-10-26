@@ -368,7 +368,7 @@ impl Header for IngestionHeader {
 pub struct IngestionDataSharePacket {
     pub uuid: Uuid,
     pub encrypted_payload: Vec<u8>,
-    pub encryption_key_id: String,
+    pub encryption_key_id: Option<String>,
     pub r_pit: i64,
     pub version_configuration: Option<String>,
     pub device_nonce: Option<Vec<u8>>,
@@ -409,7 +409,16 @@ impl Packet for IngestionDataSharePacket {
             match (tuple.0.as_str(), tuple.1) {
                 ("uuid", Value::Uuid(v)) => uuid = Some(v),
                 ("encrypted_payload", Value::Bytes(v)) => encrypted_payload = Some(v),
-                ("encryption_key_id", Value::String(v)) => encryption_key_id = Some(v),
+                ("encryption_key_id", Value::Union(boxed)) => match *boxed {
+                    Value::String(v) => encryption_key_id = Some(v),
+                    Value::Null => encryption_key_id = None,
+                    v => {
+                        return Err(Error::MalformedDataPacketError(format!(
+                            "unexpected boxed value {:?} in encryption_key_id",
+                            v
+                        )))
+                    }
+                },
                 ("r_pit", Value::Long(v)) => r_pit = Some(v),
                 ("version_configuration", Value::Union(boxed)) => match *boxed {
                     Value::String(v) => version_configuration = Some(v),
@@ -440,11 +449,7 @@ impl Packet for IngestionDataSharePacket {
             }
         }
 
-        if uuid.is_none()
-            || encrypted_payload.is_none()
-            || encryption_key_id.is_none()
-            || r_pit.is_none()
-        {
+        if uuid.is_none() || encrypted_payload.is_none() || r_pit.is_none() {
             return Err(Error::MalformedDataPacketError(
                 "missing fields in record".to_owned(),
             ));
@@ -453,7 +458,7 @@ impl Packet for IngestionDataSharePacket {
         Ok(IngestionDataSharePacket {
             uuid: uuid.unwrap(),
             encrypted_payload: encrypted_payload.unwrap(),
-            encryption_key_id: encryption_key_id.unwrap(),
+            encryption_key_id,
             r_pit: r_pit.unwrap(),
             version_configuration,
             device_nonce,
@@ -476,10 +481,13 @@ impl Packet for IngestionDataSharePacket {
             "encrypted_payload",
             Value::Bytes(self.encrypted_payload.clone()),
         );
-        record.put(
-            "encryption_key_id",
-            Value::String(self.encryption_key_id.clone()),
-        );
+        match &self.encryption_key_id {
+            Some(v) => record.put(
+                "encryption_key_id",
+                Value::Union(Box::new(Value::String(v.to_owned()))),
+            ),
+            None => record.put("encryption_key_id", Value::Union(Box::new(Value::Null))),
+        }
         record.put("r_pit", Value::Long(self.r_pit));
         match &self.version_configuration {
             Some(v) => record.put(
@@ -1102,7 +1110,7 @@ mod tests {
             IngestionDataSharePacket {
                 uuid: Uuid::new_v4(),
                 encrypted_payload: vec![0u8, 1u8, 2u8, 3u8],
-                encryption_key_id: "fake-key-1".to_owned(),
+                encryption_key_id: Some("fake-key-1".to_owned()),
                 r_pit: 1,
                 version_configuration: Some("config-1".to_owned()),
                 device_nonce: None,
@@ -1110,7 +1118,7 @@ mod tests {
             IngestionDataSharePacket {
                 uuid: Uuid::new_v4(),
                 encrypted_payload: vec![4u8, 5u8, 6u8, 7u8],
-                encryption_key_id: "fake-key-2".to_owned(),
+                encryption_key_id: None,
                 r_pit: 2,
                 version_configuration: None,
                 device_nonce: Some(vec![8u8, 9u8, 10u8, 11u8]),
@@ -1118,7 +1126,7 @@ mod tests {
             IngestionDataSharePacket {
                 uuid: Uuid::new_v4(),
                 encrypted_payload: vec![8u8, 9u8, 10u8, 11u8],
-                encryption_key_id: "fake-key-3".to_owned(),
+                encryption_key_id: Some("fake-key-3".to_owned()),
                 r_pit: 3,
                 version_configuration: None,
                 device_nonce: None,
