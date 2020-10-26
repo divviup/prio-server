@@ -8,7 +8,7 @@ use anyhow::{anyhow, Context, Result};
 use chrono::NaiveDateTime;
 use prio::{encrypt::PrivateKey, finite_field::Field, server::Server};
 use ring::signature::UnparsedPublicKey;
-use std::convert::TryFrom;
+use std::{convert::TryFrom, iter::Iterator};
 use uuid::Uuid;
 
 /// BatchIntaker is responsible for validating a batch of data packet shares
@@ -18,7 +18,7 @@ pub struct BatchIntaker<'a> {
     ingestion_batch: BatchReader<'a, IngestionHeader, IngestionDataSharePacket>,
     validation_batch: BatchWriter<'a, ValidationHeader, ValidationPacket>,
     is_first: bool,
-    share_processor_ecies_key: &'a PrivateKey,
+    packet_decryption_keys: Vec<PrivateKey>,
     batch_signing_key: &'a BatchSigningKey,
     ingestor_key: &'a UnparsedPublicKey<Vec<u8>>,
 }
@@ -32,7 +32,7 @@ impl<'a> BatchIntaker<'a> {
         ingestion_transport: &'a mut dyn Transport,
         validation_transport: &'a mut dyn Transport,
         is_first: bool,
-        share_processor_ecies_key: &'a PrivateKey,
+        packet_decryption_keys: Vec<PrivateKey>,
         batch_signing_key: &'a BatchSigningKey,
         ingestor_key: &'a UnparsedPublicKey<Vec<u8>>,
     ) -> Result<BatchIntaker<'a>> {
@@ -46,7 +46,7 @@ impl<'a> BatchIntaker<'a> {
                 validation_transport,
             ),
             is_first,
-            share_processor_ecies_key,
+            packet_decryption_keys,
             batch_signing_key,
             ingestor_key,
         })
@@ -64,11 +64,16 @@ impl<'a> BatchIntaker<'a> {
             ));
         }
 
-        let mut server = Server::new(
-            ingestion_header.bins as usize,
-            self.is_first,
-            self.share_processor_ecies_key.clone(),
-        );
+        // Ideally, we would use the encryption_key_id in the ingestion packet
+        // to figure out which private key to use for decryption, but that field
+        // is optional. Instead we try all the keys we have available until one
+        // works.
+        // https://github.com/abetterinternet/prio-server/issues/73
+        let mut servers = self
+            .packet_decryption_keys
+            .iter()
+            .map(|k| Server::new(ingestion_header.bins as usize, self.is_first, k.clone()))
+            .collect::<Vec<Server>>();
 
         // Read all the ingestion packets, generate a verification message for
         // each, and write them to the validation batch.
@@ -92,21 +97,30 @@ impl<'a> BatchIntaker<'a> {
                     // ingestion packets, do we abort handling of the entire
                     // batch (as implemented currently) or should we record it
                     // as an invalid UUID and emit a validation batch for the
-                    //  other packets?
-                    let validation_message = server
-                        .generate_verification_message(
+                    // other packets?
+                    let mut did_create_validation_packet = false;
+                    for server in servers.iter_mut() {
+                        let validation_message = match server.generate_verification_message(
                             Field::from(r_pit),
                             &packet.encrypted_payload,
-                        )
-                        .context("failed to construct validation message")?;
+                        ) {
+                            Some(m) => m,
+                            None => continue,
+                        };
 
-                    let packet = ValidationPacket {
-                        uuid: packet.uuid,
-                        f_r: u32::from(validation_message.f_r) as i64,
-                        g_r: u32::from(validation_message.g_r) as i64,
-                        h_r: u32::from(validation_message.h_r) as i64,
-                    };
-                    packet.write(&mut packet_writer)?;
+                        let packet = ValidationPacket {
+                            uuid: packet.uuid,
+                            f_r: u32::from(validation_message.f_r) as i64,
+                            g_r: u32::from(validation_message.g_r) as i64,
+                            h_r: u32::from(validation_message.h_r) as i64,
+                        };
+                        packet.write(&mut packet_writer)?;
+                        did_create_validation_packet = true;
+                        break;
+                    }
+                    if !did_create_validation_packet {
+                        return Err(anyhow!("failed to construct validation message"));
+                    }
                 })?;
 
         // Construct validation header and write it out
@@ -189,7 +203,7 @@ mod tests {
             &mut pha_ingest_transport,
             &mut pha_validate_transport,
             true,
-            &pha_ecies_key,
+            vec![pha_ecies_key],
             &pha_signing_key,
             &ingestor_pub_key,
         )
@@ -206,7 +220,7 @@ mod tests {
             &mut facilitator_ingest_transport,
             &mut facilitator_validate_transport,
             false,
-            &facilitator_ecies_key,
+            vec![facilitator_ecies_key],
             &facilitator_signing_key,
             &ingestor_pub_key,
         )
