@@ -214,7 +214,7 @@ output "manifest_bucket" {
 }
 
 output "gke_kubeconfig" {
-  value = "Run this command to update your kubectl config: gcloud container clusters get-credentials ${module.gke.cluster_name} --region ${var.gcp_region}"
+  value = "Run this command to update your kubectl config: gcloud container clusters get-credentials ${module.gke.cluster_name} --region ${var.gcp_region} --project ${var.gcp_project}"
 }
 
 output "specific_manifests" {
