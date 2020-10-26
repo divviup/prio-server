@@ -164,7 +164,7 @@ resource "kubernetes_cron_job" "workflow_manager" {
               image = "${var.container_registry}/${var.workflow_manager_image}:${var.workflow_manager_version}"
               args = [
                 "--k8s-namespace", var.kubernetes_namespace,
-                "--input-bucket", "lotophagi-ingestion-bucket",
+                "--input-bucket", var.ingestion_bucket,
               ]
               env {
                 name  = "AWS_ROLE_ARN"
@@ -211,20 +211,24 @@ resource "kubernetes_cron_job" "workflow_manager" {
   }
 }
 
-resource "kubernetes_role" "workflow-manager-role" {
+resource "kubernetes_role" "workflow_manager_role" {
   metadata {
     name      = "${var.environment}-${var.data_share_processor_name}-wfm-role"
     namespace = var.kubernetes_namespace
   }
 
   rule {
+    // API group "" means the core API group.
     api_groups = [""]
-    resources  = ["namespaces", "pods"]
-    verbs      = ["get", "list", "watch"]
+    // Workflow manager can list pods and create jobs.
+    // Note: Some of these permissions will probably wind up not being needed.
+    // Starting with a moderately generous demonstration set.
+    resources = ["namespaces", "pods", "jobs"]
+    verbs     = ["get", "list", "watch", "create"]
   }
 }
 
-resource "kubernetes_role_binding" "workflow-manager-rolebinding" {
+resource "kubernetes_role_binding" "workflow_manager_rolebinding" {
   metadata {
     name      = "${var.environment}-${var.data_share_processor_name}-workflow-manager-can-admin"
     namespace = var.kubernetes_namespace
