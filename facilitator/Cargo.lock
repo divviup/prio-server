@@ -116,6 +116,17 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cff77d8686867eceff3105329d4698d96c2391c176d5d03adc90c7389162b5b8"
 
 [[package]]
+name = "assert-json-diff"
+version = "1.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4259cbe96513d2f1073027a259fc2ca917feb3026a5a8d984e3628e490255cc0"
+dependencies = [
+ "extend",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "assert_matches"
 version = "1.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -301,6 +312,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "colored"
+version = "1.9.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f4ffc801dacf156c5854b9df4f425a626539c3a6ef7893cc0c5084a23f0b6c59"
+dependencies = [
+ "atty",
+ "lazy_static",
+ "winapi 0.3.9",
+]
+
+[[package]]
 name = "const_fn"
 version = "0.4.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -439,6 +461,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "difference"
+version = "2.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "524cbf6897b527295dff137cec09ecf3a05f4fddffd7dfcd1585403449e74198"
+
+[[package]]
 name = "digest"
 version = "0.9.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -490,6 +518,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "extend"
+version = "0.1.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f47da3a72ec598d9c8937a7ebca8962a5c7a1f28444e38c2b33c771ba3f55f05"
+dependencies = [
+ "proc-macro-error",
+ "proc-macro2",
+ "quote",
+ "syn",
+]
+
+[[package]]
 name = "facilitator"
 version = "0.1.0"
 dependencies = [
@@ -502,6 +542,7 @@ dependencies = [
  "derivative",
  "hyper",
  "hyper-rustls 0.21.0",
+ "mockito",
  "once_cell",
  "pem",
  "prio",
@@ -520,6 +561,7 @@ dependencies = [
  "thiserror",
  "tokio",
  "ureq",
+ "urlencoding",
  "uuid",
  "vergen",
 ]
@@ -1003,6 +1045,24 @@ checksum = "07b88fb9795d4d36d62a012dfbf49a8f5cf12751f36d31a9dbe66d528e58979e"
 dependencies = [
  "socket2",
  "winapi 0.3.9",
+]
+
+[[package]]
+name = "mockito"
+version = "0.27.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3a634720d366bcbce30fb05871a35da229cef101ad0b2ea4e46cf5abf031a273"
+dependencies = [
+ "assert-json-diff",
+ "colored",
+ "difference",
+ "httparse",
+ "lazy_static",
+ "log",
+ "rand 0.7.3",
+ "regex",
+ "serde_json",
+ "serde_urlencoded",
 ]
 
 [[package]]
@@ -2204,6 +2264,8 @@ dependencies = [
  "once_cell",
  "qstring",
  "rustls 0.18.1",
+ "serde",
+ "serde_json",
  "url",
  "webpki",
  "webpki-roots",
@@ -2219,6 +2281,12 @@ dependencies = [
  "matches",
  "percent-encoding",
 ]
+
+[[package]]
+name = "urlencoding"
+version = "1.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c9232eb53352b4442e40d7900465dfc534e8cb2dc8f18656fcb2ac16112b5593"
 
 [[package]]
 name = "uuid"

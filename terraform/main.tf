@@ -186,6 +186,7 @@ module "data_share_processors" {
   kubernetes_namespace                    = each.value.kubernetes_namespace
   packet_decryption_key_kubernetes_secret = each.value.packet_decryption_key_kubernetes_secret
   certificate_domain                      = "${var.environment}.certificates.${var.manifest_domain}"
+  sum_part_bucket_service_account_email   = google_service_account.sum_part_bucket_writer.email
 
   depends_on = [module.gke]
 }
@@ -200,12 +201,12 @@ resource "google_service_account" "sum_part_bucket_writer" {
   display_name = "prio-${var.environment}-sum-part-bucket-writer"
 }
 
-# Permit the service accounts for all the data share processors to impersonate
-# the sum part bucket writer.
-resource "google_service_account_iam_binding" "data_share_processors_to_sum_part_bucket_writer" {
+# Permit the service accounts for all the data share processors to request Oauth
+# tokens allowing them to impersonate the sum part bucket writer.
+resource "google_service_account_iam_binding" "data_share_processors_to_sum_part_bucket_writer_token_creator" {
   provider           = google-beta
   service_account_id = google_service_account.sum_part_bucket_writer.name
-  role               = "roles/iam.serviceAccountUser"
+  role               = "roles/iam.serviceAccountTokenCreator"
   members            = [for v in module.data_share_processors : v.service_account_email]
 }
 

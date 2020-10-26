@@ -29,7 +29,7 @@ impl LocalFileTransport {
 }
 
 impl Transport for LocalFileTransport {
-    fn get(&self, key: &str) -> Result<Box<dyn Read>> {
+    fn get(&mut self, key: &str) -> Result<Box<dyn Read>> {
         let path = self.directory.join(LocalFileTransport::relative_path(key));
         let f =
             File::open(path.as_path()).with_context(|| format!("opening {}", path.display()))?;
@@ -63,7 +63,6 @@ impl TransportWriter for File {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::io::Read;
 
     #[test]
     fn roundtrip_file_transport() {

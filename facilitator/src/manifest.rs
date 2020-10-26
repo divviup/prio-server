@@ -149,7 +149,7 @@ mod tests {
     "batch-signing-public-keys": {{
         "fake-key-2": {{
         "expiration": "",
-        "public-key": "-----BEGIN PUBLIC KEY-----\n{}\n-----END PUBLIC KEY-----"
+        "public-key": "-----BEGIN PUBLIC KEY-----\n{}\n-----END PUBLIC KEY-----\n"
       }}
     }},
     "ingestion-bucket": "us-west-1/ingestion",
@@ -166,7 +166,7 @@ mod tests {
             BatchSigningPublicKey {
                 expiration: "".to_string(),
                 public_key: format!(
-                    "-----BEGIN PUBLIC KEY-----\n{}\n-----END PUBLIC KEY-----",
+                    "-----BEGIN PUBLIC KEY-----\n{}\n-----END PUBLIC KEY-----\n",
                     DEFAULT_INGESTOR_SUBJECT_PUBLIC_KEY_INFO
                 ),
             },
@@ -319,7 +319,7 @@ mod tests {
     "batch-signing-public-keys": {
         "fake-key-2": {
         "expiration": "",
-        "public-key": "-----BEGIN PUBLIC KEY-----\ndG9vIHNob3J0Cg==\n-----END PUBLIC KEY-----"
+        "public-key": "-----BEGIN PUBLIC KEY-----\ndG9vIHNob3J0Cg==\n-----END PUBLIC KEY-----\n"
       }
     },
     "ingestion-bucket": "us-west-1/ingestion",

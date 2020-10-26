@@ -19,7 +19,7 @@ use facilitator::{
         DEFAULT_INGESTOR_PRIVATE_KEY, DEFAULT_PHA_ECIES_PRIVATE_KEY,
         DEFAULT_PHA_SIGNING_PRIVATE_KEY,
     },
-    transport::{LocalFileTransport, S3Transport, Transport},
+    transport::{GCSTransport, LocalFileTransport, S3Transport, Transport},
     BatchSigningKey, DATE_FORMAT,
 };
 
@@ -49,6 +49,70 @@ fn path_validator(s: String) -> Result<(), String> {
         .map_err(|e| e.to_string())
 }
 
+trait StorageArgumentAdder {
+    fn add_storage_argument(
+        self: Self,
+        arg_name: &'static str,
+        s3_arn_arg: &'static str,
+        gcs_sa_to_impersonate_arg: &'static str,
+    ) -> Self;
+}
+
+impl<'a, 'b> StorageArgumentAdder for App<'a, 'b> {
+    fn add_storage_argument(
+        self: App<'a, 'b>,
+        arg_name: &'static str,
+        s3_arn_arg: &'static str,
+        gcs_sa_arg: &'static str,
+    ) -> App<'a, 'b> {
+        self.arg(
+            Arg::with_name(arg_name)
+                .long(arg_name)
+                .value_name("PATH")
+                .default_value(".")
+                .validator(path_validator)
+                .help("Local or cloud storage to write data into.")
+                .long_help(
+                    "Storage to write into or read from. May be either a local \
+                    filesystem path, (no scheme), an S3 bucket (formatted as \
+                    \"s3://{region}/{bucket-name}\") or a GCS bucket \
+                    (formatted as \"gs://{bucket-name}\").",
+                ),
+        )
+        .arg(
+            Arg::with_name(s3_arn_arg)
+                .long(s3_arn_arg)
+                .help("AWS IAM role to assume when using S3.")
+                .long_help(
+                    "If present, and if the corresponding path is an S3 \
+                    bucket, authentication to S3 will try to use an OIDC \
+                    auth token obtained from the GKE metadata service to \
+                    assume the role specified in the AWS_ROLE_ARN enviornment \
+                    variable. If omitted, and the corresponding path is an S3 \
+                    bucket, credentials found in the environment or ~/.aws/ \
+                    are used. Ignored if the corresponding path is not an S3 \
+                    bucket.",
+                ),
+        )
+        .arg(
+            Arg::with_name(gcs_sa_arg)
+                .long(gcs_sa_arg)
+                .value_name("SA_EMAIL")
+                .help("GCP service account to impersonate when using GCS.")
+                .long_help(
+                    "If present, and if the corresponding path is a GCS \
+                    bucket, authentication to GCS will try to impersonate the \
+                    specified GCP service account, using the default Oauth \
+                    token retrieved from the GKE metadata service to \
+                    authenticate to GCP IAM. If omitted, and the corresponding \
+                    path is a GCS bucket, then the default credentials will be \
+                    used. Ignored if the corresponding path is not an S3 \
+                    bucket.",
+                ),
+        )
+    }
+}
+
 fn main() -> Result<(), anyhow::Error> {
     let matches = App::new("facilitator")
         .about("Prio data share processor")
@@ -68,42 +132,11 @@ fn main() -> Result<(), anyhow::Error> {
         .subcommand(
             SubCommand::with_name("generate-ingestion-sample")
                 .about("Generate sample data files")
-                .arg(
-                    Arg::with_name("pha-output")
-                        .long("pha-output")
-                        .value_name("DIR")
-                        .default_value(".")
-                        .validator(path_validator)
-                        .help(
-                            "Storage to write sample data for the PHA \
-                            (aka first server) into. May be either a local \
-                            filesystem path or an S3 bucket, formatted as \
-                            \"s3://{region}/{bucket-name}\"",
-                        ),
-                )
-                .arg(
-                    Arg::with_name("facilitator-output")
-                        .long("facilitator-output")
-                        .value_name("DIR")
-                        .default_value(".")
-                        .validator(path_validator)
-                        .help(
-                            "Storage to write sample data for the \
-                            facilitator (aka second server) into. May be \
-                            either a local filesystem path or an S3 bucket, \
-                            formatted as \"s3://{region}/{bucket-name}\"",
-                        ),
-                )
-                .arg(
-                    Arg::with_name("s3-use-credentials-from-gke-metadata")
-                        .long("s3-use-credentials-from-gke-metadata")
-                        .help(
-                            "If present, authentication to S3 will try to use \
-                            an OIDC auth token obtained from the GKE metadata \
-                            service and the AWS_ROLE_ARN environment variable. \
-                            If omitted, uses credentials found in environment \
-                            variables or ~/.aws/.",
-                        ),
+                .add_storage_argument("pha-output", "pha-output-s3-arn", "pha-output-gcs-sa-email")
+                .add_storage_argument(
+                    "facilitator-output",
+                    "facilitator-output-s3-arn",
+                    "facilitator-output-gcp-sa-email",
                 )
                 .arg(
                     Arg::with_name("aggregation-id")
@@ -320,45 +353,32 @@ fn main() -> Result<(), anyhow::Error> {
                         .hide_default_value(true)
                         .validator(b64_validator),
                 )
+                .arg(
+                    Arg::with_name("share-processor-private-key-identifier")
+                        .long("share-processor-private-key-identifier")
+                        .env("INGESTION_BATCH_SIGNING_KEY_ID")
+                        .value_name("ID")
+                        .help(
+                            "Identifier for the batch signing key, \
+                            corresponding to an entry in the ingestor global \
+                            manifest.",
+                        )
+                        .default_value("default-facilitator-batch-signing-key")
+                        .hide_default_value(true),
+                )
                 .arg(Arg::with_name("is-first").long("is-first").help(
                     "Whether this is the \"first\" server receiving a share, \
                     i.e., the PHA.",
                 ))
-                .arg(
-                    Arg::with_name("ingestion-bucket")
-                        .long("ingestion-bucket")
-                        .value_name("DIR")
-                        .default_value(".")
-                        .validator(path_validator)
-                        .help(
-                            "Directory containing ingestion data. May be \
-                            either a local filesystem path or an S3 bucket, \
-                            formatted as \"s3://{region}/{bucket-name}\"",
-                        ),
+                .add_storage_argument(
+                    "ingestion-bucket",
+                    "ingestion-bucket-s3-arn",
+                    "ingestion-bucket-gcp-sa-email",
                 )
-                .arg(
-                    Arg::with_name("validation-bucket")
-                        .long("validation-bucket")
-                        .value_name("DIR")
-                        .default_value(".")
-                        .validator(path_validator)
-                        .help(
-                            "Peer validation bucket into which to write \
-                            validation shares. May be either a local \
-                            filesystem path or an S3 bucket, formatted as \
-                            \"s3://{region}/{bucket-name}\"",
-                        ),
-                )
-                .arg(
-                    Arg::with_name("s3-use-credentials-from-gke-metadata")
-                        .long("s3-use-credentials-from-gke-metadata")
-                        .help(
-                            "If present, authentication to S3 will try to use \
-                            an OIDC auth token obtained from the GKE metadata \
-                            service and the AWS_ROLE_ARN environment variable. \
-                            If omitted, uses credentials found in environment \
-                            variables or ~/.aws/.",
-                        ),
+                .add_storage_argument(
+                    "validation-bucket",
+                    "validation-bucket-s3-arn",
+                    "validation-bucket-gcp-sa-email",
                 ),
         )
         .subcommand(
@@ -424,66 +444,25 @@ fn main() -> Result<(), anyhow::Error> {
                         )
                         .validator(date_validator),
                 )
-                .arg(
-                    Arg::with_name("ingestion-bucket")
-                        .long("ingestion-bucket")
-                        .value_name("DIR")
-                        .default_value(".")
-                        .validator(path_validator)
-                        .help(
-                            "Directory containing ingestion data. May be \
-                            either a local filesystem path or an S3 bucket, \
-                            formatted as \"s3://{region}/{bucket-name}\"",
-                        ),
+                .add_storage_argument(
+                    "ingestion-bucket",
+                    "ingestion-bucket-s3-arn",
+                    "ingestion-bucket-gcp-sa-email",
                 )
-                .arg(
-                    Arg::with_name("own-validation-bucket")
-                        .long("own-validation-bucket")
-                        .value_name("DIR")
-                        .default_value(".")
-                        .validator(path_validator)
-                        .help(
-                            "Bucket in which this share processor's validation \
-                            shares were written. May be either a local \
-                            filesystem path or an S3 bucket, formatted as \
-                            \"s3://{region}/{bucket-name}\"",
-                        ),
+                .add_storage_argument(
+                    "own-validation-bucket",
+                    "own-validation-bucket-s3-arn",
+                    "own-validation-bucket-gcp-sa-email",
                 )
-                .arg(
-                    Arg::with_name("peer-validation-bucket")
-                        .long("peer-validation-bucket")
-                        .value_name("DIR")
-                        .default_value(".")
-                        .validator(path_validator)
-                        .help(
-                            "Bucket in which the peer share processor's \
-                            validation shares were written. May be either a \
-                            local filesystem path or an S3 bucket, formatted \
-                            as \"s3://{region}/{bucket-name}\"",
-                        ),
+                .add_storage_argument(
+                    "peer-validation-bucket",
+                    "peer-validation-bucket-s3-arn",
+                    "peer-validation-bucket-gcp-sa-email",
                 )
-                .arg(
-                    Arg::with_name("aggregation-bucket")
-                        .long("aggregation-bucket")
-                        .value_name("DIR")
-                        .default_value(".")
-                        .validator(path_validator)
-                        .help(
-                            "Bucket into which sum parts are to be written. May be either a \
-                            local filesystem path or an S3 bucket, formatted \
-                            as \"s3://{region}/{bucket-name}\"",
-                        ),
-                )
-                .arg(
-                    Arg::with_name("s3-use-credentials-from-gke-metadata")
-                        .long("s3-use-credentials-from-gke-metadata")
-                        .help(
-                            "If present, authentication to S3 will try to use \
-                            an OIDC auth token obtained from the GKE metadata \
-                            service and the AWS_ROLE_ARN environment variable. \
-                            If omitted, uses credentials found in environment \
-                            variables or ~/.aws/.",
-                        ),
+                .add_storage_argument(
+                    "aggregation-bucket",
+                    "aggregation-bucket-s3-arn",
+                    "aggregation-bucket-gcp-sa-email",
                 )
                 .arg(
                     Arg::with_name("ecies-private-key")
@@ -556,9 +535,18 @@ fn main() -> Result<(), anyhow::Error> {
         // various parameters are present and valid, so it is safe to use
         // unwrap() here.
         ("generate-ingestion-sample", Some(sub_matches)) => {
-            let mut pha_transport = transport_for_output_path("pha-output", sub_matches)?;
-            let mut facilitator_transport =
-                transport_for_output_path("facilitator-output", sub_matches)?;
+            let mut pha_transport = transport_for_output_path(
+                "pha-output",
+                "pha-output-s3-arn",
+                "pha-output-gcp-sa-email",
+                sub_matches,
+            )?;
+            let mut facilitator_transport = transport_for_output_path(
+                "facilitator-output",
+                "facilitator-output-s3-arn",
+                "facilitator-output-gcp-sa-email",
+                sub_matches,
+            )?;
             let ingestor_batch_signing_key = batch_signing_key_from_arg(
                 "ingestor-private-key",
                 "ingestor-private-key-identifier",
@@ -614,10 +602,18 @@ fn main() -> Result<(), anyhow::Error> {
             Ok(())
         }
         ("batch-intake", Some(sub_matches)) => {
-            let mut ingestion_transport =
-                transport_for_output_path("ingestion-bucket", sub_matches)?;
-            let mut validation_transport =
-                transport_for_output_path("validation-bucket", sub_matches)?;
+            let mut ingestion_transport = transport_for_output_path(
+                "ingestion-bucket",
+                "ingestion-bucket-s3-arn",
+                "ingestion-bucket-gcp-sa-email",
+                sub_matches,
+            )?;
+            let mut validation_transport = transport_for_output_path(
+                "validation-bucket",
+                "ingestion-bucket-s3-arn",
+                "ingestion-bucket-gcp-sa-email",
+                sub_matches,
+            )?;
 
             let share_processor_ecies_key =
                 PrivateKey::from_base64(sub_matches.value_of("ecies-private-key").unwrap())
@@ -651,14 +647,30 @@ fn main() -> Result<(), anyhow::Error> {
             Ok(())
         }
         ("aggregate", Some(sub_matches)) => {
-            let mut ingestion_transport =
-                transport_for_output_path("ingestion-bucket", sub_matches)?;
-            let mut own_validation_transport =
-                transport_for_output_path("own-validation-bucket", sub_matches)?;
-            let mut peer_validation_transport =
-                transport_for_output_path("peer-validation-bucket", sub_matches)?;
-            let mut aggregation_transport =
-                transport_for_output_path("aggregation-bucket", sub_matches)?;
+            let mut ingestion_transport = transport_for_output_path(
+                "ingestion-bucket",
+                "ingestion-bucket-s3-arn",
+                "ingestion-bucket-gcp-sa-email",
+                sub_matches,
+            )?;
+            let mut own_validation_transport = transport_for_output_path(
+                "own-validation-bucket",
+                "own-validation-bucket-s3-arn",
+                "own-validation-bucket-gcp-sa-email",
+                sub_matches,
+            )?;
+            let mut peer_validation_transport = transport_for_output_path(
+                "peer-validation-bucket",
+                "peer-validation-bucket-s3-arn",
+                "peer-validation-bucket-gcp-sa-email",
+                sub_matches,
+            )?;
+            let mut aggregation_transport = transport_for_output_path(
+                "aggregation-bucket",
+                "aggregation-bucket-s3-arn",
+                "aggregation-bucket-gcp-sa-email",
+                sub_matches,
+            )?;
 
             let ingestor_pub_key = public_key_from_arg("ingestor-public-key", sub_matches);
             let peer_share_processor_pub_key =
@@ -742,12 +754,21 @@ fn batch_signing_key_from_arg(
     })
 }
 
-fn transport_for_output_path(arg: &str, matches: &ArgMatches) -> Result<Box<dyn Transport>> {
-    let path = StoragePath::from_str(matches.value_of(arg).unwrap())?;
+fn transport_for_output_path(
+    path: &str,
+    s3_arn_arg: &str,
+    gcp_sa_email_arg: &str,
+    matches: &ArgMatches,
+) -> Result<Box<dyn Transport>> {
+    let path = StoragePath::from_str(matches.value_of(path).unwrap())?;
     match path {
         StoragePath::S3Path(path) => Ok(Box::new(S3Transport::new(
             path,
-            matches.is_present("s3-use-credentials-from-gke-metadata"),
+            matches.is_present(s3_arn_arg),
+        ))),
+        StoragePath::GCSPath(path) => Ok(Box::new(GCSTransport::new(
+            path,
+            matches.value_of(gcp_sa_email_arg).map(String::from),
         ))),
         StoragePath::LocalPath(path) => Ok(Box::new(LocalFileTransport::new(path))),
     }

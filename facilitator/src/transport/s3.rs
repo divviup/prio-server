@@ -182,7 +182,7 @@ impl S3Transport {
 }
 
 impl Transport for S3Transport {
-    fn get(&self, key: &str) -> Result<Box<dyn Read>> {
+    fn get(&mut self, key: &str) -> Result<Box<dyn Read>> {
         let mut runtime = basic_runtime()?;
         let client = (self.client_provider)(&self.path.region, self.use_gke_metadata_credentials)?;
         let get_output = runtime
@@ -297,8 +297,6 @@ impl MultipartUploadWriter {
     }
 
     /// Upload content in internal buffer, if any, to S3 in an UploadPart call.
-    /// Returns std::io::Result because it is called by std::io::Write methods
-    /// and this makes it easier to use ? operator.
     fn upload_part(&mut self) -> Result<()> {
         if self.buffer.is_empty() {
             return Ok(());
@@ -670,7 +668,7 @@ mod tests {
             key: "".into(),
         };
 
-        let transport = S3Transport::new_with_client(s3_path.clone(), false, |region, _| {
+        let mut transport = S3Transport::new_with_client(s3_path.clone(), false, |region, _| {
             Ok(S3Client::new_with(
                 // Failed GetObject request
                 MockRequestDispatcher::with_status(404).with_request_checker(is_get_object_request),
@@ -682,7 +680,7 @@ mod tests {
         let ret = transport.get(TEST_KEY);
         assert!(ret.is_err(), "unexpected return value {:?}", ret.err());
 
-        let transport = S3Transport::new_with_client(s3_path.clone(), false, |region, _| {
+        let mut transport = S3Transport::new_with_client(s3_path.clone(), false, |region, _| {
             Ok(S3Client::new_with(
                 // Successful GetObject request
                 MockRequestDispatcher::with_status(200)

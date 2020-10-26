@@ -63,8 +63,53 @@ impl FromStr for S3Path {
     }
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct GCSPath {
+    pub bucket: String,
+    pub key: String,
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum GCSPathParseError {
+    #[error("Not a gcp path")]
+    NoPath,
+    #[error("GCP path must be in the format `gs://{{bucket name}}/{{optional key prefix}}`")]
+    InvalidFormat,
+}
+
+impl GCSPath {
+    /// Returns `self`, possibly adding '/' at the end of the key to ensure it can be combined with another path as a directory prefix.
+    pub fn ensure_directory_prefix(mut self) -> Self {
+        if !self.key.is_empty() && !self.key.ends_with('/') {
+            self.key.push('/');
+        }
+        self
+    }
+}
+
+impl FromStr for GCSPath {
+    type Err = GCSPathParseError;
+
+    fn from_str(s: &str) -> Result<Self, GCSPathParseError> {
+        let bucket_and_prefix = s.strip_prefix("gs://").ok_or(GCSPathParseError::NoPath)?;
+
+        let mut components = bucket_and_prefix
+            .splitn(2, '/')
+            .take_while(|s| !s.is_empty());
+        let bucket = components
+            .next()
+            .ok_or(GCSPathParseError::InvalidFormat)?
+            .to_owned();
+        let key = components.next().map(|s| s.to_owned()).unwrap_or_default();
+        assert!(components.next().is_none());
+
+        Ok(GCSPath { bucket, key })
+    }
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub enum StoragePath {
+    GCSPath(GCSPath),
     S3Path(S3Path),
     LocalPath(PathBuf),
 }
@@ -76,6 +121,11 @@ impl FromStr for StoragePath {
         match S3Path::from_str(s) {
             Err(S3PathParseError::NoPath) => {}
             p => return Ok(StoragePath::S3Path(p.context("parsing an S3 path")?)),
+        }
+
+        match GCSPath::from_str(s) {
+            Err(GCSPathParseError::NoPath) => {}
+            p => return Ok(StoragePath::GCSPath(p.context("parsing a GCS path")?)),
         }
 
         Ok(StoragePath::LocalPath(s.into()))
@@ -191,7 +241,7 @@ impl<'de> Deserialize<'de> for DayDuration {
 
 #[cfg(test)]
 mod tests {
-    use super::{S3Path, S3PathParseError, StoragePath};
+    use super::{GCSPath, GCSPathParseError, S3Path, S3PathParseError, StoragePath};
     use crate::config::DayDuration;
     use assert_matches::assert_matches;
     use rusoto_core::Region;
@@ -316,5 +366,37 @@ mod tests {
                 _ => {}
             }
         }
+    }
+
+    #[test]
+    fn parse_gcspath() {
+        let p1 = GCSPath::from_str("gs://the-bucket/path/to/object").unwrap();
+        assert_eq!(p1.bucket, "the-bucket");
+        assert_eq!(p1.key, "path/to/object");
+    }
+
+    #[test]
+    fn parse_gcspath_no_key() {
+        let p1 = GCSPath::from_str("gs://the-bucket").unwrap();
+        let p2 = GCSPath::from_str("gs://the-bucket/").unwrap();
+        assert_eq!(p1.key, "");
+        assert_eq!(p1, p2);
+    }
+
+    #[test]
+    fn parse_gcs_invalid_paths() {
+        // no bucket name
+        let e = GCSPath::from_str("gs://").unwrap_err();
+        assert_matches!(e, GCSPathParseError::InvalidFormat);
+        // wrong scheme
+        let e = GCSPath::from_str("s3://bucket-name/key").unwrap_err();
+        assert_matches!(e, GCSPathParseError::NoPath);
+    }
+
+    #[test]
+    fn gcspath_ensure_prefix() {
+        let p = GCSPath::from_str("gs://the-bucket/key-prefix").unwrap();
+        let p = p.ensure_directory_prefix();
+        assert_eq!(p.key, "key-prefix/");
     }
 }
