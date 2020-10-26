@@ -162,8 +162,8 @@ resource "kubernetes_cron_job" "workflow_manager" {
             container {
               name  = "workflow-manager"
               image = "${var.container_registry}/${var.workflow_manager_image}:${var.workflow_manager_version}"
-              # Write sample data to exercise writing into S3.
               args = [
+                "--k8s-namespace", var.kubernetes_namespace,
                 "--input-bucket", "lotophagi-ingestion-bucket",
               ]
               env {
@@ -201,8 +201,8 @@ resource "kubernetes_cron_job" "workflow_manager" {
             # "Never".
             # https://kubernetes.io/docs/concepts/workloads/controllers/job/#handling-pod-and-container-failures
             # https://github.com/kubernetes/kubernetes/issues/74848
-            restart_policy       = "Never"
-            service_account_name = kubernetes_service_account.workflow_manager.metadata[0].name
+            restart_policy                  = "Never"
+            service_account_name            = kubernetes_service_account.workflow_manager.metadata[0].name
             automount_service_account_token = true
           }
         }
@@ -211,20 +211,35 @@ resource "kubernetes_cron_job" "workflow_manager" {
   }
 }
 
-resource "kubernetes_cluster_role_binding" "example" {
+resource "kubernetes_role" "workflow-manager-clusterrole" {
+  metadata {
+    name      = "${var.environment}-${var.data_share_processor_name}-wfm-role"
+    namespace = "jsha-peer-1"
+  }
+
+  rule {
+    api_groups = [""]
+    resources  = ["namespaces", "pods"]
+    verbs      = ["get", "list", "watch"]
+  }
+}
+
+resource "kubernetes_role_binding" "workflow-manager-rolebinding" {
   metadata {
     name      = "${var.environment}-${var.data_share_processor_name}-workflow-manager-can-admin"
+    namespace = "jsha-peer-1"
   }
 
   role_ref {
+    kind      = "Role"
+    name      = "${var.environment}-${var.data_share_processor_name}-wfm-role"
     api_group = "rbac.authorization.k8s.io"
-    kind      = "ClusterRole"
-    name      = "cluster-admin"
   }
 
   subject {
     kind      = "ServiceAccount"
     name      = kubernetes_service_account.workflow_manager.metadata[0].name
+    namespace = "jsha-peer-1"
   }
 }
 

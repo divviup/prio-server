@@ -32,19 +32,20 @@ func basename(s string) string {
 
 func main() {
 	inputBucket := flag.String("input-bucket", "", "Name of input bucket (required)")
+	k8sNS := flag.String("k8s-namespace", "", "Kubernetes namespace")
 	flag.Parse()
 	if *inputBucket == "" {
 		flag.Usage()
 	}
 
 	log.Printf("starting %s", os.Args[0])
-	if err := work(*inputBucket); err != nil {
+	if err := work(*inputBucket, *k8sNS); err != nil {
 		log.Fatal(err)
 	}
 	log.Print("done")
 }
 
-func work(inputBucket string) error {
+func work(inputBucket, k8sNS string) error {
 	config, err := rest.InClusterConfig()
 	if err != nil {
 		return fmt.Errorf("cluster config: %w", err)
@@ -55,7 +56,7 @@ func work(inputBucket string) error {
 		return fmt.Errorf("clientset: %w", err)
 	}
 
-	pods, err := clientset.CoreV1().Pods("").List(context.TODO(), metav1.ListOptions{})
+	pods, err := clientset.CoreV1().Pods(k8sNS).List(context.TODO(), metav1.ListOptions{})
 	if err != nil {
 		return fmt.Errorf("getting pods: %w", err)
 	}
