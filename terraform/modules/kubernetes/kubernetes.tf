@@ -15,12 +15,12 @@ variable "workflow_manager_image" {
   type = string
   # This should be "prio-data-share-processor" but we have not yet renamed the
   # container image
-  default = "prio-facilitator"
+  default = "prio-workflow-manager"
 }
 
 variable "workflow_manager_version" {
   type    = string
-  default = "0.1.0"
+  default = "latest"
 }
 
 variable "gcp_project" {
@@ -153,8 +153,10 @@ resource "kubernetes_cron_job" "workflow_manager" {
     }
   }
   spec {
-    schedule                  = "*/10 * * * *"
-    failed_jobs_history_limit = 3
+    schedule                      = "*/10 * * * *"
+    concurrency_policy            = "Forbid"
+    successful_jobs_history_limit = 5
+    failed_jobs_history_limit     = 3
     job_template {
       metadata {}
       spec {
@@ -162,17 +164,11 @@ resource "kubernetes_cron_job" "workflow_manager" {
           metadata {}
           spec {
             container {
-              name  = "facilitator"
+              name  = "workflow-manager"
               image = "${var.container_registry}/${var.workflow_manager_image}:${var.workflow_manager_version}"
-              # Write sample data to exercise writing into S3.
               args = [
-                "generate-ingestion-sample",
-                "--s3-use-credentials-from-gke-metadata",
-                "--aggregation-id", "fake-1",
-                "--batch-id", "eb03ef04-5f05-4a64-95b2-ca1b841b6885",
-                "--date", "2020/09/11/21/11",
-                "--facilitator-output", "s3://${var.ingestion_bucket}",
-                "--pha-output", "/tmp/sample-pha"
+                "--k8s-namespace", var.kubernetes_namespace,
+                "--input-bucket", var.ingestion_bucket,
               ]
               env {
                 name  = "AWS_ROLE_ARN"
@@ -209,12 +205,49 @@ resource "kubernetes_cron_job" "workflow_manager" {
             # "Never".
             # https://kubernetes.io/docs/concepts/workloads/controllers/job/#handling-pod-and-container-failures
             # https://github.com/kubernetes/kubernetes/issues/74848
-            restart_policy       = "Never"
-            service_account_name = kubernetes_service_account.workflow_manager.metadata[0].name
+            restart_policy                  = "Never"
+            service_account_name            = kubernetes_service_account.workflow_manager.metadata[0].name
+            automount_service_account_token = true
           }
         }
       }
     }
+  }
+}
+
+resource "kubernetes_role" "workflow_manager_role" {
+  metadata {
+    name      = "${var.environment}-${var.data_share_processor_name}-wfm-role"
+    namespace = var.kubernetes_namespace
+  }
+
+  rule {
+    // API group "" means the core API group.
+    api_groups = [""]
+    // Workflow manager can list pods and create jobs.
+    // Note: Some of these permissions will probably wind up not being needed.
+    // Starting with a moderately generous demonstration set.
+    resources = ["namespaces", "pods", "jobs"]
+    verbs     = ["get", "list", "watch", "create"]
+  }
+}
+
+resource "kubernetes_role_binding" "workflow_manager_rolebinding" {
+  metadata {
+    name      = "${var.environment}-${var.data_share_processor_name}-workflow-manager-can-admin"
+    namespace = var.kubernetes_namespace
+  }
+
+  role_ref {
+    kind      = "Role"
+    name      = "${var.environment}-${var.data_share_processor_name}-wfm-role"
+    api_group = "rbac.authorization.k8s.io"
+  }
+
+  subject {
+    kind      = "ServiceAccount"
+    name      = kubernetes_service_account.workflow_manager.metadata[0].name
+    namespace = var.kubernetes_namespace
   }
 }
 
