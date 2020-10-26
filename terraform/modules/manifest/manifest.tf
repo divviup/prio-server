@@ -89,6 +89,7 @@ data "google_dns_managed_zone" "manifests" {
 # Create an A record from which this env's manifests will be served.
 resource "google_dns_record_set" "manifests" {
   provider     = google-beta
+  project      = var.managed_dns_zone.gcp_project
   name         = local.domain_name
   managed_zone = data.google_dns_managed_zone.manifests.name
   type         = "A"
