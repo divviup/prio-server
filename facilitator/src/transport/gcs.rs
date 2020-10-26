@@ -367,19 +367,16 @@ impl StreamingTransferWriter {
             ));
         }
 
-        // We may not yet be at the last chunk, and hence may not know the total
-        // length of eventual complete object, but this variable contains the
-        // total length of all the bytes fed into write(), even if we haven't
-        // uploaded them all yet.
-        let object_length_thus_far = self.object_upload_position + self.buffer.len();
-
         // When this is the last piece being uploaded, the Content-Range header
         // should include the total object size, but otherwise should have * to
         // indicate to GCS that there is an unknown further amount to come.
         // https://cloud.google.com/storage/docs/streaming#streaming_uploads
         let (body, content_range_header_total_length_field) =
             if last_chunk && self.buffer.len() < self.minimum_upload_chunk_size {
-                (self.buffer.as_ref(), format!("{}", object_length_thus_far))
+                (
+                    self.buffer.as_ref(),
+                    format!("{}", self.object_upload_position + self.buffer.len()),
+                )
             } else {
                 (
                     &self.buffer[..self.minimum_upload_chunk_size],
@@ -432,9 +429,12 @@ impl StreamingTransferWriter {
                     .context("End in range header {} not a valid usize")?;
                 // end is usize and so parse would fail if the value in the
                 // header was negative, but we still defend ourselves against
-                // it being bigger than is possible given our position in the
-                // object.
-                if end >= object_length_thus_far {
+                // it being less than it was before this chunk was uploaded, or
+                // being bigger than is possible given our position in the
+                // overall object.
+                if end < self.object_upload_position
+                    || end > self.object_upload_position + body.len() - 1
+                {
                     return Err(anyhow!("End in range header {} is invalid", range_header));
                 }
 
@@ -443,8 +443,7 @@ impl StreamingTransferWriter {
                 // will reject it. Instead, leave the portion of the chunk that
                 // we didn't manage to upload back in self.buffer so it can be
                 // handled by a subsequent call to upload_chunk.
-                let new_buf = self.buffer.split_off(end + 1 - self.object_upload_position);
-                self.buffer = new_buf;
+                self.buffer = self.buffer.split_off(end + 1 - self.object_upload_position);
                 self.object_upload_position = end + 1;
                 Ok(())
             }
