@@ -9,6 +9,7 @@ type DeployConfig struct {
 	DNS     DNSConfig
 	ACME    ACMEConfig
 	Storage StorageConfig
+	Job     JobConfig
 }
 
 // DNSConfig is the DNS configuration structure
@@ -54,6 +55,20 @@ type FilesystemConfig struct {
 // KubernetesConfig is used when the driver in StorageConfig is set to kubernetes
 type KubernetesConfig struct {
 	Namespace string `default:"key-rotator"`
+}
+
+// JobConfig is the configuration for the job system of deploy_tool
+type JobConfig struct {
+	Enable bool
+	Jobs   []SpecificJobConfig
+}
+
+// SpecificJobConfig is the structure of specific jobs in JobConfig
+type SpecificJobConfig struct {
+	Name           string
+	PhaName        string `toml:"pha_name"`
+	FQDN           string
+	PrivateKeyPath string `toml:"private_key_path"`
 }
 
 // Read reads a file from a path as DeployConfig

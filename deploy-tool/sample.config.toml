@@ -25,3 +25,12 @@ path = "./deploy_tool_output"
 
 [storage.kubernetes]
 namespace = "prio-server"
+
+[job]
+enable = false # Enable this to run in `job` mode
+
+[[job.jobs]]
+name = "some_name" # Name of the job - will be used for printing/debugging
+pha_name = "some-pha-name" # Name to be used in the manifest wrapper for gsutil
+fqdn = "FQDN of pha_name" # FQDN of the pha_name
+private_key_path = "path/to/private/key" # path to the private key of the job

@@ -162,6 +162,13 @@ func main() {
 		log.Fatalf("failed to parse config.toml: %v", err)
 	}
 
+	if deployConfig.Job.Enable {
+		handleJob(deployConfig)
+		// TODO eventually maybe use the output from this to generalize pushing the changes with gsutil
+		// or the API equivalent
+		return
+	}
+
 	var terraformOutput TerraformOutput
 
 	if err := json.NewDecoder(os.Stdin).Decode(&terraformOutput); err != nil {
@@ -216,7 +223,8 @@ func main() {
 				log.Fatalf("%s", err)
 			}
 
-			certificate, err := cert.IssueCertificate(deployConfig, manifestWrapper.CertificateFQDN, privKey)
+			cm := cert.CertificateManager{Config: deployConfig}
+			certificate, err := cm.IssueCertificate(manifestWrapper.CertificateFQDN, privKey)
 			if err != nil {
 				log.Fatalf("%s", err)
 			}
@@ -254,5 +262,44 @@ func main() {
 		if output, err := gsutil.CombinedOutput(); err != nil {
 			log.Fatalf("gsutil failed: %v\noutput: %s", err, output)
 		}
+	}
+}
+
+func handleJob(deployConfig config.DeployConfig) {
+	jobLogger := log.New(os.Stderr, "", log.Ldate|log.Ltime)
+
+	cm := cert.CertificateManager{Config: deployConfig}
+
+	for _, job := range deployConfig.Job.Jobs {
+		jobLogger.SetPrefix(fmt.Sprintf("JOB: %s", job.Name))
+
+		privKeyBytes, err := ioutil.ReadFile(job.PrivateKeyPath)
+		if err != nil {
+			jobLogger.Fatalf("could not read private key: %v", err)
+		}
+		buffer := make([]byte, base64.StdEncoding.DecodedLen(len(privKeyBytes)))
+
+		len, err := base64.StdEncoding.Decode(buffer, privKeyBytes)
+		if err != nil {
+			jobLogger.Fatalf("could not decode private key: %v", err)
+		}
+
+		privKeyBytes = buffer[:len]
+
+		privateKey, err := x509.ParsePKCS8PrivateKey(privKeyBytes)
+		if err != nil {
+			jobLogger.Fatalf("could not parse private key from PKCS #8 ASN.1 DER form: %v", err)
+		}
+
+		ecdsaPrivateKey, ok := privateKey.(*ecdsa.PrivateKey)
+
+		if !ok {
+			jobLogger.Fatalf("could not get ecdsa private key from the PKCS8 private key")
+		}
+
+		jobLogger.Printf("Issuing certificate for %s", job.FQDN)
+
+		// TODO continue doing something with this
+		_, _ = cm.IssueCertificate(job.FQDN, ecdsaPrivateKey)
 	}
 }

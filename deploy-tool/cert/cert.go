@@ -14,12 +14,17 @@ import (
 	"github.com/caddyserver/certmagic"
 )
 
-// IssueCertificate asks the Let's Encrypt ACMEApiEndpoint to validate and sign a certificate for a site using the DNS01 strategy
-func IssueCertificate(deployConfig config.DeployConfig, site string, privKey *ecdsa.PrivateKey) (string, error) {
-	dnsProvider, err := dns.GetACMEDNSProvider(deployConfig)
+// CertificateManager is a structure that defines the Certificate Issuance and renewal implementation
+type CertificateManager struct {
+	Config config.DeployConfig
+}
+
+func (certManager *CertificateManager) getCertMagic() (*certmagic.Config, error) {
+	deployConfig := certManager.Config
+	dnsProvider, err := dns.GetACMEDNSProvider(certManager.Config)
 
 	if err != nil {
-		return "", fmt.Errorf("error when getting the dns provider: %v", err)
+		return nil, fmt.Errorf("error when getting the dns provider: %v", err)
 	}
 
 	certmagic.DefaultACME.DNS01Solver = &certmagic.DNS01Solver{
@@ -31,24 +36,15 @@ func IssueCertificate(deployConfig config.DeployConfig, site string, privKey *ec
 	certmagic.DefaultACME.CA = deployConfig.ACME.ACMEApiEndpoint
 
 	acme := certmagic.NewDefault()
-	if err := setStorageDriver(deployConfig, acme); err != nil {
-		return "", err
+	if err := certManager.setStorageDriver(acme); err != nil {
+		return nil, err
 	}
 
-	csr, err := getCSR([]string{site}, privKey)
-	if err != nil {
-		return "", fmt.Errorf("error when getting the certificate signing request: %v", err)
-	}
-
-	issued, err := acme.Issuer.Issue(context.Background(), csr)
-	if err != nil {
-		return "", fmt.Errorf("error when issuing the certificate: %v", err)
-	}
-
-	return string(issued.Certificate), nil
+	return acme, nil
 }
 
-func setStorageDriver(deployConfig config.DeployConfig, acme *certmagic.Config) error {
+func (certManager *CertificateManager) setStorageDriver(acme *certmagic.Config) error {
+	deployConfig := certManager.Config
 	switch strings.ToLower(deployConfig.Storage.Driver) {
 	case "filesystem":
 		if deployConfig.Storage.Filesystem == nil {
@@ -69,6 +65,26 @@ func setStorageDriver(deployConfig config.DeployConfig, acme *certmagic.Config) 
 		acme.Storage = secretStorage
 	}
 	return nil
+}
+
+// IssueCertificate asks the Let's Encrypt ACMEApiEndpoint to validate and sign a certificate for a site using the DNS01 strategy
+func (certManager *CertificateManager) IssueCertificate(site string, privKey *ecdsa.PrivateKey) (string, error) {
+	acme, err := certManager.getCertMagic()
+	if err != nil {
+		return "", err
+	}
+
+	csr, err := getCSR([]string{site}, privKey)
+	if err != nil {
+		return "", fmt.Errorf("error when getting the certificate signing request: %v", err)
+	}
+
+	issued, err := acme.Issuer.Issue(context.Background(), csr)
+	if err != nil {
+		return "", fmt.Errorf("error when issuing the certificate: %v", err)
+	}
+
+	return string(issued.Certificate), nil
 }
 
 // getCSR creates an x509 CertificateRequest which includes the site this certificate will be used for
