@@ -7,15 +7,15 @@ use anyhow::{anyhow, Context, Result};
 use chrono::{prelude::Utc, DateTime, Duration};
 use serde::Deserialize;
 use std::{
-    io::{Cursor, Read, Write},
-    mem,
+    io,
+    io::{Read, Write},
 };
 
 const STORAGE_API_BASE_URL: &str = "https://storage.googleapis.com";
 const DEFAULT_OAUTH_TOKEN_URL: &str =
     "http://metadata.google.internal:80/computeMetadata/v1/instance/service-accounts/default/token";
 
-// A wrapper around an Oauth token and its expiration date.
+/// A wrapper around an Oauth token and its expiration date.
 #[derive(Debug)]
 struct OauthToken {
     token: String,
@@ -23,15 +23,15 @@ struct OauthToken {
 }
 
 impl OauthToken {
-    // Returns true if the token is not yet expired.
+    /// Returns true if the token is not yet expired.
     fn expired(&self) -> bool {
         Utc::now() < self.expiration
     }
 }
 
-// Represents the response from a GET request to the GKE metadata service's
-// service account token endpoint. Structure is derived from empirical
-// observation of the JSON scraped from inside a GKE job.
+/// Represents the response from a GET request to the GKE metadata service's
+/// service account token endpoint. Structure is derived from empirical
+/// observation of the JSON scraped from inside a GKE job.
 #[derive(Debug, Deserialize, PartialEq)]
 struct MetadataServiceTokenResponse {
     access_token: String,
@@ -39,9 +39,9 @@ struct MetadataServiceTokenResponse {
     token_type: String,
 }
 
-// Represents the response from a POST request to the GCP IAM service's
-// generateAccessToken endpoint.
-// https://cloud.google.com/iam/docs/reference/credentials/rest/v1/projects.serviceAccounts/generateAccessToken
+/// Represents the response from a POST request to the GCP IAM service's
+/// generateAccessToken endpoint.
+/// https://cloud.google.com/iam/docs/reference/credentials/rest/v1/projects.serviceAccounts/generateAccessToken
 #[derive(Debug, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 struct GenerateAccessTokenResponse {
@@ -49,18 +49,27 @@ struct GenerateAccessTokenResponse {
     expire_time: DateTime<Utc>,
 }
 
-// OauthTokenProvider manages a default service account Oauth token (i.e. the
-// one for a GCP service account mapped to a Kubernetes service account) and an
-// Oauth token used to impersonate another service account.
+/// OauthTokenProvider manages a default service account Oauth token (i.e. the
+/// one for a GCP service account mapped to a Kubernetes service account) and an
+/// Oauth token used to impersonate another service account.
 struct OauthTokenProvider {
+    /// Holds the service account email to impersonate, if one was provided to
+    /// OauthTokenProvider::new.
     service_account_to_impersonate: Option<String>,
+    /// This field is None after instantiation and is Some after the first
+    /// successful request for a token for the default service account, though
+    /// the contained token may be expired.
     default_service_account_oauth_token: Option<OauthToken>,
+    /// This field is None after instantiation and is Some after the first
+    /// successful request for a token for the impersonated service account,
+    /// though the contained token may be expired. This will always be None if
+    /// service_account_to_impersonate is None.
     impersonated_service_account_oauth_token: Option<OauthToken>,
 }
 
 impl OauthTokenProvider {
-    // Creates a token provider which can impersonate the specified service
-    // account.
+    /// Creates a token provider which can impersonate the specified service
+    /// account.
     fn new(service_account_to_impersonate: Option<String>) -> OauthTokenProvider {
         OauthTokenProvider {
             service_account_to_impersonate,
@@ -69,6 +78,12 @@ impl OauthTokenProvider {
         }
     }
 
+    /// Returns the Oauth token to use with GCS storage API in an Authorization
+    /// header, fetching it or renewing it if necessary. If a service account to
+    /// impersonate was provided, the default service account is used to
+    /// authenticate to the GCP IAM API to retrieve an Oauth token. If no
+    /// impersonation is taking place, provides the default service account
+    /// Oauth token.
     fn ensure_storage_access_oauth_token(&mut self) -> Result<String> {
         match self.service_account_to_impersonate {
             Some(_) => self.ensure_impersonated_service_account_oauth_token(),
@@ -76,66 +91,70 @@ impl OauthTokenProvider {
         }
     }
 
-    // Obtains an Oauth token for the default service account, if one is not
-    // already held or if it has expired. Otherwise returns a copy of the token.
-    // The returned value is an owned reference because the token owned by this
-    // struct could change while the caller is still holding the returned token.
+    /// Returns the current OAuth token for the default service account, if it
+    /// is valid. Otherwise obtains and returns a new one.
+    /// The returned value is an owned reference because the token owned by this
+    /// struct could change while the caller is still holding the returned token
     fn ensure_default_service_account_oauth_token(&mut self) -> Result<String> {
-        match &self.default_service_account_oauth_token {
-            Some(token) if !token.expired() => Ok(token.token.clone()),
-            _ => {
-                let http_response = ureq::get(DEFAULT_OAUTH_TOKEN_URL)
-                    .set("Metadata-Flavor", "Google")
-                    // By default, ureq will wait forever to connect or
-                    // read.
-                    .timeout_connect(10_000) // ten seconds
-                    .timeout_read(10_000) // ten seconds
-                    .call();
-                if http_response.error() {
-                    return Err(anyhow!(
-                        "failed to query GKE metadata service: {:?}",
-                        http_response
-                    ));
-                }
-
-                let response = http_response
-                    .into_json_deserialize::<MetadataServiceTokenResponse>()
-                    .context("failed to deserialize response from GKE metadata service")?;
-
-                if response.token_type != "Bearer" {
-                    return Err(anyhow!("unexpected token type {}", response.token_type));
-                }
-
-                self.default_service_account_oauth_token = Some(OauthToken {
-                    token: response.access_token.clone(),
-                    expiration: Utc::now() + Duration::seconds(response.expires_in),
-                });
-
-                Ok(response.access_token)
+        if let Some(token) = &self.default_service_account_oauth_token {
+            if !token.expired() {
+                return Ok(token.token.clone());
             }
         }
+
+        let http_response = ureq::get(DEFAULT_OAUTH_TOKEN_URL)
+            .set("Metadata-Flavor", "Google")
+            // By default, ureq will wait forever to connect or read.
+            .timeout_connect(10_000) // ten seconds
+            .timeout_read(10_000) // ten seconds
+            .call();
+        if http_response.error() {
+            return Err(anyhow!(
+                "failed to query GKE metadata service: {:?}",
+                http_response
+            ));
+        }
+
+        let response = http_response
+            .into_json_deserialize::<MetadataServiceTokenResponse>()
+            .context("failed to deserialize response from GKE metadata service")?;
+
+        if response.token_type != "Bearer" {
+            return Err(anyhow!("unexpected token type {}", response.token_type));
+        }
+
+        self.default_service_account_oauth_token = Some(OauthToken {
+            token: response.access_token.clone(),
+            expiration: Utc::now() + Duration::seconds(response.expires_in),
+        });
+
+        Ok(response.access_token)
     }
 
-    // Obtains an Oauth token to impersonate the service account this provider
-    // was set up with, if one is not already held or it has expired. Otherwise
-    // reutrns a copy of the valid token.
+    /// Returns the current OAuth token for the impersonated service account, if
+    /// it is valid. Otherwise obtains and returns a new one.
     fn ensure_impersonated_service_account_oauth_token(&mut self) -> Result<String> {
         if self.service_account_to_impersonate.is_none() {
             return Err(anyhow!("no service account to impersonate was provided"));
         }
+
+        if let Some(token) = &self.impersonated_service_account_oauth_token {
+            if !token.expired() {
+                return Ok(token.token.clone());
+            }
+        }
+
         let service_account_to_impersonate = self.service_account_to_impersonate.clone().unwrap();
         // API reference:
         // https://cloud.google.com/iam/docs/reference/credentials/rest/v1/projects.serviceAccounts/generateAccessToken
         let request_url = format!("https://iamcredentials.googleapis.com/v1/projects/-/serviceAccounts/{}:generateAccessToken",
             service_account_to_impersonate);
+        let auth = format!(
+            "Bearer {}",
+            self.ensure_default_service_account_oauth_token()?
+        );
         let http_response = ureq::post(&request_url)
-            .set(
-                "Authorization",
-                &format!(
-                    "Bearer {}",
-                    self.ensure_default_service_account_oauth_token()?
-                ),
-            )
+            .set("Authorization", &auth)
             .set("Content-Type", "application/json")
             // At the moment, these tokens are only used to read and write from
             // GCS buckets, so we request an appropriate scope. We could further
@@ -169,16 +188,22 @@ impl OauthTokenProvider {
     }
 }
 
-// GCSTransport manages reading and writing from GCS buckets. Currently, the
-// only authentication it supports is by means of impersonating a specified GCP
-// service account, which is assumed to have the necessary read or write
-// permissions on the bucket.
+/// GCSTransport manages reading and writing from GCS buckets, with
+/// authenticatiom to the API by Oauth token in an Authorization header. This
+/// struct can either use the default service account from the metadata service,
+/// or can impersonate another GCP service account if one is provided to
+/// GCSTransport::new.
 pub struct GCSTransport {
     path: GCSPath,
     oauth_token_provider: OauthTokenProvider,
 }
 
 impl GCSTransport {
+    /// Instantiate a new GCSTransport to read or write objects from or to the
+    /// provided path. If impersonate is None, GCSTransport authenticates to GCS
+    /// as the default service account. If impersonate contains a service
+    /// account email, GCSTransport will use the GCP IAM API to obtain an Oauth
+    /// token to impersonate that service account.
     pub fn new(path: GCSPath, impersonate: Option<String>) -> GCSTransport {
         GCSTransport {
             path: path.ensure_directory_prefix(),
@@ -235,9 +260,6 @@ impl Transport for GCSTransport {
         Ok(Box::new(StreamingTransferWriter::new(
             self.path.bucket.to_owned(),
             [&self.path.key, key].concat(),
-            // GCP documentation recommends setting upload part size to 8 MiB.
-            // https://cloud.google.com/storage/docs/performing-resumable-uploads#chunked-upload
-            8_388_608,
             oauth_token,
         )?))
     }
@@ -275,17 +297,18 @@ struct StreamingTransferWriter {
 }
 
 impl StreamingTransferWriter {
-    fn new(
-        bucket: String,
-        object: String,
-        minimum_upload_chunk_size: usize,
-        oauth_token: String,
-    ) -> Result<StreamingTransferWriter> {
+    /// Creates a new writer that streams content in chunks into GCS. Bucket is
+    /// the name of the GCS bucket. Object is the full name of the object being
+    /// uploaded, which may contain path separators or file extensions.
+    /// oauth_token is used to initiate the initial resumable upload request.
+    fn new(bucket: String, object: String, oauth_token: String) -> Result<StreamingTransferWriter> {
         StreamingTransferWriter::new_with_api_url(
             bucket,
             object,
-            minimum_upload_chunk_size,
             oauth_token,
+            // GCP documentation recommends setting upload part size to 8 MiB.
+            // https://cloud.google.com/storage/docs/performing-resumable-uploads#chunked-upload
+            8_388_608,
             STORAGE_API_BASE_URL,
         )
     }
@@ -293,25 +316,22 @@ impl StreamingTransferWriter {
     fn new_with_api_url(
         bucket: String,
         object: String,
-        minimum_upload_chunk_size: usize,
         oauth_token: String,
+        minimum_upload_chunk_size: usize,
         storage_api_base_url: &str,
     ) -> Result<StreamingTransferWriter> {
-        // Initiate the resumable, streaming upload. Unlike the GET side, the
-        // key is provided as a query parameter here, and thus doesn't need to
-        // be URL encoded.
+        // Initiate the resumable, streaming upload.
         // https://cloud.google.com/storage/docs/performing-resumable-uploads#initiate-session
-        let upload_url = format!(
-            "{}/upload/storage/v1/b/{}/o/?uploadType=resumable&name={}",
-            storage_api_base_url, bucket, object
-        );
+        let encoded_object = urlencoding::encode(&object);
+        let upload_url = format!("{}/upload/storage/v1/b/{}/o/", storage_api_base_url, bucket);
         let http_response = ureq::post(&upload_url)
             .set("Authorization", &format!("Bearer {}", oauth_token))
-            .set("Content-Length", "0")
+            .query("uploadType", "resumable")
+            .query("name", &encoded_object)
             // By default, ureq will wait forever to connect or read
             .timeout_connect(10_000) // ten seconds
             .timeout_read(10_000) // ten seconds
-            .call();
+            .send_bytes(&[]);
         if http_response.error() {
             return Err(anyhow!(
                 "failed to initiate streaming transfer: {:?}",
@@ -324,14 +344,9 @@ impl StreamingTransferWriter {
         // Oauth token. Session URIs are valid for a week, which should be more
         // than enough for any upload we perform.
         // https://cloud.google.com/storage/docs/resumable-uploads#session-uris
-        let upload_session_uri = match http_response.header("Location") {
-            Some(location) => location,
-            None => {
-                return Err(anyhow!(
-                    "no Location header in response when initiating streaming transfer"
-                ))
-            }
-        };
+        let upload_session_uri = http_response
+            .header("Location")
+            .context("no Location header in response when initiating streaming transfer")?;
 
         Ok(StreamingTransferWriter {
             minimum_upload_chunk_size,
@@ -346,16 +361,11 @@ impl StreamingTransferWriter {
             return Ok(());
         }
 
-        let chunk = mem::replace(
-            &mut self.buffer,
-            Vec::with_capacity(self.minimum_upload_chunk_size * 2),
-        );
-        let chunk_len = chunk.len();
         // We may not yet be at the last chunk, and hence may not know the total
-        // length of eventual complete object, but this variable the total
-        // length of all the bytes fed into write(), even if we haven't uploaded
-        // them all yet.
-        let object_length_thus_far = self.object_upload_position + chunk_len;
+        // length of eventual complete object, but this variable contains the
+        // total length of all the bytes fed into write(), even if we haven't
+        // uploaded them all yet.
+        let object_length_thus_far = self.object_upload_position + self.buffer.len();
 
         // When this is the last piece being uploaded, the Content-Range header
         // should include the total object size, but otherwise should have * to
@@ -373,98 +383,81 @@ impl StreamingTransferWriter {
             content_range_header_total_length_field
         );
 
-        // ureq::Request::send takes possession of the argument so we must clone
-        // here, in case the entire chunk doesn't get uploaded successfully.
-        let body = Cursor::new(chunk.clone());
-
         let http_response = ureq::put(&self.upload_session_uri)
-            .set("Content-Length", &format!("{}", chunk_len))
             .set("Content-Range", &content_range)
             // By default, ureq will wait forever to connect or read
             .timeout_connect(10_000) // ten seconds
             .timeout_read(10_000) // ten seconds
-            .send(body);
+            .send_bytes(&self.buffer);
 
         // On success we expect HTTP 308 Resume Incomplete and a Range: header,
         // unless this is the last part and the server accepts the entire
         // provided Content-Range, in which case it's HTTP 200, or 201 (?).
         // https://cloud.google.com/storage/docs/performing-resumable-uploads#chunked-upload
         match http_response.status() {
-            200 | 201 => {
-                if !last_chunk {
-                    return Err(anyhow!(
-                        "received HTTP 200 or 201 response with chunks remaining"
-                    ));
-                }
+            200 | 201 if last_chunk => {
+                // Truncate the buffer to "drain" it of uploaded bytes
+                self.buffer.truncate(0);
+                Ok(())
             }
+            200 | 201 => Err(anyhow!(
+                "received HTTP 200 or 201 response with chunks remaining"
+            )),
+            308 if !http_response.has("Range") => Err(anyhow!(
+                "No range header in response from GCS: {:?}",
+                http_response.into_string()
+            )),
             308 => {
-                if !http_response.has("Range") {
-                    return Err(anyhow!(
-                        "No range header in response from GCS: {:?}",
-                        http_response.into_string()
-                    ));
-                }
                 let range_header = http_response.header("Range").unwrap();
-                // The range header is like "bytes=111-222", and represents a
-                // range in the overall object, not the current chunk.
-                let range = range_header
-                    .strip_prefix("bytes=")
-                    .context(format!("unexpected Range header {}", range_header))?;
-                let mut values = range.splitn(2, '-');
-                let start = values
-                    .next()
-                    .context(format!("unexpected Range header {}", range_header))?
+                // The range header is like "bytes=0-222", and represents the
+                // uploaded portion of the overall object, not the current chunk
+                let end = range_header
+                    .strip_prefix("bytes=0-")
+                    .context(format!(
+                        "Range header {} missing bytes prefix",
+                        range_header
+                    ))?
                     .parse::<usize>()
-                    .context(format!("unexpected Range header {}", range_header))?;
-                let end = values
-                    .next()
-                    .context(format!("unexpected Range header {}", range_header))?
-                    .parse::<usize>()
-                    .context(format!("unexpected Range header {}", range_header))?;
-
-                if start != self.object_upload_position {
-                    return Err(anyhow!("unexpected Range header {}", range_header));
-                }
-
-                self.object_upload_position = end + 1;
+                    .context("End in range header {} not a valid usize")?;
 
                 // If we have a little content left over, we can't just make
                 // another request, because if there's too little of it, Google
-                // will reject it. Instead, put the portion of the chunk that we
-                // didn't manage to upload back into self.buffer so it can be
+                // will reject it. Instead, leave the portion of the chunk that
+                // we didn't manage to upload back in self.buffer so it can be
                 // handled by a subsequent call to upload_chunk.
-                self.buffer
-                    .extend_from_slice(&chunk[self.object_upload_position - start..]);
+                let new_buf = self.buffer.split_off(end + 1 - self.object_upload_position);
+                self.buffer = new_buf;
+                self.object_upload_position = end + 1;
+                Ok(())
             }
-            _ => {
-                return Err(anyhow!(
-                    "failed to upload part to GCS: {} synthetic: {}\n{:?}",
-                    http_response.status(),
-                    http_response.synthetic(),
-                    http_response.into_string()
-                ))
-            }
+            _ => Err(anyhow!(
+                "failed to upload part to GCS: {} synthetic: {}\n{:?}",
+                http_response.status(),
+                http_response.synthetic(),
+                http_response.into_string()
+            )),
         }
-
-        Ok(())
     }
 }
 
 impl Write for StreamingTransferWriter {
-    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
         // Write into memory buffer, and upload to GCS if we have accumulated
         // enough content
         self.buffer.extend_from_slice(buf);
-        if self.buffer.len() >= self.minimum_upload_chunk_size {
-            self.upload_chunk(false).map_err(|e| {
-                std::io::Error::new(std::io::ErrorKind::Other, Error::AnyhowError(e))
-            })?;
+        while self.buffer.len() >= self.minimum_upload_chunk_size {
+            self.upload_chunk(false)
+                .map_err(|e| io::Error::new(io::ErrorKind::Other, Error::AnyhowError(e)))?;
         }
 
         Ok(buf.len())
     }
 
-    fn flush(&mut self) -> std::io::Result<()> {
+    fn flush(&mut self) -> io::Result<()> {
+        // It may not be possible to flush this if we have accumulated less
+        // content in the buffer than Google will allow us to upload, and users
+        // of a TransportWriter are expected to call complete_upload when they
+        // know they are finished anyway, so we just report success.
         Ok(())
     }
 }
@@ -485,14 +478,13 @@ impl TransportWriter for StreamingTransferWriter {
             .timeout_connect(10_000) // ten seconds
             .timeout_read(10_000) // ten seconds
             .call();
-        if http_response.status() != 499 {
-            return Err(anyhow!(
+        match http_response.status() {
+            499 => Ok(()),
+            _ => Err(anyhow!(
                 "failed to cancel streaming transfer to GCS: {:?}",
                 http_response
-            ));
+            )),
         }
-
-        Ok(())
     }
 }
 
@@ -523,8 +515,8 @@ mod tests {
         let mut writer = StreamingTransferWriter::new_with_api_url(
             "fake-bucket".to_string(),
             "fake-object".to_string(),
-            10,
             "fake-token".to_string(),
+            10,
             &mockito::server_url(),
         )
         .unwrap();
@@ -567,8 +559,8 @@ mod tests {
         let mut writer = StreamingTransferWriter::new_with_api_url(
             "fake-bucket".to_string(),
             "fake-object".to_string(),
-            5,
             "fake-token".to_string(),
+            4,
             &mockito::server_url(),
         )
         .unwrap();
@@ -580,14 +572,23 @@ mod tests {
             .match_header("Content-Range", "bytes 0-9/*")
             .match_body("0123456789")
             .with_status(308)
-            .with_header("Range", "bytes=0-4")
+            .with_header("Range", "bytes=0-3")
+            .expect_at_most(1)
+            .create();
+
+        let second_mocked_put = mock("PUT", "/fake-session-uri")
+            .match_header("Content-Length", "6")
+            .match_header("Content-Range", "bytes 4-9/*")
+            .match_body("456789")
+            .with_status(308)
+            .with_header("Range", "bytes=0-7")
             .expect_at_most(1)
             .create();
 
         let final_mocked_put = mock("PUT", "/fake-session-uri")
-            .match_header("Content-Length", "5")
-            .match_header("Content-Range", "bytes 5-9/10")
-            .match_body("56789")
+            .match_header("Content-Length", "2")
+            .match_header("Content-Range", "bytes 8-9/10")
+            .match_body("89")
             .with_status(200)
             .expect_at_most(1)
             .create();
@@ -596,6 +597,7 @@ mod tests {
         writer.complete_upload().unwrap();
 
         first_mocked_put.assert();
+        second_mocked_put.assert();
         final_mocked_put.assert();
     }
 }
