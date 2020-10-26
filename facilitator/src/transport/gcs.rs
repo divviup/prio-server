@@ -361,6 +361,12 @@ impl StreamingTransferWriter {
             return Ok(());
         }
 
+        if !last_chunk && self.buffer.len() < self.minimum_upload_chunk_size {
+            return Err(anyhow!(
+                "insufficient content accumulated in buffer to upload chunk"
+            ));
+        }
+
         // We may not yet be at the last chunk, and hence may not know the total
         // length of eventual complete object, but this variable contains the
         // total length of all the bytes fed into write(), even if we haven't
@@ -371,15 +377,20 @@ impl StreamingTransferWriter {
         // should include the total object size, but otherwise should have * to
         // indicate to GCS that there is an unknown further amount to come.
         // https://cloud.google.com/storage/docs/streaming#streaming_uploads
-        let content_range_header_total_length_field = if last_chunk {
-            format!("{}", object_length_thus_far)
-        } else {
-            "*".to_owned()
-        };
+        let (body, content_range_header_total_length_field) =
+            if last_chunk && self.buffer.len() < self.minimum_upload_chunk_size {
+                (self.buffer.as_ref(), format!("{}", object_length_thus_far))
+            } else {
+                (
+                    &self.buffer[..self.minimum_upload_chunk_size],
+                    "*".to_owned(),
+                )
+            };
+
         let content_range = format!(
             "bytes {}-{}/{}",
             self.object_upload_position,
-            object_length_thus_far - 1,
+            self.object_upload_position + body.len() - 1,
             content_range_header_total_length_field
         );
 
@@ -388,7 +399,7 @@ impl StreamingTransferWriter {
             // By default, ureq will wait forever to connect or read
             .timeout_connect(10_000) // ten seconds
             .timeout_read(10_000) // ten seconds
-            .send_bytes(&self.buffer);
+            .send_bytes(body);
 
         // On success we expect HTTP 308 Resume Incomplete and a Range: header,
         // unless this is the last part and the server accepts the entire
@@ -419,6 +430,13 @@ impl StreamingTransferWriter {
                     ))?
                     .parse::<usize>()
                     .context("End in range header {} not a valid usize")?;
+                // end is usize and so parse would fail if the value in the
+                // header was negative, but we still defend ourselves against
+                // it being bigger than is possible given our position in the
+                // object.
+                if end >= object_length_thus_far {
+                    return Err(anyhow!("End in range header {} is invalid", range_header));
+                }
 
                 // If we have a little content left over, we can't just make
                 // another request, because if there's too little of it, Google
@@ -568,27 +586,27 @@ mod tests {
         mocked_post.assert();
 
         let first_mocked_put = mock("PUT", "/fake-session-uri")
-            .match_header("Content-Length", "10")
-            .match_header("Content-Range", "bytes 0-9/*")
-            .match_body("0123456789")
+            .match_header("Content-Length", "4")
+            .match_header("Content-Range", "bytes 0-3/*")
+            .match_body("0123")
             .with_status(308)
             .with_header("Range", "bytes=0-3")
             .expect_at_most(1)
             .create();
 
         let second_mocked_put = mock("PUT", "/fake-session-uri")
-            .match_header("Content-Length", "6")
-            .match_header("Content-Range", "bytes 4-9/*")
-            .match_body("456789")
+            .match_header("Content-Length", "4")
+            .match_header("Content-Range", "bytes 4-7/*")
+            .match_body("4567")
             .with_status(308)
-            .with_header("Range", "bytes=0-7")
+            .with_header("Range", "bytes=0-6")
             .expect_at_most(1)
             .create();
 
         let final_mocked_put = mock("PUT", "/fake-session-uri")
-            .match_header("Content-Length", "2")
-            .match_header("Content-Range", "bytes 8-9/10")
-            .match_body("89")
+            .match_header("Content-Length", "3")
+            .match_header("Content-Range", "bytes 7-9/10")
+            .match_body("789")
             .with_status(200)
             .expect_at_most(1)
             .create();
