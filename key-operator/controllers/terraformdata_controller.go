@@ -18,10 +18,14 @@ package controllers
 
 import (
 	"context"
+	"fmt"
+	"os"
+
 	key_generator "github.com/abetterinternet/key-operator/key"
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
 
 	"github.com/go-logr/logr"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -46,8 +50,8 @@ func (r *TerraformDataReconciler) Reconcile(req ctrl.Request) (ctrl.Result, erro
 	_ = r.Log.WithValues("terraformdata", req.NamespacedName)
 
 	// your logic here
-	data := &terraformv1.TerraformData{}
-	err := r.Get(ctx, req.NamespacedName, data)
+	data := terraformv1.TerraformData{}
+	err := r.Get(ctx, req.NamespacedName, &data)
 	if err != nil {
 		if errors.IsNotFound(err) {
 			return ctrl.Result{}, nil
@@ -62,7 +66,7 @@ func (r *TerraformDataReconciler) Reconcile(req ctrl.Request) (ctrl.Result, erro
 			r.Log.Error(err, "Unable to create private key")
 		}
 
-		err = r.storePrivateKey(key, data.Spec.HealthAuthorityName, req.Namespace, data)
+		err = r.storePrivateKey(key, data.Spec.HealthAuthorityName, req.Namespace, &data)
 		if err != nil {
 			r.Log.Error(err, "Unable to store private key")
 		}
@@ -72,6 +76,39 @@ func (r *TerraformDataReconciler) Reconcile(req ctrl.Request) (ctrl.Result, erro
 	//r.Update(ctx, data)
 
 	return ctrl.Result{}, nil
+}
+
+func (r *TerraformDataReconciler) replicateConfigMap(namespace string, terraformData *terraformv1.TerraformData) error {
+	immutable := false
+
+	podNamespace, exists := os.LookupEnv("MY_POD_NAMESPACE")
+	if !exists {
+		return fmt.Errorf("environment variable my_pod_namespace was empty")
+	}
+	config := v1.ConfigMap{}
+
+	err := r.Get(context.Background(), types.NamespacedName{
+		Namespace: podNamespace,
+		Name:      "certifier-config",
+	}, &config)
+
+	if err != nil {
+		return err
+	}
+
+	newConfig := &v1.ConfigMap{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      config.Name,
+			Namespace: namespace,
+		},
+		Immutable: &immutable,
+		Data:      config.Data,
+	}
+
+	// Can only error if the secret already has an owner
+	_ = ctrl.SetControllerReference(terraformData, newConfig, r.Scheme)
+
+	return r.Create(context.Background(), newConfig)
 }
 
 func (r *TerraformDataReconciler) storePrivateKey(key, name, namespace string, terraformData *terraformv1.TerraformData) error {

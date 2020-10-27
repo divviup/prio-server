@@ -2,19 +2,7 @@ apiVersion: operators.coreos.com/v1alpha1
 kind: ClusterServiceVersion
 metadata:
   annotations:
-    alm-examples: |-
-      [
-        {
-          "apiVersion": "terraform.isrg-prio.com/v1",
-          "kind": "TerraformData",
-          "metadata": {
-            "name": "terraformdata-sample"
-          },
-          "spec": {
-            "foo": "bar"
-          }
-        }
-      ]
+    alm-examples: '[]'
     capabilities: Basic Install
     operators.operatorframework.io/builder: operator-sdk-v1.1.0
     operators.operatorframework.io/project_layout: go.kubebuilder.io/v2
@@ -58,18 +46,6 @@ spec:
           - get
           - patch
           - update
-        - apiGroups:
-          - authentication.k8s.io
-          resources:
-          - tokenreviews
-          verbs:
-          - create
-        - apiGroups:
-          - authorization.k8s.io
-          resources:
-          - subjectaccessreviews
-          verbs:
-          - create
         serviceAccountName: default
       deployments:
       - name: key-operator-controller-manager
@@ -86,21 +62,14 @@ spec:
             spec:
               containers:
               - args:
-                - --secure-listen-address=0.0.0.0:8443
-                - --upstream=http://127.0.0.1:8080/
-                - --logtostderr=true
-                - --v=10
-                image: gcr.io/kubebuilder/kube-rbac-proxy:v0.5.0
-                name: kube-rbac-proxy
-                ports:
-                - containerPort: 8443
-                  name: https
-                resources: {}
-              - args:
-                - --metrics-addr=127.0.0.1:8080
                 - --enable-leader-election
                 command:
                 - /manager
+                env:
+                - name: MY_POD_NAMESPACE
+                  valueFrom:
+                    fieldRef:
+                      fieldPath: metadata.namespace
                 image: us.gcr.io/prio-bringup-290620/keyoperator:latest
                 name: manager
                 resources:
@@ -155,12 +124,12 @@ spec:
   - keyoperator
   links:
   - name: Key Operator
-    url: https://isrg-prio.org
+    url: https://key-operator.domain
   maintainers:
-  - email: "enpa-prio-ops@letsencrypt.org"
-    name: "ISRG PRIO"
+  - email: "No"
+    name: "No"
   maturity: alpha
   provider:
     name: KeyOperator Provider
-    url: ""
+    url: "No"
   version: 0.0.1

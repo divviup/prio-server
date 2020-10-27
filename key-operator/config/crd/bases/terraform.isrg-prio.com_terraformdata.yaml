@@ -36,10 +36,13 @@ spec:
         spec:
           description: TerraformDataSpec defines the desired state of TerraformData
           properties:
-            terraformOutput:
+            certificateFQDN:
+              type: string
+            healthAuthorityName:
               type: string
           required:
-          - terraformOutput
+          - certificateFQDN
+          - healthAuthorityName
           type: object
         status:
           description: TerraformDataStatus defines the observed state of TerraformData

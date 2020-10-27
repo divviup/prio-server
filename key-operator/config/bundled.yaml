@@ -37,10 +37,13 @@ spec:
         spec:
           description: TerraformDataSpec defines the desired state of TerraformData
           properties:
-            terraformOutput:
+            certificateFQDN:
+              type: string
+            healthAuthorityName:
               type: string
           required:
-          - terraformOutput
+          - certificateFQDN
+          - healthAuthorityName
           type: object
         status:
           description: TerraformDataStatus defines the observed state of TerraformData
@@ -128,34 +131,6 @@ rules:
   - update
 ---
 apiVersion: rbac.authorization.k8s.io/v1
-kind: ClusterRole
-metadata:
-  name: key-operator-proxy-role
-rules:
-- apiGroups:
-  - authentication.k8s.io
-  resources:
-  - tokenreviews
-  verbs:
-  - create
-- apiGroups:
-  - authorization.k8s.io
-  resources:
-  - subjectaccessreviews
-  verbs:
-  - create
----
-apiVersion: rbac.authorization.k8s.io/v1beta1
-kind: ClusterRole
-metadata:
-  name: key-operator-metrics-reader
-rules:
-- nonResourceURLs:
-  - /metrics
-  verbs:
-  - get
----
-apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
 metadata:
   name: key-operator-leader-election-rolebinding
@@ -182,34 +157,6 @@ subjects:
   name: default
   namespace: key-operator-system
 ---
-apiVersion: rbac.authorization.k8s.io/v1
-kind: ClusterRoleBinding
-metadata:
-  name: key-operator-proxy-rolebinding
-roleRef:
-  apiGroup: rbac.authorization.k8s.io
-  kind: ClusterRole
-  name: key-operator-proxy-role
-subjects:
-- kind: ServiceAccount
-  name: default
-  namespace: key-operator-system
----
-apiVersion: v1
-kind: Service
-metadata:
-  labels:
-    control-plane: controller-manager
-  name: key-operator-controller-manager-metrics-service
-  namespace: key-operator-system
-spec:
-  ports:
-  - name: https
-    port: 8443
-    targetPort: https
-  selector:
-    control-plane: controller-manager
----
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -229,20 +176,14 @@ spec:
     spec:
       containers:
       - args:
-        - --secure-listen-address=0.0.0.0:8443
-        - --upstream=http://127.0.0.1:8080/
-        - --logtostderr=true
-        - --v=10
-        image: gcr.io/kubebuilder/kube-rbac-proxy:v0.5.0
-        name: kube-rbac-proxy
-        ports:
-        - containerPort: 8443
-          name: https
-      - args:
-        - --metrics-addr=127.0.0.1:8080
         - --enable-leader-election
         command:
         - /manager
+        env:
+        - name: MY_POD_NAMESPACE
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.namespace
         image: us.gcr.io/prio-bringup-290620/keyoperator:latest
         name: manager
         resources:
@@ -253,60 +194,3 @@ spec:
             cpu: 100m
             memory: 20Mi
       terminationGracePeriodSeconds: 10
----
-apiVersion: scorecard.operatorframework.io/v1alpha3
-kind: Configuration
-metadata:
-  name: config
-stages:
-- parallel: true
-  tests:
-  - entrypoint:
-    - scorecard-test
-    - basic-check-spec
-    image: quay.io/operator-framework/scorecard-test:v1.1.0
-    labels:
-      suite: basic
-      test: basic-check-spec-test
-  - entrypoint:
-    - scorecard-test
-    - olm-bundle-validation
-    image: quay.io/operator-framework/scorecard-test:v1.1.0
-    labels:
-      suite: olm
-      test: olm-bundle-validation-test
-  - entrypoint:
-    - scorecard-test
-    - olm-crds-have-validation
-    image: quay.io/operator-framework/scorecard-test:v1.1.0
-    labels:
-      suite: olm
-      test: olm-crds-have-validation-test
-  - entrypoint:
-    - scorecard-test
-    - olm-crds-have-resources
-    image: quay.io/operator-framework/scorecard-test:v1.1.0
-    labels:
-      suite: olm
-      test: olm-crds-have-resources-test
-  - entrypoint:
-    - scorecard-test
-    - olm-spec-descriptors
-    image: quay.io/operator-framework/scorecard-test:v1.1.0
-    labels:
-      suite: olm
-      test: olm-spec-descriptors-test
-  - entrypoint:
-    - scorecard-test
-    - olm-status-descriptors
-    image: quay.io/operator-framework/scorecard-test:v1.1.0
-    labels:
-      suite: olm
-      test: olm-status-descriptors-test
----
-apiVersion: terraform.isrg-prio.com/v1
-kind: TerraformData
-metadata:
-  name: terraformdata-sample
-spec:
-  foo: bar
