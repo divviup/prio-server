@@ -1,8 +1,10 @@
+use crate::config::StoragePath;
 use anyhow::{anyhow, Context, Result};
 use ring::signature::{UnparsedPublicKey, ECDSA_P256_SHA256_ASN1};
 use serde::Deserialize;
 use serde_json::from_reader;
-use std::{collections::HashMap, io::Read};
+use std::{collections::HashMap, io::Read, str::FromStr};
+use ureq::Response;
 
 // See discussion in SpecificManifest::batch_signing_public_key
 const ECDSA_P256_SPKI_PREFIX: &[u8] = &[
@@ -52,22 +54,69 @@ struct SpecificManifest {
     packet_encryption_certificates: HashMap<String, PacketEncryptionCertificate>,
 }
 
+/// Obtains a manifest file from the provided URL
+fn fetch_manifest(manifest_url: &str) -> Result<Response> {
+    if !manifest_url.starts_with("https://") {
+        return Err(anyhow!("Manifest must be fetched over HTTPS"));
+    }
+    let response = ureq::get(manifest_url)
+        // By default, ureq will wait forever to connect or
+        // read.
+        .timeout_connect(10_000) // ten seconds
+        .timeout_read(10_000) // ten seconds
+        .call();
+    if response.error() {
+        return Err(anyhow!("failed to fetch manifest: {:?}", response));
+    }
+    Ok(response)
+}
+
+/// Attempts to parse the provided string as a PEM encoded PKIX
+/// SubjectPublicKeyInfo structure containing an ECDSA P256 public key, and
+/// returns an UnparsedPublicKey containing that key on success.
+fn public_key_from_pem(pem_key: &str) -> Result<UnparsedPublicKey<Vec<u8>>> {
+    // No Rust crate that we have found gives us an easy way to parse PKIX
+    // SubjectPublicKeyInfo structures to get at the public key which can
+    // then be used in ring::signature. Since we know the keys we deal with
+    // should always be ECDSA P256, we can instead check that the binary
+    // blob inside the PEM has the expected prefix for this kind of key in
+    // this kind of encoding, as suggested in this GitHub issue on ring:
+    // https://github.com/briansmith/ring/issues/881
+    println!("public key: {}", pem_key);
+    let pem = pem::parse(&pem_key).context("failed to parse key as PEM")?;
+    if pem.tag != "PUBLIC KEY" {
+        return Err(anyhow!(
+            "key for identifier {} is not a PEM encoded public key"
+        ));
+    }
+
+    // An ECDSA P256 public key in this encoding will always be 26 bytes of
+    // prefix + 65 bytes of key = 91 bytes total. e.g.,
+    // https://lapo.it/asn1js/#MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgD______________________________________________________________________________________w
+    if pem.contents.len() != 91 {
+        return Err(anyhow!(
+            "PEM contents are wrong size for ASN.1 encoded ECDSA P256 SubjectPublicKeyInfo"
+        ));
+    }
+
+    let (prefix, key) = pem.contents.split_at(ECDSA_P256_SPKI_PREFIX.len());
+
+    if prefix != ECDSA_P256_SPKI_PREFIX {
+        return Err(anyhow!(
+            "PEM contents are not ASN.1 encoded ECDSA P256 SubjectPublicKeyInfo"
+        ));
+    }
+
+    Ok(UnparsedPublicKey::new(
+        &ECDSA_P256_SHA256_ASN1,
+        Vec::from(key),
+    ))
+}
+
 impl SpecificManifest {
     fn from_https(base_path: &str, peer_name: &str) -> Result<SpecificManifest> {
-        if !base_path.starts_with("https://") {
-            return Err(anyhow!("Manifest must be fetched over HTTPS"));
-        }
-        let manifest_url = format!("{}/{}/specific-manifest.json", base_path, peer_name);
-        let response = ureq::get(&manifest_url)
-            // By default, ureq will wait forever to connect or
-            // read.
-            .timeout_connect(10_000) // ten seconds
-            .timeout_read(10_000) // ten seconds
-            .call();
-        if response.error() {
-            return Err(anyhow!("failed to fetch specific manifest: {:?}", response));
-        }
-        SpecificManifest::from_reader(response.into_reader())
+        let manifest_url = format!("{}/{}-manifest.json", base_path, peer_name);
+        SpecificManifest::from_reader(fetch_manifest(&manifest_url)?.into_reader())
     }
 
     fn from_reader<R: Read>(reader: R) -> Result<SpecificManifest> {
@@ -82,61 +131,134 @@ impl SpecificManifest {
     /// Returns the ECDSA P256 public key corresponding to the provided key
     /// identifier, if it exists in the manifest.
     fn batch_signing_public_key(&self, identifier: &str) -> Result<UnparsedPublicKey<Vec<u8>>> {
-        // No Rust crate that we have found gives us an easy way to parse PKIX
-        // SubjectPublicKeyInfo structures to get at the public key which can
-        // then be used in ring::signature. Since we know the keys we deal with
-        // should always be ECDSA P256, we can instead check that the binary
-        // blob inside the PEM has the expected prefix for this kind of key in
-        // this kind of encoding, as suggested in this GitHub issue on ring:
-        // https://github.com/briansmith/ring/issues/881
         let key = self
             .batch_signing_public_keys
             .get(identifier)
             .context(format!("no value for key {}", identifier))?;
+        public_key_from_pem(&key.public_key)
+    }
 
-        let pem = pem::parse(&key.public_key)
-            .context(format!("failed to parse key entry {} as PEM", identifier))?;
-        if pem.tag != "PUBLIC KEY" {
-            return Err(anyhow!(
-                "key for identifier {} is not a PEM encoded public key"
-            ));
+    /// Returns the StoragePath for the data share processor's validation
+    /// bucket.
+    fn validation_bucket(&self) -> Result<StoragePath> {
+        // For the time being, the path is assumed to be an S3 bucket.
+        StoragePath::from_str(&format!("s3://{}", &self.peer_validation_bucket))
+    }
+}
+
+/// Represents the server-identity structure within an ingestion server global
+/// manifest. One of aws_iam_entity or google_service_account should be Some.
+#[derive(Debug, Deserialize, PartialEq)]
+#[serde(rename_all = "kebab-case")]
+struct IngestionServerIdentity {
+    /// The ARN of the AWS IAM entity that this ingestion server uses to access
+    /// ingestion buckets,
+    aws_iam_entity: Option<String>,
+    /// The numeric identifier of the GCP service account that this ingestion
+    /// server uses to authenticate via OIDC identity federation to access
+    /// ingestion buckets.
+    google_service_account: Option<u64>,
+}
+
+/// Represents an ingestion server's global manifest.
+#[derive(Debug, Deserialize, PartialEq)]
+#[serde(rename_all = "kebab-case")]
+struct IngestionServerGlobalManifest {
+    /// Format version of the manifest. Versions besides the currently supported
+    /// one are rejected.
+    format: u32,
+    /// The identity used by the ingestor to authenticate when writing to
+    /// ingestion buckets.
+    server_identity: IngestionServerIdentity,
+    /// ECDSA P256 public keys used by the ingestor to sign ingestion batches.
+    /// The keys in this dictionary should match key_identifier values in
+    /// PrioBatchSignatures received from the ingestor.
+    batch_signing_public_keys: HashMap<String, BatchSigningPublicKey>,
+}
+
+impl IngestionServerGlobalManifest {
+    fn from_https(base_path: &str) -> Result<IngestionServerGlobalManifest> {
+        let manifest_url = format!("{}/global-manifest.json", base_path);
+        IngestionServerGlobalManifest::from_reader(fetch_manifest(&manifest_url)?.into_reader())
+    }
+
+    fn from_reader<R: Read>(reader: R) -> Result<IngestionServerGlobalManifest> {
+        let manifest: IngestionServerGlobalManifest =
+            from_reader(reader).context("failed to decode JSON global manifest")?;
+        if manifest.format != 0 {
+            return Err(anyhow!("unsupported manifest format {}", manifest.format));
         }
+        Ok(manifest)
+    }
 
-        // An ECDSA P256 public key in this encoding will always be 26 bytes of
-        // prefix + 65 bytes of key = 91 bytes total. e.g.,
-        // https://lapo.it/asn1js/#MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgD______________________________________________________________________________________w
-        if pem.contents.len() != 91 {
-            return Err(anyhow!(
-                "PEM contents are wrong size for ASN.1 encoded ECDSA P256 SubjectPublicKeyInfo"
-            ));
+    /// Returns the ECDSA P256 public key corresponding to the provided key
+    /// identifier, if it exists in the manifest.
+    fn batch_signing_public_key(&self, identifier: &str) -> Result<UnparsedPublicKey<Vec<u8>>> {
+        let key = self
+            .batch_signing_public_keys
+            .get(identifier)
+            .context(format!("no value for key {}", identifier))?;
+        public_key_from_pem(&key.public_key)
+    }
+}
+
+/// Represents the global manifest for a portal server.
+#[derive(Debug, Deserialize, PartialEq)]
+#[serde(rename_all = "kebab-case")]
+struct PortalServerGlobalManifest {
+    /// Format version of the manifest. Versions besides the currently supported
+    /// one are rejected.
+    format: u32,
+    /// Name of the GCS bucket to which facilitator servers should write their
+    /// sum part batches for aggregation by the portal server.
+    facilitator_sum_part_bucket: String,
+    /// Name of the GCS bucket to which PHA servers should write their sum part
+    /// batches for aggregation by the portal server.
+    pha_sum_part_bucket: String,
+}
+
+impl PortalServerGlobalManifest {
+    fn from_https(base_path: &str) -> Result<PortalServerGlobalManifest> {
+        let manifest_url = format!("{}/global-manifest.json", base_path);
+        PortalServerGlobalManifest::from_reader(fetch_manifest(&manifest_url)?.into_reader())
+    }
+
+    fn from_reader<R: Read>(reader: R) -> Result<PortalServerGlobalManifest> {
+        let manifest: PortalServerGlobalManifest =
+            from_reader(reader).context("failed to decode JSON global manifest")?;
+        if manifest.format != 0 {
+            return Err(anyhow!("unsupported manifest format {}", manifest.format));
         }
+        Ok(manifest)
+    }
 
-        let (prefix, key) = pem.contents.split_at(ECDSA_P256_SPKI_PREFIX.len());
+    /// Returns the StoragePath for the portal server's facilitator sum part
+    /// bucket
+    fn facilitator_sum_part_bucket(&self) -> Result<StoragePath> {
+        // For now, the path is assumed to be a GCS bucket.
+        StoragePath::from_str(&format!("gs://{}", &self.facilitator_sum_part_bucket))
+    }
 
-        if prefix != ECDSA_P256_SPKI_PREFIX {
-            return Err(anyhow!(
-                "PEM contents are not ASN.1 encoded ECDSA P256 SubjectPublicKeyInfo"
-            ));
-        }
-
-        Ok(UnparsedPublicKey::new(
-            &ECDSA_P256_SHA256_ASN1,
-            Vec::from(key),
-        ))
+    /// Returns the StoragePath for the portal server's PHA sum part bucket
+    fn pha_sum_part_bucket(&self) -> Result<StoragePath> {
+        // For now, the path is assumed to be a GCS bucket.
+        StoragePath::from_str(&format!("gs://{}", &self.pha_sum_part_bucket))
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::config::{GCSPath, S3Path};
     use crate::test_utils::{
         default_ingestor_private_key, DEFAULT_INGESTOR_SUBJECT_PUBLIC_KEY_INFO,
     };
     use ring::rand::SystemRandom;
+    use rusoto_core::Region;
     use std::io::Cursor;
 
     #[test]
-    fn load_manifest() {
+    fn load_specific_manifest() {
         let reader = Cursor::new(format!(
             r#"
 {{
@@ -195,10 +317,23 @@ mod tests {
         batch_signing_key
             .verify(content, signature.as_ref())
             .unwrap();
+
+        if let StoragePath::S3Path(path) = manifest.validation_bucket().unwrap() {
+            assert_eq!(
+                path,
+                S3Path {
+                    region: Region::UsWest1,
+                    bucket: "validation".to_owned(),
+                    key: "".to_owned(),
+                }
+            );
+        } else {
+            assert!(false, "unexpected storage path type");
+        }
     }
 
     #[test]
-    fn invalid_manifest() {
+    fn invalid_specific_manifest() {
         let invalid_manifests = vec![
             "not-json",
             "{ \"missing\": \"keys\"}",
@@ -267,7 +402,7 @@ mod tests {
     }
 
     #[test]
-    fn invalid_public_key() {
+    fn invalid_specific_public_key() {
         let manifests_with_invalid_public_keys = vec![
             // Wrong PEM block
             r#"
@@ -331,6 +466,203 @@ mod tests {
             let reader = Cursor::new(invalid_manifest);
             let manifest = SpecificManifest::from_reader(reader).unwrap();
             assert!(manifest.batch_signing_public_key("fake-key-1").is_err());
+        }
+    }
+
+    #[test]
+    fn load_ingestor_global_manifest() {
+        let manifest_with_aws_identity = r#"
+{
+    "format": 0,
+    "server-identity": {
+        "aws-iam-entity": "arn:aws:iam::338276578713:role/ingestor-1-role"
+    },
+    "batch-signing-public-keys": {
+        "key-identifier-1": {
+            "public-key": "-----BEGIN PUBLIC KEY-----\nMFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAE/8OzWHOvmin1KeaiMWFQXfNwS9uZ\n839EjwMff1VB4dnurW38FRP+Z0KxIdvvrPsGMWdPXoTASRAPEHHqpWlTlg==\n-----END PUBLIC KEY-----\n",
+            "expiration": "2021-01-15T18:53:20Z"
+        }
+    }
+}
+            "#;
+        let manifest_with_gcp_identity = r#"
+{
+    "format": 0,
+    "server-identity": {
+        "google-service-account": 123456789012345
+    },
+    "batch-signing-public-keys": {
+        "key-identifier-2": {
+            "public-key": "-----BEGIN PUBLIC KEY-----\nMFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAE/8OzWHOvmin1KeaiMWFQXfNwS9uZ\n839EjwMff1VB4dnurW38FRP+Z0KxIdvvrPsGMWdPXoTASRAPEHHqpWlTlg==\n-----END PUBLIC KEY-----\n",
+            "expiration": "2021-01-15T18:53:20Z"
+        },
+        "another-key": {
+            "public-key": "not-a-real-key",
+            "expiration": "2021-01-15T18:53:20Z"
+        }
+    }
+}
+            "#;
+
+        let manifest =
+            IngestionServerGlobalManifest::from_reader(Cursor::new(manifest_with_aws_identity))
+                .unwrap();
+        assert_eq!(
+            manifest.server_identity.aws_iam_entity,
+            Some("arn:aws:iam::338276578713:role/ingestor-1-role".to_owned())
+        );
+        assert_eq!(manifest.server_identity.google_service_account, None);
+        manifest
+            .batch_signing_public_key("key-identifier-1")
+            .unwrap();
+        assert!(manifest.batch_signing_public_key("nosuchkey").is_err());
+
+        let manifest =
+            IngestionServerGlobalManifest::from_reader(Cursor::new(manifest_with_gcp_identity))
+                .unwrap();
+        assert_eq!(manifest.server_identity.aws_iam_entity, None);
+        assert_eq!(
+            manifest.server_identity.google_service_account,
+            Some(123456789012345)
+        );
+        manifest
+            .batch_signing_public_key("key-identifier-2")
+            .unwrap();
+        assert!(manifest.batch_signing_public_key("nosuchkey").is_err());
+    }
+
+    #[test]
+    fn invalid_ingestor_global_manifest() {
+        let invalid_manifests = vec![
+            "not-json",
+            "{ \"missing\": \"keys\"}",
+            // No format key
+            r#"
+{
+    "server-identity": {
+        "aws-iam-entity": "arn:aws:iam::338276578713:role/ingestor-1-role"
+    },
+    "batch-signing-public-keys": {
+        "key-identifier-1": {
+            "public-key": "----BEGIN PUBLIC KEY----\nMFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEI3MQm+HzXvaYa2mVlhB4zknbtAT8cSxakmBoJcBKGqGw\nYS0bhxSpuvABM1kdBTDpQhXnVdcq+LSiukXJRpGHVg==\n----END PUBLIC KEY----",
+            "expiration": "2021-01-15T18:53:20Z"
+        }
+    }
+}
+    "#,
+            // Format key with wrong value
+            r#"
+{
+    "format": 1,
+    "server-identity": {
+        "aws-iam-entity": "arn:aws:iam::338276578713:role/ingestor-1-role"
+    },
+    "batch-signing-public-keys": {
+        "key-identifier-1": {
+            "public-key": "----BEGIN PUBLIC KEY----\nMFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEI3MQm+HzXvaYa2mVlhB4zknbtAT8cSxakmBoJcBKGqGw\nYS0bhxSpuvABM1kdBTDpQhXnVdcq+LSiukXJRpGHVg==\n----END PUBLIC KEY----",
+            "expiration": "2021-01-15T18:53:20Z"
+        }
+    }
+}
+    "#,
+            // Format key with wrong type
+            r#"
+{
+    "format": "zero",
+    "server-identity": {
+        "aws-iam-entity": "arn:aws:iam::338276578713:role/ingestor-1-role"
+    },
+    "batch-signing-public-keys": {
+        "key-identifier-1": {
+            "public-key": "----BEGIN PUBLIC KEY----\nMFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEI3MQm+HzXvaYa2mVlhB4zknbtAT8cSxakmBoJcBKGqGw\nYS0bhxSpuvABM1kdBTDpQhXnVdcq+LSiukXJRpGHVg==\n----END PUBLIC KEY----",
+            "expiration": "2021-01-15T18:53:20Z"
+        }
+    }
+}
+    "#,
+        ];
+
+        for invalid_manifest in &invalid_manifests {
+            let reader = Cursor::new(invalid_manifest);
+            IngestionServerGlobalManifest::from_reader(reader).unwrap_err();
+        }
+    }
+
+    #[test]
+    fn load_portal_global_manifest() {
+        let manifest = r#"
+{
+    "format": 0,
+    "facilitator-sum-part-bucket": "facilitator-bucket",
+    "pha-sum-part-bucket": "pha-bucket"
+}
+            "#;
+
+        let manifest = PortalServerGlobalManifest::from_reader(Cursor::new(manifest)).unwrap();
+        if let StoragePath::GCSPath(path) = manifest.facilitator_sum_part_bucket().unwrap() {
+            assert_eq!(
+                path,
+                GCSPath {
+                    bucket: "facilitator-bucket".to_owned(),
+                    key: "".to_owned(),
+                }
+            );
+        } else {
+            assert!(false, "unexpected storage path type");
+        }
+        if let StoragePath::GCSPath(path) = manifest.pha_sum_part_bucket().unwrap() {
+            assert_eq!(
+                path,
+                GCSPath {
+                    bucket: "pha-bucket".to_owned(),
+                    key: "".to_owned(),
+                }
+            );
+        } else {
+            assert!(false, "unexpected storage path type");
+        }
+    }
+
+    #[test]
+    fn invalid_portal_global_manifests() {
+        let invalid_manifests = vec![
+            "not-json",
+            "{ \"missing\": \"keys\"}",
+            // No format key
+            r#"
+{
+    "facilitator-sum-part-bucket": "facilitator-bucket",
+    "pha-sum-part-bucket": "pha-bucket"
+}
+    "#,
+            // Format key with wrong value
+            r#"
+{
+    "format": 1,
+    "facilitator-sum-part-bucket": "facilitator-bucket",
+    "pha-sum-part-bucket": "pha-bucket"
+}
+    "#,
+            // Format key with wrong type
+            r#"
+{
+    "format": "zero",
+    "facilitator-sum-part-bucket": "facilitator-bucket",
+    "pha-sum-part-bucket": "pha-bucket"
+}
+    "#,
+            // Missing field
+            r#"
+{
+    "format": 0,
+    "facilitator-sum-part-bucket": "facilitator-bucket",
+}
+    "#,
+        ];
+
+        for invalid_manifest in &invalid_manifests {
+            let reader = Cursor::new(invalid_manifest);
+            PortalServerGlobalManifest::from_reader(reader).unwrap_err();
         }
     }
 }
