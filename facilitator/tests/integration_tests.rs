@@ -14,6 +14,7 @@ use facilitator::{
     transport::LocalFileTransport,
 };
 use prio::{encrypt::PrivateKey, util::reconstruct_shares};
+use std::collections::HashMap;
 use uuid::Uuid;
 
 #[test]
@@ -40,9 +41,21 @@ fn end_to_end() {
     let pha_ecies_key = PrivateKey::from_base64(DEFAULT_PHA_ECIES_PRIVATE_KEY).unwrap();
     let facilitator_ecies_key =
         PrivateKey::from_base64(DEFAULT_FACILITATOR_ECIES_PRIVATE_KEY).unwrap();
-    let ingestor_pub_key = default_ingestor_public_key();
-    let pha_pub_signing_key = default_pha_signing_public_key();
-    let facilitator_pub_signing_key = default_facilitator_signing_public_key();
+    let mut ingestor_pub_keys = HashMap::new();
+    ingestor_pub_keys.insert(
+        default_ingestor_private_key().identifier,
+        default_ingestor_public_key(),
+    );
+    let mut pha_pub_keys = HashMap::new();
+    pha_pub_keys.insert(
+        default_pha_signing_private_key().identifier,
+        default_pha_signing_public_key(),
+    );
+    let mut facilitator_pub_keys = HashMap::new();
+    facilitator_pub_keys.insert(
+        default_facilitator_signing_private_key().identifier,
+        default_facilitator_signing_public_key(),
+    );
 
     let batch_1_reference_sum = generate_ingestion_sample(
         &mut pha_ingest_transport,
@@ -58,12 +71,8 @@ fn end_to_end() {
         0.11,
         100,
         100,
-    );
-    assert!(
-        batch_1_reference_sum.is_ok(),
-        "failed to generate first sample: {:?}",
-        batch_1_reference_sum.err()
-    );
+    )
+    .unwrap();
 
     let batch_2_reference_sum = generate_ingestion_sample(
         &mut pha_ingest_transport,
@@ -79,15 +88,11 @@ fn end_to_end() {
         0.11,
         100,
         100,
-    );
-    assert!(
-        batch_2_reference_sum.is_ok(),
-        "failed to generate second sample: {:?}",
-        batch_2_reference_sum.err()
-    );
+    )
+    .unwrap();
 
     let pha_signing_key = default_pha_signing_private_key();
-    let res = BatchIntaker::new(
+    BatchIntaker::new(
         &aggregation_name,
         &batch_1_uuid,
         &date,
@@ -96,17 +101,13 @@ fn end_to_end() {
         true,
         vec![facilitator_ecies_key.clone(), pha_ecies_key.clone()],
         &pha_signing_key,
-        &ingestor_pub_key,
+        &ingestor_pub_keys,
     )
     .unwrap()
-    .generate_validation_share();
-    assert!(
-        res.is_ok(),
-        "PHA failed to generate validation: {:?}",
-        res.err()
-    );
+    .generate_validation_share()
+    .unwrap();
 
-    let res = BatchIntaker::new(
+    BatchIntaker::new(
         &aggregation_name,
         &batch_2_uuid,
         &date,
@@ -115,18 +116,14 @@ fn end_to_end() {
         true,
         vec![pha_ecies_key.clone(), facilitator_ecies_key.clone()],
         &pha_signing_key,
-        &ingestor_pub_key,
+        &ingestor_pub_keys,
     )
     .unwrap()
-    .generate_validation_share();
-    assert!(
-        res.is_ok(),
-        "PHA failed to generate validation: {:?}",
-        res.err()
-    );
+    .generate_validation_share()
+    .unwrap();
 
     let facilitator_signing_key = default_facilitator_signing_private_key();
-    let res = BatchIntaker::new(
+    BatchIntaker::new(
         &aggregation_name,
         &batch_1_uuid,
         &date,
@@ -135,17 +132,13 @@ fn end_to_end() {
         false,
         vec![pha_ecies_key.clone(), facilitator_ecies_key.clone()],
         &facilitator_signing_key,
-        &ingestor_pub_key,
+        &ingestor_pub_keys,
     )
     .unwrap()
-    .generate_validation_share();
-    assert!(
-        res.is_ok(),
-        "facilitator failed to generate validation: {:?}",
-        res.err()
-    );
+    .generate_validation_share()
+    .unwrap();
 
-    let res = BatchIntaker::new(
+    BatchIntaker::new(
         &aggregation_name,
         &batch_2_uuid,
         &date,
@@ -154,19 +147,15 @@ fn end_to_end() {
         false,
         vec![facilitator_ecies_key.clone(), pha_ecies_key.clone()],
         &facilitator_signing_key,
-        &ingestor_pub_key,
+        &ingestor_pub_keys,
     )
     .unwrap()
-    .generate_validation_share();
-    assert!(
-        res.is_ok(),
-        "facilitator failed to generate validation: {:?}",
-        res.err()
-    );
+    .generate_validation_share()
+    .unwrap();
 
     let batch_ids_and_dates = vec![(batch_1_uuid, date), (batch_2_uuid, date)];
 
-    let res = BatchAggregator::new(
+    BatchAggregator::new(
         &aggregation_name,
         &start_date,
         &end_date,
@@ -175,20 +164,17 @@ fn end_to_end() {
         &mut pha_validate_transport,
         &mut facilitator_validate_transport,
         &mut aggregation_transport,
-        &ingestor_pub_key,
+        &ingestor_pub_keys,
         &pha_signing_key,
-        &facilitator_pub_signing_key,
+        &pha_pub_keys,
+        &facilitator_pub_keys,
         vec![pha_ecies_key.clone(), facilitator_ecies_key.clone()],
     )
     .unwrap()
-    .generate_sum_part(&batch_ids_and_dates);
-    assert!(
-        res.is_ok(),
-        "PHA failed to generate sum part: {:?}",
-        res.err()
-    );
+    .generate_sum_part(&batch_ids_and_dates)
+    .unwrap();
 
-    let res = BatchAggregator::new(
+    BatchAggregator::new(
         &aggregation_name,
         &start_date,
         &end_date,
@@ -197,17 +183,21 @@ fn end_to_end() {
         &mut facilitator_validate_transport,
         &mut pha_validate_transport,
         &mut aggregation_transport,
-        &ingestor_pub_key,
+        &ingestor_pub_keys,
         &facilitator_signing_key,
-        &pha_pub_signing_key,
+        &facilitator_pub_keys,
+        &pha_pub_keys,
         vec![pha_ecies_key.clone(), facilitator_ecies_key.clone()],
     )
     .unwrap()
-    .generate_sum_part(&batch_ids_and_dates);
-    assert!(
-        res.is_ok(),
-        "facilitator failed to generate sum part: {:?}",
-        res.err()
+    .generate_sum_part(&batch_ids_and_dates)
+    .unwrap();
+
+    let mut signing_key_map = HashMap::new();
+    signing_key_map.insert(pha_signing_key.identifier, default_pha_signing_public_key());
+    signing_key_map.insert(
+        facilitator_signing_key.identifier,
+        default_facilitator_signing_public_key(),
     );
 
     let mut pha_aggregation_batch_reader: BatchReader<'_, SumPart, IngestionDataSharePacket> =
@@ -215,13 +205,9 @@ fn end_to_end() {
             Batch::new_sum(&aggregation_name, &start_date, &end_date, true),
             &mut aggregation_transport,
         );
-    let pha_sum_part = pha_aggregation_batch_reader.header(&pha_pub_signing_key);
-    assert!(
-        pha_sum_part.is_ok(),
-        "failed to read PHA sum part; {:?}",
-        pha_sum_part.err()
-    );
-    let pha_sum_part = pha_sum_part.unwrap();
+    let pha_sum_part = pha_aggregation_batch_reader
+        .header(&signing_key_map)
+        .unwrap();
     let pha_sum_fields = pha_sum_part.sum().unwrap();
 
     let pha_invalid_packet_reader = pha_aggregation_batch_reader.packet_file_reader(&pha_sum_part);
@@ -238,14 +224,9 @@ fn end_to_end() {
         Batch::new_sum(&aggregation_name, &start_date, &end_date, false),
         &mut aggregation_transport,
     );
-    let facilitator_sum_part =
-        facilitator_aggregation_batch_reader.header(&facilitator_pub_signing_key);
-    assert!(
-        facilitator_sum_part.is_ok(),
-        "failed to read PHA sum part; {:?}",
-        facilitator_sum_part.err()
-    );
-    let facilitator_sum_part = facilitator_sum_part.unwrap();
+    let facilitator_sum_part = facilitator_aggregation_batch_reader
+        .header(&signing_key_map)
+        .unwrap();
     let facilitator_sum_fields = facilitator_sum_part.sum().unwrap();
 
     let facilitator_invalid_packet_reader =
@@ -257,11 +238,7 @@ fn end_to_end() {
 
     let reconstructed = reconstruct_shares(&facilitator_sum_fields, &pha_sum_fields).unwrap();
 
-    let reference_sum = reconstruct_shares(
-        &batch_1_reference_sum.unwrap(),
-        &batch_2_reference_sum.unwrap(),
-    )
-    .unwrap();
+    let reference_sum = reconstruct_shares(&batch_1_reference_sum, &batch_2_reference_sum).unwrap();
     assert_eq!(
         reconstructed, reference_sum,
         "reconstructed shares do not match original data.\npha sum: {:?}\n

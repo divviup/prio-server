@@ -8,7 +8,7 @@ use anyhow::{anyhow, Context, Result};
 use chrono::NaiveDateTime;
 use prio::{encrypt::PrivateKey, finite_field::Field, server::Server};
 use ring::signature::UnparsedPublicKey;
-use std::{convert::TryFrom, iter::Iterator};
+use std::{collections::HashMap, convert::TryFrom, iter::Iterator};
 use uuid::Uuid;
 
 /// BatchIntaker is responsible for validating a batch of data packet shares
@@ -20,7 +20,7 @@ pub struct BatchIntaker<'a> {
     is_first: bool,
     packet_decryption_keys: Vec<PrivateKey>,
     batch_signing_key: &'a BatchSigningKey,
-    ingestor_key: &'a UnparsedPublicKey<Vec<u8>>,
+    ingestor_public_keys: &'a HashMap<String, UnparsedPublicKey<Vec<u8>>>,
 }
 
 impl<'a> BatchIntaker<'a> {
@@ -34,7 +34,7 @@ impl<'a> BatchIntaker<'a> {
         is_first: bool,
         packet_decryption_keys: Vec<PrivateKey>,
         batch_signing_key: &'a BatchSigningKey,
-        ingestor_key: &'a UnparsedPublicKey<Vec<u8>>,
+        ingestor_public_keys: &'a HashMap<String, UnparsedPublicKey<Vec<u8>>>,
     ) -> Result<BatchIntaker<'a>> {
         Ok(BatchIntaker {
             ingestion_batch: BatchReader::new(
@@ -48,7 +48,7 @@ impl<'a> BatchIntaker<'a> {
             is_first,
             packet_decryption_keys,
             batch_signing_key,
-            ingestor_key,
+            ingestor_public_keys,
         })
     }
 
@@ -56,7 +56,7 @@ impl<'a> BatchIntaker<'a> {
     /// and packet file, then computes validation shares and sends them to the
     /// peer share processor.
     pub fn generate_validation_share(&mut self) -> Result<()> {
-        let ingestion_header = self.ingestion_batch.header(&self.ingestor_key)?;
+        let ingestion_header = self.ingestion_batch.header(self.ingestor_public_keys)?;
         if ingestion_header.bins <= 0 {
             return Err(anyhow!(
                 "invalid bins/dimension value {}",
@@ -175,7 +175,11 @@ mod tests {
         let pha_ecies_key = PrivateKey::from_base64(DEFAULT_PHA_ECIES_PRIVATE_KEY).unwrap();
         let facilitator_ecies_key =
             PrivateKey::from_base64(DEFAULT_FACILITATOR_ECIES_PRIVATE_KEY).unwrap();
-        let ingestor_pub_key = default_ingestor_public_key();
+        let mut ingestor_pub_keys = HashMap::new();
+        ingestor_pub_keys.insert(
+            default_ingestor_private_key().identifier,
+            default_ingestor_public_key(),
+        );
         let pha_signing_key = default_pha_signing_private_key();
         let facilitator_signing_key = default_facilitator_signing_private_key();
 
@@ -205,7 +209,7 @@ mod tests {
             true,
             vec![pha_ecies_key],
             &pha_signing_key,
-            &ingestor_pub_key,
+            &ingestor_pub_keys,
         )
         .unwrap();
 
@@ -222,7 +226,7 @@ mod tests {
             false,
             vec![facilitator_ecies_key],
             &facilitator_signing_key,
-            &ingestor_pub_key,
+            &ingestor_pub_keys,
         )
         .unwrap();
 

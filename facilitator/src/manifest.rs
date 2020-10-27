@@ -37,7 +37,7 @@ struct PacketEncryptionCertificate {
 /// https://docs.google.com/document/d/1MdfM3QT63ISU70l63bwzTrxr93Z7Tv7EDjLfammzo6Q/edit#heading=h.3j8dgxqo5h68
 #[derive(Debug, Deserialize, PartialEq)]
 #[serde(rename_all = "kebab-case")]
-struct SpecificManifest {
+pub struct SpecificManifest {
     /// Format version of the manifest. Versions besides the currently supported
     /// one are rejected.
     format: u32,
@@ -82,7 +82,6 @@ fn public_key_from_pem(pem_key: &str) -> Result<UnparsedPublicKey<Vec<u8>>> {
     // blob inside the PEM has the expected prefix for this kind of key in
     // this kind of encoding, as suggested in this GitHub issue on ring:
     // https://github.com/briansmith/ring/issues/881
-    println!("public key: {}", pem_key);
     let pem = pem::parse(&pem_key).context("failed to parse key as PEM")?;
     if pem.tag != "PUBLIC KEY" {
         return Err(anyhow!(
@@ -114,7 +113,10 @@ fn public_key_from_pem(pem_key: &str) -> Result<UnparsedPublicKey<Vec<u8>>> {
 }
 
 impl SpecificManifest {
-    fn from_https(base_path: &str, peer_name: &str) -> Result<SpecificManifest> {
+    /// Load the specific manifest for the specified peer relative to the
+    /// provided base path. Returns an error if the manifest could not be
+    /// downloaded or parsed.
+    pub fn from_https(base_path: &str, peer_name: &str) -> Result<SpecificManifest> {
         let manifest_url = format!("{}/{}-manifest.json", base_path, peer_name);
         SpecificManifest::from_reader(fetch_manifest(&manifest_url)?.into_reader())
     }
@@ -128,19 +130,24 @@ impl SpecificManifest {
         Ok(manifest)
     }
 
-    /// Returns the ECDSA P256 public key corresponding to the provided key
-    /// identifier, if it exists in the manifest.
-    fn batch_signing_public_key(&self, identifier: &str) -> Result<UnparsedPublicKey<Vec<u8>>> {
-        let key = self
-            .batch_signing_public_keys
-            .get(identifier)
-            .context(format!("no value for key {}", identifier))?;
-        public_key_from_pem(&key.public_key)
+    /// Attempts to parse the values in this manifest's
+    /// batch-signing-public-keys field as PEM encoded SubjectPublicKeyInfo
+    /// structures containing ECDSA P256 keys, and returns a map of key
+    /// identifier to the public keys on success, or an error otherwise.
+    pub fn batch_signing_public_keys(&self) -> Result<HashMap<String, UnparsedPublicKey<Vec<u8>>>> {
+        let mut keys = HashMap::new();
+        for (identifier, public_key) in self.batch_signing_public_keys.iter() {
+            keys.insert(
+                identifier.clone(),
+                public_key_from_pem(&public_key.public_key)?,
+            );
+        }
+        Ok(keys)
     }
 
     /// Returns the StoragePath for the data share processor's validation
     /// bucket.
-    fn validation_bucket(&self) -> Result<StoragePath> {
+    pub fn validation_bucket(&self) -> Result<StoragePath> {
         // For the time being, the path is assumed to be an S3 bucket.
         StoragePath::from_str(&format!("s3://{}", &self.peer_validation_bucket))
     }
@@ -163,7 +170,7 @@ struct IngestionServerIdentity {
 /// Represents an ingestion server's global manifest.
 #[derive(Debug, Deserialize, PartialEq)]
 #[serde(rename_all = "kebab-case")]
-struct IngestionServerGlobalManifest {
+pub struct IngestionServerGlobalManifest {
     /// Format version of the manifest. Versions besides the currently supported
     /// one are rejected.
     format: u32,
@@ -177,7 +184,9 @@ struct IngestionServerGlobalManifest {
 }
 
 impl IngestionServerGlobalManifest {
-    fn from_https(base_path: &str) -> Result<IngestionServerGlobalManifest> {
+    /// Loads the global manifest relative to the provided base path and returns
+    /// it. Returns an error if the manifest could not be loaded or parsed.
+    pub fn from_https(base_path: &str) -> Result<IngestionServerGlobalManifest> {
         let manifest_url = format!("{}/global-manifest.json", base_path);
         IngestionServerGlobalManifest::from_reader(fetch_manifest(&manifest_url)?.into_reader())
     }
@@ -191,21 +200,26 @@ impl IngestionServerGlobalManifest {
         Ok(manifest)
     }
 
-    /// Returns the ECDSA P256 public key corresponding to the provided key
-    /// identifier, if it exists in the manifest.
-    fn batch_signing_public_key(&self, identifier: &str) -> Result<UnparsedPublicKey<Vec<u8>>> {
-        let key = self
-            .batch_signing_public_keys
-            .get(identifier)
-            .context(format!("no value for key {}", identifier))?;
-        public_key_from_pem(&key.public_key)
+    /// Attempts to parse the values in this manifest's
+    /// batch-signing-public-keys field as PEM encoded SubjectPublicKeyInfo
+    /// structures containing ECDSA P256 keys, and returns a map of key
+    /// identifier to the public keys on success, or an error otherwise.
+    pub fn batch_signing_public_keys(&self) -> Result<HashMap<String, UnparsedPublicKey<Vec<u8>>>> {
+        let mut keys = HashMap::new();
+        for (identifier, public_key) in self.batch_signing_public_keys.iter() {
+            keys.insert(
+                identifier.clone(),
+                public_key_from_pem(&public_key.public_key)?,
+            );
+        }
+        Ok(keys)
     }
 }
 
 /// Represents the global manifest for a portal server.
 #[derive(Debug, Deserialize, PartialEq)]
 #[serde(rename_all = "kebab-case")]
-struct PortalServerGlobalManifest {
+pub struct PortalServerGlobalManifest {
     /// Format version of the manifest. Versions besides the currently supported
     /// one are rejected.
     format: u32,
@@ -218,7 +232,7 @@ struct PortalServerGlobalManifest {
 }
 
 impl PortalServerGlobalManifest {
-    fn from_https(base_path: &str) -> Result<PortalServerGlobalManifest> {
+    pub fn from_https(base_path: &str) -> Result<PortalServerGlobalManifest> {
         let manifest_url = format!("{}/global-manifest.json", base_path);
         PortalServerGlobalManifest::from_reader(fetch_manifest(&manifest_url)?.into_reader())
     }
@@ -232,17 +246,18 @@ impl PortalServerGlobalManifest {
         Ok(manifest)
     }
 
-    /// Returns the StoragePath for the portal server's facilitator sum part
-    /// bucket
-    fn facilitator_sum_part_bucket(&self) -> Result<StoragePath> {
+    /// Returns the StoragePath for this portal server, returning the PHA bucket
+    /// if is_pha is true, or the facilitator bucket otherwise.
+    pub fn sum_part_bucket(&self, is_pha: bool) -> Result<StoragePath> {
         // For now, the path is assumed to be a GCS bucket.
-        StoragePath::from_str(&format!("gs://{}", &self.facilitator_sum_part_bucket))
-    }
-
-    /// Returns the StoragePath for the portal server's PHA sum part bucket
-    fn pha_sum_part_bucket(&self) -> Result<StoragePath> {
-        // For now, the path is assumed to be a GCS bucket.
-        StoragePath::from_str(&format!("gs://{}", &self.pha_sum_part_bucket))
+        StoragePath::from_str(&format!(
+            "gs://{}",
+            if is_pha {
+                &self.pha_sum_part_bucket
+            } else {
+                &self.facilitator_sum_part_bucket
+            }
+        ))
     }
 }
 
@@ -308,13 +323,15 @@ mod tests {
             peer_validation_bucket: "us-west-1/validation".to_string(),
         };
         assert_eq!(manifest, expected_manifest);
-        let batch_signing_key = manifest.batch_signing_public_key("fake-key-2").unwrap();
+        let batch_signing_keys = manifest.batch_signing_public_keys().unwrap();
         let content = b"some content";
         let signature = default_ingestor_private_key()
             .key
             .sign(&SystemRandom::new(), content)
             .unwrap();
-        batch_signing_key
+        batch_signing_keys
+            .get("fake-key-2")
+            .unwrap()
             .verify(content, signature.as_ref())
             .unwrap();
 
@@ -465,7 +482,7 @@ mod tests {
         for invalid_manifest in &manifests_with_invalid_public_keys {
             let reader = Cursor::new(invalid_manifest);
             let manifest = SpecificManifest::from_reader(reader).unwrap();
-            assert!(manifest.batch_signing_public_key("fake-key-1").is_err());
+            assert!(manifest.batch_signing_public_keys().is_err());
         }
     }
 
@@ -497,7 +514,7 @@ mod tests {
             "expiration": "2021-01-15T18:53:20Z"
         },
         "another-key": {
-            "public-key": "not-a-real-key",
+            "public-key": "-----BEGIN PUBLIC KEY-----\nMFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAE/8OzWHOvmin1KeaiMWFQXfNwS9uZ\n839EjwMff1VB4dnurW38FRP+Z0KxIdvvrPsGMWdPXoTASRAPEHHqpWlTlg==\n-----END PUBLIC KEY-----\n",
             "expiration": "2021-01-15T18:53:20Z"
         }
     }
@@ -512,10 +529,9 @@ mod tests {
             Some("arn:aws:iam::338276578713:role/ingestor-1-role".to_owned())
         );
         assert_eq!(manifest.server_identity.google_service_account, None);
-        manifest
-            .batch_signing_public_key("key-identifier-1")
-            .unwrap();
-        assert!(manifest.batch_signing_public_key("nosuchkey").is_err());
+        let batch_signing_public_keys = manifest.batch_signing_public_keys().unwrap();
+        batch_signing_public_keys.get("key-identifier-1").unwrap();
+        assert!(batch_signing_public_keys.get("nosuchkey").is_none());
 
         let manifest =
             IngestionServerGlobalManifest::from_reader(Cursor::new(manifest_with_gcp_identity))
@@ -525,10 +541,9 @@ mod tests {
             manifest.server_identity.google_service_account,
             Some(123456789012345)
         );
-        manifest
-            .batch_signing_public_key("key-identifier-2")
-            .unwrap();
-        assert!(manifest.batch_signing_public_key("nosuchkey").is_err());
+        let batch_signing_public_keys = manifest.batch_signing_public_keys().unwrap();
+        batch_signing_public_keys.get("key-identifier-2").unwrap();
+        assert!(batch_signing_public_keys.get("nosuchkey").is_none());
     }
 
     #[test]
@@ -599,7 +614,7 @@ mod tests {
             "#;
 
         let manifest = PortalServerGlobalManifest::from_reader(Cursor::new(manifest)).unwrap();
-        if let StoragePath::GCSPath(path) = manifest.facilitator_sum_part_bucket().unwrap() {
+        if let StoragePath::GCSPath(path) = manifest.sum_part_bucket(false).unwrap() {
             assert_eq!(
                 path,
                 GCSPath {
@@ -610,7 +625,7 @@ mod tests {
         } else {
             assert!(false, "unexpected storage path type");
         }
-        if let StoragePath::GCSPath(path) = manifest.pha_sum_part_bucket().unwrap() {
+        if let StoragePath::GCSPath(path) = manifest.sum_part_bucket(true).unwrap() {
             assert_eq!(
                 path,
                 GCSPath {

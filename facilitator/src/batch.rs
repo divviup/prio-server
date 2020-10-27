@@ -12,6 +12,7 @@ use ring::{
     signature::{EcdsaKeyPair, Signature, UnparsedPublicKey},
 };
 use std::{
+    collections::HashMap,
     io::{Cursor, Read},
     marker::PhantomData,
 };
@@ -104,6 +105,7 @@ pub struct BatchReader<'a, H, P> {
     batch: Batch,
     transport: &'a mut dyn Transport,
     packet_schema: Schema,
+
     // These next two fields are not real and are used because not using H and P
     // in the struct definition is an error.
     phantom_header: PhantomData<*const H>,
@@ -122,8 +124,14 @@ impl<'a, H: Header, P: Packet> BatchReader<'a, H, P> {
     }
 
     /// Return the parsed header from this batch, but only if its signature is
-    /// valid.
-    pub fn header(&mut self, key: &UnparsedPublicKey<Vec<u8>>) -> Result<H> {
+    /// valid. The signature is checked by getting the key_identifier value from
+    /// the signature message, using that to obtain a public key from the
+    /// provided public_keys map, and using that key to check the ECDSA P256
+    /// signature.
+    pub fn header(
+        &mut self,
+        public_keys: &HashMap<String, UnparsedPublicKey<Vec<u8>>>,
+    ) -> Result<H> {
         let signature = BatchSignature::read(self.transport.get(self.batch.signature_key())?)?;
 
         let mut header_buf = Vec::new();
@@ -132,7 +140,13 @@ impl<'a, H: Header, P: Packet> BatchReader<'a, H, P> {
             .read_to_end(&mut header_buf)
             .context("failed to read header from transport")?;
 
-        key.verify(&header_buf, &signature.batch_header_signature)
+        public_keys
+            .get(&signature.key_identifier)
+            .context(format!(
+                "key identifier {} not present in key map",
+                signature.key_identifier,
+            ))?
+            .verify(&header_buf, &signature.batch_header_signature)
             .context("invalid signature on header")?;
 
         Ok(H::read(Cursor::new(header_buf))?)
@@ -362,7 +376,9 @@ mod tests {
                 .unwrap_or_else(|_| panic!("could not get batch file {}", extension));
         }
 
-        let header_again = batch_reader.header(read_key);
+        let mut key_map = HashMap::new();
+        key_map.insert("key-identifier".to_owned(), read_key.clone());
+        let header_again = batch_reader.header(&key_map);
         if !keys_match {
             assert!(
                 header_again.is_err(),

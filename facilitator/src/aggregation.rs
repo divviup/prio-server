@@ -13,8 +13,8 @@ use prio::{
     encrypt::PrivateKey,
     server::{Server, VerificationMessage},
 };
-use ring::signature::{KeyPair, UnparsedPublicKey, ECDSA_P256_SHA256_ASN1};
-use std::convert::TryFrom;
+use ring::signature::UnparsedPublicKey;
+use std::{collections::HashMap, convert::TryFrom};
 use uuid::Uuid;
 
 pub struct BatchAggregator<'a> {
@@ -26,9 +26,10 @@ pub struct BatchAggregator<'a> {
     peer_validation_transport: &'a mut dyn Transport,
     ingestion_transport: &'a mut dyn Transport,
     aggregation_batch: BatchWriter<'a, SumPart, InvalidPacket>,
-    ingestor_key: &'a UnparsedPublicKey<Vec<u8>>,
+    ingestor_public_keys: &'a HashMap<String, UnparsedPublicKey<Vec<u8>>>,
     share_processor_signing_key: &'a BatchSigningKey,
-    peer_share_processor_key: &'a UnparsedPublicKey<Vec<u8>>,
+    own_share_processor_public_keys: &'a HashMap<String, UnparsedPublicKey<Vec<u8>>>,
+    peer_share_processor_public_keys: &'a HashMap<String, UnparsedPublicKey<Vec<u8>>>,
     packet_decryption_keys: Vec<PrivateKey>,
 }
 
@@ -43,9 +44,10 @@ impl<'a> BatchAggregator<'a> {
         own_validation_transport: &'a mut dyn Transport,
         peer_validation_transport: &'a mut dyn Transport,
         aggregation_transport: &'a mut dyn Transport,
-        ingestor_key: &'a UnparsedPublicKey<Vec<u8>>,
+        ingestor_public_keys: &'a HashMap<String, UnparsedPublicKey<Vec<u8>>>,
         share_processor_signing_key: &'a BatchSigningKey,
-        peer_share_processor_key: &'a UnparsedPublicKey<Vec<u8>>,
+        own_share_processor_public_keys: &'a HashMap<String, UnparsedPublicKey<Vec<u8>>>,
+        peer_share_processor_public_keys: &'a HashMap<String, UnparsedPublicKey<Vec<u8>>>,
         packet_decryption_keys: Vec<PrivateKey>,
     ) -> Result<BatchAggregator<'a>> {
         Ok(BatchAggregator {
@@ -65,9 +67,10 @@ impl<'a> BatchAggregator<'a> {
                 ),
                 aggregation_transport,
             ),
-            ingestor_key,
+            ingestor_public_keys,
             share_processor_signing_key,
-            peer_share_processor_key,
+            own_share_processor_public_keys,
+            peer_share_processor_public_keys,
             packet_decryption_keys,
         })
     }
@@ -75,10 +78,6 @@ impl<'a> BatchAggregator<'a> {
     /// Compute the sum part for all the provided batch IDs and write it out to
     /// the aggregation transport.
     pub fn generate_sum_part(&mut self, batch_ids: &[(Uuid, NaiveDateTime)]) -> Result<()> {
-        let share_processor_public_key = UnparsedPublicKey::new(
-            &ECDSA_P256_SHA256_ASN1,
-            Vec::from(self.share_processor_signing_key.key.public_key().as_ref()),
-        );
         let mut invalid_uuids = Vec::new();
 
         let ingestion_header = self.ingestion_header(&batch_ids[0].0, &batch_ids[0].1)?;
@@ -95,13 +94,7 @@ impl<'a> BatchAggregator<'a> {
             .collect::<Vec<Server>>();
 
         for batch_id in batch_ids {
-            self.aggregate_share(
-                &batch_id.0,
-                &batch_id.1,
-                &share_processor_public_key,
-                &mut servers,
-                &mut invalid_uuids,
-            )?;
+            self.aggregate_share(&batch_id.0, &batch_id.1, &mut servers, &mut invalid_uuids)?;
         }
 
         // TODO(timg) what exactly do we write out when there are no invalid
@@ -172,7 +165,7 @@ impl<'a> BatchAggregator<'a> {
                 Batch::new_ingestion(self.aggregation_name, batch_id, batch_date),
                 self.ingestion_transport,
             );
-        let ingestion_header = ingestion_batch.header(&self.ingestor_key)?;
+        let ingestion_header = ingestion_batch.header(self.ingestor_public_keys)?;
         Ok(ingestion_header)
     }
 
@@ -183,7 +176,6 @@ impl<'a> BatchAggregator<'a> {
         &mut self,
         batch_id: &Uuid,
         batch_date: &NaiveDateTime,
-        share_processor_public_key: &UnparsedPublicKey<Vec<u8>>,
         servers: &mut Vec<Server>,
         invalid_uuids: &mut Vec<Uuid>,
     ) -> Result<()> {
@@ -203,9 +195,10 @@ impl<'a> BatchAggregator<'a> {
                 self.peer_validation_transport,
             );
         let peer_validation_header =
-            peer_validation_batch.header(&self.peer_share_processor_key)?;
-        let own_validation_header = own_validation_batch.header(share_processor_public_key)?;
-        let ingestion_header = ingestion_batch.header(&self.ingestor_key)?;
+            peer_validation_batch.header(self.peer_share_processor_public_keys)?;
+        let own_validation_header =
+            own_validation_batch.header(self.own_share_processor_public_keys)?;
+        let ingestion_header = ingestion_batch.header(self.ingestor_public_keys)?;
 
         // Make sure all the parameters in the headers line up
         if !peer_validation_header.check_parameters(&own_validation_header) {
