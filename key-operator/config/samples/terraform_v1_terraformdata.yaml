@@ -1,0 +1,7 @@
+apiVersion: terraform.isrg-prio.com/v1
+kind: TerraformData
+metadata:
+  name: terraformdata-sample
+spec:
+  # Add fields here
+  foo: bar

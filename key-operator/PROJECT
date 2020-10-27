@@ -1,0 +1,11 @@
+domain: isrg-prio.com
+layout: go.kubebuilder.io/v2
+projectName: key-operator
+repo: github.com/abetterinternet/key-operator
+resources:
+- group: terraform
+  kind: TerraformData
+  version: v1
+version: 3-alpha
+plugins:
+  go.sdk.operatorframework.io/v2-alpha: {}

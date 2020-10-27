@@ -1,0 +1,8 @@
+apiVersion: terraform.isrg-prio.com/v1
+kind: TerraformData
+metadata:
+  name: terraformdata-sample
+  namespace: test-pha-1
+spec:
+  # Add fields here
+  terraformOutput: "Some Output"
