@@ -13,6 +13,8 @@ import (
 	"os"
 	"strings"
 
+	batchv1 "k8s.io/api/batch/v1"
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
 	_ "k8s.io/client-go/plugin/pkg/client/auth/gcp"
@@ -21,6 +23,9 @@ import (
 	"cloud.google.com/go/storage"
 	"google.golang.org/api/iterator"
 )
+
+var BuildID string
+var BuildTime string
 
 // batchMap is used to store information about a batch, indexed by the basename
 // of that batch.
@@ -42,22 +47,23 @@ func basename(s string) string {
 	return s
 }
 
+var k8sNS = flag.String("k8s-namespace", "", "Kubernetes namespace")
+
 func main() {
 	inputBucket := flag.String("input-bucket", "", "Name of input bucket (required)")
-	k8sNS := flag.String("k8s-namespace", "", "Kubernetes namespace")
 	flag.Parse()
 	if *inputBucket == "" {
 		flag.Usage()
 	}
 
 	log.Printf("starting %s", os.Args[0])
-	if err := work(*inputBucket, *k8sNS); err != nil {
+	if err := work(context.Background(), *inputBucket); err != nil {
 		log.Fatal(err)
 	}
 	log.Print("done")
 }
 
-func work(inputBucket, k8sNS string) error {
+func work(ctx context.Context, inputBucket string) error {
 	config, err := rest.InClusterConfig()
 	if err != nil {
 		return fmt.Errorf("cluster config: %w", err)
@@ -68,13 +74,6 @@ func work(inputBucket, k8sNS string) error {
 		return fmt.Errorf("clientset: %w", err)
 	}
 
-	pods, err := clientset.CoreV1().Pods(k8sNS).List(context.TODO(), metav1.ListOptions{})
-	if err != nil {
-		return fmt.Errorf("getting pods: %w", err)
-	}
-	log.Printf("There are %d pods in the cluster", len(pods.Items))
-
-	ctx := context.Background()
 	client, err := storage.NewClient(ctx)
 	if err != nil {
 		return fmt.Errorf("storage.newClient: %w", err)
@@ -91,7 +90,7 @@ func work(inputBucket, k8sNS string) error {
 			break
 		}
 		if err != nil {
-			return fmt.Errorf("iterating on inputBucket objects: %w", err)
+			return fmt.Errorf("iterating on inputBucket objects from %q: %w", inputBucket, err)
 		}
 		name := attrs.Name
 		basename := basename(name)
@@ -111,16 +110,78 @@ func work(inputBucket, k8sNS string) error {
 		names = append(names, attrs.Name)
 	}
 
-	var readybatches []*batch
-	var unreadybatches []*batch
+	var readyBatches []string
 	for k, v := range batches {
 		if v.metadata && v.avro && v.sig {
 			log.Printf("ready: %s", k)
-			readybatches = append(readybatches, v)
+			readyBatches = append(readyBatches, k)
 		} else {
 			log.Printf("unready: %s", k)
-			unreadybatches = append(unreadybatches, v)
 		}
 	}
+
+	log.Printf("starting %d jobs", len(readyBatches))
+	for _, batchName := range readyBatches {
+		err = startJob(ctx, clientset, batchName)
+		if err != nil {
+			return fmt.Errorf("starting job for batch %q: %w", batchName, err)
+		}
+	}
+	return nil
+}
+
+func startJob(ctx context.Context, clientset *kubernetes.Clientset, batchName string) error {
+	log.Printf("starting job for batch %q...", batchName)
+	jobName := fmt.Sprintf("i-batch-%s", strings.ReplaceAll(batchName, "/", "-"))
+
+	pathComponents := strings.Split(batchName, "/")
+	batchID := pathComponents[len(pathComponents)-1]
+	batchDate := strings.Join(pathComponents[0:len(pathComponents)-1], "/")
+	job := &batchv1.Job{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      jobName,
+			Namespace: *k8sNS,
+		},
+		Spec: batchv1.JobSpec{
+			Template: corev1.PodTemplateSpec{
+				Spec: corev1.PodSpec{
+					RestartPolicy: "Never",
+					Containers: []corev1.Container{
+						{
+							Args: []string{
+								"batch-intake",
+								"--s3-use-credentials-from-gke-metadata",
+								"--aggregation-id", "fake-1",
+								"--batch-id", batchID,
+								"--date", batchDate,
+								"--ingestion-bucket", "gs://tbd",
+								"--validation-bucket", "gs://tbd",
+								"--ingestor-public-key", "what_is_my_pubkey",
+								"--ecies-private-key", "what_is_my_privkey",
+								"--share-processor-private-key", "what_is_my_other_privkey",
+							},
+							Name:            "facile-container",
+							Image:           "us.gcr.io/jsha-prio-bringup/letsencrypt/prio-facilitator:7.7.7",
+							ImagePullPolicy: "Always",
+						},
+					},
+				},
+			},
+		},
+	}
+	createdJob, err := clientset.BatchV1().Jobs(*k8sNS).Create(ctx, job, metav1.CreateOptions{})
+	if err != nil {
+		// TODO: Checking an error for a substring is pretty clumsy. Figure out if k8s client
+		// returns typed errors.
+		if strings.HasSuffix(err.Error(), "already exists") {
+			log.Printf("skipping %q because a job for it already exists (err %T = %#v)",
+				batchName, err, err)
+			return nil
+		} else {
+			return fmt.Errorf("creating job: %w", err)
+		}
+	}
+	log.Printf("Created job %q: %#v", jobName, createdJob.ObjectMeta.UID)
+
 	return nil
 }

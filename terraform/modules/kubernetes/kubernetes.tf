@@ -223,7 +223,7 @@ resource "kubernetes_role" "workflow_manager_role" {
 
   rule {
     // API group "" means the core API group.
-    api_groups = [""]
+    api_groups = ["batch", ""]
     // Workflow manager can list pods and create jobs.
     // Note: Some of these permissions will probably wind up not being needed.
     // Starting with a moderately generous demonstration set.
