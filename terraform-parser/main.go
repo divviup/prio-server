@@ -52,7 +52,11 @@ func main() {
 
 	for name, data := range configuration {
 		if err := encoder.Encode(data); err != nil {
-			log.Fatalf("Failed to encode the output for %s", name)
+			log.Fatalf("Failed to encode the output for %s:%v", name, err)
+		}
+		// Print out the three newlines to make it easier to separate into multiple files if the admin needs that.
+		if _, err := os.Stdout.WriteString("\n\n\n"); err != nil {
+			log.Fatalf("Failed to write newlines to the output for %s:%v", name, err)
 		}
 	}
 }
