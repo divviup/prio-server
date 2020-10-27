@@ -12,8 +12,7 @@ import (
 func main() {
 	var output terraform.Output
 
-	f, _ := os.Open("output.json")
-	if err := json.NewDecoder(f).Decode(&output); err != nil {
+	if err := json.NewDecoder(os.Stdin).Decode(&output); err != nil {
 		log.Fatalf("failed to parse the terraform output: %v", err)
 	}
 
