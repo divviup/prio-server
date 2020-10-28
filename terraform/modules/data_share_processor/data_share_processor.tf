@@ -249,7 +249,7 @@ resource "google_storage_bucket" "own_validation_bucket" {
 # bucket
 resource "google_storage_bucket_iam_binding" "own_validation_bucket_admin" {
   bucket = google_storage_bucket.own_validation_bucket.name
-  role   = "roles/storage.objectAdmin"
+  role   = "roles/storage.legacyBucketWriter"
   members = [
     module.kubernetes.service_account_email
   ]

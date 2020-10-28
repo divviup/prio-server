@@ -23,7 +23,9 @@ use uuid::Uuid;
 #[test]
 fn end_to_end() {
     let pha_tempdir = tempfile::TempDir::new().unwrap();
+    let pha_copy_tempdir = tempfile::TempDir::new().unwrap();
     let facilitator_tempdir = tempfile::TempDir::new().unwrap();
+    let facilitator_copy_tempdir = tempfile::TempDir::new().unwrap();
 
     let aggregation_name = "fake-aggregation-1".to_owned();
     let date = NaiveDateTime::from_timestamp(2234567890, 654321);
@@ -102,14 +104,28 @@ fn end_to_end() {
         ],
     };
 
-    let mut pha_validate_signable_transport = SignableTransport {
+    let mut pha_peer_validate_signable_transport = SignableTransport {
         transport: Box::new(LocalFileTransport::new(pha_tempdir.path().to_path_buf())),
         batch_signing_key: default_pha_signing_private_key(),
     };
 
-    let mut facilitator_validate_signable_transport = SignableTransport {
+    let mut facilitator_peer_validate_signable_transport = SignableTransport {
         transport: Box::new(LocalFileTransport::new(
             facilitator_tempdir.path().to_path_buf(),
+        )),
+        batch_signing_key: default_facilitator_signing_private_key(),
+    };
+
+    let mut pha_own_validate_signable_transport = SignableTransport {
+        transport: Box::new(LocalFileTransport::new(
+            pha_copy_tempdir.path().to_path_buf(),
+        )),
+        batch_signing_key: default_pha_signing_private_key(),
+    };
+
+    let mut facilitator_own_validate_signable_transport = SignableTransport {
+        transport: Box::new(LocalFileTransport::new(
+            facilitator_copy_tempdir.path().to_path_buf(),
         )),
         batch_signing_key: default_facilitator_signing_private_key(),
     };
@@ -119,7 +135,8 @@ fn end_to_end() {
         &batch_1_uuid,
         &date,
         &mut pha_ingest_transport,
-        &mut pha_validate_signable_transport,
+        &mut pha_peer_validate_signable_transport,
+        &mut pha_own_validate_signable_transport,
         true,
     )
     .unwrap()
@@ -131,7 +148,8 @@ fn end_to_end() {
         &batch_2_uuid,
         &date,
         &mut pha_ingest_transport,
-        &mut pha_validate_signable_transport,
+        &mut pha_peer_validate_signable_transport,
+        &mut pha_own_validate_signable_transport,
         true,
     )
     .unwrap()
@@ -143,7 +161,8 @@ fn end_to_end() {
         &batch_1_uuid,
         &date,
         &mut facilitator_ingest_transport,
-        &mut facilitator_validate_signable_transport,
+        &mut facilitator_peer_validate_signable_transport,
+        &mut facilitator_own_validate_signable_transport,
         false,
     )
     .unwrap()
@@ -155,7 +174,8 @@ fn end_to_end() {
         &batch_2_uuid,
         &date,
         &mut facilitator_ingest_transport,
-        &mut facilitator_validate_signable_transport,
+        &mut facilitator_peer_validate_signable_transport,
+        &mut facilitator_own_validate_signable_transport,
         false,
     )
     .unwrap()

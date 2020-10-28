@@ -72,30 +72,34 @@ impl Write for DigestWriter {
     }
 }
 
-/// SidecarWriter wraps an std::io::Write, but also writes any buffers passed to
-/// it into a second std::io::Write.
+/// SidecarWriter wraps a vector of std::io::Writes of one type and writes all
+/// provided buffers to them. It also writes all buffers to an additional
+/// instance of std::io:Write that may be of a different type than the ones in
+/// the vector.
 pub struct SidecarWriter<T: Write, W: Write> {
-    writer: T,
+    writers: Vec<T>,
     sidecar: W,
 }
 
 impl<T: Write, W: Write> SidecarWriter<T, W> {
-    fn new(writer: T, sidecar: W) -> SidecarWriter<T, W> {
-        SidecarWriter { writer, sidecar }
+    fn new(writers: Vec<T>, sidecar: W) -> SidecarWriter<T, W> {
+        SidecarWriter { writers, sidecar }
     }
 }
 
 impl<T: Write, W: Write> Write for SidecarWriter<T, W> {
     fn write(&mut self, buf: &[u8]) -> Result<usize, std::io::Error> {
-        // We might get a short write into whatever writer is, so make sure the
-        // sidecar writer doesn't get ahead in that case.
-        let n = self.writer.write(buf)?;
-        self.sidecar.write_all(&buf[..n])?;
-        Ok(n)
+        for writer in &mut self.writers {
+            writer.write_all(buf)?;
+        }
+        self.sidecar.write_all(buf)?;
+        Ok(buf.len())
     }
 
     fn flush(&mut self) -> Result<(), std::io::Error> {
-        self.writer.flush()?;
+        for writer in &mut self.writers {
+            writer.flush()?;
+        }
         self.sidecar.flush()
     }
 }
