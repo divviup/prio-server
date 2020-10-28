@@ -41,18 +41,24 @@ spec:
               type: string
             healthAuthorityName:
               type: string
+            manifestBucket:
+              type: string
           required:
           - certificateFQDN
           - healthAuthorityName
+          - manifestBucket
           type: object
         status:
           description: TerraformDataStatus defines the observed state of TerraformData
           properties:
+            configMapCreated:
+              type: boolean
             jobScheduled:
               type: boolean
             keyCreated:
               type: boolean
           required:
+          - configMapCreated
           - jobScheduled
           - keyCreated
           type: object
@@ -109,6 +115,14 @@ metadata:
   creationTimestamp: null
   name: key-operator-manager-role
 rules:
+- apiGroups:
+  - ""
+  resources:
+  - secret
+  verbs:
+  - create
+  - get
+  - patch
 - apiGroups:
   - terraform.isrg-prio.com
   resources:

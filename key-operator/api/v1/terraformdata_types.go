@@ -30,6 +30,7 @@ type TerraformDataSpec struct {
 
 	CertificateFQDN     string `json:"certificateFQDN"`
 	HealthAuthorityName string `json:"healthAuthorityName"`
+	ManifestBucket      string `json:"manifestBucket"`
 }
 
 // TerraformDataStatus defines the observed state of TerraformData
@@ -37,8 +38,9 @@ type TerraformDataStatus struct {
 	// INSERT ADDITIONAL STATUS FIELD - define observed state of cluster
 	// Important: Run "make" to regenerate code after modifying this file
 
-	KeyCreated   bool `json:"keyCreated"`
-	JobScheduled bool `json:"jobScheduled"`
+	ConfigMapCreated bool `json:"configMapCreated"`
+	KeyCreated       bool `json:"keyCreated"`
+	JobScheduled     bool `json:"jobScheduled"`
 }
 
 // +kubebuilder:object:root=true

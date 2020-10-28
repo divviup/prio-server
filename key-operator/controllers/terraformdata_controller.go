@@ -44,14 +44,16 @@ type TerraformDataReconciler struct {
 
 // +kubebuilder:rbac:groups=terraform.isrg-prio.com,resources=terraformdata,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=terraform.isrg-prio.com,resources=terraformdata/status,verbs=get;update;patch
+// +kubebuilder:rbac:groups=core,resources=secrets,verbs=get;create;patch;list
+// +kubebuilder:rbac:groups=core,resources=configmaps,verbs=get;create;patch;list
 
 func (r *TerraformDataReconciler) Reconcile(req ctrl.Request) (ctrl.Result, error) {
 	ctx := context.Background()
-	_ = r.Log.WithValues("terraformdata", req.NamespacedName)
 
 	// your logic here
 	data := terraformv1.TerraformData{}
 	err := r.Get(ctx, req.NamespacedName, &data)
+
 	if err != nil {
 		if errors.IsNotFound(err) {
 			return ctrl.Result{}, nil
@@ -59,7 +61,7 @@ func (r *TerraformDataReconciler) Reconcile(req ctrl.Request) (ctrl.Result, erro
 		r.Log.Error(err, "Failed to get TerraformData")
 		return ctrl.Result{}, err
 	}
-
+	r.Log.WithValues("Status!", data.Status).Info("Status here")
 	if !data.Status.KeyCreated {
 		key, err := key_generator.GenerateKey()
 		if err != nil {
@@ -69,8 +71,26 @@ func (r *TerraformDataReconciler) Reconcile(req ctrl.Request) (ctrl.Result, erro
 		err = r.storePrivateKey(key, data.Spec.HealthAuthorityName, req.Namespace, &data)
 		if err != nil {
 			r.Log.Error(err, "Unable to store private key")
+		} else {
+			data.Status.KeyCreated = true
+			err = r.Update(ctx, &data)
+			if err != nil {
+				r.Log.Error(err, "Unable to update status!!!!")
+			}
 		}
+	}
 
+	if !data.Status.ConfigMapCreated {
+		err := r.replicateConfigMap(req.Namespace, &data)
+		if err != nil {
+			r.Log.Error(err, "Unable to store private key")
+		} else {
+			data.Status.ConfigMapCreated = true
+			err = r.Update(ctx, &data)
+			if err != nil {
+				r.Log.Error(err, "Unable to update status!!!!")
+			}
+		}
 	}
 
 	//r.Update(ctx, data)
@@ -105,7 +125,7 @@ func (r *TerraformDataReconciler) replicateConfigMap(namespace string, terraform
 		Data:      config.Data,
 	}
 
-	// Can only error if the secret already has an owner
+	// Can only error if the config already has an owner
 	_ = ctrl.SetControllerReference(terraformData, newConfig, r.Scheme)
 
 	return r.Create(context.Background(), newConfig)

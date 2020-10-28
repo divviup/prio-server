@@ -27,6 +27,14 @@ spec:
       clusterPermissions:
       - rules:
         - apiGroups:
+          - ""
+          resources:
+          - secret
+          verbs:
+          - create
+          - get
+          - patch
+        - apiGroups:
           - terraform.isrg-prio.com
           resources:
           - terraformdata

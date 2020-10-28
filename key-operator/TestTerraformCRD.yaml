@@ -4,5 +4,6 @@ metadata:
   name: terraformdata-sample
   namespace: test-pha-1
 spec:
-  # Add fields here
-  terraformOutput: "Some Output"
+  certificateFQDN: "Some fqdn"
+  healthAuthorityName: "test-pha-1"
+  manifestBucket: "some bucket"
