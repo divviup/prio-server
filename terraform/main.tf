@@ -179,6 +179,7 @@ module "data_share_processors" {
   source                                  = "./modules/data_share_processor"
   environment                             = var.environment
   data_share_processor_name               = each.key
+  gcp_region                              = var.gcp_region
   gcp_project                             = var.gcp_project
   ingestor_aws_role_arn                   = each.value.ingestor_aws_role_arn
   ingestor_google_service_account_id      = each.value.ingestor_gcp_service_account_id

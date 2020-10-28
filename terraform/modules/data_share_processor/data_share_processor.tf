@@ -10,6 +10,10 @@ variable "gcp_project" {
   type = string
 }
 
+variable "gcp_region" {
+  type = string
+}
+
 variable "ingestor_aws_role_arn" {
   type = string
 }
@@ -226,6 +230,29 @@ POLICY
   tags = {
     environment = var.environment
   }
+}
+
+# Besides the validation bucket owned by the peer data share processor, we write
+# validation batches into a bucket we control so that we can be certain they
+# be available when we perform the aggregation step.
+resource "google_storage_bucket" "own_validation_bucket" {
+  provider = google-beta
+  name     = "${local.resource_prefix}-own-validation"
+  location = var.gcp_region
+  # Force deletion of bucket contents on bucket destroy. Bucket contents would
+  # be re-created by a subsequent deploy so no reason to keep them around.
+  force_destroy               = true
+  uniform_bucket_level_access = true
+}
+
+# Permit the workflow manager and facilitator service account to manage the
+# bucket
+resource "google_storage_bucket_iam_binding" "own_validation_bucket_admin" {
+  bucket = google_storage_bucket.own_validation_bucket.name
+  role   = "roles/storage.objectAdmin"
+  members = [
+    module.kubernetes.service_account_email
+  ]
 }
 
 module "kubernetes" {
