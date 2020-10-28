@@ -157,7 +157,8 @@ resource "aws_s3_bucket" "ingestion_bucket" {
         "AWS": "${aws_iam_role.bucket_role.arn}"
       },
       "Action": [
-        "s3:GetObject"
+        "s3:GetObject",
+        "s3:ListBucket"
       ],
       "Resource": [
         "arn:aws:s3:::${local.ingestion_bucket_name}/*",
@@ -210,7 +211,8 @@ resource "aws_s3_bucket" "peer_validation_bucket" {
         "AWS": "${aws_iam_role.bucket_role.arn}"
       },
       "Action": [
-        "s3:GetObject"
+        "s3:GetObject",
+        "s3:ListBucket"
       ],
       "Resource": [
         "arn:aws:s3:::${local.peer_validation_bucket_name}/*",

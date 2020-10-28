@@ -12,10 +12,8 @@ variable "container_registry" {
 }
 
 variable "workflow_manager_image" {
-  type = string
-  # This should be "prio-data-share-processor" but we have not yet renamed the
-  # container image
-  default = "prio-workflow-manager"
+  type    = string
+  default = "letsencrypt"
 }
 
 variable "workflow_manager_version" {
