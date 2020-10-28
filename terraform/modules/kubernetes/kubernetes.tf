@@ -13,7 +13,7 @@ variable "container_registry" {
 
 variable "workflow_manager_image" {
   type    = string
-  default = "letsencrypt"
+  default = "prio-workflow-manager"
 }
 
 variable "workflow_manager_version" {
