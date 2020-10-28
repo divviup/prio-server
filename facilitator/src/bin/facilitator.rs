@@ -6,13 +6,14 @@ use ring::signature::{
     EcdsaKeyPair, KeyPair, UnparsedPublicKey, ECDSA_P256_SHA256_ASN1,
     ECDSA_P256_SHA256_ASN1_SIGNING,
 };
-use std::str::FromStr;
+use std::{collections::HashMap, str::FromStr};
 use uuid::Uuid;
 
 use facilitator::{
     aggregation::BatchAggregator,
     config::StoragePath,
     intake::BatchIntaker,
+    manifest::{IngestionServerGlobalManifest, PortalServerGlobalManifest, SpecificManifest},
     sample::generate_ingestion_sample,
     test_utils::{
         DEFAULT_FACILITATOR_ECIES_PRIVATE_KEY, DEFAULT_FACILITATOR_SIGNING_PRIVATE_KEY,
@@ -51,11 +52,22 @@ fn path_validator(s: String) -> Result<(), String> {
 // Trait applied to clap::App to extend its builder pattern with some helpers
 // specific to our use case.
 trait AppArgumentAdder {
-    fn add_storage_argument(
+    fn add_instance_name_argument(self: Self) -> Self;
+
+    fn add_manifest_base_url_argument(self: Self, manifest_base_url_arg_name: &'static str)
+        -> Self;
+
+    fn add_storage_arguments(
         self: Self,
-        arg_name: &'static str,
+        storage_arg_name: &'static str,
         s3_arn_arg: &'static str,
         gcs_sa_to_impersonate_arg: &'static str,
+    ) -> Self;
+
+    fn add_peer_batch_public_key_arguments(
+        self: Self,
+        key_argument: &'static str,
+        key_identifier_argument: &'static str,
     ) -> Self;
 
     fn add_batch_signing_key_arguments(self: Self) -> Self;
@@ -64,15 +76,49 @@ trait AppArgumentAdder {
 }
 
 impl<'a, 'b> AppArgumentAdder for App<'a, 'b> {
-    fn add_storage_argument(
+    fn add_instance_name_argument(self: App<'a, 'b>) -> App<'a, 'b> {
+        self.arg(
+            Arg::with_name("instance-name")
+                .long("instance-name")
+                .value_name("NAME")
+                .default_value("fake-pha-fake-ingestor")
+                .help("Name of this data share processor")
+                .long_help(
+                    "Name of this data share processor instance, to be used to \
+                    look up manifests to discover resources owned by this \
+                    server and peers. e.g., the instance for the state \"zc\" \
+                    and ingestor server \"megacorp\" would be \"zc-megacorp\".",
+                ),
+        )
+    }
+
+    fn add_manifest_base_url_argument(
         self: App<'a, 'b>,
-        arg_name: &'static str,
+        manifest_base_url_arg_name: &'static str,
+    ) -> App<'a, 'b> {
+        self.arg(
+            Arg::with_name(manifest_base_url_arg_name)
+                .long(manifest_base_url_arg_name)
+                .value_name("BASE_URL")
+                .help("Base URL relative to which manifests should be fetched")
+                .long_help(
+                    "Base URL from which the other server vends manifests, \
+                    enabling this data share processor to retrieve the global \
+                    or specific manifest for the server and obtain storage \
+                    buckets and batch signing public keys.",
+                ),
+        )
+    }
+
+    fn add_storage_arguments(
+        self: App<'a, 'b>,
+        storage_arg_name: &'static str,
         s3_arn_arg: &'static str,
         gcs_sa_arg: &'static str,
     ) -> App<'a, 'b> {
         self.arg(
-            Arg::with_name(arg_name)
-                .long(arg_name)
+            Arg::with_name(storage_arg_name)
+                .long(storage_arg_name)
                 .value_name("PATH")
                 .default_value(".")
                 .validator(path_validator)
@@ -114,6 +160,38 @@ impl<'a, 'b> AppArgumentAdder for App<'a, 'b> {
                     used. Ignored if the corresponding path is not an S3 \
                     bucket.",
                 ),
+        )
+    }
+
+    fn add_peer_batch_public_key_arguments(
+        self: App<'a, 'b>,
+        key_argument: &'static str,
+        key_identifier_argument: &'static str,
+    ) -> App<'a, 'b> {
+        self.arg(
+            Arg::with_name(key_argument)
+                .long(key_argument)
+                .value_name("B64")
+                .help("Base64 encoded batch public key for the other server")
+                .long_help(
+                    "Base64 encoded ECDSA P256 public key for the other server \
+                    ingestor. If not specified, a default key will be used.",
+                )
+                .default_value(DEFAULT_FACILITATOR_SIGNING_PRIVATE_KEY)
+                .hide_default_value(true)
+                .validator(b64_validator),
+        )
+        .arg(
+            Arg::with_name(key_identifier_argument)
+                .long(key_identifier_argument)
+                .value_name("KEY_ID")
+                .help("Identifier for the batch public key for the other server")
+                .long_help(
+                    "Identifier for the batch public key for the other server. \
+                    Should match the key-identifier in the signature of the \
+                    batch being received from the other server.",
+                )
+                .default_value("default-batch-signing-key-id"),
         )
     }
 
@@ -193,8 +271,8 @@ fn main() -> Result<(), anyhow::Error> {
         .subcommand(
             SubCommand::with_name("generate-ingestion-sample")
                 .about("Generate sample data files")
-                .add_storage_argument("pha-output", "pha-output-s3-arn", "pha-output-gcs-sa-email")
-                .add_storage_argument(
+                .add_storage_arguments("pha-output", "pha-output-s3-arn", "pha-output-gcs-sa-email")
+                .add_storage_arguments(
                     "facilitator-output",
                     "facilitator-output-s3-arn",
                     "facilitator-output-gcp-sa-email",
@@ -315,6 +393,7 @@ fn main() -> Result<(), anyhow::Error> {
         .subcommand(
             SubCommand::with_name("batch-intake")
                 .about("Validate an ingestion share and emit a validation share.")
+                .add_instance_name_argument()
                 .arg(
                     Arg::with_name("aggregation-id")
                         .long("aggregation-id")
@@ -344,39 +423,32 @@ fn main() -> Result<(), anyhow::Error> {
                         .validator(date_validator),
                 )
                 .add_packet_decryption_key_argument()
-                .arg(
-                    Arg::with_name("ingestor-public-key")
-                        .long("ingestor-public-key")
-                        .value_name("B64")
-                        .help("Base64 encoded public key for the ingestor")
-                        .long_help(
-                            "Base64 encoded ECDSA P256 public key for the \
-                            ingestor. If not specified, a default key will be \
-                            used.",
-                        )
-                        .default_value(DEFAULT_FACILITATOR_SIGNING_PRIVATE_KEY)
-                        .hide_default_value(true)
-                        .validator(b64_validator),
+                .add_peer_batch_public_key_arguments(
+                    "ingestor-public-key",
+                    "ingestor-public-key-identifier",
                 )
                 .add_batch_signing_key_arguments()
                 .arg(Arg::with_name("is-first").long("is-first").help(
                     "Whether this is the \"first\" server receiving a share, \
                     i.e., the PHA.",
                 ))
-                .add_storage_argument(
+                .add_manifest_base_url_argument("ingestor-manifest-base-url")
+                .add_storage_arguments(
                     "ingestion-bucket",
                     "ingestion-bucket-s3-arn",
                     "ingestion-bucket-gcp-sa-email",
                 )
-                .add_storage_argument(
-                    "validation-bucket",
-                    "validation-bucket-s3-arn",
-                    "validation-bucket-gcp-sa-email",
+                .add_manifest_base_url_argument("peer-manifest-base-url")
+                .add_storage_arguments(
+                    "peer-validation-bucket",
+                    "peer-validation-bucket-s3-arn",
+                    "peer-validation-bucket-gcp-sa-email",
                 ),
         )
         .subcommand(
             SubCommand::with_name("aggregate")
                 .about("Verify peer validation share and emit sum part.")
+                .add_instance_name_argument()
                 .arg(
                     Arg::with_name("aggregation-id")
                         .long("aggregation-id")
@@ -437,59 +509,40 @@ fn main() -> Result<(), anyhow::Error> {
                         )
                         .validator(date_validator),
                 )
-                .add_storage_argument(
+                .add_manifest_base_url_argument("ingestor-manifest-base-url")
+                .add_storage_arguments(
                     "ingestion-bucket",
                     "ingestion-bucket-s3-arn",
                     "ingestion-bucket-gcp-sa-email",
                 )
-                .add_storage_argument(
+                .add_peer_batch_public_key_arguments(
+                    "ingestor-public-key",
+                    "ingestor-public-key-identifier",
+                )
+                .add_manifest_base_url_argument("own-manifest-base-url")
+                .add_storage_arguments(
                     "own-validation-bucket",
                     "own-validation-bucket-s3-arn",
                     "own-validation-bucket-gcp-sa-email",
                 )
-                .add_storage_argument(
+                .add_manifest_base_url_argument("peer-manifest-base-url")
+                .add_storage_arguments(
                     "peer-validation-bucket",
                     "peer-validation-bucket-s3-arn",
                     "peer-validation-bucket-gcp-sa-email",
                 )
-                .add_storage_argument(
+                .add_peer_batch_public_key_arguments(
+                    "peer-public-key",
+                    "peer-public-key-identifier",
+                )
+                .add_manifest_base_url_argument("portal-server-manifest-base-url")
+                .add_storage_arguments(
                     "aggregation-bucket",
                     "aggregation-bucket-s3-arn",
                     "aggregation-bucket-gcp-sa-email",
                 )
                 .add_packet_decryption_key_argument()
-                .arg(
-                    Arg::with_name("ingestor-public-key")
-                        .long("ingestor-public-key")
-                        .value_name("B64")
-                        .help("Base64 encoded public key for the ingestor")
-                        .long_help(
-                            "Base64 encoded ECDSA P256 public key for the \
-                            ingestor. If not specified, a default key will be \
-                            used.",
-                        )
-                        .default_value(DEFAULT_FACILITATOR_SIGNING_PRIVATE_KEY)
-                        .hide_default_value(true)
-                        .validator(b64_validator),
-                )
                 .add_batch_signing_key_arguments()
-                .arg(
-                    Arg::with_name("peer-share-processor-public-key")
-                        .long("peer-share-processor-public-key")
-                        .value_name("B64")
-                        .help(
-                            "Base64 encoded public key for the peer share \
-                            processor",
-                        )
-                        .long_help(
-                            "Base64 encoded ECDSA P256 public key for the peer \
-                            share processor. If not specified, a default key \
-                            will be used.",
-                        )
-                        .default_value(DEFAULT_FACILITATOR_SIGNING_PRIVATE_KEY)
-                        .hide_default_value(true)
-                        .validator(b64_validator),
-                )
                 .arg(Arg::with_name("is-first").long("is-first").help(
                     "Whether this is the \"first\" server receiving a share, i.e., the PHA.",
                 )),
@@ -503,14 +556,17 @@ fn main() -> Result<(), anyhow::Error> {
         // various parameters are present and valid, so it is safe to use
         // unwrap() here.
         ("generate-ingestion-sample", Some(sub_matches)) => {
-            let mut pha_transport = transport_for_output_path(
-                "pha-output",
+            let pha_storage_path = StoragePath::from_str(matches.value_of("pha-output").unwrap())?;
+            let mut pha_transport = transport_from_arguments(
+                pha_storage_path,
                 "pha-output-s3-arn",
                 "pha-output-gcp-sa-email",
                 sub_matches,
             )?;
-            let mut facilitator_transport = transport_for_output_path(
-                "facilitator-output",
+            let facilitator_storage_path =
+                StoragePath::from_str(matches.value_of("facilitator-output").unwrap())?;
+            let mut facilitator_transport = transport_from_arguments(
+                facilitator_storage_path,
                 "facilitator-output-s3-arn",
                 "facilitator-output-gcp-sa-email",
                 sub_matches,
@@ -566,23 +622,44 @@ fn main() -> Result<(), anyhow::Error> {
             Ok(())
         }
         ("batch-intake", Some(sub_matches)) => {
-            let mut ingestion_transport = transport_for_output_path(
-                "ingestion-bucket",
-                "ingestion-bucket-s3-arn",
-                "ingestion-bucket-gcp-sa-email",
-                sub_matches,
-            )?;
-            let mut validation_transport = transport_for_output_path(
-                "validation-bucket",
-                "ingestion-bucket-s3-arn",
-                "ingestion-bucket-gcp-sa-email",
-                sub_matches,
-            )?;
+            // Get the bucket and batch signing public keys for the ingestor
+            let (mut ingestion_transport, ingestor_pub_key_map) =
+                ingestion_transport_and_keys_from_args(sub_matches)?;
 
+            // Get the keys we will use to decrypt packets in the ingestion
+            // batch
             let packet_decryption_keys = packet_decryption_keys_from_arg(&sub_matches);
 
-            let ingestor_pub_key = public_key_from_arg("ingestor-public-key", sub_matches);
+            // We need the bucket to which we will write validations for the
+            // peer data share processor, which can be provided either directly
+            // via command line argument or must be fetched from the peer
+            // specific manifest.
+            let validation_bucket = match (
+                matches.value_of("peer-validation-bucket"),
+                matches.value_of("peer-manifest-base-url"),
+            ) {
+                (Some(path), _) => StoragePath::from_str(path)?,
+                (None, Some(manifest_base_url)) => SpecificManifest::from_https(
+                    manifest_base_url,
+                    matches.value_of("instance-name").unwrap(),
+                )?
+                .validation_bucket()?,
+                _ => {
+                    return Err(anyhow!(
+                        "peer-validation-bucket is required if \
+                        peer-manifest-base-url is not provided."
+                    ))
+                }
+            };
+            let mut validation_transport = transport_from_arguments(
+                validation_bucket,
+                "peer-validation-bucket-s3-arn",
+                "peer-validation-bucket-gcp-sa-email",
+                sub_matches,
+            )?;
 
+            // Get the key we will use to sign batches written to the peer
+            // validation bucket
             let batch_signing_key = batch_signing_key_from_arg(sub_matches)?;
 
             let mut batch_intaker = BatchIntaker::new(
@@ -599,43 +676,143 @@ fn main() -> Result<(), anyhow::Error> {
                 sub_matches.is_present("is-first"),
                 packet_decryption_keys,
                 &batch_signing_key,
-                &ingestor_pub_key,
+                &ingestor_pub_key_map,
             )?;
             batch_intaker.generate_validation_share()?;
             Ok(())
         }
         ("aggregate", Some(sub_matches)) => {
-            let mut ingestion_transport = transport_for_output_path(
-                "ingestion-bucket",
-                "ingestion-bucket-s3-arn",
-                "ingestion-bucket-gcp-sa-email",
-                sub_matches,
-            )?;
-            let mut own_validation_transport = transport_for_output_path(
-                "own-validation-bucket",
+            let is_first = sub_matches.is_present("is-first");
+            let instance_name = matches.value_of("instance-name").unwrap();
+
+            // Get the ingestion server bucket and batch signing public keys
+            let (mut ingestion_transport, ingestor_pub_key_map) =
+                ingestion_transport_and_keys_from_args(sub_matches)?;
+
+            // Get the keys we will use to decrypt the packets in the ingestion
+            // batch
+            let packet_decryption_keys = packet_decryption_keys_from_arg(&sub_matches);
+
+            // We need the bucket to which we previously wrote our validation
+            // shares, which is owned by the peer data share processor and can
+            // be provided either directly via command line argument or must be
+            // fetched from the peer specific manifest.
+            // TODO: is it safe to assume peer won't have deleted validations we
+            // need? Should we also write copies of our validations to a bucket
+            // we control to ensure they'll be available at aggregation time?
+            let own_validation_bucket = match (
+                matches.value_of("own-validation-bucket"),
+                matches.value_of("peer-manifest-base-url"),
+            ) {
+                (Some(path), _) => StoragePath::from_str(path)?,
+                (None, Some(manifest_base_url)) => SpecificManifest::from_https(
+                    manifest_base_url,
+                    matches.value_of("instance-name").unwrap(),
+                )?
+                .validation_bucket()?,
+                _ => {
+                    return Err(anyhow!(
+                        "peer-validation-bucket is required if \
+                        peer-manifest-base-url is not provided."
+                    ))
+                }
+            };
+            let mut own_validation_transport = transport_from_arguments(
+                own_validation_bucket,
                 "own-validation-bucket-s3-arn",
                 "own-validation-bucket-gcp-sa-email",
                 sub_matches,
             )?;
-            let mut peer_validation_transport = transport_for_output_path(
-                "peer-validation-bucket",
+
+            // To read our own validation shares, we require our own public keys
+            // which we discover in our own specific manifest.
+            let own_public_key_map = match (
+                matches.value_of("batch-signing-private-key"),
+                matches.value_of("batch-signing-private-key-identifier"),
+                matches.value_of("own-manifest-base-url"),
+            ) {
+                (Some(private_key), Some(private_key_identifier), _) => {
+                    public_key_map_from_arg(private_key, private_key_identifier)
+                }
+                (_, _, Some(manifest_base_url)) => {
+                    SpecificManifest::from_https(manifest_base_url, instance_name)?
+                        .batch_signing_public_keys()?
+                }
+                _ => {
+                    return Err(anyhow!(
+                        "batch-signing-private-key and \
+                        batch-signing-private-key-identifier are required if \
+                        own-manifest-base-url is not provided."
+                    ))
+                }
+            };
+
+            // We created the bucket that peers wrote validations into, and so
+            // it is simply provided via argument.
+            let peer_validation_bucket =
+                StoragePath::from_str(matches.value_of("peer-validation-bucket").unwrap())?;
+
+            let mut peer_validation_transport = transport_from_arguments(
+                peer_validation_bucket,
                 "peer-validation-bucket-s3-arn",
                 "peer-validation-bucket-gcp-sa-email",
                 sub_matches,
             )?;
-            let mut aggregation_transport = transport_for_output_path(
-                "aggregation-bucket",
+
+            // We need the public keys the peer data share processor used to
+            // sign messages, which we can obtain by argument or by discovering
+            // their specific manifest.
+            let peer_share_processor_pub_key_map = match (
+                matches.value_of("peer-public-key"),
+                matches.value_of("peer-public-key-identifier"),
+                matches.value_of("peer-manifest-base-url"),
+            ) {
+                (Some(public_key), Some(public_key_identifier), _) => {
+                    public_key_map_from_arg(public_key, public_key_identifier)
+                }
+                (_, _, Some(manifest_base_url)) => {
+                    SpecificManifest::from_https(manifest_base_url, instance_name)?
+                        .batch_signing_public_keys()?
+                }
+                _ => {
+                    return Err(anyhow!(
+                        "peer-public-key and peer-public-key-identifier are \
+                        required if peer-manifest-base-url is not provided."
+                    ))
+                }
+            };
+
+            // We need the portal server owned bucket to which to write sum part
+            // messages aka aggregations. We can get that from an argument,
+            // absent which we discover it from the portal server global
+            // manifest.
+            let aggregation_bucket = match (
+                matches.value_of("aggregation-bucket"),
+                matches.value_of("portal-server-manifest-base-url"),
+            ) {
+                (Some(path), _) => StoragePath::from_str(path)?,
+                (None, Some(manifest_base_url)) => {
+                    PortalServerGlobalManifest::from_https(manifest_base_url)?
+                        .sum_part_bucket(is_first)?
+                }
+                _ => {
+                    return Err(anyhow!(
+                        "aggregation-bucket is required if \
+                        portal-server-manifest-base-url is not provided."
+                    ))
+                }
+            };
+
+            let mut aggregation_transport = transport_from_arguments(
+                aggregation_bucket,
                 "aggregation-bucket-s3-arn",
                 "aggregation-bucket-gcp-sa-email",
                 sub_matches,
             )?;
 
-            let ingestor_pub_key = public_key_from_arg("ingestor-public-key", sub_matches);
-            let peer_share_processor_pub_key =
-                public_key_from_arg("peer-share-processor-public-key", sub_matches);
+            // Get the key we will use to sign sum part messages sent to the
+            // portal server.
             let batch_signing_key = batch_signing_key_from_arg(sub_matches)?;
-
-            let packet_decryption_keys = packet_decryption_keys_from_arg(&sub_matches);
 
             let batch_ids: Vec<Uuid> = sub_matches
                 .values_of("batch-id")
@@ -664,14 +841,15 @@ fn main() -> Result<(), anyhow::Error> {
                     || Utc::now().naive_utc(),
                     |v| NaiveDateTime::parse_from_str(&v, DATE_FORMAT).unwrap(),
                 ),
-                sub_matches.is_present("is-first"),
+                is_first,
                 &mut *ingestion_transport,
                 &mut *own_validation_transport,
                 &mut *peer_validation_transport,
                 &mut *aggregation_transport,
-                &ingestor_pub_key,
+                &ingestor_pub_key_map,
                 &batch_signing_key,
-                &peer_share_processor_pub_key,
+                &own_public_key_map,
+                &peer_share_processor_pub_key_map,
                 packet_decryption_keys,
             )?
             .generate_sum_part(&batch_info)?;
@@ -681,17 +859,24 @@ fn main() -> Result<(), anyhow::Error> {
     }
 }
 
-fn public_key_from_arg(arg: &str, matches: &ArgMatches) -> UnparsedPublicKey<Vec<u8>> {
+fn public_key_map_from_arg(
+    key: &str,
+    key_identifier: &str,
+) -> HashMap<String, UnparsedPublicKey<Vec<u8>>> {
     // UnparsedPublicKey::new doesn't return an error, so try parsing the
     // argument as a private key first.
-    let key_bytes = base64::decode(matches.value_of(arg).unwrap()).unwrap();
-    match EcdsaKeyPair::from_pkcs8(&ECDSA_P256_SHA256_ASN1_SIGNING, &key_bytes) {
+    let key_bytes = base64::decode(key).unwrap();
+    let public_key = match EcdsaKeyPair::from_pkcs8(&ECDSA_P256_SHA256_ASN1_SIGNING, &key_bytes) {
         Ok(priv_key) => UnparsedPublicKey::new(
             &ECDSA_P256_SHA256_ASN1,
             Vec::from(priv_key.public_key().as_ref()),
         ),
         Err(_) => UnparsedPublicKey::new(&ECDSA_P256_SHA256_ASN1, key_bytes),
-    }
+    };
+
+    let mut key_map = HashMap::new();
+    key_map.insert(key_identifier.to_owned(), public_key);
+    key_map
 }
 
 fn packet_decryption_keys_from_arg(matches: &ArgMatches) -> Vec<PrivateKey> {
@@ -717,22 +902,76 @@ fn batch_signing_key_from_arg(matches: &ArgMatches) -> Result<BatchSigningKey> {
     })
 }
 
-fn transport_for_output_path(
-    path: &str,
+fn ingestion_transport_and_keys_from_args(
+    matches: &ArgMatches,
+) -> Result<(
+    Box<dyn Transport>,
+    HashMap<String, UnparsedPublicKey<Vec<u8>>>,
+)> {
+    // To read content from an ingestion bucket, we need the bucket, which we
+    // know because our deployment created it, so it is always provided via the
+    // ingestion-bucket argument.
+    let ingestion_bucket = StoragePath::from_str(matches.value_of("ingestion-bucket").unwrap())?;
+
+    let ingestion_transport = transport_from_arguments(
+        ingestion_bucket,
+        "ingestion-bucket-s3-arn",
+        "ingestion-bucket-gcp-sa-email",
+        matches,
+    )?;
+
+    // We also need the public keys the ingestor may have used to sign the
+    // the batch, which can be provided either directly via command line or must
+    // be fetched from the ingestor global manifest.
+    let ingestor_pub_key_map = match (
+        matches.value_of("ingestor-public-key"),
+        matches.value_of("ingestor-public-key-identifier"),
+        matches.value_of("ingestor-manifest-base-url"),
+    ) {
+        (Some(public_key), Some(public_key_identifier), _) => {
+            public_key_map_from_arg(public_key, public_key_identifier)
+        }
+        (_, _, Some(manifest_base_url)) => {
+            IngestionServerGlobalManifest::from_https(manifest_base_url)?
+                .batch_signing_public_keys()?
+        }
+        _ => {
+            return Err(anyhow!(
+                "ingestor-public-key and ingestor-public-key-identifier are \
+                required if ingestor-manifest-base-url is not provided."
+            ))
+        }
+    };
+
+    Ok((ingestion_transport, ingestor_pub_key_map))
+}
+
+fn transport_from_arguments(
+    path: StoragePath,
     s3_arn_arg: &str,
     gcp_sa_email_arg: &str,
     matches: &ArgMatches,
 ) -> Result<Box<dyn Transport>> {
-    let path = StoragePath::from_str(matches.value_of(path).unwrap())?;
+    transport_for_output_path(
+        path,
+        matches.is_present(s3_arn_arg),
+        matches.value_of(gcp_sa_email_arg).map(String::from),
+    )
+}
+
+fn transport_for_output_path(
+    path: StoragePath,
+    use_gke_metadata_credentials: bool,
+    impersonated_gcp_account: Option<String>,
+) -> Result<Box<dyn Transport>> {
     match path {
         StoragePath::S3Path(path) => Ok(Box::new(S3Transport::new(
             path,
-            matches.is_present(s3_arn_arg),
+            use_gke_metadata_credentials,
         ))),
-        StoragePath::GCSPath(path) => Ok(Box::new(GCSTransport::new(
-            path,
-            matches.value_of(gcp_sa_email_arg).map(String::from),
-        ))),
+        StoragePath::GCSPath(path) => {
+            Ok(Box::new(GCSTransport::new(path, impersonated_gcp_account)))
+        }
         StoragePath::LocalPath(path) => Ok(Box::new(LocalFileTransport::new(path))),
     }
 }
