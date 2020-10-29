@@ -1,14 +1,14 @@
 use crate::{
     batch::{Batch, BatchReader, BatchWriter},
     idl::{IngestionDataSharePacket, IngestionHeader, Packet, ValidationHeader, ValidationPacket},
-    transport::Transport,
+    transport::{SignableTransport, VerifiableAndDecryptableTransport},
     BatchSigningKey, Error,
 };
 use anyhow::{anyhow, Context, Result};
 use chrono::NaiveDateTime;
 use prio::{encrypt::PrivateKey, finite_field::Field, server::Server};
 use ring::signature::UnparsedPublicKey;
-use std::{convert::TryFrom, iter::Iterator};
+use std::{collections::HashMap, convert::TryFrom, iter::Iterator};
 use uuid::Uuid;
 
 /// BatchIntaker is responsible for validating a batch of data packet shares
@@ -16,39 +16,35 @@ use uuid::Uuid;
 /// share processor.
 pub struct BatchIntaker<'a> {
     ingestion_batch: BatchReader<'a, IngestionHeader, IngestionDataSharePacket>,
+    ingestor_public_keys: &'a HashMap<String, UnparsedPublicKey<Vec<u8>>>,
+    packet_decryption_keys: &'a Vec<PrivateKey>,
     validation_batch: BatchWriter<'a, ValidationHeader, ValidationPacket>,
-    is_first: bool,
-    packet_decryption_keys: Vec<PrivateKey>,
     batch_signing_key: &'a BatchSigningKey,
-    ingestor_key: &'a UnparsedPublicKey<Vec<u8>>,
+    is_first: bool,
 }
 
 impl<'a> BatchIntaker<'a> {
-    #[allow(clippy::too_many_arguments)] // Grandfathered in
     pub fn new(
         aggregation_name: &str,
         batch_id: &Uuid,
         date: &NaiveDateTime,
-        ingestion_transport: &'a mut dyn Transport,
-        validation_transport: &'a mut dyn Transport,
+        ingestion_transport: &'a mut VerifiableAndDecryptableTransport,
+        validation_transport: &'a mut SignableTransport,
         is_first: bool,
-        packet_decryption_keys: Vec<PrivateKey>,
-        batch_signing_key: &'a BatchSigningKey,
-        ingestor_key: &'a UnparsedPublicKey<Vec<u8>>,
     ) -> Result<BatchIntaker<'a>> {
         Ok(BatchIntaker {
             ingestion_batch: BatchReader::new(
                 Batch::new_ingestion(aggregation_name, batch_id, date),
-                ingestion_transport,
+                &mut *ingestion_transport.transport.transport,
             ),
+            ingestor_public_keys: &ingestion_transport.transport.batch_signing_public_keys,
+            packet_decryption_keys: &ingestion_transport.packet_decryption_keys,
             validation_batch: BatchWriter::new(
                 Batch::new_validation(aggregation_name, batch_id, date, is_first),
-                validation_transport,
+                &mut *validation_transport.transport,
             ),
+            batch_signing_key: &validation_transport.batch_signing_key,
             is_first,
-            packet_decryption_keys,
-            batch_signing_key,
-            ingestor_key,
         })
     }
 
@@ -56,7 +52,7 @@ impl<'a> BatchIntaker<'a> {
     /// and packet file, then computes validation shares and sends them to the
     /// peer share processor.
     pub fn generate_validation_share(&mut self) -> Result<()> {
-        let ingestion_header = self.ingestion_batch.header(&self.ingestor_key)?;
+        let ingestion_header = self.ingestion_batch.header(self.ingestor_public_keys)?;
         if ingestion_header.bins <= 0 {
             return Err(anyhow!(
                 "invalid bins/dimension value {}",
@@ -154,7 +150,7 @@ mod tests {
             default_ingestor_public_key, default_pha_signing_private_key,
             DEFAULT_FACILITATOR_ECIES_PRIVATE_KEY, DEFAULT_PHA_ECIES_PRIVATE_KEY,
         },
-        transport::LocalFileTransport,
+        transport::{LocalFileTransport, VerifiableTransport},
     };
 
     #[test]
@@ -165,28 +161,15 @@ mod tests {
         let aggregation_name = "fake-aggregation-1".to_owned();
         let date = NaiveDateTime::from_timestamp(1234567890, 654321);
         let batch_uuid = Uuid::new_v4();
-        let mut pha_ingest_transport = LocalFileTransport::new(pha_tempdir.path().to_path_buf());
-        let mut facilitator_ingest_transport =
-            LocalFileTransport::new(facilitator_tempdir.path().to_path_buf());
-        let mut pha_validate_transport = LocalFileTransport::new(pha_tempdir.path().to_path_buf());
-        let mut facilitator_validate_transport =
-            LocalFileTransport::new(facilitator_tempdir.path().to_path_buf());
-
-        let pha_ecies_key = PrivateKey::from_base64(DEFAULT_PHA_ECIES_PRIVATE_KEY).unwrap();
-        let facilitator_ecies_key =
-            PrivateKey::from_base64(DEFAULT_FACILITATOR_ECIES_PRIVATE_KEY).unwrap();
-        let ingestor_pub_key = default_ingestor_public_key();
-        let pha_signing_key = default_pha_signing_private_key();
-        let facilitator_signing_key = default_facilitator_signing_private_key();
 
         generate_ingestion_sample(
-            &mut pha_ingest_transport,
-            &mut facilitator_ingest_transport,
+            &mut LocalFileTransport::new(pha_tempdir.path().to_path_buf()),
+            &mut LocalFileTransport::new(facilitator_tempdir.path().to_path_buf()),
             &batch_uuid,
             &aggregation_name,
             &date,
-            &pha_ecies_key,
-            &facilitator_ecies_key,
+            &PrivateKey::from_base64(DEFAULT_PHA_ECIES_PRIVATE_KEY).unwrap(),
+            &PrivateKey::from_base64(DEFAULT_FACILITATOR_ECIES_PRIVATE_KEY).unwrap(),
             &default_ingestor_private_key(),
             10,
             10,
@@ -196,6 +179,46 @@ mod tests {
         )
         .expect("failed to generate sample");
 
+        let mut ingestor_pub_keys = HashMap::new();
+        ingestor_pub_keys.insert(
+            default_ingestor_private_key().identifier,
+            default_ingestor_public_key(),
+        );
+        let mut pha_ingest_transport = VerifiableAndDecryptableTransport {
+            transport: VerifiableTransport {
+                transport: Box::new(LocalFileTransport::new(pha_tempdir.path().to_path_buf())),
+                batch_signing_public_keys: ingestor_pub_keys.clone(),
+            },
+            packet_decryption_keys: vec![
+                PrivateKey::from_base64(DEFAULT_PHA_ECIES_PRIVATE_KEY).unwrap()
+            ],
+        };
+
+        let mut facilitator_ingest_transport = VerifiableAndDecryptableTransport {
+            transport: VerifiableTransport {
+                transport: Box::new(LocalFileTransport::new(
+                    facilitator_tempdir.path().to_path_buf(),
+                )),
+                batch_signing_public_keys: ingestor_pub_keys.clone(),
+            },
+            packet_decryption_keys: vec![PrivateKey::from_base64(
+                DEFAULT_FACILITATOR_ECIES_PRIVATE_KEY,
+            )
+            .unwrap()],
+        };
+
+        let mut pha_validate_transport = SignableTransport {
+            transport: Box::new(LocalFileTransport::new(pha_tempdir.path().to_path_buf())),
+            batch_signing_key: default_pha_signing_private_key(),
+        };
+
+        let mut facilitator_validate_transport = SignableTransport {
+            transport: Box::new(LocalFileTransport::new(
+                facilitator_tempdir.path().to_path_buf(),
+            )),
+            batch_signing_key: default_facilitator_signing_private_key(),
+        };
+
         let mut pha_ingestor = BatchIntaker::new(
             &aggregation_name,
             &batch_uuid,
@@ -203,9 +226,6 @@ mod tests {
             &mut pha_ingest_transport,
             &mut pha_validate_transport,
             true,
-            vec![pha_ecies_key],
-            &pha_signing_key,
-            &ingestor_pub_key,
         )
         .unwrap();
 
@@ -220,9 +240,6 @@ mod tests {
             &mut facilitator_ingest_transport,
             &mut facilitator_validate_transport,
             false,
-            vec![facilitator_ecies_key],
-            &facilitator_signing_key,
-            &ingestor_pub_key,
         )
         .unwrap();
 
