@@ -40,6 +40,8 @@ jobs:
       uses: codecov/codecov-action@v1
       with:
         fail_ci_if_error: false
+        flags: deploy_tool_tests
+        name: deploy tool tests
   
   deploy-tool-lint:
     runs-on: ubuntu-latest

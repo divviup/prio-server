@@ -1,0 +1,46 @@
+name: facilitator-test
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  build_and_test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v2
+      
+      - name: Install rust
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: nightly
+          override: true
+          default: true
+      
+      - name: Install grcov
+        run: cargo install grcov
+
+      - name: Test
+        run: cargo test --all-features --no-fail-fast
+        env:
+          CARGO_INCREMENTAL: '0'
+          RUSTFLAGS: '-Zprofile -Ccodegen-units=1 -Cinline-threshold=0 -Clink-dead-code -Coverflow-checks=off -Cpanic=abort -Zpanic_abort_tests'
+          RUSTDOCFLAGS: '-Zprofile -Ccodegen-units=1 -Cinline-threshold=0 -Clink-dead-code -Coverflow-checks=off -Cpanic=abort -Zpanic_abort_tests'
+        working-directory: facilitator
+
+      - name: Get code coverage
+        run: grcov ./target/debug -s . --llvm --branch --guess-directory-when-missing --ignore-not-existing -t lcov -o coverage.txt
+        working-directory: facilitator
+
+      - name: Upload test coverage
+        if: success()
+        uses: codecov/codecov-action@v1
+        with:
+          fail_ci_if_error: false
+          file: ./facilitator/coverage.txt
+          flags: facilitator_tests
+          name: facilitator tests
