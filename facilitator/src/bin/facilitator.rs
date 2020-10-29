@@ -78,6 +78,23 @@ trait AppArgumentAdder {
     fn add_packet_decryption_key_argument(self: Self) -> Self;
 }
 
+const SHARED_HELP: &str = 
+"Service accounts: Any flag ending in -gcp-sa-email specifies a GCP service account \
+(identified by an email address). Requests to Google Storage (gs://) will be \
+authenticated as this account, by means of impersonation using GKE's Workload \
+Identity feature: https://cloud.google.com/kubernetes-engine/docs/how-to/workload-identity.\
+Such flags are ignored when reading or writing an S3 bucket (s3://). \
+\
+Flags ending in -s3-arn specify an AWS service account (identified by an `arn:` URI). \
+Requests to S3 will be authenticated by assuming this role. The credential to assume \
+the role is an OIDC auth token obtained by the GKE metadata service. If an -s3-arn flag \
+is omitted, the corresponding requests will be authenticated by direct AWS credentials \
+from ~/.aws/.\
+\
+Keys: All keys are P-256. Public keys are base64-encoded DER SPKI. Private keys are in the \
+base64 encoded format expected by libprio-rs, or base64-encoded PKCS#8, as documented. \
+";
+
 impl<'a, 'b> AppArgumentAdder for App<'a, 'b> {
     fn add_instance_name_argument(self: App<'a, 'b>) -> App<'a, 'b> {
         self.arg(
@@ -105,7 +122,7 @@ impl<'a, 'b> AppArgumentAdder for App<'a, 'b> {
                 .value_name("BASE_URL")
                 .help("Base URL relative to which manifests should be fetched")
                 .long_help(
-                    "Base URL from which the other server vends manifests, \
+                    "Base URL from which the entity named by flag vends manifests, \
                     enabling this data share processor to retrieve the global \
                     or specific manifest for the server and obtain storage \
                     buckets and batch signing public keys.",
@@ -123,46 +140,20 @@ impl<'a, 'b> AppArgumentAdder for App<'a, 'b> {
             Arg::with_name(storage_arg_name)
                 .long(storage_arg_name)
                 .value_name("PATH")
-                .default_value(".")
                 .validator(path_validator)
-                .help("Local or cloud storage to write data into.")
-                .long_help(
-                    "Storage to write into or read from. May be either a local \
-                    filesystem path, (no scheme), an S3 bucket (formatted as \
-                    \"s3://{region}/{bucket-name}\") or a GCS bucket \
-                    (formatted as \"gs://{bucket-name}\").",
-                ),
+                .help("Storage path (gs://, s3:// or local dir name)"),
         )
         .arg(
             Arg::with_name(s3_arn_arg)
                 .long(s3_arn_arg)
+                .value_name("AWS_IAM_ROLE")
                 .help("AWS IAM role to assume when using S3.")
-                .long_help(
-                    "If present, and if the corresponding path is an S3 \
-                    bucket, authentication to S3 will try to use an OIDC \
-                    auth token obtained from the GKE metadata service to \
-                    assume the role specified in the AWS_ROLE_ARN enviornment \
-                    variable. If omitted, and the corresponding path is an S3 \
-                    bucket, credentials found in the environment or ~/.aws/ \
-                    are used. Ignored if the corresponding path is not an S3 \
-                    bucket.",
-                ),
         )
         .arg(
             Arg::with_name(gcs_sa_arg)
                 .long(gcs_sa_arg)
-                .value_name("SA_EMAIL")
+                .value_name("GCP_SERVICE_ACCOUNT")
                 .help("GCP service account to impersonate when using GCS.")
-                .long_help(
-                    "If present, and if the corresponding path is a GCS \
-                    bucket, authentication to GCS will try to impersonate the \
-                    specified GCP service account, using the default Oauth \
-                    token retrieved from the GKE metadata service to \
-                    authenticate to GCP IAM. If omitted, and the corresponding \
-                    path is a GCS bucket, then the default credentials will be \
-                    used. Ignored if the corresponding path is not an S3 \
-                    bucket.",
-                ),
         )
     }
 
@@ -175,11 +166,7 @@ impl<'a, 'b> AppArgumentAdder for App<'a, 'b> {
             Arg::with_name(key_argument)
                 .long(key_argument)
                 .value_name("B64")
-                .help("Base64 encoded batch public key for the other server")
-                .long_help(
-                    "Base64 encoded ECDSA P256 public key for the other server \
-                    ingestor. If not specified, a default key will be used.",
-                )
+                .help("Batch signing public key (for the entity named by flag)")
                 .default_value(DEFAULT_FACILITATOR_SIGNING_PRIVATE_KEY)
                 .hide_default_value(true)
                 .validator(b64_validator),
@@ -188,12 +175,7 @@ impl<'a, 'b> AppArgumentAdder for App<'a, 'b> {
             Arg::with_name(key_identifier_argument)
                 .long(key_identifier_argument)
                 .value_name("KEY_ID")
-                .help("Identifier for the batch public key for the other server")
-                .long_help(
-                    "Identifier for the batch public key for the other server. \
-                    Should match the key-identifier in the signature of the \
-                    batch being received from the other server.",
-                )
+                .help("Identifier for the batch keypair in use by the entity named by flag")
                 .default_value("default-batch-signing-key-id"),
         )
     }
@@ -206,7 +188,7 @@ impl<'a, 'b> AppArgumentAdder for App<'a, 'b> {
                 .value_name("B64_PKCS8")
                 .help("Batch signing private key for this server")
                 .long_help(
-                    "Base64 encoded PKCS#8 document containing ECDSA P256 \
+                    "Base64 encoded PKCS#8 document containing P-256 \
                     batch signing private key to be used by this server when \
                     sending messages to other servers. If not specified, a \
                     fixed private key is used.",
@@ -222,9 +204,10 @@ impl<'a, 'b> AppArgumentAdder for App<'a, 'b> {
                 .value_name("ID")
                 .help("Batch signing private key identifier")
                 .long_help(
-                    "Identifier for the batch signing key, corresponding to an \
-                    entry in this server's global or specific manifest. Used \
-                    to construct PrioBatchSignature messages.",
+                    "Identifier for the batch signing keypair to use, \
+                    corresponding to an entry in this server's global \
+                    or specific manifest. Used to construct \
+                    PrioBatchSignature messages.",
                 )
                 .default_value("default-batch-signing-key-id")
                 .hide_default_value(true),
@@ -237,13 +220,10 @@ impl<'a, 'b> AppArgumentAdder for App<'a, 'b> {
                 .long("packet-decryption-keys")
                 .value_name("B64")
                 .env("PACKET_DECRYPTION_KEYS")
-                .help("Packet decryption keys for this server.")
                 .long_help(
-                    "ECDSA P256 keys to be used by this server to decrypt \
-                    ingestion share packets. Values should be the base64 \
-                    encoded format expected by libprio-rs, separated by ','. \
-                    Multiple keys may be provided. When decrypting packets, \
-                    all provided keys will be tried until one works.",
+                    "List of packet decryption private keys, comma separated. \
+                    When decrypting packets, all provided keys will be tried \
+                    until one works.",
                 )
                 .multiple(true)
                 .min_values(1)
@@ -394,8 +374,8 @@ fn main() -> Result<(), anyhow::Error> {
                 ),
         )
         .subcommand(
-            SubCommand::with_name("batch-intake")
-                .about("Validate an ingestion share and emit a validation share.")
+            SubCommand::with_name("intake-batch")
+                .about(format!("Validate an input share (from an ingestor's bucket) and emit a validation share.\n\n{}", SHARED_HELP).as_str())
                 .add_instance_name_argument()
                 .arg(
                     Arg::with_name("aggregation-id")
@@ -437,9 +417,9 @@ fn main() -> Result<(), anyhow::Error> {
                 ))
                 .add_manifest_base_url_argument("ingestor-manifest-base-url")
                 .add_storage_arguments(
-                    "ingestion-bucket",
-                    "ingestion-bucket-s3-arn",
-                    "ingestion-bucket-gcp-sa-email",
+                    "ingestor-bucket",
+                    "ingestor-bucket-s3-arn",
+                    "ingestor-bucket-gcp-sa-email",
                 )
                 .add_manifest_base_url_argument("peer-manifest-base-url")
                 .add_storage_arguments(
@@ -450,7 +430,7 @@ fn main() -> Result<(), anyhow::Error> {
         )
         .subcommand(
             SubCommand::with_name("aggregate")
-                .about("Verify peer validation share and emit sum part.")
+                .about(format!("Verify peer validation share and emit sum part.\n\n{}", SHARED_HELP).as_str())
                 .add_instance_name_argument()
                 .arg(
                     Arg::with_name("aggregation-id")
@@ -514,9 +494,9 @@ fn main() -> Result<(), anyhow::Error> {
                 )
                 .add_manifest_base_url_argument("ingestor-manifest-base-url")
                 .add_storage_arguments(
-                    "ingestion-bucket",
-                    "ingestion-bucket-s3-arn",
-                    "ingestion-bucket-gcp-sa-email",
+                    "ingestor-bucket",
+                    "ingestor-bucket-s3-arn",
+                    "ingestor-bucket-gcp-sa-email",
                 )
                 .add_peer_batch_public_key_arguments(
                     "ingestor-public-key",
@@ -625,7 +605,7 @@ fn main() -> Result<(), anyhow::Error> {
             Ok(())
         }
         ("batch-intake", Some(sub_matches)) => {
-            let mut ingestion_transport = ingestion_transport_from_args(sub_matches)?;
+            let mut ingestion_transport = intake_transport_from_args(sub_matches)?;
 
             // We need the bucket to which we will write validations for the
             // peer data share processor, which can be provided either directly
@@ -679,7 +659,7 @@ fn main() -> Result<(), anyhow::Error> {
             let is_first = sub_matches.is_present("is-first");
             let instance_name = matches.value_of("instance-name").unwrap();
 
-            let mut ingestion_transport = ingestion_transport_from_args(sub_matches)?;
+            let mut ingestion_transport = intake_transport_from_args(sub_matches)?;
 
             // We need the bucket to which we previously wrote our validation
             // shares, which is owned by the peer data share processor and can
@@ -882,16 +862,16 @@ fn batch_signing_key_from_arg(matches: &ArgMatches) -> Result<BatchSigningKey> {
     })
 }
 
-fn ingestion_transport_from_args(
+fn intake_transport_from_args(
     matches: &ArgMatches,
 ) -> Result<VerifiableAndDecryptableTransport> {
     // To read content from an ingestion bucket, we need the bucket, which we
     // know because our deployment created it, so it is always provided via the
     // ingestion-bucket argument.
-    let ingestion_bucket = StoragePath::from_str(matches.value_of("ingestion-bucket").unwrap())?;
+    let ingestor_bucket = StoragePath::from_str(matches.value_of("ingestor-bucket").unwrap())?;
 
-    let ingestion_transport = transport_from_arguments(
-        ingestion_bucket,
+    let intake_transport = transport_from_arguments(
+        ingestor_bucket,
         "ingestion-bucket-s3-arn",
         "ingestion-bucket-gcp-sa-email",
         matches,
@@ -934,7 +914,7 @@ fn ingestion_transport_from_args(
 
     Ok(VerifiableAndDecryptableTransport {
         transport: VerifiableTransport {
-            transport: ingestion_transport,
+            transport: intake_transport,
             batch_signing_public_keys: ingestor_pub_key_map,
         },
         packet_decryption_keys,
