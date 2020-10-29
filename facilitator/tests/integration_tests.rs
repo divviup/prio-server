@@ -11,7 +11,10 @@ use facilitator::{
         default_pha_signing_public_key, DEFAULT_FACILITATOR_ECIES_PRIVATE_KEY,
         DEFAULT_PHA_ECIES_PRIVATE_KEY,
     },
-    transport::LocalFileTransport,
+    transport::{
+        LocalFileTransport, SignableTransport, VerifiableAndDecryptableTransport,
+        VerifiableTransport,
+    },
 };
 use prio::{encrypt::PrivateKey, util::reconstruct_shares};
 use std::collections::HashMap;
@@ -30,41 +33,20 @@ fn end_to_end() {
     let batch_1_uuid = Uuid::new_v4();
     let batch_2_uuid = Uuid::new_v4();
 
-    let mut pha_ingest_transport = LocalFileTransport::new(pha_tempdir.path().to_path_buf());
-    let mut facilitator_ingest_transport =
-        LocalFileTransport::new(facilitator_tempdir.path().to_path_buf());
-    let mut pha_validate_transport = LocalFileTransport::new(pha_tempdir.path().to_path_buf());
-    let mut facilitator_validate_transport =
-        LocalFileTransport::new(facilitator_tempdir.path().to_path_buf());
-    let mut aggregation_transport = LocalFileTransport::new(pha_tempdir.path().to_path_buf());
-
-    let pha_ecies_key = PrivateKey::from_base64(DEFAULT_PHA_ECIES_PRIVATE_KEY).unwrap();
-    let facilitator_ecies_key =
-        PrivateKey::from_base64(DEFAULT_FACILITATOR_ECIES_PRIVATE_KEY).unwrap();
     let mut ingestor_pub_keys = HashMap::new();
     ingestor_pub_keys.insert(
         default_ingestor_private_key().identifier,
         default_ingestor_public_key(),
     );
-    let mut pha_pub_keys = HashMap::new();
-    pha_pub_keys.insert(
-        default_pha_signing_private_key().identifier,
-        default_pha_signing_public_key(),
-    );
-    let mut facilitator_pub_keys = HashMap::new();
-    facilitator_pub_keys.insert(
-        default_facilitator_signing_private_key().identifier,
-        default_facilitator_signing_public_key(),
-    );
 
     let batch_1_reference_sum = generate_ingestion_sample(
-        &mut pha_ingest_transport,
-        &mut facilitator_ingest_transport,
+        &mut LocalFileTransport::new(pha_tempdir.path().to_path_buf()),
+        &mut LocalFileTransport::new(facilitator_tempdir.path().to_path_buf()),
         &batch_1_uuid,
         &aggregation_name,
         &date,
-        &pha_ecies_key,
-        &facilitator_ecies_key,
+        &PrivateKey::from_base64(DEFAULT_PHA_ECIES_PRIVATE_KEY).unwrap(),
+        &PrivateKey::from_base64(DEFAULT_FACILITATOR_ECIES_PRIVATE_KEY).unwrap(),
         &default_ingestor_private_key(),
         10,
         10,
@@ -75,13 +57,13 @@ fn end_to_end() {
     .unwrap();
 
     let batch_2_reference_sum = generate_ingestion_sample(
-        &mut pha_ingest_transport,
-        &mut facilitator_ingest_transport,
+        &mut LocalFileTransport::new(pha_tempdir.path().to_path_buf()),
+        &mut LocalFileTransport::new(facilitator_tempdir.path().to_path_buf()),
         &batch_2_uuid,
         &aggregation_name,
         &date,
-        &pha_ecies_key,
-        &facilitator_ecies_key,
+        &PrivateKey::from_base64(DEFAULT_PHA_ECIES_PRIVATE_KEY).unwrap(),
+        &PrivateKey::from_base64(DEFAULT_FACILITATOR_ECIES_PRIVATE_KEY).unwrap(),
         &default_ingestor_private_key(),
         10,
         10,
@@ -91,17 +73,54 @@ fn end_to_end() {
     )
     .unwrap();
 
-    let pha_signing_key = default_pha_signing_private_key();
+    let mut ingestor_pub_keys = HashMap::new();
+    ingestor_pub_keys.insert(
+        default_ingestor_private_key().identifier,
+        default_ingestor_public_key(),
+    );
+    let mut pha_ingest_transport = VerifiableAndDecryptableTransport {
+        transport: VerifiableTransport {
+            transport: Box::new(LocalFileTransport::new(pha_tempdir.path().to_path_buf())),
+            batch_signing_public_keys: ingestor_pub_keys.clone(),
+        },
+        packet_decryption_keys: vec![
+            PrivateKey::from_base64(DEFAULT_PHA_ECIES_PRIVATE_KEY).unwrap(),
+            PrivateKey::from_base64(DEFAULT_FACILITATOR_ECIES_PRIVATE_KEY).unwrap(),
+        ],
+    };
+
+    let mut facilitator_ingest_transport = VerifiableAndDecryptableTransport {
+        transport: VerifiableTransport {
+            transport: Box::new(LocalFileTransport::new(
+                facilitator_tempdir.path().to_path_buf(),
+            )),
+            batch_signing_public_keys: ingestor_pub_keys.clone(),
+        },
+        packet_decryption_keys: vec![
+            PrivateKey::from_base64(DEFAULT_PHA_ECIES_PRIVATE_KEY).unwrap(),
+            PrivateKey::from_base64(DEFAULT_FACILITATOR_ECIES_PRIVATE_KEY).unwrap(),
+        ],
+    };
+
+    let mut pha_validate_signable_transport = SignableTransport {
+        transport: Box::new(LocalFileTransport::new(pha_tempdir.path().to_path_buf())),
+        batch_signing_key: default_pha_signing_private_key(),
+    };
+
+    let mut facilitator_validate_signable_transport = SignableTransport {
+        transport: Box::new(LocalFileTransport::new(
+            facilitator_tempdir.path().to_path_buf(),
+        )),
+        batch_signing_key: default_facilitator_signing_private_key(),
+    };
+
     BatchIntaker::new(
         &aggregation_name,
         &batch_1_uuid,
         &date,
         &mut pha_ingest_transport,
-        &mut pha_validate_transport,
+        &mut pha_validate_signable_transport,
         true,
-        vec![facilitator_ecies_key.clone(), pha_ecies_key.clone()],
-        &pha_signing_key,
-        &ingestor_pub_keys,
     )
     .unwrap()
     .generate_validation_share()
@@ -112,27 +131,20 @@ fn end_to_end() {
         &batch_2_uuid,
         &date,
         &mut pha_ingest_transport,
-        &mut pha_validate_transport,
+        &mut pha_validate_signable_transport,
         true,
-        vec![pha_ecies_key.clone(), facilitator_ecies_key.clone()],
-        &pha_signing_key,
-        &ingestor_pub_keys,
     )
     .unwrap()
     .generate_validation_share()
     .unwrap();
 
-    let facilitator_signing_key = default_facilitator_signing_private_key();
     BatchIntaker::new(
         &aggregation_name,
         &batch_1_uuid,
         &date,
         &mut facilitator_ingest_transport,
-        &mut facilitator_validate_transport,
+        &mut facilitator_validate_signable_transport,
         false,
-        vec![pha_ecies_key.clone(), facilitator_ecies_key.clone()],
-        &facilitator_signing_key,
-        &ingestor_pub_keys,
     )
     .unwrap()
     .generate_validation_share()
@@ -143,11 +155,8 @@ fn end_to_end() {
         &batch_2_uuid,
         &date,
         &mut facilitator_ingest_transport,
-        &mut facilitator_validate_transport,
+        &mut facilitator_validate_signable_transport,
         false,
-        vec![facilitator_ecies_key.clone(), pha_ecies_key.clone()],
-        &facilitator_signing_key,
-        &ingestor_pub_keys,
     )
     .unwrap()
     .generate_validation_share()
@@ -155,59 +164,73 @@ fn end_to_end() {
 
     let batch_ids_and_dates = vec![(batch_1_uuid, date), (batch_2_uuid, date)];
 
+    let mut pha_pub_keys = HashMap::new();
+    pha_pub_keys.insert(
+        default_pha_signing_private_key().identifier,
+        default_pha_signing_public_key(),
+    );
+
+    let mut pha_validate_verifiable_transport = VerifiableTransport {
+        transport: Box::new(LocalFileTransport::new(pha_tempdir.path().to_path_buf())),
+        batch_signing_public_keys: pha_pub_keys.clone(),
+    };
+
+    let mut facilitator_pub_keys = HashMap::new();
+    facilitator_pub_keys.insert(
+        default_facilitator_signing_private_key().identifier,
+        default_facilitator_signing_public_key(),
+    );
+    let mut facilitator_validate_verifiable_transport = VerifiableTransport {
+        transport: Box::new(LocalFileTransport::new(
+            facilitator_tempdir.path().to_path_buf(),
+        )),
+        batch_signing_public_keys: facilitator_pub_keys.clone(),
+    };
+
+    let mut pha_aggregation_transport = SignableTransport {
+        transport: Box::new(LocalFileTransport::new(pha_tempdir.path().to_path_buf())),
+        batch_signing_key: default_pha_signing_private_key(),
+    };
     BatchAggregator::new(
         &aggregation_name,
         &start_date,
         &end_date,
         true,
         &mut pha_ingest_transport,
-        &mut pha_validate_transport,
-        &mut facilitator_validate_transport,
-        &mut aggregation_transport,
-        &ingestor_pub_keys,
-        &pha_signing_key,
-        &pha_pub_keys,
-        &facilitator_pub_keys,
-        vec![pha_ecies_key.clone(), facilitator_ecies_key.clone()],
+        &mut pha_validate_verifiable_transport,
+        &mut facilitator_validate_verifiable_transport,
+        &mut pha_aggregation_transport,
     )
     .unwrap()
     .generate_sum_part(&batch_ids_and_dates)
     .unwrap();
 
+    let mut facilitator_aggregation_transport = SignableTransport {
+        transport: Box::new(LocalFileTransport::new(
+            facilitator_tempdir.path().to_path_buf(),
+        )),
+        batch_signing_key: default_facilitator_signing_private_key(),
+    };
     BatchAggregator::new(
         &aggregation_name,
         &start_date,
         &end_date,
         false,
         &mut facilitator_ingest_transport,
-        &mut facilitator_validate_transport,
-        &mut pha_validate_transport,
-        &mut aggregation_transport,
-        &ingestor_pub_keys,
-        &facilitator_signing_key,
-        &facilitator_pub_keys,
-        &pha_pub_keys,
-        vec![pha_ecies_key.clone(), facilitator_ecies_key.clone()],
+        &mut facilitator_validate_verifiable_transport,
+        &mut pha_validate_verifiable_transport,
+        &mut facilitator_aggregation_transport,
     )
     .unwrap()
     .generate_sum_part(&batch_ids_and_dates)
     .unwrap();
 
-    let mut signing_key_map = HashMap::new();
-    signing_key_map.insert(pha_signing_key.identifier, default_pha_signing_public_key());
-    signing_key_map.insert(
-        facilitator_signing_key.identifier,
-        default_facilitator_signing_public_key(),
-    );
-
     let mut pha_aggregation_batch_reader: BatchReader<'_, SumPart, IngestionDataSharePacket> =
         BatchReader::new(
             Batch::new_sum(&aggregation_name, &start_date, &end_date, true),
-            &mut aggregation_transport,
+            &mut *pha_aggregation_transport.transport,
         );
-    let pha_sum_part = pha_aggregation_batch_reader
-        .header(&signing_key_map)
-        .unwrap();
+    let pha_sum_part = pha_aggregation_batch_reader.header(&pha_pub_keys).unwrap();
     let pha_sum_fields = pha_sum_part.sum().unwrap();
 
     let pha_invalid_packet_reader = pha_aggregation_batch_reader.packet_file_reader(&pha_sum_part);
@@ -222,10 +245,10 @@ fn end_to_end() {
         IngestionDataSharePacket,
     > = BatchReader::new(
         Batch::new_sum(&aggregation_name, &start_date, &end_date, false),
-        &mut aggregation_transport,
+        &mut *facilitator_aggregation_transport.transport,
     );
     let facilitator_sum_part = facilitator_aggregation_batch_reader
-        .header(&signing_key_map)
+        .header(&facilitator_pub_keys)
         .unwrap();
     let facilitator_sum_fields = facilitator_sum_part.sum().unwrap();
 

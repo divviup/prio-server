@@ -19,7 +19,10 @@ use facilitator::{
         DEFAULT_FACILITATOR_ECIES_PRIVATE_KEY, DEFAULT_FACILITATOR_SIGNING_PRIVATE_KEY,
         DEFAULT_PHA_ECIES_PRIVATE_KEY,
     },
-    transport::{GCSTransport, LocalFileTransport, S3Transport, Transport},
+    transport::{
+        GCSTransport, LocalFileTransport, S3Transport, SignableTransport, Transport,
+        VerifiableAndDecryptableTransport, VerifiableTransport,
+    },
     BatchSigningKey, DATE_FORMAT,
 };
 
@@ -622,13 +625,7 @@ fn main() -> Result<(), anyhow::Error> {
             Ok(())
         }
         ("batch-intake", Some(sub_matches)) => {
-            // Get the bucket and batch signing public keys for the ingestor
-            let (mut ingestion_transport, ingestor_pub_key_map) =
-                ingestion_transport_and_keys_from_args(sub_matches)?;
-
-            // Get the keys we will use to decrypt packets in the ingestion
-            // batch
-            let packet_decryption_keys = packet_decryption_keys_from_arg(&sub_matches);
+            let mut ingestion_transport = ingestion_transport_from_args(sub_matches)?;
 
             // We need the bucket to which we will write validations for the
             // peer data share processor, which can be provided either directly
@@ -651,16 +648,16 @@ fn main() -> Result<(), anyhow::Error> {
                     ))
                 }
             };
-            let mut validation_transport = transport_from_arguments(
-                validation_bucket,
-                "peer-validation-bucket-s3-arn",
-                "peer-validation-bucket-gcp-sa-email",
-                sub_matches,
-            )?;
 
-            // Get the key we will use to sign batches written to the peer
-            // validation bucket
-            let batch_signing_key = batch_signing_key_from_arg(sub_matches)?;
+            let mut validation_transport = SignableTransport {
+                transport: transport_from_arguments(
+                    validation_bucket,
+                    "peer-validation-bucket-s3-arn",
+                    "peer-validation-bucket-gcp-sa-email",
+                    sub_matches,
+                )?,
+                batch_signing_key: batch_signing_key_from_arg(sub_matches)?,
+            };
 
             let mut batch_intaker = BatchIntaker::new(
                 &sub_matches.value_of("aggregation-id").unwrap(),
@@ -671,12 +668,9 @@ fn main() -> Result<(), anyhow::Error> {
                     || Utc::now().naive_utc(),
                     |v| NaiveDateTime::parse_from_str(&v, DATE_FORMAT).unwrap(),
                 ),
-                &mut *ingestion_transport,
-                &mut *validation_transport,
+                &mut ingestion_transport,
+                &mut validation_transport,
                 sub_matches.is_present("is-first"),
-                packet_decryption_keys,
-                &batch_signing_key,
-                &ingestor_pub_key_map,
             )?;
             batch_intaker.generate_validation_share()?;
             Ok(())
@@ -685,13 +679,7 @@ fn main() -> Result<(), anyhow::Error> {
             let is_first = sub_matches.is_present("is-first");
             let instance_name = matches.value_of("instance-name").unwrap();
 
-            // Get the ingestion server bucket and batch signing public keys
-            let (mut ingestion_transport, ingestor_pub_key_map) =
-                ingestion_transport_and_keys_from_args(sub_matches)?;
-
-            // Get the keys we will use to decrypt the packets in the ingestion
-            // batch
-            let packet_decryption_keys = packet_decryption_keys_from_arg(&sub_matches);
+            let mut ingestion_transport = ingestion_transport_from_args(sub_matches)?;
 
             // We need the bucket to which we previously wrote our validation
             // shares, which is owned by the peer data share processor and can
@@ -717,7 +705,7 @@ fn main() -> Result<(), anyhow::Error> {
                     ))
                 }
             };
-            let mut own_validation_transport = transport_from_arguments(
+            let own_validation_transport = transport_from_arguments(
                 own_validation_bucket,
                 "own-validation-bucket-s3-arn",
                 "own-validation-bucket-gcp-sa-email",
@@ -752,7 +740,7 @@ fn main() -> Result<(), anyhow::Error> {
             let peer_validation_bucket =
                 StoragePath::from_str(matches.value_of("peer-validation-bucket").unwrap())?;
 
-            let mut peer_validation_transport = transport_from_arguments(
+            let peer_validation_transport = transport_from_arguments(
                 peer_validation_bucket,
                 "peer-validation-bucket-s3-arn",
                 "peer-validation-bucket-gcp-sa-email",
@@ -803,7 +791,7 @@ fn main() -> Result<(), anyhow::Error> {
                 }
             };
 
-            let mut aggregation_transport = transport_from_arguments(
+            let aggregation_transport = transport_from_arguments(
                 aggregation_bucket,
                 "aggregation-bucket-s3-arn",
                 "aggregation-bucket-gcp-sa-email",
@@ -842,15 +830,19 @@ fn main() -> Result<(), anyhow::Error> {
                     |v| NaiveDateTime::parse_from_str(&v, DATE_FORMAT).unwrap(),
                 ),
                 is_first,
-                &mut *ingestion_transport,
-                &mut *own_validation_transport,
-                &mut *peer_validation_transport,
-                &mut *aggregation_transport,
-                &ingestor_pub_key_map,
-                &batch_signing_key,
-                &own_public_key_map,
-                &peer_share_processor_pub_key_map,
-                packet_decryption_keys,
+                &mut ingestion_transport,
+                &mut VerifiableTransport {
+                    transport: own_validation_transport,
+                    batch_signing_public_keys: own_public_key_map,
+                },
+                &mut VerifiableTransport {
+                    transport: peer_validation_transport,
+                    batch_signing_public_keys: peer_share_processor_pub_key_map,
+                },
+                &mut SignableTransport {
+                    transport: aggregation_transport,
+                    batch_signing_key,
+                },
             )?
             .generate_sum_part(&batch_info)?;
             Ok(())
@@ -879,18 +871,6 @@ fn public_key_map_from_arg(
     key_map
 }
 
-fn packet_decryption_keys_from_arg(matches: &ArgMatches) -> Vec<PrivateKey> {
-    matches
-        .values_of("packet-decryption-keys")
-        .unwrap()
-        .map(|k| {
-            PrivateKey::from_base64(k)
-                .context("could not parse encoded packet encryption key")
-                .unwrap()
-        })
-        .collect()
-}
-
 fn batch_signing_key_from_arg(matches: &ArgMatches) -> Result<BatchSigningKey> {
     let key_bytes = base64::decode(matches.value_of("batch-signing-private-key").unwrap()).unwrap();
     let key_identifier = matches
@@ -902,12 +882,9 @@ fn batch_signing_key_from_arg(matches: &ArgMatches) -> Result<BatchSigningKey> {
     })
 }
 
-fn ingestion_transport_and_keys_from_args(
+fn ingestion_transport_from_args(
     matches: &ArgMatches,
-) -> Result<(
-    Box<dyn Transport>,
-    HashMap<String, UnparsedPublicKey<Vec<u8>>>,
-)> {
+) -> Result<VerifiableAndDecryptableTransport> {
     // To read content from an ingestion bucket, we need the bucket, which we
     // know because our deployment created it, so it is always provided via the
     // ingestion-bucket argument.
@@ -943,7 +920,25 @@ fn ingestion_transport_and_keys_from_args(
         }
     };
 
-    Ok((ingestion_transport, ingestor_pub_key_map))
+    // Get the keys we will use to decrypt packets in the ingestion
+    // batch
+    let packet_decryption_keys = matches
+        .values_of("packet-decryption-keys")
+        .unwrap()
+        .map(|k| {
+            PrivateKey::from_base64(k)
+                .context("could not parse encoded packet encryption key")
+                .unwrap()
+        })
+        .collect();
+
+    Ok(VerifiableAndDecryptableTransport {
+        transport: VerifiableTransport {
+            transport: ingestion_transport,
+            batch_signing_public_keys: ingestor_pub_key_map,
+        },
+        packet_decryption_keys,
+    })
 }
 
 fn transport_from_arguments(

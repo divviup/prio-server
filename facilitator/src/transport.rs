@@ -2,7 +2,9 @@ mod gcs;
 mod local;
 mod s3;
 
+use crate::{manifest::BatchSigningPublicKeys, BatchSigningKey};
 use anyhow::Result;
+use prio::encrypt::PrivateKey;
 use std::{
     boxed::Box,
     io::{Read, Write},
@@ -11,6 +13,23 @@ use std::{
 pub use gcs::GCSTransport;
 pub use local::LocalFileTransport;
 pub use s3::S3Transport;
+
+/// A transport along with the public keys that can be used to verify signatures
+/// on the batches read from the transport.
+pub struct VerifiableTransport {
+    pub transport: Box<dyn Transport>,
+    pub batch_signing_public_keys: BatchSigningPublicKeys,
+}
+
+pub struct VerifiableAndDecryptableTransport {
+    pub transport: VerifiableTransport,
+    pub packet_decryption_keys: Vec<PrivateKey>,
+}
+
+pub struct SignableTransport {
+    pub transport: Box<dyn Transport>,
+    pub batch_signing_key: BatchSigningKey,
+}
 
 /// A TransportWriter extends std::io::Write but adds methods that explicitly
 /// allow callers to complete or cancel an upload.

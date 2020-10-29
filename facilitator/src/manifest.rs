@@ -12,6 +12,11 @@ const ECDSA_P256_SPKI_PREFIX: &[u8] = &[
     0x86, 0x48, 0xce, 0x3d, 0x03, 0x01, 0x07, 0x03, 0x42, 0x00,
 ];
 
+/// A set of batch signing public keys as might be found in a server's global
+/// or specific manifest. The keys are key identifiers and the values are public
+/// keys which may be used to verify batch signatures.
+pub type BatchSigningPublicKeys = HashMap<String, UnparsedPublicKey<Vec<u8>>>;
+
 /// Represents the description of a batch signing public key in a specific
 /// manifest.
 #[derive(Debug, Deserialize, PartialEq)]
@@ -134,7 +139,7 @@ impl SpecificManifest {
     /// batch-signing-public-keys field as PEM encoded SubjectPublicKeyInfo
     /// structures containing ECDSA P256 keys, and returns a map of key
     /// identifier to the public keys on success, or an error otherwise.
-    pub fn batch_signing_public_keys(&self) -> Result<HashMap<String, UnparsedPublicKey<Vec<u8>>>> {
+    pub fn batch_signing_public_keys(&self) -> Result<BatchSigningPublicKeys> {
         let mut keys = HashMap::new();
         for (identifier, public_key) in self.batch_signing_public_keys.iter() {
             keys.insert(
@@ -204,7 +209,7 @@ impl IngestionServerGlobalManifest {
     /// batch-signing-public-keys field as PEM encoded SubjectPublicKeyInfo
     /// structures containing ECDSA P256 keys, and returns a map of key
     /// identifier to the public keys on success, or an error otherwise.
-    pub fn batch_signing_public_keys(&self) -> Result<HashMap<String, UnparsedPublicKey<Vec<u8>>>> {
+    pub fn batch_signing_public_keys(&self) -> Result<BatchSigningPublicKeys> {
         let mut keys = HashMap::new();
         for (identifier, public_key) in self.batch_signing_public_keys.iter() {
             keys.insert(

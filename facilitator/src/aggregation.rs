@@ -4,17 +4,13 @@ use crate::{
         IngestionDataSharePacket, IngestionHeader, InvalidPacket, Packet, SumPart,
         ValidationHeader, ValidationPacket,
     },
-    transport::Transport,
+    transport::{SignableTransport, VerifiableAndDecryptableTransport, VerifiableTransport},
     BatchSigningKey, Error,
 };
 use anyhow::{anyhow, Context, Result};
 use chrono::NaiveDateTime;
-use prio::{
-    encrypt::PrivateKey,
-    server::{Server, VerificationMessage},
-};
-use ring::signature::UnparsedPublicKey;
-use std::{collections::HashMap, convert::TryFrom};
+use prio::server::{Server, VerificationMessage};
+use std::convert::TryFrom;
 use uuid::Uuid;
 
 pub struct BatchAggregator<'a> {
@@ -22,15 +18,11 @@ pub struct BatchAggregator<'a> {
     aggregation_name: &'a str,
     aggregation_start: &'a NaiveDateTime,
     aggregation_end: &'a NaiveDateTime,
-    own_validation_transport: &'a mut dyn Transport,
-    peer_validation_transport: &'a mut dyn Transport,
-    ingestion_transport: &'a mut dyn Transport,
+    own_validation_transport: &'a mut VerifiableTransport,
+    peer_validation_transport: &'a mut VerifiableTransport,
+    ingestion_transport: &'a mut VerifiableAndDecryptableTransport,
     aggregation_batch: BatchWriter<'a, SumPart, InvalidPacket>,
-    ingestor_public_keys: &'a HashMap<String, UnparsedPublicKey<Vec<u8>>>,
     share_processor_signing_key: &'a BatchSigningKey,
-    own_share_processor_public_keys: &'a HashMap<String, UnparsedPublicKey<Vec<u8>>>,
-    peer_share_processor_public_keys: &'a HashMap<String, UnparsedPublicKey<Vec<u8>>>,
-    packet_decryption_keys: Vec<PrivateKey>,
 }
 
 impl<'a> BatchAggregator<'a> {
@@ -40,15 +32,10 @@ impl<'a> BatchAggregator<'a> {
         aggregation_start: &'a NaiveDateTime,
         aggregation_end: &'a NaiveDateTime,
         is_first: bool,
-        ingestion_transport: &'a mut dyn Transport,
-        own_validation_transport: &'a mut dyn Transport,
-        peer_validation_transport: &'a mut dyn Transport,
-        aggregation_transport: &'a mut dyn Transport,
-        ingestor_public_keys: &'a HashMap<String, UnparsedPublicKey<Vec<u8>>>,
-        share_processor_signing_key: &'a BatchSigningKey,
-        own_share_processor_public_keys: &'a HashMap<String, UnparsedPublicKey<Vec<u8>>>,
-        peer_share_processor_public_keys: &'a HashMap<String, UnparsedPublicKey<Vec<u8>>>,
-        packet_decryption_keys: Vec<PrivateKey>,
+        ingestion_transport: &'a mut VerifiableAndDecryptableTransport,
+        own_validation_transport: &'a mut VerifiableTransport,
+        peer_validation_transport: &'a mut VerifiableTransport,
+        aggregation_transport: &'a mut SignableTransport,
     ) -> Result<BatchAggregator<'a>> {
         Ok(BatchAggregator {
             is_first,
@@ -65,13 +52,9 @@ impl<'a> BatchAggregator<'a> {
                     aggregation_end,
                     is_first,
                 ),
-                aggregation_transport,
+                &mut *aggregation_transport.transport,
             ),
-            ingestor_public_keys,
-            share_processor_signing_key,
-            own_share_processor_public_keys,
-            peer_share_processor_public_keys,
-            packet_decryption_keys,
+            share_processor_signing_key: &aggregation_transport.batch_signing_key,
         })
     }
 
@@ -88,6 +71,7 @@ impl<'a> BatchAggregator<'a> {
         // works.
         // https://github.com/abetterinternet/prio-server/issues/73
         let mut servers = self
+            .ingestion_transport
             .packet_decryption_keys
             .iter()
             .map(|k| Server::new(ingestion_header.bins as usize, self.is_first, k.clone()))
@@ -117,7 +101,7 @@ impl<'a> BatchAggregator<'a> {
         let mut accumulator_server = Server::new(
             ingestion_header.bins as usize,
             self.is_first,
-            self.packet_decryption_keys[0].clone(),
+            self.ingestion_transport.packet_decryption_keys[0].clone(),
         );
         for server in servers.iter() {
             accumulator_server.merge_total_shares(server.total_shares());
@@ -163,9 +147,10 @@ impl<'a> BatchAggregator<'a> {
         let mut ingestion_batch: BatchReader<'_, IngestionHeader, IngestionDataSharePacket> =
             BatchReader::new(
                 Batch::new_ingestion(self.aggregation_name, batch_id, batch_date),
-                self.ingestion_transport,
+                &mut *self.ingestion_transport.transport.transport,
             );
-        let ingestion_header = ingestion_batch.header(self.ingestor_public_keys)?;
+        let ingestion_header = ingestion_batch
+            .header(&self.ingestion_transport.transport.batch_signing_public_keys)?;
         Ok(ingestion_header)
     }
 
@@ -182,23 +167,24 @@ impl<'a> BatchAggregator<'a> {
         let mut ingestion_batch: BatchReader<'_, IngestionHeader, IngestionDataSharePacket> =
             BatchReader::new(
                 Batch::new_ingestion(self.aggregation_name, batch_id, batch_date),
-                self.ingestion_transport,
+                &mut *self.ingestion_transport.transport.transport,
             );
         let mut own_validation_batch: BatchReader<'_, ValidationHeader, ValidationPacket> =
             BatchReader::new(
                 Batch::new_validation(self.aggregation_name, batch_id, batch_date, self.is_first),
-                self.own_validation_transport,
+                &mut *self.own_validation_transport.transport,
             );
         let mut peer_validation_batch: BatchReader<'_, ValidationHeader, ValidationPacket> =
             BatchReader::new(
                 Batch::new_validation(self.aggregation_name, batch_id, batch_date, !self.is_first),
-                self.peer_validation_transport,
+                &mut *self.peer_validation_transport.transport,
             );
-        let peer_validation_header =
-            peer_validation_batch.header(self.peer_share_processor_public_keys)?;
-        let own_validation_header =
-            own_validation_batch.header(self.own_share_processor_public_keys)?;
-        let ingestion_header = ingestion_batch.header(self.ingestor_public_keys)?;
+        let peer_validation_header = peer_validation_batch
+            .header(&self.peer_validation_transport.batch_signing_public_keys)?;
+        let own_validation_header = own_validation_batch
+            .header(&self.own_validation_transport.batch_signing_public_keys)?;
+        let ingestion_header = ingestion_batch
+            .header(&self.ingestion_transport.transport.batch_signing_public_keys)?;
 
         // Make sure all the parameters in the headers line up
         if !peer_validation_header.check_parameters(&own_validation_header) {
