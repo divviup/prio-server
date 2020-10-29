@@ -1,0 +1,10 @@
+--- terraform/Makefile
++++ terraform/Makefile
+@@ -91,6 +91,7 @@ apply: .terraform/terraform.tfstate ## Have terraform do the things. This will c
+ 	@terraform apply \
+ 		-lock=true \
+ 		-input=false \
++		-auto-approve \
+ 		-refresh=true \
+ 		-var-file="$(VARS)"
+ 	echo "If that succeeded, run 'terraform output --json | (cd ../deploy-tool/ ; go run main.go )'"

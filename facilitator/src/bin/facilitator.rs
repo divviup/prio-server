@@ -78,8 +78,8 @@ trait AppArgumentAdder {
     fn add_packet_decryption_key_argument(self: Self) -> Self;
 }
 
-const SHARED_HELP: &str = 
-"Service accounts: Any flag ending in -gcp-sa-email specifies a GCP service account \
+const SHARED_HELP: &str =
+    "Service accounts: Any flag ending in -gcp-sa-email specifies a GCP service account \
 (identified by an email address). Requests to Google Storage (gs://) will be \
 authenticated as this account, by means of impersonation using GKE's Workload \
 Identity feature: https://cloud.google.com/kubernetes-engine/docs/how-to/workload-identity.\
@@ -147,13 +147,13 @@ impl<'a, 'b> AppArgumentAdder for App<'a, 'b> {
             Arg::with_name(s3_arn_arg)
                 .long(s3_arn_arg)
                 .value_name("AWS_IAM_ROLE")
-                .help("AWS IAM role to assume when using S3.")
+                .help("AWS IAM role to assume when using S3."),
         )
         .arg(
             Arg::with_name(gcs_sa_arg)
                 .long(gcs_sa_arg)
                 .value_name("GCP_SERVICE_ACCOUNT")
-                .help("GCP service account to impersonate when using GCS.")
+                .help("GCP service account to impersonate when using GCS."),
         )
     }
 
@@ -862,9 +862,7 @@ fn batch_signing_key_from_arg(matches: &ArgMatches) -> Result<BatchSigningKey> {
     })
 }
 
-fn intake_transport_from_args(
-    matches: &ArgMatches,
-) -> Result<VerifiableAndDecryptableTransport> {
+fn intake_transport_from_args(matches: &ArgMatches) -> Result<VerifiableAndDecryptableTransport> {
     // To read content from an ingestion bucket, we need the bucket, which we
     // know because our deployment created it, so it is always provided via the
     // ingestion-bucket argument.

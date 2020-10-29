@@ -88,7 +88,7 @@ output: .terraform/terraform.tfstate ## Make Terraform print output variable(s).
 
 .PHONY: apply
 apply: .terraform/terraform.tfstate ## Have terraform do the things. This will cost money.
-	@terraform apply \
+	terraform apply \
 		-lock=true \
 		-input=false \
 		-refresh=true \
