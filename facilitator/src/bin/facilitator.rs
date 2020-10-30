@@ -80,14 +80,16 @@ trait AppArgumentAdder {
 
 const SHARED_HELP: &str =
     "Service accounts: Any flag ending in -gcp-sa-email specifies a GCP service account \
-(identified by an email address). Requests to Google Storage (gs://) will be \
-authenticated as this account, by means of impersonation using GKE's Workload \
-Identity feature: https://cloud.google.com/kubernetes-engine/docs/how-to/workload-identity.\
+(identified by an email address). Requests to Google Storage (gs://) are always authenticated \
+as one of our service accounts by GKE's Workload Identity feature: \
+https://cloud.google.com/kubernetes-engine/docs/how-to/workload-identity. If a -gcp-sa-email \
+flag is set, facilitator will use the service account it is running as to impersonate a \
+different account, which has permissions to write to the named bucket. \
 Such flags are ignored when reading or writing an S3 bucket (s3://). \
 \
 Flags ending in -s3-arn specify an AWS service account (identified by an `arn:` URI). \
 Requests to S3 will be authenticated by assuming this role. The credential to assume \
-the role is an OIDC auth token obtained by the GKE metadata service. If an -s3-arn flag \
+the role is an OIDC auth token obtained from the GKE metadata service. If an -s3-arn flag \
 is omitted, the corresponding requests will be authenticated by direct AWS credentials \
 from ~/.aws/.\
 \
