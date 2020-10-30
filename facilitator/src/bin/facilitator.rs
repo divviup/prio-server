@@ -114,9 +114,6 @@ enum Entity {
     Ingestor,
     Peer,
     Own,
-    // Hack: the aggregation bucket is part of the "Own" entity (i.e. whoever is running this).
-    // For the purpose of command line flags it acts as a separate entity.
-    Aggregation,
     Portal,
 }
 
@@ -132,7 +129,6 @@ impl Entity {
             Entity::Ingestor => "ingestor",
             Entity::Peer => "peer",
             Entity::Own => "own",
-            Entity::Aggregation => "aggregation",
             Entity::Portal => "portal",
         }
     }
@@ -529,7 +525,7 @@ fn main() -> Result<(), anyhow::Error> {
                 .add_storage_arguments(Entity::Peer,  InOut::Input)
                 .add_batch_public_key_arguments(Entity::Peer)
                 .add_manifest_base_url_argument(Entity::Portal)
-                .add_storage_arguments(Entity::Aggregation,  InOut::Output)
+                .add_storage_arguments(Entity::Portal,  InOut::Output)
                 .add_packet_decryption_key_argument()
                 .add_batch_signing_key_arguments()
                 .arg(Arg::with_name("is-first").long("is-first").help(
@@ -732,8 +728,8 @@ fn main() -> Result<(), anyhow::Error> {
             // messages aka aggregations. We can get that from an argument,
             // absent which we discover it from the portal server global
             // manifest.
-            let aggregation_bucket = match (
-                sub_matches.value_of("aggregation-output"),
+            let portal_bucket = match (
+                sub_matches.value_of("portal-output"),
                 sub_matches.value_of("portal-manifest-base-url"),
             ) {
                 (Some(path), _) => StoragePath::from_str(path),
@@ -742,13 +738,12 @@ fn main() -> Result<(), anyhow::Error> {
                         .sum_part_bucket(is_first)
                 }
                 _ => Err(anyhow!(
-                    "aggregation-output or portal-manifest-base-url required"
+                    "portal-output or portal-manifest-base-url required"
                 )),
             }?;
             let aggregation_identity = sub_matches.value_of("aggregation-identity");
 
-            let aggregation_transport =
-                transport_for_path(aggregation_bucket, aggregation_identity)?;
+            let aggregation_transport = transport_for_path(portal_bucket, aggregation_identity)?;
 
             // Get the key we will use to sign sum part messages sent to the
             // portal server.
