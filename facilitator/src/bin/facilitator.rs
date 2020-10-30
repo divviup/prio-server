@@ -452,6 +452,7 @@ fn main() -> Result<(), anyhow::Error> {
                 .add_storage_arguments(Entity::Ingestor, InOut::Input)
                 .add_manifest_base_url_argument(Entity::Peer)
                 .add_storage_arguments(Entity::Peer, InOut::Output)
+                .add_storage_arguments(Entity::Own, InOut::Output),
         )
         .subcommand(
             SubCommand::with_name("aggregate")
@@ -521,12 +522,12 @@ fn main() -> Result<(), anyhow::Error> {
                 .add_storage_arguments(Entity::Ingestor, InOut::Input)
                 .add_batch_public_key_arguments(Entity::Ingestor)
                 .add_manifest_base_url_argument(Entity::Own)
-                .add_storage_arguments(Entity::Own,  InOut::Output)
+                .add_storage_arguments(Entity::Own, InOut::Input)
                 .add_manifest_base_url_argument(Entity::Peer)
-                .add_storage_arguments(Entity::Peer,  InOut::Input)
+                .add_storage_arguments(Entity::Peer, InOut::Input)
                 .add_batch_public_key_arguments(Entity::Peer)
                 .add_manifest_base_url_argument(Entity::Portal)
-                .add_storage_arguments(Entity::Portal,  InOut::Output)
+                .add_storage_arguments(Entity::Portal, InOut::Output)
                 .add_packet_decryption_key_argument()
                 .add_batch_signing_key_arguments()
                 .arg(Arg::with_name("is-first").long("is-first").help(
@@ -605,24 +606,36 @@ fn main() -> Result<(), anyhow::Error> {
             let mut intake_transport = intake_transport_from_args(sub_matches)?;
 
             // We need the bucket to which we will write validations for the
-            // peer data share processor, which can be provided either directly
-            // via command line argument or must be fetched from the peer
-            // specific manifest.
-            let validation_bucket = if let Some(path) = sub_matches.value_of("peer-output") {
-                StoragePath::from_str(path)
-            } else if let Some(base_url) = sub_matches.value_of("peer-manifest-base-url") {
-                SpecificManifest::from_https(
-                    base_url,
-                    sub_matches.value_of("instance-name").unwrap(),
-                )?
-                .validation_bucket()
-            } else {
-                Err(anyhow!("peer-output or peer-manifest-base-url required."))
-            }?;
+            // peer data share processor, which can either be fetched from the
+            // peer manifest or provided directly via command line argument. We
+            // check the manifest argument first because peer-output will always
+            // have at least the default value ".".
+            let peer_validation_bucket =
+                if let Some(base_url) = sub_matches.value_of("peer-manifest-base-url") {
+                    SpecificManifest::from_https(
+                        base_url,
+                        sub_matches.value_of("instance-name").unwrap(),
+                    )?
+                    .validation_bucket()
+                } else if let Some(path) = sub_matches.value_of("peer-output") {
+                    StoragePath::from_str(path)
+                } else {
+                    Err(anyhow!("peer-output or peer-manifest-base-url required."))
+                }?;
 
             let peer_identity = sub_matches.value_of("peer-identity");
-            let mut validation_transport = SignableTransport {
-                transport: transport_for_path(validation_bucket, peer_identity)?,
+            let mut peer_validation_transport = SignableTransport {
+                transport: transport_for_path(peer_validation_bucket, peer_identity)?,
+                batch_signing_key: batch_signing_key_from_arg(sub_matches)?,
+            };
+
+            // We created the bucket to which we write copies of our validation
+            // shares, so it is simply provided by argument.
+            let own_validation_bucket =
+                StoragePath::from_str(matches.value_of("own-output").unwrap())?;
+            let own_identity = sub_matches.value_of("own-identity");
+            let mut own_validation_transport = SignableTransport {
+                transport: transport_for_path(own_validation_bucket, own_identity)?,
                 batch_signing_key: batch_signing_key_from_arg(sub_matches)?,
             };
 
@@ -636,7 +649,8 @@ fn main() -> Result<(), anyhow::Error> {
                     |v| NaiveDateTime::parse_from_str(&v, DATE_FORMAT).unwrap(),
                 ),
                 &mut intake_transport,
-                &mut validation_transport,
+                &mut peer_validation_transport,
+                &mut own_validation_transport,
                 sub_matches.is_present("is-first"),
             )?;
             batch_intaker.generate_validation_share()?;
@@ -648,25 +662,10 @@ fn main() -> Result<(), anyhow::Error> {
 
             let mut intake_transport = intake_transport_from_args(sub_matches)?;
 
-            // We need the bucket to which we previously wrote our validation
-            // shares, which is owned by the peer data share processor and can
-            // be provided either directly via command line argument or must be
-            // fetched from the peer specific manifest.
-            // TODO: is it safe to assume peer won't have deleted validations we
-            // need? Should we also write copies of our validations to a bucket
-            // we control to ensure they'll be available at aggregation time?
-            let own_validation_bucket = if let Some(path) = sub_matches.value_of("own-input") {
-                StoragePath::from_str(path)
-            } else if let Some(base_url) = sub_matches.value_of("own-manifest-base-url") {
-                SpecificManifest::from_https(
-                    base_url,
-                    sub_matches.value_of("instance-name").unwrap(),
-                )?
-                .validation_bucket()
-            } else {
-                Err(anyhow!("own-input or own-manifest-base-url required"))
-            }?;
-
+            // We created the bucket to which we wrote copies of our validation
+            // shares, so it is simply provided by argument.
+            let own_validation_bucket =
+                StoragePath::from_str(matches.value_of("own-output").unwrap())?;
             let own_identity = sub_matches.value_of("own-identity");
             let own_validation_transport = transport_for_path(own_validation_bucket, own_identity)?;
 
@@ -726,18 +725,19 @@ fn main() -> Result<(), anyhow::Error> {
             };
 
             // We need the portal server owned bucket to which to write sum part
-            // messages aka aggregations. We can get that from an argument,
-            // absent which we discover it from the portal server global
-            // manifest.
+            // messages aka aggregations. We can discover it from the portal
+            // server global manifest, or we can get that from an argument. We
+            // check for the manifest first since portal-output will always have
+            // the default value ".".
             let portal_bucket = match (
-                sub_matches.value_of("portal-output"),
                 sub_matches.value_of("portal-manifest-base-url"),
+                sub_matches.value_of("portal-output"),
             ) {
-                (Some(path), _) => StoragePath::from_str(path),
-                (None, Some(manifest_base_url)) => {
+                (Some(manifest_base_url), _) => {
                     PortalServerGlobalManifest::from_https(manifest_base_url)?
                         .sum_part_bucket(is_first)
                 }
+                (_, Some(path)) => StoragePath::from_str(path),
                 _ => Err(anyhow!(
                     "portal-output or portal-manifest-base-url required"
                 )),
