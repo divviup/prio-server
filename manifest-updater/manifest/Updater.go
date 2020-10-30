@@ -34,12 +34,12 @@ func (u *Updater) UpdateIngestionServerGlobalManifest(manifest IngestionServerGl
 	return u.update(fmt.Sprintf("%s/%s", ingestor, GlobalManifestJson), data)
 }
 
-func (u *Updater) UpdateDataShareSpecificManifest(manifest DataShareSpecificManifest, publicHealthAuthority, ingestor string) error {
+func (u *Updater) UpdateDataShareSpecificManifest(manifest DataShareSpecificManifest, phaIngestorName string) error {
 	data, err := json.Marshal(manifest)
 	if err != nil {
 		return err
 	}
-	return u.update(fmt.Sprintf("%s-%s.json", publicHealthAuthority, ingestor), data)
+	return u.update(fmt.Sprintf("%s-manifest.json", phaIngestorName), data)
 }
 
 func (u *Updater) update(path string, data []byte) error {
