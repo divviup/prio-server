@@ -181,6 +181,7 @@ impl<'a, 'b> AppArgumentAdder for App<'a, 'b> {
                 .long(entity.suffix(in_out.str()))
                 .value_name("PATH")
                 .validator(path_validator)
+                .default_value(".")
                 .help("Storage path (gs://, s3:// or local dir name)"),
         )
         .arg(
