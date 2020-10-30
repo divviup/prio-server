@@ -541,7 +541,8 @@ fn main() -> Result<(), anyhow::Error> {
         // various parameters are present and valid, so it is safe to use
         // unwrap() here.
         ("generate-ingestion-sample", Some(sub_matches)) => {
-            let pha_storage_path = StoragePath::from_str(matches.value_of("pha-output").unwrap())?;
+            let pha_storage_path =
+                StoragePath::from_str(sub_matches.value_of("pha-output").unwrap())?;
             let mut pha_transport = transport_from_arguments(
                 pha_storage_path,
                 "pha-output-s3-arn",
@@ -549,7 +550,7 @@ fn main() -> Result<(), anyhow::Error> {
                 sub_matches,
             )?;
             let facilitator_storage_path =
-                StoragePath::from_str(matches.value_of("facilitator-output").unwrap())?;
+                StoragePath::from_str(sub_matches.value_of("facilitator-output").unwrap())?;
             let mut facilitator_transport = transport_from_arguments(
                 facilitator_storage_path,
                 "facilitator-output-s3-arn",
@@ -614,13 +615,13 @@ fn main() -> Result<(), anyhow::Error> {
             // via command line argument or must be fetched from the peer
             // specific manifest.
             let validation_bucket = match (
-                matches.value_of("peer-validation-bucket"),
-                matches.value_of("peer-manifest-base-url"),
+                sub_matches.value_of("peer-validation-bucket"),
+                sub_matches.value_of("peer-manifest-base-url"),
             ) {
                 (Some(path), _) => StoragePath::from_str(path)?,
                 (None, Some(manifest_base_url)) => SpecificManifest::from_https(
                     manifest_base_url,
-                    matches.value_of("instance-name").unwrap(),
+                    sub_matches.value_of("instance-name").unwrap(),
                 )?
                 .validation_bucket()?,
                 _ => {
@@ -659,7 +660,7 @@ fn main() -> Result<(), anyhow::Error> {
         }
         ("aggregate", Some(sub_matches)) => {
             let is_first = sub_matches.is_present("is-first");
-            let instance_name = matches.value_of("instance-name").unwrap();
+            let instance_name = sub_matches.value_of("instance-name").unwrap();
 
             let mut ingestion_transport = intake_transport_from_args(sub_matches)?;
 
@@ -671,13 +672,13 @@ fn main() -> Result<(), anyhow::Error> {
             // need? Should we also write copies of our validations to a bucket
             // we control to ensure they'll be available at aggregation time?
             let own_validation_bucket = match (
-                matches.value_of("own-validation-bucket"),
-                matches.value_of("peer-manifest-base-url"),
+                sub_matches.value_of("own-validation-bucket"),
+                sub_matches.value_of("peer-manifest-base-url"),
             ) {
                 (Some(path), _) => StoragePath::from_str(path)?,
                 (None, Some(manifest_base_url)) => SpecificManifest::from_https(
                     manifest_base_url,
-                    matches.value_of("instance-name").unwrap(),
+                    sub_matches.value_of("instance-name").unwrap(),
                 )?
                 .validation_bucket()?,
                 _ => {
@@ -697,9 +698,9 @@ fn main() -> Result<(), anyhow::Error> {
             // To read our own validation shares, we require our own public keys
             // which we discover in our own specific manifest.
             let own_public_key_map = match (
-                matches.value_of("batch-signing-private-key"),
-                matches.value_of("batch-signing-private-key-identifier"),
-                matches.value_of("own-manifest-base-url"),
+                sub_matches.value_of("batch-signing-private-key"),
+                sub_matches.value_of("batch-signing-private-key-identifier"),
+                sub_matches.value_of("own-manifest-base-url"),
             ) {
                 (Some(private_key), Some(private_key_identifier), _) => {
                     public_key_map_from_arg(private_key, private_key_identifier)
@@ -720,7 +721,7 @@ fn main() -> Result<(), anyhow::Error> {
             // We created the bucket that peers wrote validations into, and so
             // it is simply provided via argument.
             let peer_validation_bucket =
-                StoragePath::from_str(matches.value_of("peer-validation-bucket").unwrap())?;
+                StoragePath::from_str(sub_matches.value_of("peer-validation-bucket").unwrap())?;
 
             let peer_validation_transport = transport_from_arguments(
                 peer_validation_bucket,
@@ -733,9 +734,9 @@ fn main() -> Result<(), anyhow::Error> {
             // sign messages, which we can obtain by argument or by discovering
             // their specific manifest.
             let peer_share_processor_pub_key_map = match (
-                matches.value_of("peer-public-key"),
-                matches.value_of("peer-public-key-identifier"),
-                matches.value_of("peer-manifest-base-url"),
+                sub_matches.value_of("peer-public-key"),
+                sub_matches.value_of("peer-public-key-identifier"),
+                sub_matches.value_of("peer-manifest-base-url"),
             ) {
                 (Some(public_key), Some(public_key_identifier), _) => {
                     public_key_map_from_arg(public_key, public_key_identifier)
@@ -757,8 +758,8 @@ fn main() -> Result<(), anyhow::Error> {
             // absent which we discover it from the portal server global
             // manifest.
             let aggregation_bucket = match (
-                matches.value_of("aggregation-bucket"),
-                matches.value_of("portal-server-manifest-base-url"),
+                sub_matches.value_of("aggregation-bucket"),
+                sub_matches.value_of("portal-server-manifest-base-url"),
             ) {
                 (Some(path), _) => StoragePath::from_str(path)?,
                 (None, Some(manifest_base_url)) => {
