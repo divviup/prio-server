@@ -56,6 +56,8 @@ func basename(s string) string {
 }
 
 var k8sNS = flag.String("k8s-namespace", "", "Kubernetes namespace")
+var bskSecretName = flag.String("bsk-secret-name", "", "Name of k8s secret for batch signing key")
+var pdksSecretName = flag.String("pdks-secret-name", "", "Nmae of k8s secret for packet decrypt keys")
 
 func main() {
 	inputBucket := flag.String("input-bucket", "", "Name of input bucket (required)")
@@ -65,6 +67,11 @@ func main() {
 		flag.Usage()
 		os.Exit(1)
 	}
+
+	if len(flag.Args()) == 0 || flag.Args()[0] != "passthrough" {
+		log.Fatal("Must provide 'passthrough' arg, followed by args to pass through to facilitator")
+	}
+	passthroughArgs := flag.Args()[1:]
 
 	log.Printf("starting %s version %s - %s. Args: %s", os.Args[0], BuildID, BuildTime, os.Args[1:])
 	var readyBatches []string
@@ -84,7 +91,7 @@ func main() {
 		log.Fatalf("unknown service %s", *service)
 	}
 
-	if err := launch(context.Background(), readyBatches); err != nil {
+	if err := launch(context.Background(), readyBatches, passthroughArgs); err != nil {
 		log.Fatal(err)
 	}
 	log.Print("done")
@@ -220,7 +227,7 @@ func getReadyBatchesGS(ctx context.Context, inputBucket string) ([]string, error
 	return readyBatches, nil
 }
 
-func launch(ctx context.Context, readyBatches []string) error {
+func launch(ctx context.Context, readyBatches []string, passthroughArgs []string) error {
 	// This uses the credentials that an instance running in the k8s cluster
 	// gets automatically, via automount_service_account_token in the Terraform config.
 	config, err := rest.InClusterConfig()
@@ -234,20 +241,32 @@ func launch(ctx context.Context, readyBatches []string) error {
 
 	log.Printf("starting %d jobs", len(readyBatches))
 	for _, batchName := range readyBatches {
-		if err := startJob(ctx, clientset, batchName); err != nil {
+		if err := startJob(ctx, clientset, batchName, passthroughArgs); err != nil {
 			return fmt.Errorf("starting job for batch %q: %w", batchName, err)
 		}
 	}
 	return nil
 }
 
-func startJob(ctx context.Context, clientset *kubernetes.Clientset, batchName string) error {
-	log.Printf("starting job for batch %q...", batchName)
+func startJob(
+	ctx context.Context,
+	clientset *kubernetes.Clientset,
+	batchName string,
+	passthroughArgs []string,
+) error {
 	jobName := fmt.Sprintf("i-batch-%s", strings.ReplaceAll(batchName, "/", "-"))
 
 	pathComponents := strings.Split(batchName, "/")
 	batchID := pathComponents[len(pathComponents)-1]
 	batchDate := strings.Join(pathComponents[0:len(pathComponents)-1], "/")
+
+	var args []string
+	args = append(args, passthroughArgs...)
+	args = append(args,
+		"--batch-id", batchID,
+		"--date", batchDate,
+	)
+	log.Printf("starting job for batch %q with args %s", batchName, passthroughArgs)
 	job := &batchv1.Job{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      jobName,
@@ -259,21 +278,24 @@ func startJob(ctx context.Context, clientset *kubernetes.Clientset, batchName st
 					RestartPolicy: "Never",
 					Containers: []corev1.Container{
 						{
-							Args: []string{
-								"batch-intake",
-								"--s3-use-credentials-from-gke-metadata",
-								"--aggregation-id", "fake-1",
-								"--batch-id", batchID,
-								"--date", batchDate,
-								"--ingestion-bucket", "gs://tbd",
-								"--validation-bucket", "gs://tbd",
-								"--ingestor-public-key", "what_is_my_pubkey",
-								"--ecies-private-key", "what_is_my_privkey",
-								"--share-processor-private-key", "what_is_my_other_privkey",
-							},
+							Args:            args,
 							Name:            "facile-container",
-							Image:           "us.gcr.io/jsha-prio-bringup/letsencrypt/prio-facilitator:7.7.7",
+							Image:           "us.gcr.io/jsha-prio-bringup/letsencrypt/prio-facilitator:1.2.3",
 							ImagePullPolicy: "Always",
+							Env: []corev1.EnvVar{
+								{
+									Name: "BATCH_SIGNING_KEY",
+									ValueFrom: &corev1.EnvVarSource{
+										SecretKeyRef: &corev1.SecretKeySelector{Key: *bskSecretName},
+									},
+								},
+								{
+									Name: "PACKET_DECRYPTION_KEYS",
+									ValueFrom: &corev1.EnvVarSource{
+										SecretKeyRef: &corev1.SecretKeySelector{Key: *pdksSecretName},
+									},
+								},
+							},
 						},
 					},
 				},

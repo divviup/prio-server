@@ -13,4 +13,5 @@ ingestors = {
   ingestor-1 = "storage.googleapis.com/prio-demo-gcp-manifests/ingestor-1"
   ingestor-2 = "storage.googleapis.com/prio-demo-gcp-manifests/ingestor-2"
 }
-peer_share_processor_manifest_domain = "storage.googleapis.com/prio-demo-gcp-manifests/pha-servers"
+peer_share_processor_manifest_base_url = "storage.googleapis.com/prio-demo-gcp-manifests/pha-servers"
+portal_server_manifest_base_url        = "storage.googleapis.com/prio-demo-gcp-manifests/portal-server"

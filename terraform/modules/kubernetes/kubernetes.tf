@@ -33,11 +33,39 @@ variable "ingestion_bucket_role" {
   type = string
 }
 
+variable "ingestor_manifest_base_url" {
+  type = string
+}
+
+variable "peer_validation_bucket_name" {
+  type = string
+}
+
+variable "peer_validation_bucket_role" {
+  type = string
+}
+
+variable "peer_manifest_base_url" {
+  type = string
+}
+
+variable "own_validation_bucket" {
+  type = string
+}
+
+variable "own_manifest_base_url" {
+  type = string
+}
+
 variable "kubernetes_namespace" {
   type = string
 }
 
 variable "packet_decryption_key_kubernetes_secret" {
+  type = string
+}
+
+variable "portal_server_manifest_base_url" {
   type = string
 }
 
@@ -141,6 +169,59 @@ resource "kubernetes_secret" "batch_signing_key" {
   }
 }
 
+# ConfigMap containing the parameters that are common to every intake-batch job
+# that will be spawned in this data share processor, except for secrets.
+resource "kubernetes_config_map" "intake_batch_job_config_map" {
+  metadata {
+    name      = "${var.data_share_processor_name}-intake-batch-config"
+    namespace = var.kubernetes_namespace
+  }
+
+  # These key-value pairs will be plopped directly into the container
+  # environment, so they MUST match the environment variables set in various
+  # Arg::env calls in src/bin/facilitator.rs.
+  data = {
+    # PACKET_DECRYPTION_KEYS is a Kubernetes secret
+    # BATCH_SIGNING_PRIVATE_KEY is a Kubernetes secret
+    AWS_ACCOUNT_ID                       = data.aws_caller_identity.current.account_id
+    BATCH_SIGNING_PRIVATE_KEY_IDENTIFIER = kubernetes_secret.batch_signing_key.metadata[0].name
+    INGESTOR_IDENTITY                    = var.ingestion_bucket_role
+    INGESTOR_INPUT                       = var.ingestion_bucket
+    INGESTOR_MANIFEST_BASE_URL           = var.ingestor_manifest_base_url
+    INSTANCE_NAME                        = var.data_share_processor_name
+    PEER_IDENTITY                        = var.peer_validation_bucket_role
+    PEER_MANIFEST_BASE_URL               = var.peer_manifest_base_url
+    OWN_OUTPUT                           = var.own_validation_bucket
+  }
+}
+
+# ConfigMap containing the parameters that are common to every aggregation job
+# that will be spawned in this data share processor, except for secrets.
+resource "kubernetes_config_map" "aggregate_job_config_map" {
+  metadata {
+    name      = "${var.data_share_processor_name}-aggregate-config"
+    namespace = var.kubernetes_namespace
+  }
+
+  data = {
+    # PACKET_DECRYPTION_KEYS is a Kubernetes secret
+    # BATCH_SIGNING_PRIVATE_KEY is a Kubernetes secret
+    AWS_ACCOUNT_ID                       = data.aws_caller_identity.current.account_id
+    BATCH_SIGNING_PRIVATE_KEY_IDENTIFIER = kubernetes_secret.batch_signing_key.metadata[0].name
+    INGESTOR_IDENTITY                    = var.ingestion_bucket_role
+    INGESTOR_INPUT                       = var.ingestion_bucket
+    INGESTOR_MANIFEST_BASE_URL           = var.ingestor_manifest_base_url
+    INSTANCE_NAME                        = var.data_share_processor_name
+    OWN_INPUT                            = var.own_validation_bucket
+    OWN_MANIFEST_BASE_URL                = var.own_manifest_base_url
+    PEER_INPUT                           = var.peer_validation_bucket_name
+    PEER_IDENTITY                        = var.peer_validation_bucket_role
+    PEER_MANIFEST_BASE_URL               = var.peer_manifest_base_url
+    PORTAL_IDENTITY                      = var.sum_part_bucket_service_account_email
+    PORTAL_MANIFEST_BASE_URL             = var.portal_server_manifest_base_url
+  }
+}
+
 resource "kubernetes_cron_job" "workflow_manager" {
   metadata {
     name      = "${var.environment}-${var.data_share_processor_name}-workflow-manager"
@@ -167,6 +248,10 @@ resource "kubernetes_cron_job" "workflow_manager" {
               args = [
                 "--k8s-namespace", var.kubernetes_namespace,
                 "--input-bucket", var.ingestion_bucket,
+                "--bsk-secret-name", kubernetes_secret.batch_signing_key.metadata[0].name,
+                "--pdks-secret-name", var.packet_decryption_key_kubernetes_secret,
+                "--intake-batch-job-config-map-name", kubernetes_config_map.intake_batch_job_config_map.metadata[0].name,
+                "--aggregate-job-config-map-name", kubernetes_config_map.aggregate_job_config_map.metadata[0].name,
               ]
               env {
                 name  = "AWS_ROLE_ARN"
@@ -175,24 +260,6 @@ resource "kubernetes_cron_job" "workflow_manager" {
               env {
                 name  = "AWS_ACCOUNT_ID"
                 value = data.aws_caller_identity.current.account_id
-              }
-              env {
-                name = "BATCH_SIGNING_KEY"
-                value_from {
-                  secret_key_ref {
-                    name = kubernetes_secret.batch_signing_key.metadata[0].name
-                    key  = "signing_key"
-                  }
-                }
-              }
-              env {
-                name = "INGESTION_PACKET_DECRYPTION_KEY"
-                value_from {
-                  secret_key_ref {
-                    name = var.packet_decryption_key_kubernetes_secret
-                    key  = "decryption_key"
-                  }
-                }
               }
             }
             # If we use any other restart policy, then when the job is finally
