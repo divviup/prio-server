@@ -1,7 +1,7 @@
 use crate::{
     config::S3Path,
     transport::{Transport, TransportWriter},
-    Error,
+    Error, Identity,
 };
 use anyhow::{Context, Result};
 use derivative::Derivative;
@@ -42,10 +42,6 @@ const METADATA_SERVICE_TOKEN_URL: &str = "http://metadata.google.internal:80/com
 // via environment variable.
 const AWS_ACCOUNT_ID_ENVIRONMENT_VARIABLE: &str = "AWS_ACCOUNT_ID";
 
-// When running in GCP, we are provided the AWS role to assume via environment
-// variable.
-const AWS_ROLE_ARN_ENVIRONMENT_VARIABLE: &str = "AWS_ROLE_ARN";
-
 /// Constructs a basic runtime suitable for use in our single threaded context
 fn basic_runtime() -> Result<Runtime> {
     Ok(Builder::new().basic_scheduler().enable_all().build()?)
@@ -54,17 +50,17 @@ fn basic_runtime() -> Result<Runtime> {
 /// Implementation of Transport that reads and writes objects from Amazon S3.
 pub struct S3Transport {
     path: S3Path,
-    use_gke_metadata_credentials: bool,
+    identity: Identity,
     // client_provider allows injection of mock S3Client for testing purposes
-    client_provider: fn(&Region, bool) -> Result<S3Client>,
+    client_provider: ClientProvider,
 }
 
 impl S3Transport {
-    pub fn new(path: S3Path, use_gke_metadata_credentials: bool) -> S3Transport {
+    pub fn new(path: S3Path, identity: Identity) -> S3Transport {
         S3Transport::new_with_client(
             path,
-            use_gke_metadata_credentials,
-            |region, use_gke_metadata_credentials| {
+            identity,
+            Box::new(|region: &Region, identity: String| {
                 // Rusoto uses Hyper which uses connection pools. The default
                 // timeout for those connections is 90 seconds[1]. Amazon S3's
                 // API closes idle client connections after 20 seconds[2]. If we
@@ -84,7 +80,7 @@ impl S3Transport {
                 let connector = HttpsConnector::new();
                 let http_client = rusoto_core::HttpClient::from_builder(builder, connector);
 
-                if use_gke_metadata_credentials {
+                if identity != "" {
                     // When running in GKE, the token used to authenticate to
                     // AWS S3 is made available via the instance metadata
                     // service. See terraform/modules/kubernetes/kubernetes.tf
@@ -137,7 +133,7 @@ impl S3Transport {
                             // The AWS role that we are assuming is provided via
                             // environment variable. See
                             // terraform/modules/kubernetes/kubernetes.tf
-                            Variable::from_env_var(AWS_ROLE_ARN_ENVIRONMENT_VARIABLE),
+                            identity,
                             // The role ARN we assume is already bound to a
                             // specific facilitator instance, so we don't get
                             // much from further scoping the role assumption,
@@ -164,27 +160,30 @@ impl S3Transport {
                         region.clone(),
                     ))
                 }
-            },
+            }),
         )
     }
 
     fn new_with_client(
         path: S3Path,
-        use_gke_metadata_credentials: bool,
-        client_provider: fn(&Region, bool) -> Result<S3Client>,
+        identity: Identity,
+        client_provider: ClientProvider,
     ) -> S3Transport {
         S3Transport {
             path: path.ensure_directory_prefix(),
-            use_gke_metadata_credentials,
+            identity,
             client_provider,
         }
     }
 }
 
+// ClientProvider allows mocking out a client for testing.
+type ClientProvider = Box<dyn Fn(&Region, String) -> Result<S3Client>>;
+
 impl Transport for S3Transport {
     fn get(&mut self, key: &str) -> Result<Box<dyn Read>> {
         let mut runtime = basic_runtime()?;
-        let client = (self.client_provider)(&self.path.region, self.use_gke_metadata_credentials)?;
+        let client = (self.client_provider)(&self.path.region, self.identity.clone())?;
         let get_output = runtime
             .block_on(client.get_object(GetObjectRequest {
                 bucket: self.path.bucket.to_owned(),
@@ -205,7 +204,7 @@ impl Transport for S3Transport {
             // Set buffer size to 5 MB, which is the minimum required by Amazon
             // https://docs.aws.amazon.com/AmazonS3/latest/dev/qfacts.html
             5_242_880,
-            (self.client_provider)(&self.path.region, self.use_gke_metadata_credentials)?,
+            (self.client_provider)(&self.path.region, self.identity.clone())?,
         )?))
     }
 }
@@ -668,7 +667,7 @@ mod tests {
             key: "".into(),
         };
 
-        let mut transport = S3Transport::new_with_client(s3_path.clone(), false, |region, _| {
+        let provider = Box::new(|region: &Region, _: String| {
             Ok(S3Client::new_with(
                 // Failed GetObject request
                 MockRequestDispatcher::with_status(404).with_request_checker(is_get_object_request),
@@ -676,20 +675,25 @@ mod tests {
                 region.clone(),
             ))
         });
+        let mut transport = S3Transport::new_with_client(s3_path.clone(), "".to_string(), provider);
 
         let ret = transport.get(TEST_KEY);
         assert!(ret.is_err(), "unexpected return value {:?}", ret.err());
 
-        let mut transport = S3Transport::new_with_client(s3_path.clone(), false, |region, _| {
-            Ok(S3Client::new_with(
-                // Successful GetObject request
-                MockRequestDispatcher::with_status(200)
-                    .with_request_checker(is_get_object_request)
-                    .with_body("fake-content"),
-                MockCredentialsProvider,
-                region.clone(),
-            ))
-        });
+        let mut transport = S3Transport::new_with_client(
+            s3_path.clone(),
+            "".to_string(),
+            Box::new(|region: &Region, _: String| {
+                Ok(S3Client::new_with(
+                    // Successful GetObject request
+                    MockRequestDispatcher::with_status(200)
+                        .with_request_checker(is_get_object_request)
+                        .with_body("fake-content"),
+                    MockCredentialsProvider,
+                    region.clone(),
+                ))
+            }),
+        );
 
         let mut reader = transport
             .get(TEST_KEY)
@@ -698,46 +702,50 @@ mod tests {
         reader.read_to_end(&mut content).expect("failed to read");
         assert_eq!(Vec::from("fake-content"), content);
 
-        let mut transport = S3Transport::new_with_client(s3_path, false, |region, _| {
-            let requests = vec![
-                // Response to CreateMultipartUpload
-                MockRequestDispatcher::with_status(200)
-                    .with_body(
-                        r#"<?xml version="1.0" encoding="UTF-8"?>
+        let mut transport = S3Transport::new_with_client(
+            s3_path,
+            "".to_string(),
+            Box::new(|region: &Region, _: Identity| {
+                let requests = vec![
+                    // Response to CreateMultipartUpload
+                    MockRequestDispatcher::with_status(200)
+                        .with_body(
+                            r#"<?xml version="1.0" encoding="UTF-8"?>
 <InitiateMultipartUploadResult>
    <Bucket>fake-bucket</Bucket>
    <Key>fake-key</Key>
    <UploadId>upload-id</UploadId>
 </InitiateMultipartUploadResult>"#,
-                    )
-                    .with_request_checker(is_create_multipart_upload_request),
-                // Well formed response to UploadPart
-                MockRequestDispatcher::with_status(200)
-                    .with_request_checker(is_upload_part_request)
-                    .with_header("ETag", "fake-etag"),
-                // Well formed response to CompleteMultipartUpload
-                MockRequestDispatcher::with_status(200)
-                    .with_request_checker(is_complete_multipart_upload_request)
-                    .with_body(
-                        r#"<?xml version="1.0" encoding="UTF-8"?>
+                        )
+                        .with_request_checker(is_create_multipart_upload_request),
+                    // Well formed response to UploadPart
+                    MockRequestDispatcher::with_status(200)
+                        .with_request_checker(is_upload_part_request)
+                        .with_header("ETag", "fake-etag"),
+                    // Well formed response to CompleteMultipartUpload
+                    MockRequestDispatcher::with_status(200)
+                        .with_request_checker(is_complete_multipart_upload_request)
+                        .with_body(
+                            r#"<?xml version="1.0" encoding="UTF-8"?>
 <CompleteMultipartUploadResult>
    <Location>string</Location>
    <Bucket>fake-bucket</Bucket>
    <Key>fake-key</Key>
    <ETag>fake-etag</ETag>
 </CompleteMultipartUploadResult>"#,
-                    ),
-                // Response to AbortMultipartUpload, expected because of
-                // cancel_upload call
-                MockRequestDispatcher::with_status(204)
-                    .with_request_checker(is_abort_multipart_upload_request),
-            ];
-            Ok(S3Client::new_with(
-                MultipleMockRequestDispatcher::new(requests),
-                MockCredentialsProvider,
-                region.clone(),
-            ))
-        });
+                        ),
+                    // Response to AbortMultipartUpload, expected because of
+                    // cancel_upload call
+                    MockRequestDispatcher::with_status(204)
+                        .with_request_checker(is_abort_multipart_upload_request),
+                ];
+                Ok(S3Client::new_with(
+                    MultipleMockRequestDispatcher::new(requests),
+                    MockCredentialsProvider,
+                    region.clone(),
+                ))
+            }),
+        );
 
         let mut writer = transport.put(TEST_KEY).unwrap();
         writer.write_all(b"fake-content").unwrap();

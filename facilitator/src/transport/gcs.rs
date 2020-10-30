@@ -1,7 +1,7 @@
 use crate::{
     config::GCSPath,
     transport::{Transport, TransportWriter},
-    Error,
+    Error, Identity,
 };
 use anyhow::{anyhow, Context, Result};
 use chrono::{prelude::Utc, DateTime, Duration};
@@ -200,14 +200,21 @@ pub struct GCSTransport {
 
 impl GCSTransport {
     /// Instantiate a new GCSTransport to read or write objects from or to the
-    /// provided path. If impersonate is None, GCSTransport authenticates to GCS
-    /// as the default service account. If impersonate contains a service
+    /// provided path. If identity is "", GCSTransport authenticates to GCS
+    /// as the default service account. If identity contains a service
     /// account email, GCSTransport will use the GCP IAM API to obtain an Oauth
     /// token to impersonate that service account.
-    pub fn new(path: GCSPath, impersonate: Option<String>) -> GCSTransport {
-        GCSTransport {
-            path: path.ensure_directory_prefix(),
-            oauth_token_provider: OauthTokenProvider::new(impersonate),
+    pub fn new(path: GCSPath, identity: Identity) -> GCSTransport {
+        if &identity == "" {
+            GCSTransport {
+                path: path.ensure_directory_prefix(),
+                oauth_token_provider: OauthTokenProvider::new(None),
+            }
+        } else {
+            GCSTransport {
+                path: path.ensure_directory_prefix(),
+                oauth_token_provider: OauthTokenProvider::new(Some(identity)),
+            }
         }
     }
 }
