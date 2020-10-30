@@ -57,21 +57,11 @@ fn path_validator(s: String) -> Result<(), String> {
 trait AppArgumentAdder {
     fn add_instance_name_argument(self: Self) -> Self;
 
-    fn add_manifest_base_url_argument(self: Self, manifest_base_url_arg_name: &'static str)
-        -> Self;
+    fn add_manifest_base_url_argument(self: Self, entity: Entity) -> Self;
 
-    fn add_storage_arguments(
-        self: Self,
-        storage_arg_name: &'static str,
-        s3_arn_arg: &'static str,
-        gcs_sa_to_impersonate_arg: &'static str,
-    ) -> Self;
+    fn add_storage_arguments(self: Self, entity: Entity, in_out: InOut) -> Self;
 
-    fn add_peer_batch_public_key_arguments(
-        self: Self,
-        key_argument: &'static str,
-        key_identifier_argument: &'static str,
-    ) -> Self;
+    fn add_batch_public_key_arguments(self: Self, entity: Entity) -> Self;
 
     fn add_batch_signing_key_arguments(self: Self) -> Self;
 
@@ -95,6 +85,57 @@ Keys: All keys are P-256. Public keys are base64-encoded DER SPKI. Private keys 
 base64 encoded format expected by libprio-rs, or base64-encoded PKCS#8, as documented. \
 ";
 
+/// The string "-input" or "-output", for appending to arg names.
+enum InOut {
+    Input,
+    Output,
+}
+
+impl InOut {
+    fn str(&self) -> &'static str {
+        match self {
+            InOut::Input => "-input",
+            InOut::Output => "-output",
+        }
+    }
+}
+
+/// One of the organizations participating in the Prio system.
+enum Entity {
+    Ingestor,
+    Peer,
+    Own,
+    // Hack: the aggregation bucket is part of the "Own" entity (i.e. whoever is running this).
+    // For the purpose of command line flags it acts as a separate entity.
+    Aggregation,
+    Portal,
+}
+
+/// We need to be able to give &'static strs to `clap`, but sometimes we want to generate them
+/// with format!(), which generates a String. This leaks a String in order to give us a &'static str.
+fn leak_string(s: String) -> &'static str {
+    Box::leak(s.into_boxed_str())
+}
+
+impl Entity {
+    fn str(&self) -> &'static str {
+        match self {
+            Entity::Ingestor => "ingestor",
+            Entity::Peer => "peer",
+            Entity::Own => "own",
+            Entity::Aggregation => "aggregation",
+            Entity::Portal => "portal",
+        }
+    }
+
+    /// Return the lowercase name of this entity, plus a suffix.
+    /// Intentionally leak the resulting string so it can be used
+    /// as a &'static str by clap.
+    fn suffix(&self, s: &str) -> &'static str {
+        leak_string(format!("{}{}", self.str(), s))
+    }
+}
+
 impl<'a, 'b> AppArgumentAdder for App<'a, 'b> {
     fn add_instance_name_argument(self: App<'a, 'b>) -> App<'a, 'b> {
         self.arg(
@@ -112,70 +153,66 @@ impl<'a, 'b> AppArgumentAdder for App<'a, 'b> {
         )
     }
 
-    fn add_manifest_base_url_argument(
-        self: App<'a, 'b>,
-        manifest_base_url_arg_name: &'static str,
-    ) -> App<'a, 'b> {
+    fn add_manifest_base_url_argument(self: App<'a, 'b>, entity: Entity) -> App<'a, 'b> {
+        let name = entity.suffix("-manifest-base-url");
         self.arg(
-            Arg::with_name(manifest_base_url_arg_name)
-                .long(manifest_base_url_arg_name)
+            Arg::with_name(name)
+                .long(name)
                 .value_name("BASE_URL")
                 .help("Base URL relative to which manifests should be fetched")
-                .long_help(
-                    "Base URL from which the entity named by flag vends manifests, \
+                .long_help(leak_string(format!(
+                    "Base URL from which the {} vends manifests, \
                     enabling this data share processor to retrieve the global \
                     or specific manifest for the server and obtain storage \
                     buckets and batch signing public keys.",
-                ),
+                    entity.str()
+                ))),
         )
     }
 
-    fn add_storage_arguments(
-        self: App<'a, 'b>,
-        storage_arg_name: &'static str,
-        s3_arn_arg: &'static str,
-        gcs_sa_arg: &'static str,
-    ) -> App<'a, 'b> {
+    fn add_storage_arguments(self: App<'a, 'b>, entity: Entity, in_out: InOut) -> App<'a, 'b> {
         self.arg(
-            Arg::with_name(storage_arg_name)
-                .long(storage_arg_name)
+            Arg::with_name(entity.suffix(in_out.str()))
+                .long(entity.suffix(in_out.str()))
                 .value_name("PATH")
                 .validator(path_validator)
                 .help("Storage path (gs://, s3:// or local dir name)"),
         )
         .arg(
-            Arg::with_name(s3_arn_arg)
-                .long(s3_arn_arg)
+            Arg::with_name(entity.suffix("-s3-arn"))
+                .long(entity.suffix("-s3-arn"))
                 .value_name("AWS_IAM_ROLE")
                 .help("AWS IAM role to assume when using S3."),
         )
         .arg(
-            Arg::with_name(gcs_sa_arg)
-                .long(gcs_sa_arg)
+            Arg::with_name(entity.suffix("-gcp-sa-email"))
+                .long(entity.suffix("-gcp-sa-email"))
                 .value_name("GCP_SERVICE_ACCOUNT")
                 .help("GCP service account to impersonate when using GCS."),
         )
     }
 
-    fn add_peer_batch_public_key_arguments(
-        self: App<'a, 'b>,
-        key_argument: &'static str,
-        key_identifier_argument: &'static str,
-    ) -> App<'a, 'b> {
+    fn add_batch_public_key_arguments(self: App<'a, 'b>, entity: Entity) -> App<'a, 'b> {
         self.arg(
-            Arg::with_name(key_argument)
-                .long(key_argument)
+            Arg::with_name(entity.suffix("-public-key"))
+                .long(entity.suffix("-public-key"))
                 .value_name("B64")
-                .help("Batch signing public key (for the entity named by flag)")
+                .help(leak_string(format!(
+                    "Batch signing public key for the {}",
+                    entity.str()
+                )))
                 .default_value(DEFAULT_FACILITATOR_SIGNING_PRIVATE_KEY)
                 .hide_default_value(true)
                 .validator(b64_validator),
         )
         .arg(
-            Arg::with_name(key_identifier_argument)
-                .long(key_identifier_argument)
+            Arg::with_name(entity.suffix("-public-key-identifier"))
+                .long(entity.suffix("-public-key-identifier"))
                 .value_name("KEY_ID")
-                .help("Identifier for the batch keypair in use by the entity named by flag")
+                .help(leak_string(format!(
+                    "Identifier for the {}'s batch keypair",
+                    entity.str()
+                )))
                 .default_value("default-batch-signing-key-id"),
         )
     }
@@ -254,12 +291,8 @@ fn main() -> Result<(), anyhow::Error> {
         .subcommand(
             SubCommand::with_name("generate-ingestion-sample")
                 .about("Generate sample data files")
-                .add_storage_arguments("pha-output", "pha-output-s3-arn", "pha-output-gcs-sa-email")
-                .add_storage_arguments(
-                    "facilitator-output",
-                    "facilitator-output-s3-arn",
-                    "facilitator-output-gcp-sa-email",
-                )
+                .add_storage_arguments(Entity::Peer, InOut::Output)
+                .add_storage_arguments(Entity::Own, InOut::Output)
                 .arg(
                     Arg::with_name("aggregation-id")
                         .long("aggregation-id")
@@ -406,27 +439,16 @@ fn main() -> Result<(), anyhow::Error> {
                         .validator(date_validator),
                 )
                 .add_packet_decryption_key_argument()
-                .add_peer_batch_public_key_arguments(
-                    "ingestor-public-key",
-                    "ingestor-public-key-identifier",
-                )
+                .add_batch_public_key_arguments(Entity::Ingestor)
                 .add_batch_signing_key_arguments()
                 .arg(Arg::with_name("is-first").long("is-first").help(
                     "Whether this is the \"first\" server receiving a share, \
                     i.e., the PHA.",
                 ))
-                .add_manifest_base_url_argument("ingestor-manifest-base-url")
-                .add_storage_arguments(
-                    "ingestor-bucket",
-                    "ingestor-bucket-s3-arn",
-                    "ingestor-bucket-gcp-sa-email",
-                )
-                .add_manifest_base_url_argument("peer-manifest-base-url")
-                .add_storage_arguments(
-                    "peer-validation-bucket",
-                    "peer-validation-bucket-s3-arn",
-                    "peer-validation-bucket-gcp-sa-email",
-                ),
+                .add_manifest_base_url_argument(Entity::Ingestor)
+                .add_storage_arguments(Entity::Ingestor, InOut::Input)
+                .add_manifest_base_url_argument(Entity::Peer)
+                .add_storage_arguments(Entity::Peer, InOut::Output)
         )
         .subcommand(
             SubCommand::with_name("aggregate")
@@ -492,38 +514,16 @@ fn main() -> Result<(), anyhow::Error> {
                         )
                         .validator(date_validator),
                 )
-                .add_manifest_base_url_argument("ingestor-manifest-base-url")
-                .add_storage_arguments(
-                    "ingestor-bucket",
-                    "ingestor-bucket-s3-arn",
-                    "ingestor-bucket-gcp-sa-email",
-                )
-                .add_peer_batch_public_key_arguments(
-                    "ingestor-public-key",
-                    "ingestor-public-key-identifier",
-                )
-                .add_manifest_base_url_argument("own-manifest-base-url")
-                .add_storage_arguments(
-                    "own-validation-bucket",
-                    "own-validation-bucket-s3-arn",
-                    "own-validation-bucket-gcp-sa-email",
-                )
-                .add_manifest_base_url_argument("peer-manifest-base-url")
-                .add_storage_arguments(
-                    "peer-validation-bucket",
-                    "peer-validation-bucket-s3-arn",
-                    "peer-validation-bucket-gcp-sa-email",
-                )
-                .add_peer_batch_public_key_arguments(
-                    "peer-public-key",
-                    "peer-public-key-identifier",
-                )
-                .add_manifest_base_url_argument("portal-server-manifest-base-url")
-                .add_storage_arguments(
-                    "aggregation-bucket",
-                    "aggregation-bucket-s3-arn",
-                    "aggregation-bucket-gcp-sa-email",
-                )
+                .add_manifest_base_url_argument(Entity::Ingestor)
+                .add_storage_arguments(Entity::Ingestor, InOut::Input)
+                .add_batch_public_key_arguments(Entity::Ingestor)
+                .add_manifest_base_url_argument(Entity::Own)
+                .add_storage_arguments(Entity::Own,  InOut::Output)
+                .add_manifest_base_url_argument(Entity::Peer)
+                .add_storage_arguments(Entity::Peer,  InOut::Input)
+                .add_batch_public_key_arguments(Entity::Peer)
+                .add_manifest_base_url_argument(Entity::Portal)
+                .add_storage_arguments(Entity::Aggregation,  InOut::Output)
                 .add_packet_decryption_key_argument()
                 .add_batch_signing_key_arguments()
                 .arg(Arg::with_name("is-first").long("is-first").help(
