@@ -68,24 +68,31 @@ trait AppArgumentAdder {
     fn add_packet_decryption_key_argument(self: Self) -> Self;
 }
 
-const SHARED_HELP: &str =
-    "Service accounts: Any flag ending in -gcp-sa-email specifies a GCP service account \
-(identified by an email address). Requests to Google Storage (gs://) are always authenticated \
-as one of our service accounts by GKE's Workload Identity feature: \
-https://cloud.google.com/kubernetes-engine/docs/how-to/workload-identity. If a -gcp-sa-email \
-flag is set, facilitator will use the service account it is running as to impersonate a \
-different account, which has permissions to write to the named bucket. \
-Such flags are ignored when reading or writing an S3 bucket (s3://). \
-\
-Flags ending in -s3-arn specify an AWS service account (identified by an `arn:` URI). \
-Requests to S3 will be authenticated by assuming this role. The credential to assume \
-the role is an OIDC auth token obtained from the GKE metadata service. If an -s3-arn flag \
-is omitted, the corresponding requests will be authenticated by direct AWS credentials \
-from ~/.aws/.\
-\
-Keys: All keys are P-256. Public keys are base64-encoded DER SPKI. Private keys are in the \
-base64 encoded format expected by libprio-rs, or base64-encoded PKCS#8, as documented. \
-";
+const SHARED_HELP: &str = "Storage arguments: Any flag ending in -input or -output can take an \
+     S3 bucket (s3://<region>/<bucket>), a Google Storage bucket (gs://), \
+     or a local directory name. The corresponding -identity flag specifies \
+     what identity to use with a bucket.
+     
+     For S3 buckets: An identity flag may contain an AWS IAM role, specified \
+     using an ARN (i.e. \"arn:...\"). Facilitator will assume that role \
+     using an OIDC auth token obtained from the GKE metadata service. \
+     Appropriate mappings need to be in place from Facilitator's k8s \
+     service account to its GCP service account to the IAM role. If \
+     the identity flag is empty, use credentials from ~/.aws.
+
+     For GS buckets: An identity flag may contain a GCP service account \
+     (identified by an email address). Requests to Google Storage (gs://) \
+     are always authenticated as one of our service accounts by GKE's \
+     Workload Identity feature: \
+     https://cloud.google.com/kubernetes-engine/docs/how-to/workload-identity. \
+     If an identity flag is set, facilitator will use its default service account \
+     to impersonate a different account, which should have permissions to write \
+     to or read from the named bucket. \
+     \
+     Keys: All keys are P-256. Public keys are base64-encoded DER SPKI. Private \
+     keys are in the base64 encoded format expected by libprio-rs, or base64-encoded \
+     PKCS#8, as documented. \
+    ";
 
 /// The string "-input" or "-output", for appending to arg names.
 enum InOut {
@@ -188,12 +195,6 @@ impl<'a, 'b> AppArgumentAdder for App<'a, 'b> {
                     "Identity to assume when using S3 or GS storage APIs for {} bucket.",
                     entity.str()
                 ))),
-        )
-        .arg(
-            Arg::with_name(entity.suffix("-gcp-sa-email"))
-                .long(entity.suffix("-gcp-sa-email"))
-                .value_name("GCP_SERVICE_ACCOUNT")
-                .help("GCP service account to impersonate when using GCS."),
         )
     }
 
