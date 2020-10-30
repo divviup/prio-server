@@ -1,7 +1,7 @@
 use crate::{
-    config::GCSPath,
+    config::{GCSPath, Identity},
     transport::{Transport, TransportWriter},
-    Error, Identity,
+    Error,
 };
 use anyhow::{anyhow, Context, Result};
 use chrono::{prelude::Utc, DateTime, Duration};
@@ -205,16 +205,9 @@ impl GCSTransport {
     /// account email, GCSTransport will use the GCP IAM API to obtain an Oauth
     /// token to impersonate that service account.
     pub fn new(path: GCSPath, identity: Identity) -> GCSTransport {
-        if &identity == "" {
-            GCSTransport {
-                path: path.ensure_directory_prefix(),
-                oauth_token_provider: OauthTokenProvider::new(None),
-            }
-        } else {
-            GCSTransport {
-                path: path.ensure_directory_prefix(),
-                oauth_token_provider: OauthTokenProvider::new(Some(identity)),
-            }
+        GCSTransport {
+            path: path.ensure_directory_prefix(),
+            oauth_token_provider: OauthTokenProvider::new(identity.map(|x| x.to_string())),
         }
     }
 }

@@ -11,7 +11,7 @@ use uuid::Uuid;
 
 use facilitator::{
     aggregation::BatchAggregator,
-    config::StoragePath,
+    config::{Identity, StoragePath},
     intake::BatchIntaker,
     manifest::{IngestionServerGlobalManifest, PortalServerGlobalManifest, SpecificManifest},
     sample::generate_ingestion_sample,
@@ -23,7 +23,7 @@ use facilitator::{
         GCSTransport, LocalFileTransport, S3Transport, SignableTransport, Transport,
         VerifiableAndDecryptableTransport, VerifiableTransport,
     },
-    BatchSigningKey, Identity, DATE_FORMAT,
+    BatchSigningKey, DATE_FORMAT,
 };
 
 fn num_validator<F: FromStr>(s: String) -> Result<(), String> {
@@ -546,14 +546,13 @@ fn main() -> Result<(), anyhow::Error> {
         ("generate-ingestion-sample", Some(sub_matches)) => {
             let peer_output_path =
                 StoragePath::from_str(sub_matches.value_of("peer-output").unwrap())?;
-            let peer_identity = sub_matches.value_of("peer-identity").unwrap_or_default();
-            let mut peer_transport =
-                transport_for_path(peer_output_path, peer_identity.to_string())?;
+            let peer_identity = sub_matches.value_of("peer-identity");
+            let mut peer_transport = transport_for_path(peer_output_path, peer_identity)?;
 
             let own_output_path =
                 StoragePath::from_str(sub_matches.value_of("own-output").unwrap())?;
-            let own_identity = sub_matches.value_of("own-identity").unwrap_or_default();
-            let mut own_transport = transport_for_path(own_output_path, own_identity.to_string())?;
+            let own_identity = sub_matches.value_of("own-identity");
+            let mut own_transport = transport_for_path(own_output_path, own_identity)?;
             let ingestor_batch_signing_key = batch_signing_key_from_arg(sub_matches)?;
 
             generate_ingestion_sample(
@@ -623,9 +622,9 @@ fn main() -> Result<(), anyhow::Error> {
                 Err(anyhow!("peer-output or peer-manifest-base-url required."))
             }?;
 
-            let peer_identity = sub_matches.value_of("peer-identity").unwrap_or_default();
+            let peer_identity = sub_matches.value_of("peer-identity");
             let mut validation_transport = SignableTransport {
-                transport: transport_for_path(validation_bucket, peer_identity.to_string())?,
+                transport: transport_for_path(validation_bucket, peer_identity)?,
                 batch_signing_key: batch_signing_key_from_arg(sub_matches)?,
             };
 
@@ -670,9 +669,8 @@ fn main() -> Result<(), anyhow::Error> {
                 Err(anyhow!("own-input or own-manifest-base-url required"))
             }?;
 
-            let own_identity = sub_matches.value_of("own-identity").unwrap_or_default();
-            let own_validation_transport =
-                transport_for_path(own_validation_bucket, own_identity.to_string())?;
+            let own_identity = sub_matches.value_of("own-identity");
+            let own_validation_transport = transport_for_path(own_validation_bucket, own_identity)?;
 
             // To read our own validation shares, we require our own public keys
             // which we discover in our own specific manifest.
@@ -701,10 +699,10 @@ fn main() -> Result<(), anyhow::Error> {
             // it is simply provided via argument.
             let peer_validation_bucket =
                 StoragePath::from_str(sub_matches.value_of("peer-input").unwrap())?;
-            let peer_identity = sub_matches.value_of("peer-identity").unwrap_or_default();
+            let peer_identity = sub_matches.value_of("peer-identity");
 
             let peer_validation_transport =
-                transport_for_path(peer_validation_bucket, peer_identity.to_string())?;
+                transport_for_path(peer_validation_bucket, peer_identity)?;
 
             // We need the public keys the peer data share processor used to
             // sign messages, which we can obtain by argument or by discovering
@@ -746,12 +744,10 @@ fn main() -> Result<(), anyhow::Error> {
                     "aggregation-output or portal-manifest-base-url required"
                 )),
             }?;
-            let aggregation_identity = sub_matches
-                .value_of("aggregation-identity")
-                .unwrap_or_default();
+            let aggregation_identity = sub_matches.value_of("aggregation-identity");
 
             let aggregation_transport =
-                transport_for_path(aggregation_bucket, aggregation_identity.to_string())?;
+                transport_for_path(aggregation_bucket, aggregation_identity)?;
 
             // Get the key we will use to sign sum part messages sent to the
             // portal server.
@@ -842,9 +838,9 @@ fn intake_transport_from_args(matches: &ArgMatches) -> Result<VerifiableAndDecry
     // know because our deployment created it, so it is always provided via the
     // ingestor-input argument.
     let ingestor_bucket = StoragePath::from_str(matches.value_of("ingestor-input").unwrap())?;
-    let ingestor_identity = matches.value_of("ingestor-identity").unwrap_or_default();
+    let ingestor_identity = matches.value_of("ingestor-identity");
 
-    let intake_transport = transport_for_path(ingestor_bucket, ingestor_identity.to_string())?;
+    let intake_transport = transport_for_path(ingestor_bucket, ingestor_identity)?;
 
     // We also need the public keys the ingestor may have used to sign the
     // the batch, which can be provided either directly via command line or must

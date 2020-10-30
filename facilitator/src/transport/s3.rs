@@ -1,7 +1,7 @@
 use crate::{
-    config::S3Path,
+    config::{Identity, S3Path},
     transport::{Transport, TransportWriter},
-    Error, Identity,
+    Error,
 };
 use anyhow::{Context, Result};
 use derivative::Derivative;
@@ -50,7 +50,7 @@ fn basic_runtime() -> Result<Runtime> {
 /// Implementation of Transport that reads and writes objects from Amazon S3.
 pub struct S3Transport {
     path: S3Path,
-    identity: Identity,
+    iam_role: Option<String>,
     // client_provider allows injection of mock S3Client for testing purposes
     client_provider: ClientProvider,
 }
@@ -60,7 +60,7 @@ impl S3Transport {
         S3Transport::new_with_client(
             path,
             identity,
-            Box::new(|region: &Region, identity: String| {
+            Box::new(|region: &Region, iam_role: Option<String>| {
                 // Rusoto uses Hyper which uses connection pools. The default
                 // timeout for those connections is 90 seconds[1]. Amazon S3's
                 // API closes idle client connections after 20 seconds[2]. If we
@@ -80,7 +80,7 @@ impl S3Transport {
                 let connector = HttpsConnector::new();
                 let http_client = rusoto_core::HttpClient::from_builder(builder, connector);
 
-                if identity != "" {
+                if let Some(iam_role) = iam_role {
                     // When running in GKE, the token used to authenticate to
                     // AWS S3 is made available via the instance metadata
                     // service. See terraform/modules/kubernetes/kubernetes.tf
@@ -133,7 +133,7 @@ impl S3Transport {
                             // The AWS role that we are assuming is provided via
                             // environment variable. See
                             // terraform/modules/kubernetes/kubernetes.tf
-                            identity,
+                            iam_role,
                             // The role ARN we assume is already bound to a
                             // specific facilitator instance, so we don't get
                             // much from further scoping the role assumption,
@@ -171,19 +171,19 @@ impl S3Transport {
     ) -> S3Transport {
         S3Transport {
             path: path.ensure_directory_prefix(),
-            identity,
+            iam_role: identity.map(|x| x.to_string()),
             client_provider,
         }
     }
 }
 
 // ClientProvider allows mocking out a client for testing.
-type ClientProvider = Box<dyn Fn(&Region, String) -> Result<S3Client>>;
+type ClientProvider = Box<dyn Fn(&Region, Option<String>) -> Result<S3Client>>;
 
 impl Transport for S3Transport {
     fn get(&mut self, key: &str) -> Result<Box<dyn Read>> {
         let mut runtime = basic_runtime()?;
-        let client = (self.client_provider)(&self.path.region, self.identity.clone())?;
+        let client = (self.client_provider)(&self.path.region, self.iam_role.clone())?;
         let get_output = runtime
             .block_on(client.get_object(GetObjectRequest {
                 bucket: self.path.bucket.to_owned(),
@@ -204,7 +204,7 @@ impl Transport for S3Transport {
             // Set buffer size to 5 MB, which is the minimum required by Amazon
             // https://docs.aws.amazon.com/AmazonS3/latest/dev/qfacts.html
             5_242_880,
-            (self.client_provider)(&self.path.region, self.identity.clone())?,
+            (self.client_provider)(&self.path.region, self.iam_role.clone())?,
         )?))
     }
 }
@@ -667,7 +667,7 @@ mod tests {
             key: "".into(),
         };
 
-        let provider = Box::new(|region: &Region, _: String| {
+        let provider = Box::new(|region: &Region, _: Option<String>| {
             Ok(S3Client::new_with(
                 // Failed GetObject request
                 MockRequestDispatcher::with_status(404).with_request_checker(is_get_object_request),
@@ -675,15 +675,15 @@ mod tests {
                 region.clone(),
             ))
         });
-        let mut transport = S3Transport::new_with_client(s3_path.clone(), "".to_string(), provider);
+        let mut transport = S3Transport::new_with_client(s3_path.clone(), None, provider);
 
         let ret = transport.get(TEST_KEY);
         assert!(ret.is_err(), "unexpected return value {:?}", ret.err());
 
         let mut transport = S3Transport::new_with_client(
             s3_path.clone(),
-            "".to_string(),
-            Box::new(|region: &Region, _: String| {
+            None,
+            Box::new(|region: &Region, _: Option<String>| {
                 Ok(S3Client::new_with(
                     // Successful GetObject request
                     MockRequestDispatcher::with_status(200)
@@ -704,8 +704,8 @@ mod tests {
 
         let mut transport = S3Transport::new_with_client(
             s3_path,
-            "".to_string(),
-            Box::new(|region: &Region, _: Identity| {
+            None,
+            Box::new(|region: &Region, _: Option<String>| {
                 let requests = vec![
                     // Response to CreateMultipartUpload
                     MockRequestDispatcher::with_status(200)
