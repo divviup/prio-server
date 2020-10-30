@@ -167,6 +167,22 @@ resource "kubernetes_cron_job" "workflow_manager" {
               args = [
                 "--k8s-namespace", var.kubernetes_namespace,
                 "--input-bucket", var.ingestion_bucket,
+                "--bsk-secret-name", kubernetes_secret.batch_signing_key.metadata[0].name,
+                "--pdks-secret-name", var.packet_decryption_key_kubernetes_secret,
+                "passthrough",
+                # These args are passed to facilitator in addition to the per-batch
+                # args that workflow-manager builds to pass in.
+                "intake-batch",
+                "--aggregation-id", "fake-1",
+                "--instance-name", "foo",
+
+                "--ingestor-input", var.ingestion_bucket,
+                "--ingestor-identity", var.ingestion_bucket_role,
+                "--ingestor-manifest-base-url", "I dunno",
+
+                "--peer-output", var.peer_validation_bucket_name,
+                "--peer-identity", var.peer_share_processor_aws_account_id,
+                "--peer-manifest-base-url", "https://${var.peer_share_processor_manifest_domain}/",
               ]
               env {
                 name  = "AWS_ROLE_ARN"
@@ -175,24 +191,6 @@ resource "kubernetes_cron_job" "workflow_manager" {
               env {
                 name  = "AWS_ACCOUNT_ID"
                 value = data.aws_caller_identity.current.account_id
-              }
-              env {
-                name = "BATCH_SIGNING_KEY"
-                value_from {
-                  secret_key_ref {
-                    name = kubernetes_secret.batch_signing_key.metadata[0].name
-                    key  = "signing_key"
-                  }
-                }
-              }
-              env {
-                name = "INGESTION_PACKET_DECRYPTION_KEY"
-                value_from {
-                  secret_key_ref {
-                    name = var.packet_decryption_key_kubernetes_secret
-                    key  = "decryption_key"
-                  }
-                }
               }
             }
             # If we use any other restart policy, then when the job is finally
