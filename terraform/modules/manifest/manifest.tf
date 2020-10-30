@@ -135,3 +135,7 @@ resource "google_compute_global_forwarding_rule" "manifests" {
 output "bucket" {
   value = google_storage_bucket.manifests.name
 }
+
+output "base_url" {
+  value = local.domain_name
+}

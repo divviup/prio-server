@@ -14,22 +14,6 @@ variable "gcp_region" {
   type = string
 }
 
-variable "ingestor_aws_role_arn" {
-  type = string
-}
-
-variable "ingestor_google_service_account_id" {
-  type = string
-}
-
-variable "peer_share_processor_aws_account_id" {
-  type = string
-}
-
-variable "peer_share_processor_manifest_domain" {
-  type = string
-}
-
 variable "kubernetes_namespace" {
   type = string
 }
@@ -42,13 +26,41 @@ variable "certificate_domain" {
   type = string
 }
 
+variable "ingestor_manifest_base_url" {
+  type = string
+}
+
+variable "ingestor_aws_role_arn" {
+  type = string
+}
+
+variable "ingestor_gcp_service_account_id" {
+  type = string
+}
+
+variable "peer_share_processor_aws_account_id" {
+  type = string
+}
+
+variable "peer_share_processor_manifest_base_url" {
+  type = string
+}
+
+variable "own_manifest_base_url" {
+  type = string
+}
+
 variable "sum_part_bucket_service_account_email" {
+  type = string
+}
+
+variable "portal_server_manifest_base_url" {
   type = string
 }
 
 locals {
   resource_prefix = "prio-${var.environment}-${var.data_share_processor_name}"
-  ingestion_bucket_writer_role_arn = var.ingestor_google_service_account_id != "" ? (
+  ingestion_bucket_writer_role_arn = var.ingestor_gcp_service_account_id != "" ? (
     aws_iam_role.ingestor_bucket_writer_role[0].arn
     ) : (
     var.ingestor_aws_role_arn
@@ -105,7 +117,7 @@ ROLE
 # block, which seems to be the Terraform convention to conditionally create
 # resources (c.f. lots of StackOverflow questions and GitHub issues).
 resource "aws_iam_role" "ingestor_bucket_writer_role" {
-  count              = var.ingestor_google_service_account_id != "" ? 1 : 0
+  count              = var.ingestor_gcp_service_account_id != "" ? 1 : 0
   name               = "${local.resource_prefix}-bucket-writer"
   assume_role_policy = <<ROLE
 {
@@ -119,7 +131,7 @@ resource "aws_iam_role" "ingestor_bucket_writer_role" {
       "Action": "sts:AssumeRoleWithWebIdentity",
       "Condition": {
         "StringEquals": {
-          "accounts.google.com:sub": "${var.ingestor_google_service_account_id}"
+          "accounts.google.com:sub": "${var.ingestor_gcp_service_account_id}"
         }
       }
     }
@@ -264,14 +276,18 @@ module "kubernetes" {
   data_share_processor_name               = var.data_share_processor_name
   gcp_project                             = var.gcp_project
   environment                             = var.environment
+  kubernetes_namespace                    = var.kubernetes_namespace
   ingestion_bucket                        = "${aws_s3_bucket.ingestion_bucket.region}/${aws_s3_bucket.ingestion_bucket.bucket}"
   ingestion_bucket_role                   = aws_iam_role.bucket_role.arn
-  kubernetes_namespace                    = var.kubernetes_namespace
+  ingestor_manifest_base_url              = var.ingestor_manifest_base_url
   packet_decryption_key_kubernetes_secret = var.packet_decryption_key_kubernetes_secret
-  sum_part_bucket_service_account_email   = var.sum_part_bucket_service_account_email
-  peer_share_processor_aws_account_id     = var.peer_share_processor_aws_account_id
-  peer_share_processor_manifest_domain    = var.peer_share_processor_manifest_domain
+  peer_manifest_base_url                  = var.peer_share_processor_manifest_base_url
   peer_validation_bucket_name             = local.peer_validation_bucket_name
+  peer_validation_bucket_role             = aws_iam_role.bucket_role.arn
+  own_validation_bucket                   = google_storage_bucket.own_validation_bucket.name
+  own_manifest_base_url                   = var.own_manifest_base_url
+  sum_part_bucket_service_account_email   = var.sum_part_bucket_service_account_email
+  portal_server_manifest_base_url         = var.portal_server_manifest_base_url
 }
 
 output "data_share_processor_name" {
