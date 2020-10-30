@@ -25,6 +25,8 @@ jobs:
         file: ./facilitator/Dockerfile
         push: true
         tags: letsencrypt/prio-facilitator:${{ steps.get_version.outputs.VERSION }}
+    - name: tag-latest
+      run: docker tag letsencrypt/prio-facilitator:${{ steps.get_version.outputs.VERSION }} letsencrypt/prio-facilitator:latest
 
   push-workflow-manager:
     runs-on: ubuntu-latest
@@ -44,5 +46,9 @@ jobs:
       run: ./workflow-manager/build.sh
     - name: tag
       run: docker tag letsencrypt/prio-workflow-manager letsencrypt/prio-workflow-manager:${{ steps.get_version.outputs.VERSION }}
+    - name: tag-latest
+      run: docker tag letsencrypt/prio-workflow-manager letsencrypt/prio-workflow-manager:latest
     - name: push
       run: docker push letsencrypt/prio-workflow-manager:${{ steps.get_version.outputs.VERSION }}
+    - name: push-latest
+      run: docker push letsencrypt/prio-workflow-manager:latest
