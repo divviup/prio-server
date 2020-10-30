@@ -1,5 +1,5 @@
 use crate::{
-    config::GCSPath,
+    config::{GCSPath, Identity},
     transport::{Transport, TransportWriter},
     Error,
 };
@@ -200,14 +200,14 @@ pub struct GCSTransport {
 
 impl GCSTransport {
     /// Instantiate a new GCSTransport to read or write objects from or to the
-    /// provided path. If impersonate is None, GCSTransport authenticates to GCS
-    /// as the default service account. If impersonate contains a service
+    /// provided path. If identity is "", GCSTransport authenticates to GCS
+    /// as the default service account. If identity contains a service
     /// account email, GCSTransport will use the GCP IAM API to obtain an Oauth
     /// token to impersonate that service account.
-    pub fn new(path: GCSPath, impersonate: Option<String>) -> GCSTransport {
+    pub fn new(path: GCSPath, identity: Identity) -> GCSTransport {
         GCSTransport {
             path: path.ensure_directory_prefix(),
-            oauth_token_provider: OauthTokenProvider::new(impersonate),
+            oauth_token_provider: OauthTokenProvider::new(identity.map(|x| x.to_string())),
         }
     }
 }

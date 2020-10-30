@@ -6,6 +6,10 @@ use rusoto_core::{region::ParseRegionError, Region};
 use serde::{de, export::Formatter, Deserialize, Deserializer, Serialize, Serializer};
 use std::{fmt, path::PathBuf, str::FromStr};
 
+/// Identity represents a cloud identity: Either an AWS IAM ARN (i.e. "arn:...")
+/// or a GCP ServiceAccount (i.e. "foo@bar.com").
+pub type Identity<'a> = Option<&'a str>;
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct S3Path {
     pub region: Region,

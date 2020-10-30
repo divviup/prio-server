@@ -17,6 +17,10 @@ pub use workflow::{workflow_main, WorkflowArgs};
 
 pub const DATE_FORMAT: &str = "%Y/%m/%d/%H/%M";
 
+/// Identity represents a cloud identity: Either an AWS IAM ARN (i.e. "arn:...")
+/// or a GCP ServiceAccount (i.e. "foo@bar.com").
+pub type Identity = String;
+
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
     /// Compatibility enum entry to ease migration.
