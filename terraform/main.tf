@@ -184,6 +184,7 @@ module "data_share_processors" {
   ingestor_aws_role_arn                   = each.value.ingestor_aws_role_arn
   ingestor_google_service_account_id      = each.value.ingestor_gcp_service_account_id
   peer_share_processor_aws_account_id     = jsondecode(data.http.peer_share_processor_global_manifest.body).server-identity.aws-account-id
+  peer_share_processor_manifest_domain    = var.peer_share_processor_manifest_domain
   kubernetes_namespace                    = each.value.kubernetes_namespace
   packet_decryption_key_kubernetes_secret = each.value.packet_decryption_key_kubernetes_secret
   certificate_domain                      = "${var.environment}.certificates.${var.manifest_domain}"

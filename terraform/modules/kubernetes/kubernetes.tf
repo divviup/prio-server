@@ -2,6 +2,18 @@ variable "data_share_processor_name" {
   type = string
 }
 
+variable "peer_share_processor_aws_account_id" {
+  type = string
+}
+
+variable "peer_share_processor_manifest_domain" {
+  type = string
+}
+
+variable "peer_validation_bucket_name" {
+  type = string
+}
+
 variable "environment" {
   type = string
 }

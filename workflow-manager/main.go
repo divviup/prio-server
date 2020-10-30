@@ -280,7 +280,7 @@ func startJob(
 						{
 							Args:            args,
 							Name:            "facile-container",
-							Image:           "us.gcr.io/jsha-prio-bringup/letsencrypt/prio-facilitator:7.7.7",
+							Image:           "us.gcr.io/jsha-prio-bringup/letsencrypt/prio-facilitator:1.2.3",
 							ImagePullPolicy: "Always",
 							Env: []corev1.EnvVar{
 								{

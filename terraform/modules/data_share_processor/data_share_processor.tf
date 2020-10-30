@@ -26,6 +26,10 @@ variable "peer_share_processor_aws_account_id" {
   type = string
 }
 
+variable "peer_share_processor_manifest_domain" {
+  type = string
+}
+
 variable "kubernetes_namespace" {
   type = string
 }
@@ -265,6 +269,9 @@ module "kubernetes" {
   kubernetes_namespace                    = var.kubernetes_namespace
   packet_decryption_key_kubernetes_secret = var.packet_decryption_key_kubernetes_secret
   sum_part_bucket_service_account_email   = var.sum_part_bucket_service_account_email
+  peer_share_processor_aws_account_id     = var.peer_share_processor_aws_account_id
+  peer_share_processor_manifest_domain    = var.peer_share_processor_manifest_domain
+  peer_validation_bucket_name             = local.peer_validation_bucket_name
 }
 
 output "data_share_processor_name" {
