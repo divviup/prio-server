@@ -36,6 +36,5 @@ RUN strip facilitator/target/debug/facilitator
 FROM scratch
 COPY --from=builder /lib/ld-musl-x86_64.so.1 /lib/ld-musl-x86_64.so.1
 COPY --from=builder /usr/src/prio-server/facilitator/target/debug/facilitator /facilitator
-# This should be temporarily copied from the host OS into the current directory to build.
-COPY ca-certificates.crt /etc/ssl/certs/ca-certificates.crt
+COPY --from=builder /etc/ssl/cert.pem /etc/ssl/cert.pem
 ENTRYPOINT ["/facilitator"]
