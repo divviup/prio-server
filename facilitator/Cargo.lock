@@ -542,6 +542,7 @@ dependencies = [
  "derivative",
  "hyper",
  "hyper-rustls 0.21.0",
+ "log",
  "mockito",
  "once_cell",
  "pem",
@@ -556,6 +557,7 @@ dependencies = [
  "serde",
  "serde_json",
  "serde_test",
+ "simple_logger",
  "structopt",
  "tempfile",
  "thiserror",
@@ -1788,6 +1790,19 @@ checksum = "a3e12110bc539e657a646068aaf5eb5b63af9d0c1f7b29c97113fad80e15f035"
 dependencies = [
  "arc-swap",
  "libc",
+]
+
+[[package]]
+name = "simple_logger"
+version = "1.11.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "cd57f17c093ead1d4a1499dc9acaafdd71240908d64775465543b8d9a9f1d198"
+dependencies = [
+ "atty",
+ "chrono",
+ "colored",
+ "log",
+ "winapi 0.3.9",
 ]
 
 [[package]]

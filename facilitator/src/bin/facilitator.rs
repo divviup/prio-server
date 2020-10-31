@@ -141,6 +141,10 @@ impl Entity {
     }
 }
 
+fn upper_snake_case(s: &str) -> String {
+    s.to_uppercase().replace("-", "_")
+}
+
 impl<'a, 'b> AppArgumentAdder for App<'a, 'b> {
     fn add_instance_name_argument(self: App<'a, 'b>) -> App<'a, 'b> {
         self.arg(
@@ -160,9 +164,11 @@ impl<'a, 'b> AppArgumentAdder for App<'a, 'b> {
 
     fn add_manifest_base_url_argument(self: App<'a, 'b>, entity: Entity) -> App<'a, 'b> {
         let name = entity.suffix("-manifest-base-url");
+        let name_env = leak_string(upper_snake_case(name));
         self.arg(
             Arg::with_name(name)
                 .long(name)
+                .env(name_env)
                 .value_name("BASE_URL")
                 .help("Base URL relative to which manifests should be fetched")
                 .long_help(leak_string(format!(
@@ -176,17 +182,23 @@ impl<'a, 'b> AppArgumentAdder for App<'a, 'b> {
     }
 
     fn add_storage_arguments(self: App<'a, 'b>, entity: Entity, in_out: InOut) -> App<'a, 'b> {
+        let name = entity.suffix(in_out.str());
+        let name_env = leak_string(upper_snake_case(name));
+        let id = entity.suffix("-identity");
+        let id_env = leak_string(upper_snake_case(id));
         self.arg(
-            Arg::with_name(entity.suffix(in_out.str()))
-                .long(entity.suffix(in_out.str()))
+            Arg::with_name(name)
+                .long(name)
+                .env(name_env)
                 .value_name("PATH")
                 .validator(path_validator)
                 .default_value(".")
                 .help("Storage path (gs://, s3:// or local dir name)"),
         )
         .arg(
-            Arg::with_name(entity.suffix("-identity"))
-                .long(entity.suffix("-identity"))
+            Arg::with_name(id)
+                .long(id)
+                .env(id_env)
                 .value_name("IAM_ROLE_OR_SERVICE_ACCOUNT")
                 .help(leak_string(format!(
                     "Identity to assume when using S3 or GS storage APIs for {} bucket.",
@@ -240,7 +252,7 @@ impl<'a, 'b> AppArgumentAdder for App<'a, 'b> {
         .arg(
             Arg::with_name("batch-signing-private-key-identifier")
                 .long("batch-signing-private-key-identifier")
-                .env("BATCH_SIGNING_PRIVATE_KEY_ID")
+                .env("BATCH_SIGNING_PRIVATE_KEY_IDENTIFIER")
                 .value_name("ID")
                 .help("Batch signing private key identifier")
                 .long_help(
@@ -276,6 +288,16 @@ impl<'a, 'b> AppArgumentAdder for App<'a, 'b> {
 }
 
 fn main() -> Result<(), anyhow::Error> {
+    use log::info;
+    use simple_logger::SimpleLogger;
+    SimpleLogger::new().init().unwrap();
+
+    info!(
+        "{} {} {}",
+        env!("VERGEN_SEMVER"),
+        env!("VERGEN_SHA_SHORT"),
+        env!("VERGEN_BUILD_TIMESTAMP")
+    );
     let matches = App::new("facilitator")
         .about("Prio data share processor")
         // Environment variables are injected via build.rs

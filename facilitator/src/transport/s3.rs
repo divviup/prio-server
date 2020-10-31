@@ -6,6 +6,7 @@ use crate::{
 use anyhow::{Context, Result};
 use derivative::Derivative;
 use hyper_rustls::HttpsConnector;
+use log::debug;
 use rusoto_core::{
     credential::{
         AutoRefreshingProvider, CredentialsError, DefaultCredentialsProvider, Secret, Variable,
@@ -182,6 +183,7 @@ type ClientProvider = Box<dyn Fn(&Region, Option<String>) -> Result<S3Client>>;
 
 impl Transport for S3Transport {
     fn get(&mut self, key: &str) -> Result<Box<dyn Read>> {
+        debug!("get {} as {:?}", self.path, self.iam_role);
         let mut runtime = basic_runtime()?;
         let client = (self.client_provider)(&self.path.region, self.iam_role.clone())?;
         let get_output = runtime
@@ -198,14 +200,16 @@ impl Transport for S3Transport {
     }
 
     fn put(&mut self, key: &str) -> Result<Box<dyn TransportWriter>> {
-        Ok(Box::new(MultipartUploadWriter::new(
+        debug!("put {} as {:?}", self.path, self.iam_role);
+        let writer = MultipartUploadWriter::new(
             self.path.bucket.to_owned(),
-            [&self.path.key, key].concat(),
+            format!("{}{}", &self.path.key, key),
             // Set buffer size to 5 MB, which is the minimum required by Amazon
             // https://docs.aws.amazon.com/AmazonS3/latest/dev/qfacts.html
             5_242_880,
             (self.client_provider)(&self.path.region, self.iam_role.clone())?,
-        )?))
+        )?;
+        Ok(Box::new(writer))
     }
 }
 
@@ -276,7 +280,10 @@ impl MultipartUploadWriter {
                     ..Default::default()
                 }),
             )
-            .context("error creating multipart upload")?;
+            .context(format!(
+                "error creating multipart upload to s3://{}",
+                bucket
+            ))?;
 
         Ok(MultipartUploadWriter {
             runtime,

@@ -5,6 +5,7 @@ use crate::{
 };
 use anyhow::{anyhow, Context, Result};
 use chrono::{prelude::Utc, DateTime, Duration};
+use log::debug;
 use serde::Deserialize;
 use std::{
     io,
@@ -52,6 +53,7 @@ struct GenerateAccessTokenResponse {
 /// OauthTokenProvider manages a default service account Oauth token (i.e. the
 /// one for a GCP service account mapped to a Kubernetes service account) and an
 /// Oauth token used to impersonate another service account.
+#[derive(Debug)]
 struct OauthTokenProvider {
     /// Holds the service account email to impersonate, if one was provided to
     /// OauthTokenProvider::new.
@@ -214,6 +216,7 @@ impl GCSTransport {
 
 impl Transport for GCSTransport {
     fn get(&mut self, key: &str) -> Result<Box<dyn Read>> {
+        debug!("get {} as {:?}", self.path, self.oauth_token_provider);
         // Per API reference, the object key must be URL encoded.
         // API reference: https://cloud.google.com/storage/docs/json_api/v1/objects/get
         let encoded_key = urlencoding::encode(&[&self.path.key, key].concat());
@@ -249,6 +252,7 @@ impl Transport for GCSTransport {
     }
 
     fn put(&mut self, key: &str) -> Result<Box<dyn TransportWriter>> {
+        debug!("get {} as {:?}", self.path, self.oauth_token_provider);
         // The Oauth token will only be used once, during the call to
         // StreamingTransferWriter::new, so we don't have to worry about it
         // expiring during the lifetime of that object, and so obtain a token
@@ -257,11 +261,12 @@ impl Transport for GCSTransport {
         let oauth_token = self
             .oauth_token_provider
             .ensure_storage_access_oauth_token()?;
-        Ok(Box::new(StreamingTransferWriter::new(
+        let writer = StreamingTransferWriter::new(
             self.path.bucket.to_owned(),
             [&self.path.key, key].concat(),
             oauth_token,
-        )?))
+        )?;
+        Ok(Box::new(writer))
     }
 }
 
@@ -333,10 +338,7 @@ impl StreamingTransferWriter {
             .timeout_read(10_000) // ten seconds
             .send_bytes(&[]);
         if http_response.error() {
-            return Err(anyhow!(
-                "failed to initiate streaming transfer: {:?}",
-                http_response
-            ));
+            return Err(anyhow!("uploading to gs://{}: {:?}", bucket, http_response));
         }
 
         // The upload session URI authenticates subsequent upload requests for
