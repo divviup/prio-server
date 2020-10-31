@@ -288,6 +288,16 @@ impl<'a, 'b> AppArgumentAdder for App<'a, 'b> {
 }
 
 fn main() -> Result<(), anyhow::Error> {
+    use log::info;
+    use simple_logger::SimpleLogger;
+    SimpleLogger::new().init().unwrap();
+
+    info!(
+        "{} {} {}",
+        env!("VERGEN_SEMVER"),
+        env!("VERGEN_SHA_SHORT"),
+        env!("VERGEN_BUILD_TIMESTAMP")
+    );
     let matches = App::new("facilitator")
         .about("Prio data share processor")
         // Environment variables are injected via build.rs
