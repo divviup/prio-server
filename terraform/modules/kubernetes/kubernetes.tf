@@ -197,10 +197,10 @@ resource "kubernetes_config_map" "intake_batch_job_config_map" {
     BATCH_SIGNING_PRIVATE_KEY_IDENTIFIER = kubernetes_secret.batch_signing_key.metadata[0].name
     INGESTOR_IDENTITY                    = var.ingestion_bucket_role
     INGESTOR_INPUT                       = var.ingestion_bucket
-    INGESTOR_MANIFEST_BASE_URL           = var.ingestor_manifest_base_url
+    INGESTOR_MANIFEST_BASE_URL           = "https://${var.ingestor_manifest_base_url}"
     INSTANCE_NAME                        = var.data_share_processor_name
     PEER_IDENTITY                        = var.peer_validation_bucket_role
-    PEER_MANIFEST_BASE_URL               = var.peer_manifest_base_url
+    PEER_MANIFEST_BASE_URL               = "https://${var.peer_manifest_base_url}"
     OWN_OUTPUT                           = var.own_validation_bucket
   }
 }
@@ -220,15 +220,15 @@ resource "kubernetes_config_map" "aggregate_job_config_map" {
     BATCH_SIGNING_PRIVATE_KEY_IDENTIFIER = kubernetes_secret.batch_signing_key.metadata[0].name
     INGESTOR_INPUT                       = "s3://${var.ingestion_bucket}"
     INGESTOR_IDENTITY                    = var.ingestion_bucket_role
-    INGESTOR_MANIFEST_BASE_URL           = var.ingestor_manifest_base_url
+    INGESTOR_MANIFEST_BASE_URL           = "https://${var.ingestor_manifest_base_url}"
     INSTANCE_NAME                        = var.data_share_processor_name
     OWN_INPUT                            = "gs://${var.own_validation_bucket}"
     OWN_MANIFEST_BASE_URL                = var.own_manifest_base_url
     PEER_INPUT                           = "s3://${var.peer_validation_bucket}"
     PEER_IDENTITY                        = var.peer_validation_bucket_role
-    PEER_MANIFEST_BASE_URL               = var.peer_manifest_base_url
+    PEER_MANIFEST_BASE_URL               = "https://${var.peer_manifest_base_url}"
     PORTAL_IDENTITY                      = var.sum_part_bucket_service_account_email
-    PORTAL_MANIFEST_BASE_URL             = var.portal_server_manifest_base_url
+    PORTAL_MANIFEST_BASE_URL             = "https://${var.portal_server_manifest_base_url}"
   }
 }
 

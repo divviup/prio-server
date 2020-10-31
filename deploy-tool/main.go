@@ -31,7 +31,7 @@ import (
 // BatchSigningPublicKey represents a public key used for batch signing.
 type BatchSigningPublicKey struct {
 	// PublicKey is the PEM armored base64 encoding of the ASN.1 encoding of the
-	// PKIX SubjectPublicKeyInfo structure. It must be an ECDSA P256 key.
+	// PKIX SubjectPublicKeyInfo structure. It must be a P-256 key.
 	PublicKey string `json:"public-key"`
 	// Expiration is the ISO 8601 encoded UTC date at which this key expires.
 	Expiration string `json:"expiration"`
@@ -87,34 +87,34 @@ type TerraformOutput struct {
 
 type privateKeyMarshaler func(*ecdsa.PrivateKey) ([]byte, error)
 
-// marshalX962UncompresedPrivateKey encodes an ECDSA P256 private key into the
-// format expected by libprio-rs encrypt::PrivateKey, which is the X9.62
-// uncompressed public key concatenated with the secret scalar.
+// marshalX962UncompressedPrivateKey encodes a P-256 private key into the format
+// expected by libprio-rs encrypt::PrivateKey, which is the X9.62 uncompressed
+// public key concatenated with the secret scalar.
 func marshalX962UncompressedPrivateKey(ecdsaKey *ecdsa.PrivateKey) ([]byte, error) {
 	marshaledPublicKey := elliptic.Marshal(elliptic.P256(), ecdsaKey.PublicKey.X, ecdsaKey.PublicKey.Y)
 	return append(marshaledPublicKey, ecdsaKey.D.Bytes()...), nil
 }
 
-// marshakPKCS8PrivateKey encodes an ECDSA P256 private key into a PKCS#8
-// document. This function adapts x509.MarshalPKCS8PrivateKey to the
-// privateKeyMarshaler type.
+// marshalPKCS8PrivateKey encodes a P-256 private key into a PKCS#8 document.
+// This function adapts x509.MarshalPKCS8PrivateKey to the privateKeyMarshaler
+// type.
 func marshalPKCS8PrivateKey(ecdsaKey *ecdsa.PrivateKey) ([]byte, error) {
 	return x509.MarshalPKCS8PrivateKey(ecdsaKey)
 }
 
-// generateAndDeployKeyPair generates an ECDSA P256 key pair and stores the
-// base64 encoded PKCS#8 encoding of that key in a Kubernetes secret with the
-// provided keyName, in the provided namespace. Returns the private key so the
-// caller may use it to populate specific manifests.
+// generateAndDeployKeyPair generates a P-256 key pair and stores the base64
+// encoded PKCS#8 encoding of that key in a Kubernetes secret with the provided
+// keyName, in the provided namespace. Returns the private key so the caller may
+// use it to populate specific manifests.
 func generateAndDeployKeyPair(namespace, keyName string, keyMarshaler privateKeyMarshaler) (*ecdsa.PrivateKey, error) {
-	ecdsaKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	p256Key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	if err != nil {
-		return nil, fmt.Errorf("failed to generate ECDSA P256 key: %w", err)
+		return nil, fmt.Errorf("failed to generate P-256 key: %w", err)
 	}
 
-	marshaledPrivateKey, err := keyMarshaler(ecdsaKey)
+	marshaledPrivateKey, err := keyMarshaler(p256Key)
 	if err != nil {
-		return nil, fmt.Errorf("failed to marshal ECDSA key to PKCS#8 document: %w", err)
+		return nil, fmt.Errorf("failed to marshal key to PKCS#8 document: %w", err)
 	}
 
 	// Put the private keys into Kubernetes secrets. There's no straightforward
@@ -160,7 +160,7 @@ func generateAndDeployKeyPair(namespace, keyName string, keyMarshaler privateKey
 		return nil, fmt.Errorf("failed to run kubectl apply: %v\nCombined output: %s", err, output)
 	}
 
-	return ecdsaKey, nil
+	return p256Key, nil
 }
 
 // getConfigFilePath gets the configuration file path from the DEPLOY_CONFIG_PATH environment variable.
