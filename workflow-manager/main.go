@@ -57,9 +57,13 @@ func basename(s string) string {
 
 var k8sNS = flag.String("k8s-namespace", "", "Kubernetes namespace")
 var bskSecretName = flag.String("bsk-secret-name", "", "Name of k8s secret for batch signing key")
-var pdksSecretName = flag.String("pdks-secret-name", "", "Nmae of k8s secret for packet decrypt keys")
+var pdksSecretName = flag.String("pdks-secret-name", "", "Name of k8s secret for packet decrypt keys")
+var intakeConfigMap = flag.String("intake-batch-config-map", "", "Name of config map for intake jobs")
+var aggregateConfigMap = flag.String("aggregate-config-map", "", "Name of config map for aggregate jobs")
 
 func main() {
+	log.Printf("starting %s version %s - %s. Args: %s", os.Args[0], BuildID, BuildTime, os.Args[1:])
+
 	inputBucket := flag.String("input-bucket", "", "Name of input bucket (required)")
 	service := flag.String("service", "s3", "Where to find buckets (s3 or gs)")
 	flag.Parse()
@@ -68,12 +72,10 @@ func main() {
 		os.Exit(1)
 	}
 
-	if len(flag.Args()) == 0 || flag.Args()[0] != "passthrough" {
-		log.Fatal("Must provide 'passthrough' arg, followed by args to pass through to facilitator")
+	if *intakeConfigMap == "" || *aggregateConfigMap == "" {
+		log.Fatal("--intake-batch-config-map and --aggregate-config-map are required")
 	}
-	passthroughArgs := flag.Args()[1:]
 
-	log.Printf("starting %s version %s - %s. Args: %s", os.Args[0], BuildID, BuildTime, os.Args[1:])
 	var readyBatches []string
 	var err error
 	switch *service {
@@ -91,7 +93,7 @@ func main() {
 		log.Fatalf("unknown service %s", *service)
 	}
 
-	if err := launch(context.Background(), readyBatches, passthroughArgs); err != nil {
+	if err := launch(context.Background(), readyBatches); err != nil {
 		log.Fatal(err)
 	}
 	log.Print("done")
@@ -227,7 +229,7 @@ func getReadyBatchesGS(ctx context.Context, inputBucket string) ([]string, error
 	return readyBatches, nil
 }
 
-func launch(ctx context.Context, readyBatches []string, passthroughArgs []string) error {
+func launch(ctx context.Context, readyBatches []string) error {
 	// This uses the credentials that an instance running in the k8s cluster
 	// gets automatically, via automount_service_account_token in the Terraform config.
 	config, err := rest.InClusterConfig()
@@ -241,7 +243,7 @@ func launch(ctx context.Context, readyBatches []string, passthroughArgs []string
 
 	log.Printf("starting %d jobs", len(readyBatches))
 	for _, batchName := range readyBatches {
-		if err := startJob(ctx, clientset, batchName, passthroughArgs); err != nil {
+		if err := startJob(ctx, clientset, batchName); err != nil {
 			return fmt.Errorf("starting job for batch %q: %w", batchName, err)
 		}
 	}
@@ -252,7 +254,6 @@ func startJob(
 	ctx context.Context,
 	clientset *kubernetes.Clientset,
 	batchName string,
-	passthroughArgs []string,
 ) error {
 	jobName := fmt.Sprintf("i-batch-%s", strings.ReplaceAll(batchName, "/", "-"))
 
@@ -260,13 +261,11 @@ func startJob(
 	batchID := pathComponents[len(pathComponents)-1]
 	batchDate := strings.Join(pathComponents[0:len(pathComponents)-1], "/")
 
-	var args []string
-	args = append(args, passthroughArgs...)
-	args = append(args,
+	args := []string{
 		"--batch-id", batchID,
 		"--date", batchDate,
-	)
-	log.Printf("starting job for batch %q with args %s", batchName, passthroughArgs)
+	}
+	log.Printf("starting job for batch %q with args %s", batchName, args)
 	job := &batchv1.Job{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      jobName,
@@ -282,6 +281,15 @@ func startJob(
 							Name:            "facile-container",
 							Image:           "us.gcr.io/jsha-prio-bringup/letsencrypt/prio-facilitator:1.2.3",
 							ImagePullPolicy: "Always",
+							EnvFrom: []corev1.EnvFromSource{
+								{
+									ConfigMapRef: &corev1.ConfigMapEnvSource{
+										LocalObjectReference: corev1.LocalObjectReference{
+											Name: *intakeConfigMap,
+										},
+									},
+								},
+							},
 							Env: []corev1.EnvVar{
 								{
 									Name: "BATCH_SIGNING_KEY",
