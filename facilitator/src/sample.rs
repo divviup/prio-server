@@ -130,10 +130,10 @@ pub fn generate_ingestion_sample(
                 &ingestor_signing_key.key,
             )?;
 
-            Ok(facilitator_ingestion_batch.put_signature(
+            facilitator_ingestion_batch.put_signature(
                 &facilitator_header_signature,
                 &ingestor_signing_key.identifier,
-            )?)
+            )
         })?;
 
     let pha_header_signature = pha_ingestion_batch.put_header(
@@ -152,6 +152,7 @@ pub fn generate_ingestion_sample(
         &ingestor_signing_key.key,
     )?;
     pha_ingestion_batch.put_signature(&pha_header_signature, &ingestor_signing_key.identifier)?;
+    println!("done");
     Ok(reference_sum)
 }
 
