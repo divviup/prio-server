@@ -154,12 +154,12 @@ resource "kubernetes_secret" "ingestion_packet_decryption_keys" {
   data = {
     # See comment on batch_signing_key, in modules/kubernetes/kubernetes.tf,
     # about the initial value and the lifecycle block here.
-    decryption_key = "not-a-real-key"
+    secret_key = "not-a-real-key"
   }
 
   lifecycle {
     ignore_changes = [
-      data
+      data["secret_key"]
     ]
   }
 }

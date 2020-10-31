@@ -371,6 +371,7 @@ fn main() -> Result<(), anyhow::Error> {
                 .arg(
                     Arg::with_name("pha-ecies-private-key")
                         .long("pha-ecies-private-key")
+                        .env("PHA_ECIES_PRIVATE_KEY")
                         .value_name("B64")
                         .help(
                             "Base64 encoded ECIES private key for the PHA \
@@ -388,6 +389,7 @@ fn main() -> Result<(), anyhow::Error> {
                 .arg(
                     Arg::with_name("facilitator-ecies-private-key")
                         .long("facilitator-ecies-private-key")
+                        .env("FACILITATOR_ECIES_PRIVATE_KEY")
                         .value_name("B64")
                         .help(
                             "Base64 encoded ECIES private key for the \
@@ -624,7 +626,7 @@ fn main() -> Result<(), anyhow::Error> {
             )?;
             Ok(())
         }
-        ("batch-intake", Some(sub_matches)) => {
+        ("intake-batch", Some(sub_matches)) => {
             let mut intake_transport = intake_transport_from_args(sub_matches)?;
 
             // We need the bucket to which we will write validations for the

@@ -61,10 +61,12 @@ pub struct SpecificManifest {
 
 /// Obtains a manifest file from the provided URL
 fn fetch_manifest(manifest_url: &str) -> Result<Response> {
-    if !manifest_url.starts_with("https://") {
-        return Err(anyhow!("Manifest must be fetched over HTTPS"));
-    }
-    let response = ureq::get(manifest_url)
+    let url_with_scheme = if !manifest_url.starts_with("https://") {
+        format!("https://{}", manifest_url)
+    } else {
+        manifest_url.to_owned()
+    };
+    let response = ureq::get(&url_with_scheme)
         // By default, ureq will wait forever to connect or
         // read.
         .timeout_connect(10_000) // ten seconds

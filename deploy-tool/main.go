@@ -85,17 +85,34 @@ type TerraformOutput struct {
 	} `json:"specific_manifests"`
 }
 
+type privateKeyMarshaler func(*ecdsa.PrivateKey) ([]byte, error)
+
+// marshalX962UncompresedPrivateKey encodes an ECDSA P256 private key into the
+// format expected by libprio-rs encrypt::PrivateKey, which is the X9.62
+// uncompressed public key concatenated with the secret scalar.
+func marshalX962UncompressedPrivateKey(ecdsaKey *ecdsa.PrivateKey) ([]byte, error) {
+	marshaledPublicKey := elliptic.Marshal(elliptic.P256(), ecdsaKey.PublicKey.X, ecdsaKey.PublicKey.Y)
+	return append(marshaledPublicKey, ecdsaKey.D.Bytes()...), nil
+}
+
+// marshakPKCS8PrivateKey encodes an ECDSA P256 private key into a PKCS#8
+// document. This function adapts x509.MarshalPKCS8PrivateKey to the
+// privateKeyMarshaler type.
+func marshalPKCS8PrivateKey(ecdsaKey *ecdsa.PrivateKey) ([]byte, error) {
+	return x509.MarshalPKCS8PrivateKey(ecdsaKey)
+}
+
 // generateAndDeployKeyPair generates an ECDSA P256 key pair and stores the
 // base64 encoded PKCS#8 encoding of that key in a Kubernetes secret with the
 // provided keyName, in the provided namespace. Returns the private key so the
 // caller may use it to populate specific manifests.
-func generateAndDeployKeyPair(namespace, keyName string) (*ecdsa.PrivateKey, error) {
+func generateAndDeployKeyPair(namespace, keyName string, keyMarshaler privateKeyMarshaler) (*ecdsa.PrivateKey, error) {
 	ecdsaKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	if err != nil {
 		return nil, fmt.Errorf("failed to generate ECDSA P256 key: %w", err)
 	}
 
-	pkcs8PrivateKey, err := x509.MarshalPKCS8PrivateKey(ecdsaKey)
+	marshaledPrivateKey, err := keyMarshaler(ecdsaKey)
 	if err != nil {
 		return nil, fmt.Errorf("failed to marshal ECDSA key to PKCS#8 document: %w", err)
 	}
@@ -117,12 +134,12 @@ func generateAndDeployKeyPair(namespace, keyName string) (*ecdsa.PrivateKey, err
 	defer tempFile.Close()
 	defer os.Remove(tempFile.Name())
 
-	base64PrivateKey := base64.StdEncoding.EncodeToString(pkcs8PrivateKey)
+	base64PrivateKey := base64.StdEncoding.EncodeToString(marshaledPrivateKey)
 	if err := ioutil.WriteFile(tempFile.Name(), []byte(base64PrivateKey), 0600); err != nil {
 		return nil, fmt.Errorf("failed to write out PKCS#8 private key: %v", err)
 	}
 
-	secretArgument := fmt.Sprintf("--from-file=signing_key=%s", tempFile.Name())
+	secretArgument := fmt.Sprintf("--from-file=secret_key=%s", tempFile.Name())
 	kubectlCreate := exec.Command("kubectl", "-n", namespace, "create",
 		"secret", "generic", keyName, secretArgument, "--dry-run=client", "-o=json")
 	kubectlApply := exec.Command("kubectl", "apply", "-f", "-")
@@ -176,7 +193,7 @@ func main() {
 				continue
 			}
 			log.Printf("generating ECDSA P256 key %s", name)
-			privateKey, err := generateAndDeployKeyPair(manifestWrapper.KubernetesNamespace, name)
+			privateKey, err := generateAndDeployKeyPair(manifestWrapper.KubernetesNamespace, name, marshalPKCS8PrivateKey)
 			if err != nil {
 				log.Fatalf("%s", err)
 			}
@@ -211,7 +228,7 @@ func main() {
 				continue
 			}
 			log.Printf("generating and certifying P256 key %s", name)
-			privKey, err := generateAndDeployKeyPair(manifestWrapper.KubernetesNamespace, name)
+			privKey, err := generateAndDeployKeyPair(manifestWrapper.KubernetesNamespace, name, marshalX962UncompressedPrivateKey)
 			if err != nil {
 				log.Fatalf("%s", err)
 			}
