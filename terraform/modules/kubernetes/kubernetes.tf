@@ -169,12 +169,12 @@ resource "kubernetes_secret" "batch_signing_key" {
     # the TF statefile. So we set a dummy value here, and will update the value
     # later using kubectl. We use lifecycle.ignore_changes so that Terraform
     # won't blow away the replaced value on subsequent applies.
-    signing_key = "not-a-real-key"
+    secret_key = "not-a-real-key"
   }
 
   lifecycle {
     ignore_changes = [
-      data["signing_key"]
+      data["secret_key"]
     ]
   }
 }
@@ -197,10 +197,10 @@ resource "kubernetes_config_map" "intake_batch_job_config_map" {
     BATCH_SIGNING_PRIVATE_KEY_IDENTIFIER = kubernetes_secret.batch_signing_key.metadata[0].name
     INGESTOR_IDENTITY                    = var.ingestion_bucket_role
     INGESTOR_INPUT                       = var.ingestion_bucket
-    INGESTOR_MANIFEST_BASE_URL           = var.ingestor_manifest_base_url
+    INGESTOR_MANIFEST_BASE_URL           = "https://${var.ingestor_manifest_base_url}"
     INSTANCE_NAME                        = var.data_share_processor_name
     PEER_IDENTITY                        = var.peer_validation_bucket_role
-    PEER_MANIFEST_BASE_URL               = var.peer_manifest_base_url
+    PEER_MANIFEST_BASE_URL               = "https://${var.peer_manifest_base_url}"
     OWN_OUTPUT                           = var.own_validation_bucket
   }
 }
@@ -220,15 +220,15 @@ resource "kubernetes_config_map" "aggregate_job_config_map" {
     BATCH_SIGNING_PRIVATE_KEY_IDENTIFIER = kubernetes_secret.batch_signing_key.metadata[0].name
     INGESTOR_INPUT                       = "s3://${var.ingestion_bucket}"
     INGESTOR_IDENTITY                    = var.ingestion_bucket_role
-    INGESTOR_MANIFEST_BASE_URL           = var.ingestor_manifest_base_url
+    INGESTOR_MANIFEST_BASE_URL           = "https://${var.ingestor_manifest_base_url}"
     INSTANCE_NAME                        = var.data_share_processor_name
     OWN_INPUT                            = "gs://${var.own_validation_bucket}"
     OWN_MANIFEST_BASE_URL                = var.own_manifest_base_url
     PEER_INPUT                           = "s3://${var.peer_validation_bucket}"
     PEER_IDENTITY                        = var.peer_validation_bucket_role
-    PEER_MANIFEST_BASE_URL               = var.peer_manifest_base_url
+    PEER_MANIFEST_BASE_URL               = "https://${var.peer_manifest_base_url}"
     PORTAL_IDENTITY                      = var.sum_part_bucket_service_account_email
-    PORTAL_MANIFEST_BASE_URL             = var.portal_server_manifest_base_url
+    PORTAL_MANIFEST_BASE_URL             = "https://${var.portal_server_manifest_base_url}"
   }
 }
 
@@ -318,14 +318,32 @@ resource "kubernetes_cron_job" "sample_maker" {
               image = "${var.container_registry}/${var.facilitator_image}:${var.facilitator_version}"
               args = [
                 "generate-ingestion-sample",
-                "--own-output", "gs://${var.own_validation_bucket}",
-                "--peer-output", "s3://${var.peer_validation_bucket}",
-                "--peer-identity", var.peer_validation_bucket_role,
+                "--own-output", "s3://${var.ingestion_bucket}",
+                "--own-identity", var.ingestion_bucket_role,
+                "--peer-output", "/tmp/pha-sample", # drop PHA shares for now
                 "--aggregation-id", "kittens-seen",
               ]
               env {
                 name  = "AWS_ACCOUNT_ID"
                 value = data.aws_caller_identity.current.account_id
+              }
+              env {
+                name = "PHA_ECIES_PRIVATE_KEY"
+                value_from {
+                  secret_key_ref {
+                    name = var.packet_decryption_key_kubernetes_secret
+                    key  = "secret_key"
+                  }
+                }
+              }
+              env {
+                name = "FACILITATOR_ECIES_PRIVATE_KEY"
+                value_from {
+                  secret_key_ref {
+                    name = var.packet_decryption_key_kubernetes_secret
+                    key  = "secret_key"
+                  }
+                }
               }
             }
           }

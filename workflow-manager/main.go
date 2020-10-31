@@ -266,11 +266,11 @@ func startJob(
 	batchName string,
 	ageLimit time.Duration,
 ) error {
-	jobName := fmt.Sprintf("i-batch-%s", strings.ReplaceAll(batchName, "/", "-"))
-
+	// batchName is like "kittens-seen/2020/10/31/20/29/b8a5579a-f984-460a-a42d-2813cbf57771"
 	pathComponents := strings.Split(batchName, "/")
 	batchID := pathComponents[len(pathComponents)-1]
-	batchDate := pathComponents[0 : len(pathComponents)-1]
+	aggregationID := pathComponents[0]
+	batchDate := pathComponents[1 : len(pathComponents)-1]
 
 	if len(batchDate) != 5 {
 		return fmt.Errorf("malformed date in %q. Expected 5 date components, got %d", batchName, len(batchDate))
@@ -290,7 +290,11 @@ func startJob(
 		log.Printf("skipping batch %q because it is too old (%s)", batchName, age)
 	}
 
+	jobName := fmt.Sprintf("i-batch-%s", batchID)
+
 	args := []string{
+		"intake-batch",
+		"--aggregation-id", aggregationID,
 		"--batch-id", batchID,
 		"--date", strings.Join(batchDate, "/"),
 	}
@@ -323,13 +327,23 @@ func startJob(
 								{
 									Name: "BATCH_SIGNING_KEY",
 									ValueFrom: &corev1.EnvVarSource{
-										SecretKeyRef: &corev1.SecretKeySelector{Key: *bskSecretName},
+										SecretKeyRef: &corev1.SecretKeySelector{
+											LocalObjectReference: corev1.LocalObjectReference{
+												Name: *bskSecretName,
+											},
+											Key: "secret_key",
+										},
 									},
 								},
 								{
 									Name: "PACKET_DECRYPTION_KEYS",
 									ValueFrom: &corev1.EnvVarSource{
-										SecretKeyRef: &corev1.SecretKeySelector{Key: *pdksSecretName},
+										SecretKeyRef: &corev1.SecretKeySelector{
+											LocalObjectReference: corev1.LocalObjectReference{
+												Name: *pdksSecretName,
+											},
+											Key: "secret_key",
+										},
 									},
 								},
 							},
