@@ -12,7 +12,7 @@ To generate sample ingestion data, see the `generate-ingestion-sample` command a
 
 ## Docker
 
-To build a Docker image, run ./build.sh.
+To build a Docker image, try `docker build -t my-image-repository/facilitator:x.y.z -f facilitator/Dockerfile .` *from the root directory of `prio-server`*. This is important because building `facilitator` depends on the schema files in `avro-schema`.
 
 ## References
 
