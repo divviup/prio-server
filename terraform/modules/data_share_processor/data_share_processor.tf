@@ -201,6 +201,8 @@ POLICY
 # any case, since we have no control over or insight into the role assumption
 # policies in the other account, we gain nothing by specifying anything beyond
 # the AWS account.
+# For the aws_iam_role.bucket_role.arn section (the second entry), we temporarily
+# allow the various write permissions, so that sample_maker can write sample data.
 resource "aws_s3_bucket" "peer_validation_bucket" {
   bucket = local.peer_validation_bucket_name
   # Force deletion of bucket contents on bucket destroy.
@@ -232,7 +234,11 @@ resource "aws_s3_bucket" "peer_validation_bucket" {
       },
       "Action": [
         "s3:GetObject",
-        "s3:ListBucket"
+        "s3:ListBucket",
+        "s3:AbortMultipartUpload",
+        "s3:PutObject",
+        "s3:ListMultipartUploadParts",
+        "s3:ListBucketMultipartUploads"
       ],
       "Resource": [
         "arn:aws:s3:::${local.peer_validation_bucket_name}/*",
@@ -282,7 +288,7 @@ module "kubernetes" {
   ingestor_manifest_base_url              = var.ingestor_manifest_base_url
   packet_decryption_key_kubernetes_secret = var.packet_decryption_key_kubernetes_secret
   peer_manifest_base_url                  = var.peer_share_processor_manifest_base_url
-  peer_validation_bucket_name             = local.peer_validation_bucket_name
+  peer_validation_bucket                  = "${aws_s3_bucket.peer_validation_bucket.region}/${aws_s3_bucket.peer_validation_bucket.bucket}"
   peer_validation_bucket_role             = aws_iam_role.bucket_role.arn
   own_validation_bucket                   = google_storage_bucket.own_validation_bucket.name
   own_manifest_base_url                   = var.own_manifest_base_url

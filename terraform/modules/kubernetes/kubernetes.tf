@@ -21,6 +21,16 @@ variable "workflow_manager_version" {
   default = "latest"
 }
 
+variable "facilitator_image" {
+  type    = string
+  default = "prio-facilitator"
+}
+
+variable "facilitator_version" {
+  type    = string
+  default = "latest"
+}
+
 variable "gcp_project" {
   type = string
 }
@@ -37,7 +47,7 @@ variable "ingestor_manifest_base_url" {
   type = string
 }
 
-variable "peer_validation_bucket_name" {
+variable "peer_validation_bucket" {
   type = string
 }
 
@@ -208,13 +218,13 @@ resource "kubernetes_config_map" "aggregate_job_config_map" {
     # BATCH_SIGNING_PRIVATE_KEY is a Kubernetes secret
     AWS_ACCOUNT_ID                       = data.aws_caller_identity.current.account_id
     BATCH_SIGNING_PRIVATE_KEY_IDENTIFIER = kubernetes_secret.batch_signing_key.metadata[0].name
+    INGESTOR_INPUT                       = "s3://${var.ingestion_bucket}"
     INGESTOR_IDENTITY                    = var.ingestion_bucket_role
-    INGESTOR_INPUT                       = var.ingestion_bucket
     INGESTOR_MANIFEST_BASE_URL           = var.ingestor_manifest_base_url
     INSTANCE_NAME                        = var.data_share_processor_name
-    OWN_INPUT                            = var.own_validation_bucket
+    OWN_INPUT                            = "gs://${var.own_validation_bucket}"
     OWN_MANIFEST_BASE_URL                = var.own_manifest_base_url
-    PEER_INPUT                           = var.peer_validation_bucket_name
+    PEER_INPUT                           = "s3://${var.peer_validation_bucket}"
     PEER_IDENTITY                        = var.peer_validation_bucket_role
     PEER_MANIFEST_BASE_URL               = var.peer_manifest_base_url
     PORTAL_IDENTITY                      = var.sum_part_bucket_service_account_email
@@ -250,8 +260,8 @@ resource "kubernetes_cron_job" "workflow_manager" {
                 "--input-bucket", var.ingestion_bucket,
                 "--bsk-secret-name", kubernetes_secret.batch_signing_key.metadata[0].name,
                 "--pdks-secret-name", var.packet_decryption_key_kubernetes_secret,
-                "--intake-batch-job-config-map-name", kubernetes_config_map.intake_batch_job_config_map.metadata[0].name,
-                "--aggregate-job-config-map-name", kubernetes_config_map.aggregate_job_config_map.metadata[0].name,
+                "--intake-batch-config-map", kubernetes_config_map.intake_batch_job_config_map.metadata[0].name,
+                "--aggregate-config-map", kubernetes_config_map.aggregate_job_config_map.metadata[0].name,
               ]
               env {
                 name  = "AWS_ROLE_ARN"
@@ -273,6 +283,51 @@ resource "kubernetes_cron_job" "workflow_manager" {
             restart_policy                  = "Never"
             service_account_name            = kubernetes_service_account.workflow_manager.metadata[0].name
             automount_service_account_token = true
+          }
+        }
+      }
+    }
+  }
+}
+
+resource "kubernetes_cron_job" "sample_maker" {
+  metadata {
+    name      = "${var.environment}-${var.data_share_processor_name}-sample-maker"
+    namespace = var.kubernetes_namespace
+
+    annotations = {
+      environment = var.environment
+    }
+  }
+  spec {
+    schedule                      = "* * * * *"
+    concurrency_policy            = "Forbid"
+    successful_jobs_history_limit = 5
+    failed_jobs_history_limit     = 3
+    job_template {
+      metadata {}
+      spec {
+        template {
+          metadata {}
+          spec {
+            restart_policy                  = "Never"
+            service_account_name            = kubernetes_service_account.workflow_manager.metadata[0].name
+            automount_service_account_token = true
+            container {
+              name  = "sample-maker"
+              image = "${var.container_registry}/${var.facilitator_image}:${var.facilitator_version}"
+              args = [
+                "generate-ingestion-sample",
+                "--own-output", "gs://${var.own_validation_bucket}",
+                "--peer-output", "s3://${var.peer_validation_bucket}",
+                "--peer-identity", var.peer_validation_bucket_role,
+                "--aggregation-id", "kittens-seen",
+              ]
+              env {
+                name  = "AWS_ACCOUNT_ID"
+                value = data.aws_caller_identity.current.account_id
+              }
+            }
           }
         }
       }
