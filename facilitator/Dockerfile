@@ -32,8 +32,9 @@ RUN cargo build --manifest-path ./facilitator/Cargo.toml
 # We build in debug mode so the build runs quickly, then strip the binary for size.
 RUN strip facilitator/target/debug/facilitator
 
-# Build a minimal container containing only the binary and the one .so it needs.
+# Build a minimal container containing only the binary, the one .so it needs, and root certs.
 FROM scratch
 COPY --from=builder /lib/ld-musl-x86_64.so.1 /lib/ld-musl-x86_64.so.1
 COPY --from=builder /usr/src/prio-server/facilitator/target/debug/facilitator /facilitator
+COPY --from=builder /etc/ssl/cert.pem /etc/ssl/cert.pem
 ENTRYPOINT ["/facilitator"]
