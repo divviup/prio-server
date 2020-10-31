@@ -742,9 +742,8 @@ fn main() -> Result<(), anyhow::Error> {
                     "portal-output or portal-manifest-base-url required"
                 )),
             }?;
-            let aggregation_identity = sub_matches.value_of("aggregation-identity");
-
-            let aggregation_transport = transport_for_path(portal_bucket, aggregation_identity)?;
+            let portal_identity = sub_matches.value_of("portal-identity");
+            let aggregation_transport = transport_for_path(portal_bucket, portal_identity)?;
 
             // Get the key we will use to sign sum part messages sent to the
             // portal server.
