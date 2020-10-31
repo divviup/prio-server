@@ -4,7 +4,11 @@ use once_cell::sync::Lazy;
 use regex::Regex;
 use rusoto_core::{region::ParseRegionError, Region};
 use serde::{de, export::Formatter, Deserialize, Deserializer, Serialize, Serializer};
-use std::{fmt, path::PathBuf, str::FromStr};
+use std::{
+    fmt::{self, Display},
+    path::PathBuf,
+    str::FromStr,
+};
 
 /// Identity represents a cloud identity: Either an AWS IAM ARN (i.e. "arn:...")
 /// or a GCP ServiceAccount (i.e. "foo@bar.com").
@@ -36,6 +40,18 @@ impl S3Path {
             self.key.push('/');
         }
         self
+    }
+}
+
+impl Display for S3Path {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "s3://{}/{}/{}",
+            self.region.name(),
+            self.bucket,
+            self.key
+        )
     }
 }
 
@@ -88,6 +104,12 @@ impl GCSPath {
             self.key.push('/');
         }
         self
+    }
+}
+
+impl Display for GCSPath {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        write!(f, "gs://{}/{}", self.bucket, self.key)
     }
 }
 
