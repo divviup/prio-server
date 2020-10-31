@@ -333,10 +333,7 @@ impl StreamingTransferWriter {
             .timeout_read(10_000) // ten seconds
             .send_bytes(&[]);
         if http_response.error() {
-            return Err(anyhow!(
-                "failed to initiate streaming transfer: {:?}",
-                http_response
-            ));
+            return Err(anyhow!("uploading to gs://{}: {:?}", bucket, http_response));
         }
 
         // The upload session URI authenticates subsequent upload requests for

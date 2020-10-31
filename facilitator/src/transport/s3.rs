@@ -276,7 +276,10 @@ impl MultipartUploadWriter {
                     ..Default::default()
                 }),
             )
-            .context("error creating multipart upload")?;
+            .context(format!(
+                "error creating multipart upload to s3://{}",
+                bucket
+            ))?;
 
         Ok(MultipartUploadWriter {
             runtime,
