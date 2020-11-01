@@ -69,17 +69,20 @@ var bskSecretName = flag.String("bsk-secret-name", "", "Name of k8s secret for b
 var pdksSecretName = flag.String("pdks-secret-name", "", "Name of k8s secret for packet decrypt keys")
 var intakeConfigMap = flag.String("intake-batch-config-map", "", "Name of config map for intake jobs")
 var aggregateConfigMap = flag.String("aggregate-config-map", "", "Name of config map for aggregate jobs")
+var ingestorInput = flag.String("ingestor-input", "", "Bucket for input from ingestor (s3:// or gs://) (Required)")
+var ingestorIdentity = flag.String("ingestor-identity", "", "Identity to use with ingestor bucket (Required for S3)")
 
 func main() {
 	log.Printf("starting %s version %s - %s. Args: %s", os.Args[0], BuildID, BuildTime, os.Args[1:])
-
-	inputBucket := flag.String("input-bucket", "", "Name of input bucket (required)")
-	service := flag.String("service", "s3", "Where to find buckets (s3 or gs)")
 	flag.Parse()
-	if *inputBucket == "" {
-		flag.Usage()
-		os.Exit(1)
+	if *ingestorInput == "" {
+		log.Fatal("--ingestor-input is required")
 	}
+	if !strings.HasPrefix(*ingestorInput, "s3://") && !strings.HasPrefix(*ingestorInput, "gs://") {
+		log.Fatalf("invalid --ingestor-input: %q", *ingestorInput)
+	}
+	service := (*ingestorInput)[0:2]
+	inputBucket := (*ingestorInput)[4:]
 
 	if *intakeConfigMap == "" || *aggregateConfigMap == "" {
 		log.Fatal("--intake-batch-config-map and --aggregate-config-map are required")
@@ -91,19 +94,19 @@ func main() {
 	}
 
 	var readyBatches []string
-	switch *service {
+	switch service {
 	case "s3":
-		readyBatches, err = getReadyBatchesS3(context.Background(), *inputBucket)
+		readyBatches, err = getReadyBatchesS3(context.Background(), inputBucket, *ingestorIdentity)
 		if err != nil {
 			log.Fatal(err)
 		}
 	case "gs":
-		readyBatches, err = getReadyBatchesGS(context.Background(), *inputBucket)
+		readyBatches, err = getReadyBatchesGS(context.Background(), inputBucket)
 		if err != nil {
 			log.Fatal(err)
 		}
 	default:
-		log.Fatalf("unknown service %s", *service)
+		log.Fatalf("unknown service %s", service)
 	}
 
 	if err := launch(context.Background(), readyBatches, ageLimit); err != nil {
@@ -112,11 +115,12 @@ func main() {
 	log.Print("done")
 }
 
-type tokenFetcher struct{}
+type tokenFetcher struct {
+	audience string
+}
 
 func (tf tokenFetcher) FetchToken(credentials.Context) ([]byte, error) {
-	audience := fmt.Sprintf("sts.amazonaws.com/%s", os.Getenv("AWS_ACCOUNT_ID"))
-	url := fmt.Sprintf("http://metadata.google.internal:80/computeMetadata/v1/instance/service-accounts/default/identity?audience=%s", audience)
+	url := fmt.Sprintf("http://metadata.google.internal:80/computeMetadata/v1/instance/service-accounts/default/identity?audience=%s", tf.audience)
 	req, err := http.NewRequest("GET", url, nil)
 	if err != nil {
 		return nil, fmt.Errorf("building request: %w", err)
@@ -138,7 +142,7 @@ func (tf tokenFetcher) FetchToken(credentials.Context) ([]byte, error) {
 	return bytes, nil
 }
 
-func getReadyBatchesS3(ctx context.Context, inputBucket string) ([]string, error) {
+func getReadyBatchesS3(ctx context.Context, inputBucket string, roleARN string) ([]string, error) {
 	parts := strings.SplitN(inputBucket, "/", 2)
 	region := parts[0]
 	bucket := parts[1]
@@ -147,11 +151,16 @@ func getReadyBatchesS3(ctx context.Context, inputBucket string) ([]string, error
 		return nil, fmt.Errorf("making AWS session: %w", err)
 	}
 
+	arnComponents := strings.Split(roleARN, ":")
+	if len(arnComponents) != 6 {
+		return nil, fmt.Errorf("invalid ARN: %q", roleARN)
+	}
+	audience := fmt.Sprintf("sts.amazonaws.com/%s", arnComponents[4])
+
 	stsSTS := sts.New(sess)
-	roleARN := os.Getenv("AWS_ROLE_ARN")
 	roleSessionName := ""
 	roleProvider := stscreds.NewWebIdentityRoleProviderWithToken(
-		stsSTS, roleARN, roleSessionName, tokenFetcher{})
+		stsSTS, roleARN, roleSessionName, tokenFetcher{audience})
 
 	credentials := credentials.NewCredentials(roleProvider)
 	log.Printf("looking for ready batches in s3://%s as %s", bucket, roleARN)

@@ -260,20 +260,13 @@ resource "kubernetes_cron_job" "workflow_manager" {
               args = [
                 "--k8s-namespace", var.kubernetes_namespace,
                 "--k8s-service-account", kubernetes_service_account.workflow_manager.metadata[0].name,
-                "--input-bucket", var.ingestion_bucket,
+                "--ingestor-input", "s3://${var.ingestion_bucket}",
+                "--ingestor-identity", var.ingestion_bucket_role,
                 "--bsk-secret-name", kubernetes_secret.batch_signing_key.metadata[0].name,
                 "--pdks-secret-name", var.packet_decryption_key_kubernetes_secret,
                 "--intake-batch-config-map", kubernetes_config_map.intake_batch_job_config_map.metadata[0].name,
                 "--aggregate-config-map", kubernetes_config_map.aggregate_job_config_map.metadata[0].name,
               ]
-              env {
-                name  = "AWS_ROLE_ARN"
-                value = var.ingestion_bucket_role
-              }
-              env {
-                name  = "AWS_ACCOUNT_ID"
-                value = data.aws_caller_identity.current.account_id
-              }
             }
             # If we use any other restart policy, then when the job is finally
             # deemed to be a failure, Kubernetes will destroy the job, pod and
