@@ -5,7 +5,7 @@ use crate::{
 };
 use anyhow::{anyhow, Context, Result};
 use chrono::{prelude::Utc, DateTime, Duration};
-use log::debug;
+use log::info;
 use serde::Deserialize;
 use std::{
     io,
@@ -216,7 +216,7 @@ impl GCSTransport {
 
 impl Transport for GCSTransport {
     fn get(&mut self, key: &str) -> Result<Box<dyn Read>> {
-        debug!("get {} as {:?}", self.path, self.oauth_token_provider);
+        info!("get {} as {:?}", self.path, self.oauth_token_provider);
         // Per API reference, the object key must be URL encoded.
         // API reference: https://cloud.google.com/storage/docs/json_api/v1/objects/get
         let encoded_key = urlencoding::encode(&[&self.path.key, key].concat());
@@ -252,7 +252,7 @@ impl Transport for GCSTransport {
     }
 
     fn put(&mut self, key: &str) -> Result<Box<dyn TransportWriter>> {
-        debug!("get {} as {:?}", self.path, self.oauth_token_provider);
+        info!("get {} as {:?}", self.path, self.oauth_token_provider);
         // The Oauth token will only be used once, during the call to
         // StreamingTransferWriter::new, so we don't have to worry about it
         // expiring during the lifetime of that object, and so obtain a token

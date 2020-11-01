@@ -202,6 +202,7 @@ resource "kubernetes_config_map" "intake_batch_job_config_map" {
     PEER_IDENTITY                        = var.peer_validation_bucket_role
     PEER_MANIFEST_BASE_URL               = "https://${var.peer_manifest_base_url}"
     OWN_OUTPUT                           = "gs://${var.own_validation_bucket}"
+    RUST_LOG                             = "info"
   }
 }
 
@@ -229,6 +230,7 @@ resource "kubernetes_config_map" "aggregate_job_config_map" {
     PEER_MANIFEST_BASE_URL               = "https://${var.peer_manifest_base_url}"
     PORTAL_IDENTITY                      = var.sum_part_bucket_service_account_email
     PORTAL_MANIFEST_BASE_URL             = "https://${var.portal_server_manifest_base_url}"
+    RUST_LOG                             = "info"
   }
 }
 

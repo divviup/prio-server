@@ -290,8 +290,7 @@ impl<'a, 'b> AppArgumentAdder for App<'a, 'b> {
 
 fn main() -> Result<(), anyhow::Error> {
     use log::info;
-    use simple_logger::SimpleLogger;
-    SimpleLogger::new().init().unwrap();
+    env_logger::init();
 
     info!(
         "{} {} {}",
