@@ -83,6 +83,14 @@ variable "sum_part_bucket_service_account_email" {
   type = string
 }
 
+variable "test_peer_ingestion_bucket" {
+  type = string
+}
+
+variable "is_first" {
+  type = bool
+}
+
 data "aws_caller_identity" "current" {}
 
 # Workload identity[1] lets us map GCP service accounts to Kubernetes service
@@ -193,6 +201,7 @@ resource "kubernetes_config_map" "intake_batch_job_config_map" {
   data = {
     # PACKET_DECRYPTION_KEYS is a Kubernetes secret
     # BATCH_SIGNING_PRIVATE_KEY is a Kubernetes secret
+    IS_FIRST                             = var.is_first ? "true" : "false"
     AWS_ACCOUNT_ID                       = data.aws_caller_identity.current.account_id
     BATCH_SIGNING_PRIVATE_KEY_IDENTIFIER = kubernetes_secret.batch_signing_key.metadata[0].name
     INGESTOR_IDENTITY                    = var.ingestion_bucket_role
@@ -217,6 +226,7 @@ resource "kubernetes_config_map" "aggregate_job_config_map" {
   data = {
     # PACKET_DECRYPTION_KEYS is a Kubernetes secret
     # BATCH_SIGNING_PRIVATE_KEY is a Kubernetes secret
+    IS_FIRST                             = var.is_first ? "true" : "false"
     AWS_ACCOUNT_ID                       = data.aws_caller_identity.current.account_id
     BATCH_SIGNING_PRIVATE_KEY_IDENTIFIER = kubernetes_secret.batch_signing_key.metadata[0].name
     INGESTOR_INPUT                       = "s3://${var.ingestion_bucket}"
@@ -287,6 +297,10 @@ resource "kubernetes_cron_job" "workflow_manager" {
 }
 
 resource "kubernetes_cron_job" "sample_maker" {
+  # This sample maker acts as an ingestion server in our test setup. It only
+  # gets created in one of the two envs, and writes to both env's ingestion
+  # buckets.
+  count = var.test_peer_ingestion_bucket == "" ? 0 : 1
   metadata {
     name      = "${var.environment}-${var.data_share_processor_name}-sample-maker"
     namespace = var.kubernetes_namespace
@@ -316,22 +330,17 @@ resource "kubernetes_cron_job" "sample_maker" {
                 "generate-ingestion-sample",
                 "--own-output", "s3://${var.ingestion_bucket}",
                 "--own-identity", var.ingestion_bucket_role,
-                "--peer-output", "/tmp/pha-sample", # drop PHA shares for now
+                "--peer-output", "s3://${var.test_peer_ingestion_bucket}",
+                "--peer-identity", var.ingestion_bucket_role,
                 "--aggregation-id", "kittens-seen",
               ]
               env {
                 name  = "AWS_ACCOUNT_ID"
                 value = data.aws_caller_identity.current.account_id
               }
-              env {
-                name = "PHA_ECIES_PRIVATE_KEY"
-                value_from {
-                  secret_key_ref {
-                    name = var.packet_decryption_key_kubernetes_secret
-                    key  = "secret_key"
-                  }
-                }
-              }
+              # We intentionally do not specify PHA_ECIES_PRIVATE_KEY, so that
+              # facilitator will use the DEFAULT_PHA_ECIES_PRIVATE_KEY, which
+              # the facilitators in the peer test env have access to.
               env {
                 name = "FACILITATOR_ECIES_PRIVATE_KEY"
                 value_from {

@@ -1,4 +1,4 @@
-environment                = "demo-gcp"
+environment                = "demo-gcp-peer"
 gcp_region                 = "us-west1"
 gcp_project                = "prio-bringup-290620"
 machine_type               = "e2-small"
@@ -13,6 +13,7 @@ ingestors = {
   ingestor-1 = "storage.googleapis.com/prio-demo-gcp-manifests/ingestor-1"
   ingestor-2 = "storage.googleapis.com/prio-demo-gcp-manifests/ingestor-2"
 }
-peer_share_processor_manifest_base_url = "demo-gcp-peer.manifests.isrg-prio.org"
-portal_server_manifest_base_url        = "storage.googleapis.com/prio-demo-gcp-manifests/portal-server"
-test_peer_environment                  = "demo-gcp-peer"
+peer_share_processor_manifest_base_url    = "demo-gcp.manifests.isrg-prio.org"
+portal_server_manifest_base_url           = "storage.googleapis.com/prio-demo-gcp-manifests/portal-server"
+test_peer_environment_with_fake_ingestors = "demo-gcp"
+is_first                                  = true
