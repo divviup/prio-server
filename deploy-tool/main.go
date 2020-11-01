@@ -20,11 +20,11 @@ import (
 	"github.com/abetterinternet/prio-server/deploy-tool/config"
 )
 
-// DEFAULT_PHA_ECIES_PRIVATE_KEY is a libprio-rs encoded ECIES private key. It
+// DefaultPHAECIESPrivateKey is a libprio-rs encoded ECIES private key. It
 // MUST match the constant of the same name in facilitator/src/test_utils.rs.
 // It is present here so that a test environment can be configured to use
 // predictable keys for packet decryption.
-const DEFAULT_PHA_ECIES_PRIVATE_KEY = "BIl6j+J6dYttxALdjISDv6ZI4/VWVEhUzaS05Lg" +
+const DefaultPHAECIESPrivateKey = "BIl6j+J6dYttxALdjISDv6ZI4/VWVEhUzaS05Lg" +
 	"rsfswmbLOgNt9HUC2E0w+9RqZx3XMkdEHBHfNuCSMpOwofVSq3TfyKwn0NrftKisKKVSaTOt5" +
 	"seJ67P5QL4hxgPWvxw=="
 
@@ -118,7 +118,7 @@ func marshalPKCS8PrivateKey(ecdsaKey *ecdsa.PrivateKey) ([]byte, error) {
 // default PHA ECIES private key compiled into the facilitator. This is intended
 // for test environments so they can use predictable keys.
 func marshalDefaultPHAECIESPrivateKey(ecdsaKey *ecdsa.PrivateKey) ([]byte, error) {
-	return base64.StdEncoding.DecodeString(DEFAULT_PHA_ECIES_PRIVATE_KEY)
+	return base64.StdEncoding.DecodeString(DefaultPHAECIESPrivateKey)
 }
 
 // generateAndDeployKeyPair generates a P-256 key pair and stores the base64
