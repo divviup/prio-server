@@ -13,7 +13,9 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"strconv"
 	"strings"
+	"time"
 
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/aws/credentials"
@@ -32,7 +34,10 @@ import (
 	"k8s.io/client-go/rest"
 )
 
+// BuildID is generated at build time and contains the branch and short hash.
 var BuildID string
+
+//BuildTime is generated at build time and contains the build time.
 var BuildTime string
 
 // batchMap is used to store information about a batch, indexed by the basename
@@ -56,6 +61,7 @@ func basename(s string) string {
 }
 
 var k8sNS = flag.String("k8s-namespace", "", "Kubernetes namespace")
+var maxAge = flag.String("max-age", "1h", "Max age (in Go duration format) for batches to be worth processing.")
 var bskSecretName = flag.String("bsk-secret-name", "", "Name of k8s secret for batch signing key")
 var pdksSecretName = flag.String("pdks-secret-name", "", "Name of k8s secret for packet decrypt keys")
 var intakeConfigMap = flag.String("intake-batch-config-map", "", "Name of config map for intake jobs")
@@ -76,8 +82,12 @@ func main() {
 		log.Fatal("--intake-batch-config-map and --aggregate-config-map are required")
 	}
 
+	ageLimit, err := time.ParseDuration(*maxAge)
+	if err != nil {
+		log.Fatal(err)
+	}
+
 	var readyBatches []string
-	var err error
 	switch *service {
 	case "s3":
 		readyBatches, err = getReadyBatchesS3(context.Background(), *inputBucket)
@@ -93,7 +103,7 @@ func main() {
 		log.Fatalf("unknown service %s", *service)
 	}
 
-	if err := launch(context.Background(), readyBatches); err != nil {
+	if err := launch(context.Background(), readyBatches, ageLimit); err != nil {
 		log.Fatal(err)
 	}
 	log.Print("done")
@@ -229,7 +239,7 @@ func getReadyBatchesGS(ctx context.Context, inputBucket string) ([]string, error
 	return readyBatches, nil
 }
 
-func launch(ctx context.Context, readyBatches []string) error {
+func launch(ctx context.Context, readyBatches []string, ageLimit time.Duration) error {
 	// This uses the credentials that an instance running in the k8s cluster
 	// gets automatically, via automount_service_account_token in the Terraform config.
 	config, err := rest.InClusterConfig()
@@ -243,7 +253,7 @@ func launch(ctx context.Context, readyBatches []string) error {
 
 	log.Printf("starting %d jobs", len(readyBatches))
 	for _, batchName := range readyBatches {
-		if err := startJob(ctx, clientset, batchName); err != nil {
+		if err := startJob(ctx, clientset, batchName, ageLimit); err != nil {
 			return fmt.Errorf("starting job for batch %q: %w", batchName, err)
 		}
 	}
@@ -254,19 +264,39 @@ func startJob(
 	ctx context.Context,
 	clientset *kubernetes.Clientset,
 	batchName string,
+	ageLimit time.Duration,
 ) error {
 	// batchName is like "kittens-seen/2020/10/31/20/29/b8a5579a-f984-460a-a42d-2813cbf57771"
 	pathComponents := strings.Split(batchName, "/")
 	batchID := pathComponents[len(pathComponents)-1]
-	batchDate := strings.Join(pathComponents[1:len(pathComponents)-1], "/")
 	aggregationID := pathComponents[0]
+	batchDate := pathComponents[1 : len(pathComponents)-1]
+
+	if len(batchDate) != 5 {
+		return fmt.Errorf("malformed date in %q. Expected 5 date components, got %d", batchName, len(batchDate))
+	}
+	var dateComponents []int
+	for _, c := range batchDate {
+		parsed, err := strconv.ParseInt(c, 10, 64)
+		if err != nil {
+			return fmt.Errorf("parsing date component %q in %q: %w", c, batchName, err)
+		}
+		dateComponents = append(dateComponents, int(parsed))
+	}
+
+	batchTime := time.Date(dateComponents[0], time.Month(dateComponents[1]), dateComponents[2], dateComponents[3], dateComponents[4], 0, 0, nil)
+	age := time.Now().Sub(batchTime)
+	if age > ageLimit {
+		log.Printf("skipping batch %q because it is too old (%s)", batchName, age)
+	}
+
 	jobName := fmt.Sprintf("i-batch-%s", batchID)
 
 	args := []string{
 		"intake-batch",
 		"--aggregation-id", aggregationID,
 		"--batch-id", batchID,
-		"--date", batchDate,
+		"--date", strings.Join(batchDate, "/"),
 	}
 	log.Printf("starting job for batch %q with args %s", batchName, args)
 	job := &batchv1.Job{
@@ -331,9 +361,8 @@ func startJob(
 			log.Printf("skipping %q because a job for it already exists (err %T = %#v)",
 				batchName, err, err)
 			return nil
-		} else {
-			return fmt.Errorf("creating job: %w", err)
 		}
+		return fmt.Errorf("creating job: %w", err)
 	}
 	log.Printf("Created job %q: %#v", jobName, createdJob.ObjectMeta.UID)
 
