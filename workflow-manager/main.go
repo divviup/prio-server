@@ -67,17 +67,20 @@ var bskSecretName = flag.String("bsk-secret-name", "", "Name of k8s secret for b
 var pdksSecretName = flag.String("pdks-secret-name", "", "Name of k8s secret for packet decrypt keys")
 var intakeConfigMap = flag.String("intake-batch-config-map", "", "Name of config map for intake jobs")
 var aggregateConfigMap = flag.String("aggregate-config-map", "", "Name of config map for aggregate jobs")
+var ingestorInput = flag.String("ingestor-input", "", "Bucket for input from ingestor (s3:// or gs://) (Required)")
+var ingestorIdentity = flag.String("ingestor-identity", "", "Identity to use with ingestor bucket (Required for S3)")
 
 func main() {
 	log.Printf("starting %s version %s - %s. Args: %s", os.Args[0], BuildID, BuildTime, os.Args[1:])
-
-	inputBucket := flag.String("input-bucket", "", "Name of input bucket (required)")
-	service := flag.String("service", "s3", "Where to find buckets (s3 or gs)")
 	flag.Parse()
-	if *inputBucket == "" {
-		flag.Usage()
-		os.Exit(1)
+	if *ingestorInput == "" {
+		log.Fatal("--ingestor-input is required")
 	}
+	if !strings.HasPrefix(*ingestorInput, "s3://") && !strings.HasPrefix(*ingestorInput, "gs://") {
+		log.Fatalf("invalid --ingestor-input: %q", *ingestorInput)
+	}
+	service := (*ingestorInput)[0:2]
+	inputBucket := (*ingestorInput)[4:]
 
 	if *intakeConfigMap == "" || *aggregateConfigMap == "" {
 		log.Fatal("--intake-batch-config-map and --aggregate-config-map are required")
@@ -89,19 +92,19 @@ func main() {
 	}
 
 	var readyBatches []string
-	switch *service {
+	switch service {
 	case "s3":
-		readyBatches, err = getReadyBatchesS3(context.Background(), *inputBucket, os.Getenv("AWS_ROLE_ARN"))
+		readyBatches, err = getReadyBatchesS3(context.Background(), inputBucket, *ingestorIdentity)
 		if err != nil {
 			log.Fatal(err)
 		}
 	case "gs":
-		readyBatches, err = getReadyBatchesGS(context.Background(), *inputBucket)
+		readyBatches, err = getReadyBatchesGS(context.Background(), inputBucket)
 		if err != nil {
 			log.Fatal(err)
 		}
 	default:
-		log.Fatalf("unknown service %s", *service)
+		log.Fatalf("unknown service %s", service)
 	}
 
 	if err := launch(context.Background(), readyBatches, ageLimit); err != nil {
