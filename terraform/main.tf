@@ -257,3 +257,7 @@ output "specific_manifests" {
     }
   }
 }
+
+output "use_default_pha_ecies_key" {
+  value = var.test_peer_environment_with_fake_ingestors != ""
+}

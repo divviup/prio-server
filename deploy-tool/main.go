@@ -20,6 +20,14 @@ import (
 	"github.com/abetterinternet/prio-server/deploy-tool/config"
 )
 
+// DEFAULT_PHA_ECIES_PRIVATE_KEY is a libprio-rs encoded ECIES private key. It
+// MUST match the constant of the same name in facilitator/src/test_utils.rs.
+// It is present here so that a test environment can be configured to use
+// predictable keys for packet decryption.
+const DEFAULT_PHA_ECIES_PRIVATE_KEY = "BIl6j+J6dYttxALdjISDv6ZI4/VWVEhUzaS05Lg" +
+	"rsfswmbLOgNt9HUC2E0w+9RqZx3XMkdEHBHfNuCSMpOwofVSq3TfyKwn0NrftKisKKVSaTOt5" +
+	"seJ67P5QL4hxgPWvxw=="
+
 // This tool consumes the output of `terraform apply`, generating keys and then
 // populating specific manifests and Kubernetes secrets with appropriate values.
 // We do this in this tool because if we generated secrets via Terraform
@@ -83,6 +91,9 @@ type TerraformOutput struct {
 			SpecificManifest    SpecificManifest `json:"specific-manifest"`
 		}
 	} `json:"specific_manifests"`
+	UseDefaultPHAECIESKey struct {
+		Value bool
+	} `json:"use_default_pha_ecies_key"`
 }
 
 type privateKeyMarshaler func(*ecdsa.PrivateKey) ([]byte, error)
@@ -100,6 +111,14 @@ func marshalX962UncompressedPrivateKey(ecdsaKey *ecdsa.PrivateKey) ([]byte, erro
 // type.
 func marshalPKCS8PrivateKey(ecdsaKey *ecdsa.PrivateKey) ([]byte, error) {
 	return x509.MarshalPKCS8PrivateKey(ecdsaKey)
+}
+
+// marshalDefaultPHAECIESPrivateKey ignores the provided key and returns the
+// X9.62 uncompressed public key concatenated with the secret scalar of the
+// default PHA ECIES private key compiled into the facilitator. This is intended
+// for test environments so they can use predictable keys.
+func marshalDefaultPHAECIESPrivateKey(ecdsaKey *ecdsa.PrivateKey) ([]byte, error) {
+	return base64.StdEncoding.DecodeString(DEFAULT_PHA_ECIES_PRIVATE_KEY)
 }
 
 // generateAndDeployKeyPair generates a P-256 key pair and stores the base64
@@ -228,7 +247,16 @@ func main() {
 				continue
 			}
 			log.Printf("generating and certifying P256 key %s", name)
-			privKey, err := generateAndDeployKeyPair(manifestWrapper.KubernetesNamespace, name, marshalX962UncompressedPrivateKey)
+			keyMarshaler := marshalX962UncompressedPrivateKey
+			if terraformOutput.UseDefaultPHAECIESKey.Value {
+				// If we are configuring a special test environment, we populate
+				// Kubernetes secrets with a fixed packet decryption key. This
+				// means that the public key in the certificate in the manifest
+				// won't match the actual packet decryption key, but in this
+				// test setup, nothing currently consults those certificates.
+				keyMarshaler = marshalDefaultPHAECIESPrivateKey
+			}
+			privKey, err := generateAndDeployKeyPair(manifestWrapper.KubernetesNamespace, name, keyMarshaler)
 			if err != nil {
 				log.Fatalf("%s", err)
 			}

@@ -55,6 +55,8 @@ fn path_validator(s: String) -> Result<(), String> {
 // Trait applied to clap::App to extend its builder pattern with some helpers
 // specific to our use case.
 trait AppArgumentAdder {
+    fn add_is_first_argument(self: Self) -> Self;
+
     fn add_instance_name_argument(self: Self) -> Self;
 
     fn add_manifest_base_url_argument(self: Self, entity: Entity) -> Self;
@@ -146,6 +148,21 @@ fn upper_snake_case(s: &str) -> String {
 }
 
 impl<'a, 'b> AppArgumentAdder for App<'a, 'b> {
+    fn add_is_first_argument(self: App<'a, 'b>) -> App<'a, 'b> {
+        self.arg(
+            Arg::with_name("is-first")
+                .env("IS_FIRST")
+                .long("is-first")
+                .value_name("BOOL")
+                .possible_value("true")
+                .possible_value("false")
+                .default_value("false")
+                .help(
+                    "Whether this is the \"first\" server receiving a share, \
+                    i.e., the PHA.",
+                ),
+        )
+    }
     fn add_instance_name_argument(self: App<'a, 'b>) -> App<'a, 'b> {
         self.arg(
             Arg::with_name("instance-name")
@@ -438,6 +455,7 @@ fn main() -> Result<(), anyhow::Error> {
             SubCommand::with_name("intake-batch")
                 .about(format!("Validate an input share (from an ingestor's bucket) and emit a validation share.\n\n{}", SHARED_HELP).as_str())
                 .add_instance_name_argument()
+                .add_is_first_argument()
                 .arg(
                     Arg::with_name("aggregation-id")
                         .long("aggregation-id")
@@ -466,10 +484,6 @@ fn main() -> Result<(), anyhow::Error> {
                         )
                         .validator(date_validator),
                 )
-                .arg(Arg::with_name("is-first").env("IS_FIRST").long("is-first").help(
-                    "Whether this is the \"first\" server receiving a share, \
-                    i.e., the PHA.",
-                ))
                 .add_packet_decryption_key_argument()
                 .add_batch_public_key_arguments(Entity::Ingestor)
                 .add_batch_signing_key_arguments()
@@ -483,6 +497,7 @@ fn main() -> Result<(), anyhow::Error> {
             SubCommand::with_name("aggregate")
                 .about(format!("Verify peer validation share and emit sum part.\n\n{}", SHARED_HELP).as_str())
                 .add_instance_name_argument()
+                .add_is_first_argument()
                 .arg(
                     Arg::with_name("aggregation-id")
                         .long("aggregation-id")
@@ -555,9 +570,6 @@ fn main() -> Result<(), anyhow::Error> {
                 .add_storage_arguments(Entity::Portal, InOut::Output)
                 .add_packet_decryption_key_argument()
                 .add_batch_signing_key_arguments()
-                .arg(Arg::with_name("is-first").env("IS_FIRST").long("is-first").help(
-                    "Whether this is the \"first\" server receiving a share, i.e., the PHA.",
-                )),
         )
         .get_matches();
 
@@ -676,14 +688,14 @@ fn main() -> Result<(), anyhow::Error> {
                 &mut intake_transport,
                 &mut peer_validation_transport,
                 &mut own_validation_transport,
-                sub_matches.is_present("is-first"),
+                is_first_from_arg(sub_matches),
             )?;
             batch_intaker.generate_validation_share()?;
             Ok(())
         }
         ("aggregate", Some(sub_matches)) => {
-            let is_first = sub_matches.is_present("is-first");
             let instance_name = sub_matches.value_of("instance-name").unwrap();
+            let is_first = is_first_from_arg(sub_matches);
 
             let mut intake_transport = intake_transport_from_args(sub_matches)?;
 
@@ -821,6 +833,11 @@ fn main() -> Result<(), anyhow::Error> {
         }
         (_, _) => Ok(()),
     }
+}
+
+fn is_first_from_arg(matches: &ArgMatches) -> bool {
+    let is_first = matches.value_of("is-first").unwrap();
+    is_first == "true"
 }
 
 fn public_key_map_from_arg(
