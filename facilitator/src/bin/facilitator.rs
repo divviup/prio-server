@@ -466,7 +466,7 @@ fn main() -> Result<(), anyhow::Error> {
                         )
                         .validator(date_validator),
                 )
-                .arg(Arg::with_name("is-first").long("is-first").help(
+                .arg(Arg::with_name("is-first").env("IS_FIRST").long("is-first").help(
                     "Whether this is the \"first\" server receiving a share, \
                     i.e., the PHA.",
                 ))
@@ -555,7 +555,7 @@ fn main() -> Result<(), anyhow::Error> {
                 .add_storage_arguments(Entity::Portal, InOut::Output)
                 .add_packet_decryption_key_argument()
                 .add_batch_signing_key_arguments()
-                .arg(Arg::with_name("is-first").long("is-first").help(
+                .arg(Arg::with_name("is-first").env("IS_FIRST").long("is-first").help(
                     "Whether this is the \"first\" server receiving a share, i.e., the PHA.",
                 )),
         )

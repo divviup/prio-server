@@ -50,6 +50,24 @@ variable "portal_server_manifest_base_url" {
   type = string
 }
 
+variable "test_peer_environment" {
+  type        = string
+  default     = ""
+  description = "Name of peer environment set up to test against this one (not to be used in production deployments)"
+}
+
+variable "test_peer_environment_with_fake_ingestors" {
+  type        = string
+  default     = ""
+  description = "Name of peer environment which contains fake ingestion servers set up to test against this one (not to be used in production deployments)"
+}
+
+variable "is_pha" {
+  type        = bool
+  default     = false
+  description = "Whether the data share processors created by this environment are \"first\" or \"PHA servers\""
+}
+
 terraform {
   backend "gcs" {}
 
@@ -180,23 +198,26 @@ locals {
 }
 
 module "data_share_processors" {
-  for_each                                = local.peer_ingestor_pairs
-  source                                  = "./modules/data_share_processor"
-  environment                             = var.environment
-  data_share_processor_name               = each.key
-  gcp_region                              = var.gcp_region
-  gcp_project                             = var.gcp_project
-  kubernetes_namespace                    = each.value.kubernetes_namespace
-  certificate_domain                      = "${var.environment}.certificates.${var.manifest_domain}"
-  ingestor_aws_role_arn                   = each.value.ingestor_aws_role_arn
-  ingestor_gcp_service_account_id         = each.value.ingestor_gcp_service_account_id
-  ingestor_manifest_base_url              = each.value.ingestor_manifest_base_url
-  packet_decryption_key_kubernetes_secret = each.value.packet_decryption_key_kubernetes_secret
-  peer_share_processor_aws_account_id     = jsondecode(data.http.peer_share_processor_global_manifest.body).server-identity.aws-account-id
-  peer_share_processor_manifest_base_url  = var.peer_share_processor_manifest_base_url
-  sum_part_bucket_service_account_email   = google_service_account.sum_part_bucket_writer.email
-  portal_server_manifest_base_url         = var.portal_server_manifest_base_url
-  own_manifest_base_url                   = module.manifest.base_url
+  for_each                                  = local.peer_ingestor_pairs
+  source                                    = "./modules/data_share_processor"
+  environment                               = var.environment
+  data_share_processor_name                 = each.key
+  gcp_region                                = var.gcp_region
+  gcp_project                               = var.gcp_project
+  kubernetes_namespace                      = each.value.kubernetes_namespace
+  certificate_domain                        = "${var.environment}.certificates.${var.manifest_domain}"
+  ingestor_aws_role_arn                     = each.value.ingestor_aws_role_arn
+  ingestor_gcp_service_account_id           = each.value.ingestor_gcp_service_account_id
+  ingestor_manifest_base_url                = each.value.ingestor_manifest_base_url
+  packet_decryption_key_kubernetes_secret   = each.value.packet_decryption_key_kubernetes_secret
+  peer_share_processor_aws_account_id       = jsondecode(data.http.peer_share_processor_global_manifest.body).server-identity.aws-account-id
+  peer_share_processor_manifest_base_url    = var.peer_share_processor_manifest_base_url
+  sum_part_bucket_service_account_email     = google_service_account.sum_part_bucket_writer.email
+  portal_server_manifest_base_url           = var.portal_server_manifest_base_url
+  own_manifest_base_url                     = module.manifest.base_url
+  test_peer_environment                     = var.test_peer_environment
+  test_peer_environment_with_fake_ingestors = var.test_peer_environment_with_fake_ingestors
+  is_pha                                    = var.is_pha
 
   depends_on = [module.gke]
 }

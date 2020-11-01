@@ -58,15 +58,54 @@ variable "portal_server_manifest_base_url" {
   type = string
 }
 
+variable "test_peer_environment" {
+  type = string
+}
+
+variable "test_peer_environment_with_fake_ingestors" {
+  type = string
+}
+
+variable "is_pha" {
+  type = bool
+}
+
 locals {
   resource_prefix = "prio-${var.environment}-${var.data_share_processor_name}"
-  ingestion_bucket_writer_role_arn = var.ingestor_gcp_service_account_id != "" ? (
+  # There are four cases for who is writing to this data share processor's
+  # ingestion bucket, listed in the order we check for them:
+  #
+  # 1 - This is a test peer environment that creates fake ingestors. The fake
+  #     ingestors assume this data share processor's aws_iam_role.bucket_role,
+  #     so, grant that role write permissions on the ingestion bucket.
+  # 2 - This is a test peer environment that does _not_ create fake ingestors.
+  #     We assume the test peer env uses the same AWS account ID and that it
+  #     follows the same naming conventions we do, and grant what should be the
+  #     corresponding data share processor's aws_iam_role.bucket_role access.
+  # 3 - This is a non-test environment for an ingestor that advertises a GCP
+  #     service account. We will have created
+  #     aws_iam_role.ingestor_bucket_writer_role and grant it write access.
+  # 4 - This is a non-test environment for an ingestor that advertises an AWS
+  #     role. We grant that arole write access.
+  ingestion_bucket_writer_role_arn = var.test_peer_environment != "" ? (
+    aws_iam_role.bucket_role.arn
+    ) : var.test_peer_environment_with_fake_ingestors != "" ? (
+    "arn:aws:iam::${data.aws_caller_identity.current.account_id}:role/prio-${var.test_peer_environment_with_fake_ingestors}-${var.data_share_processor_name}-bucket-role"
+    ) : var.ingestor_gcp_service_account_id != "" ? (
     aws_iam_role.ingestor_bucket_writer_role[0].arn
     ) : (
     var.ingestor_aws_role_arn
   )
   ingestion_bucket_name       = "${local.resource_prefix}-ingestion"
   peer_validation_bucket_name = "${local.resource_prefix}-peer-validation"
+  # If this is a test peer environment that creates fake ingestors, we make an
+  # educated guess about the name of the test peer's ingestion bucket so our
+  # fake ingestors can write ingestion batches to them. This assumes that the
+  # test peer follows our naming convention and that they are in the same AWS
+  # region as we are.
+  test_peer_ingestion_bucket = var.test_peer_environment != "" ? (
+    "${aws_s3_bucket.ingestion_bucket.region}/prio-${var.test_peer_environment}-${var.data_share_processor_name}-ingestion"
+  ) : ""
 }
 
 data "aws_caller_identity" "current" {}
@@ -214,7 +253,7 @@ resource "aws_s3_bucket" "peer_validation_bucket" {
     {
       "Effect": "Allow",
       "Principal": {
-        "AWS": "${var.peer_share_processor_aws_account_id}"
+        "AWS": "arn:aws:iam::${data.aws_caller_identity.current.account_id}:role/prio-${coalesce(var.test_peer_environment, var.test_peer_environment_with_fake_ingestors)}-${var.data_share_processor_name}-bucket-role"
       },
       "Action": [
         "s3:AbortMultipartUpload",
@@ -294,6 +333,8 @@ module "kubernetes" {
   own_manifest_base_url                   = var.own_manifest_base_url
   sum_part_bucket_service_account_email   = var.sum_part_bucket_service_account_email
   portal_server_manifest_base_url         = var.portal_server_manifest_base_url
+  test_peer_ingestion_bucket              = local.test_peer_ingestion_bucket
+  is_pha                                  = var.is_pha
 }
 
 output "data_share_processor_name" {
