@@ -150,6 +150,7 @@ impl<'a, 'b> AppArgumentAdder for App<'a, 'b> {
         self.arg(
             Arg::with_name("instance-name")
                 .long("instance-name")
+                .env("INSTANCE_NAME")
                 .value_name("NAME")
                 .default_value("fake-pha-fake-ingestor")
                 .help("Name of this data share processor")
@@ -371,6 +372,7 @@ fn main() -> Result<(), anyhow::Error> {
                 .arg(
                     Arg::with_name("pha-ecies-private-key")
                         .long("pha-ecies-private-key")
+                        .env("PHA_ECIES_PRIVATE_KEY")
                         .value_name("B64")
                         .help(
                             "Base64 encoded ECIES private key for the PHA \
@@ -388,6 +390,7 @@ fn main() -> Result<(), anyhow::Error> {
                 .arg(
                     Arg::with_name("facilitator-ecies-private-key")
                         .long("facilitator-ecies-private-key")
+                        .env("FACILITATOR_ECIES_PRIVATE_KEY")
                         .value_name("B64")
                         .help(
                             "Base64 encoded ECIES private key for the \
@@ -624,7 +627,7 @@ fn main() -> Result<(), anyhow::Error> {
             )?;
             Ok(())
         }
-        ("batch-intake", Some(sub_matches)) => {
+        ("intake-batch", Some(sub_matches)) => {
             let mut intake_transport = intake_transport_from_args(sub_matches)?;
 
             // We need the bucket to which we will write validations for the
@@ -654,7 +657,7 @@ fn main() -> Result<(), anyhow::Error> {
             // We created the bucket to which we write copies of our validation
             // shares, so it is simply provided by argument.
             let own_validation_bucket =
-                StoragePath::from_str(matches.value_of("own-output").unwrap())?;
+                StoragePath::from_str(sub_matches.value_of("own-output").unwrap())?;
             let own_identity = sub_matches.value_of("own-identity");
             let mut own_validation_transport = SignableTransport {
                 transport: transport_for_path(own_validation_bucket, own_identity)?,
