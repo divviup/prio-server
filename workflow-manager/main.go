@@ -62,6 +62,7 @@ func basename(s string) string {
 
 var k8sNS = flag.String("k8s-namespace", "", "Kubernetes namespace")
 var maxAge = flag.String("max-age", "1h", "Max age (in Go duration format) for batches to be worth processing.")
+var k8sServiceAccount = flag.String("k8s-service-account", "", "Kubernetes service account for intake and aggregate jobs")
 var bskSecretName = flag.String("bsk-secret-name", "", "Name of k8s secret for batch signing key")
 var pdksSecretName = flag.String("pdks-secret-name", "", "Name of k8s secret for packet decrypt keys")
 var intakeConfigMap = flag.String("intake-batch-config-map", "", "Name of config map for intake jobs")
@@ -307,7 +308,8 @@ func startJob(
 		Spec: batchv1.JobSpec{
 			Template: corev1.PodTemplateSpec{
 				Spec: corev1.PodSpec{
-					RestartPolicy: "Never",
+					ServiceAccountName: *k8sServiceAccount,
+					RestartPolicy:      "Never",
 					Containers: []corev1.Container{
 						{
 							Args:            args,
