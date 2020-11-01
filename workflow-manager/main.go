@@ -495,11 +495,16 @@ func getReadyValidationBatchesS3(ctx context.Context, validationsBucket string, 
 }
 
 func launchAggregationJob(ctx context.Context, readyBatches []string) error {
+	if len(readyBatches) == 0 {
+		log.Printf("no batches to aggregate")
+		return nil
+	}
+
 	config, err := rest.InClusterConfig()
 	if err != nil {
 		return fmt.Errorf("cluster config: %w", err)
 	}
-	_, err = kubernetes.NewForConfig(config)
+	clientset, err := kubernetes.NewForConfig(config)
 	if err != nil {
 		return fmt.Errorf("clientset: %w", err)
 	}
@@ -515,7 +520,7 @@ func launchAggregationJob(ctx context.Context, readyBatches []string) error {
 			return err
 		}
 		batchIDs = append(batchIDs, batchPath.batchID)
-		batchTimes = append(batchIDs, batchPath.batchDateString())
+		batchTimes = append(batchTimes, batchPath.batchDateString())
 
 		// All batches should have the same aggregation ID?
 		if aggregationID != "" && aggregationID != batchPath.aggregationID {
@@ -567,7 +572,76 @@ func launchAggregationJob(ctx context.Context, readyBatches []string) error {
 		args = append(args, batchTime)
 	}
 
-	log.Printf("Aggregate args: %v", args)
+	jobName := strings.ReplaceAll(fmt.Sprintf("a-%s", earliestBatch.batchDateString()), "/", "-")
+
+	log.Printf("starting aggregation job with args %s", args)
+
+	job := &batchv1.Job{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      jobName,
+			Namespace: *k8sNS,
+		}, Spec: batchv1.JobSpec{
+			Template: corev1.PodTemplateSpec{
+				Spec: corev1.PodSpec{
+					ServiceAccountName: *k8sServiceAccount,
+					RestartPolicy:      "Never",
+					Containers: []corev1.Container{
+						{
+							Args:            args,
+							Name:            "facile-container",
+							Image:           "us.gcr.io/prio-bringup-290620/prio-facilitator:latest",
+							ImagePullPolicy: "Always",
+							EnvFrom: []corev1.EnvFromSource{
+								{
+									ConfigMapRef: &corev1.ConfigMapEnvSource{
+										LocalObjectReference: corev1.LocalObjectReference{
+											Name: *aggregateConfigMap,
+										},
+									},
+								},
+							},
+							Env: []corev1.EnvVar{
+								{
+									Name: "BATCH_SIGNING_KEY",
+									ValueFrom: &corev1.EnvVarSource{
+										SecretKeyRef: &corev1.SecretKeySelector{
+											LocalObjectReference: corev1.LocalObjectReference{
+												Name: *bskSecretName,
+											},
+											Key: "secret_key",
+										},
+									},
+								},
+								{
+									Name: "PACKET_DECRYPTION_KEYS",
+									ValueFrom: &corev1.EnvVarSource{
+										SecretKeyRef: &corev1.SecretKeySelector{
+											LocalObjectReference: corev1.LocalObjectReference{
+												Name: *pdksSecretName,
+											},
+											Key: "secret_key",
+										},
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+	createdJob, err := clientset.BatchV1().Jobs(*k8sNS).Create(ctx, job, metav1.CreateOptions{})
+	if err != nil {
+		// TODO: Checking an error for a substring is pretty clumsy. Figure out if k8s client
+		// returns typed errors.
+		if strings.HasSuffix(err.Error(), "already exists") {
+			log.Printf("skipping %q because a job for it already exists (err %T = %#v)",
+				jobName, err, err)
+			return nil
+		}
+		return fmt.Errorf("creating job: %w", err)
+	}
+	log.Printf("Created job %q: %#v", jobName, createdJob.ObjectMeta.UID)
 
 	return nil
 }

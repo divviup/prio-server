@@ -268,7 +268,7 @@ resource "kubernetes_cron_job" "workflow_manager" {
               name  = "workflow-manager"
               image = "${var.container_registry}/${var.workflow_manager_image}:${var.workflow_manager_version}"
               args = [
-                "--is-first", var.is_pha ? "true" : "false",
+                "--is-first", var.is_first ? "true" : "false",
                 "--k8s-namespace", var.kubernetes_namespace,
                 "--k8s-service-account", kubernetes_service_account.workflow_manager.metadata[0].name,
                 "--ingestor-input", "s3://${var.ingestion_bucket}",
