@@ -87,7 +87,7 @@ variable "test_peer_ingestion_bucket" {
   type = string
 }
 
-variable "is_pha" {
+variable "is_first" {
   type = bool
 }
 
@@ -201,7 +201,7 @@ resource "kubernetes_config_map" "intake_batch_job_config_map" {
   data = {
     # PACKET_DECRYPTION_KEYS is a Kubernetes secret
     # BATCH_SIGNING_PRIVATE_KEY is a Kubernetes secret
-    IS_FIRST                             = var.is_pha ? "true" : "false"
+    IS_FIRST                             = var.is_first ? "true" : "false"
     AWS_ACCOUNT_ID                       = data.aws_caller_identity.current.account_id
     BATCH_SIGNING_PRIVATE_KEY_IDENTIFIER = kubernetes_secret.batch_signing_key.metadata[0].name
     INGESTOR_IDENTITY                    = var.ingestion_bucket_role
@@ -225,7 +225,7 @@ resource "kubernetes_config_map" "aggregate_job_config_map" {
   data = {
     # PACKET_DECRYPTION_KEYS is a Kubernetes secret
     # BATCH_SIGNING_PRIVATE_KEY is a Kubernetes secret
-    IS_FIRST                             = var.is_pha ? "true" : "false"
+    IS_FIRST                             = var.is_first ? "true" : "false"
     AWS_ACCOUNT_ID                       = data.aws_caller_identity.current.account_id
     BATCH_SIGNING_PRIVATE_KEY_IDENTIFIER = kubernetes_secret.batch_signing_key.metadata[0].name
     INGESTOR_INPUT                       = "s3://${var.ingestion_bucket}"
@@ -302,7 +302,10 @@ resource "kubernetes_cron_job" "workflow_manager" {
 }
 
 resource "kubernetes_cron_job" "sample_maker" {
-  count = var.test_peer_ingestion_bucket != "" ? 1 : 0
+  # This sample maker acts as an ingestion server in our test setup. It only
+  # gets created in one of the two envs, and writes to both env's ingestion
+  # buckets.
+  count = var.test_peer_ingestion_bucket == "" ? 0 : 1
   metadata {
     name      = "${var.environment}-${var.data_share_processor_name}-sample-maker"
     namespace = var.kubernetes_namespace

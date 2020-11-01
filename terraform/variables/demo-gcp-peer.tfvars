@@ -16,4 +16,4 @@ ingestors = {
 peer_share_processor_manifest_base_url    = "demo-gcp.manifests.isrg-prio.org"
 portal_server_manifest_base_url           = "storage.googleapis.com/prio-demo-gcp-manifests/portal-server"
 test_peer_environment_with_fake_ingestors = "demo-gcp"
-is_pha                                    = true
+is_first                                  = true

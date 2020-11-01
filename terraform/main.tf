@@ -53,16 +53,16 @@ variable "portal_server_manifest_base_url" {
 variable "test_peer_environment" {
   type        = string
   default     = ""
-  description = "Name of peer environment set up to test against this one (not to be used in production deployments)"
+  description = "Name of peer environment set up to test against this one (not to be used in production deployments). Should not be set alongside test_peer_environment_with_fake_ingestors."
 }
 
 variable "test_peer_environment_with_fake_ingestors" {
   type        = string
   default     = ""
-  description = "Name of peer environment which contains fake ingestion servers set up to test against this one (not to be used in production deployments)"
+  description = "Name of peer environment which contains fake ingestion servers set up to test against this one (not to be used in production deployments). Should not be set alongside test_peer_environment."
 }
 
-variable "is_pha" {
+variable "is_first" {
   type        = bool
   default     = false
   description = "Whether the data share processors created by this environment are \"first\" or \"PHA servers\""
@@ -217,7 +217,7 @@ module "data_share_processors" {
   own_manifest_base_url                     = module.manifest.base_url
   test_peer_environment                     = var.test_peer_environment
   test_peer_environment_with_fake_ingestors = var.test_peer_environment_with_fake_ingestors
-  is_pha                                    = var.is_pha
+  is_first                                  = var.is_first
 
   depends_on = [module.gke]
 }
@@ -258,6 +258,6 @@ output "specific_manifests" {
   }
 }
 
-output "use_default_pha_ecies_key" {
+output "use_test_pha_decryption_key" {
   value = var.test_peer_environment_with_fake_ingestors != ""
 }

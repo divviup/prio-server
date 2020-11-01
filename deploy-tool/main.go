@@ -20,11 +20,11 @@ import (
 	"github.com/abetterinternet/prio-server/deploy-tool/config"
 )
 
-// DefaultPHAECIESPrivateKey is a libprio-rs encoded ECIES private key. It
-// MUST match the constant of the same name in facilitator/src/test_utils.rs.
+// TestPHADecryptionKey is a libprio-rs encoded ECIES private key. It MUST match
+// the constant DEFAULT_PHA_ECIES_PRIVATE_KEY in facilitator/src/test_utils.rs.
 // It is present here so that a test environment can be configured to use
 // predictable keys for packet decryption.
-const DefaultPHAECIESPrivateKey = "BIl6j+J6dYttxALdjISDv6ZI4/VWVEhUzaS05Lg" +
+const TestPHADecryptionKey = "BIl6j+J6dYttxALdjISDv6ZI4/VWVEhUzaS05Lg" +
 	"rsfswmbLOgNt9HUC2E0w+9RqZx3XMkdEHBHfNuCSMpOwofVSq3TfyKwn0NrftKisKKVSaTOt5" +
 	"seJ67P5QL4hxgPWvxw=="
 
@@ -91,9 +91,9 @@ type TerraformOutput struct {
 			SpecificManifest    SpecificManifest `json:"specific-manifest"`
 		}
 	} `json:"specific_manifests"`
-	UseDefaultPHAECIESKey struct {
+	UseTestPHADecryptionKey struct {
 		Value bool
-	} `json:"use_default_pha_ecies_key"`
+	} `json:"use_test_pha_decryption_key"`
 }
 
 type privateKeyMarshaler func(*ecdsa.PrivateKey) ([]byte, error)
@@ -113,12 +113,12 @@ func marshalPKCS8PrivateKey(ecdsaKey *ecdsa.PrivateKey) ([]byte, error) {
 	return x509.MarshalPKCS8PrivateKey(ecdsaKey)
 }
 
-// marshalDefaultPHAECIESPrivateKey ignores the provided key and returns the
-// X9.62 uncompressed public key concatenated with the secret scalar of the
-// default PHA ECIES private key compiled into the facilitator. This is intended
-// for test environments so they can use predictable keys.
-func marshalDefaultPHAECIESPrivateKey(ecdsaKey *ecdsa.PrivateKey) ([]byte, error) {
-	return base64.StdEncoding.DecodeString(DefaultPHAECIESPrivateKey)
+// marshalTestPHADecryptionKey ignores the provided key and returns the
+// default PHA decryption key in the same format as
+// marshalX962UncompressedPrivateKey. This is intended for test environments so
+// they can use predictable keys.
+func marshalTestPHADecryptionKey(ecdsaKey *ecdsa.PrivateKey) ([]byte, error) {
+	return base64.StdEncoding.DecodeString(TestPHADecryptionKey)
 }
 
 // generateAndDeployKeyPair generates a P-256 key pair and stores the base64
@@ -248,13 +248,13 @@ func main() {
 			}
 			log.Printf("generating and certifying P256 key %s", name)
 			keyMarshaler := marshalX962UncompressedPrivateKey
-			if terraformOutput.UseDefaultPHAECIESKey.Value {
+			if terraformOutput.UseTestPHADecryptionKey.Value {
 				// If we are configuring a special test environment, we populate
 				// Kubernetes secrets with a fixed packet decryption key. This
 				// means that the public key in the certificate in the manifest
 				// won't match the actual packet decryption key, but in this
 				// test setup, nothing currently consults those certificates.
-				keyMarshaler = marshalDefaultPHAECIESPrivateKey
+				keyMarshaler = marshalTestPHADecryptionKey
 			}
 			privKey, err := generateAndDeployKeyPair(manifestWrapper.KubernetesNamespace, name, keyMarshaler)
 			if err != nil {
