@@ -26,6 +26,7 @@ import (
 	"google.golang.org/api/iterator"
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
 	_ "k8s.io/client-go/plugin/pkg/client/auth/gcp"
@@ -281,6 +282,16 @@ func startJob(
 							Name:            "facile-container",
 							Image:           "us.gcr.io/jsha-prio-bringup/letsencrypt/prio-facilitator:1.2.3",
 							ImagePullPolicy: "Always",
+							Resources: corev1.ResourceRequirements{
+								Requests: corev1.ResourceList{
+									corev1.ResourceMemory: resource.MustParse("1000Mi"),
+									corev1.ResourceCPU:    resource.MustParse("1"),
+								},
+								Limits: corev1.ResourceList{
+									corev1.ResourceMemory: resource.MustParse("4000Mi"),
+									corev1.ResourceCPU:    resource.MustParse("2"),
+								},
+							},
 							EnvFrom: []corev1.EnvFromSource{
 								{
 									ConfigMapRef: &corev1.ConfigMapEnvSource{
