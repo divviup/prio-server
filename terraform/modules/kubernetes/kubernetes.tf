@@ -196,12 +196,12 @@ resource "kubernetes_config_map" "intake_batch_job_config_map" {
     AWS_ACCOUNT_ID                       = data.aws_caller_identity.current.account_id
     BATCH_SIGNING_PRIVATE_KEY_IDENTIFIER = kubernetes_secret.batch_signing_key.metadata[0].name
     INGESTOR_IDENTITY                    = var.ingestion_bucket_role
-    INGESTOR_INPUT                       = var.ingestion_bucket
+    INGESTOR_INPUT                       = "s3://${var.ingestion_bucket}"
     INGESTOR_MANIFEST_BASE_URL           = "https://${var.ingestor_manifest_base_url}"
     INSTANCE_NAME                        = var.data_share_processor_name
     PEER_IDENTITY                        = var.peer_validation_bucket_role
     PEER_MANIFEST_BASE_URL               = "https://${var.peer_manifest_base_url}"
-    OWN_OUTPUT                           = var.own_validation_bucket
+    OWN_OUTPUT                           = "gs://${var.own_validation_bucket}"
   }
 }
 
@@ -257,6 +257,7 @@ resource "kubernetes_cron_job" "workflow_manager" {
               image = "${var.container_registry}/${var.workflow_manager_image}:${var.workflow_manager_version}"
               args = [
                 "--k8s-namespace", var.kubernetes_namespace,
+                "--k8s-service-account", kubernetes_service_account.workflow_manager.metadata[0].name,
                 "--input-bucket", var.ingestion_bucket,
                 "--bsk-secret-name", kubernetes_secret.batch_signing_key.metadata[0].name,
                 "--pdks-secret-name", var.packet_decryption_key_kubernetes_secret,
