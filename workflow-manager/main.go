@@ -28,6 +28,7 @@ import (
 	"google.golang.org/api/iterator"
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
@@ -153,6 +154,7 @@ func getReadyBatchesS3(ctx context.Context, inputBucket string) ([]string, error
 		stsSTS, roleARN, roleSessionName, tokenFetcher{})
 
 	credentials := credentials.NewCredentials(roleProvider)
+	log.Printf("looking for ready batches in s3://%s as %s", bucket, roleARN)
 
 	config := aws.NewConfig().
 		WithRegion(region).
@@ -202,6 +204,8 @@ func getReadyBatchesGS(ctx context.Context, inputBucket string) ([]string, error
 	batches := make(map[string]*batch)
 	bkt := client.Bucket(inputBucket)
 	query := &storage.Query{Prefix: ""}
+
+	log.Printf("looking for ready batches in gs://%s as (ambient service account)", inputBucket)
 	it := bkt.Objects(ctx, query)
 	for {
 		attrs, err := it.Next()
@@ -286,13 +290,13 @@ func startJob(
 		dateComponents = append(dateComponents, int(parsed))
 	}
 
-	batchTime := time.Date(dateComponents[0], time.Month(dateComponents[1]), dateComponents[2], dateComponents[3], dateComponents[4], 0, 0, nil)
+	batchTime := time.Date(dateComponents[0], time.Month(dateComponents[1]), dateComponents[2], dateComponents[3], dateComponents[4], 0, 0, time.UTC)
 	age := time.Now().Sub(batchTime)
 	if age > ageLimit {
 		log.Printf("skipping batch %q because it is too old (%s)", batchName, age)
 	}
 
-	jobName := fmt.Sprintf("i-batch-%s", batchID)
+	jobName := fmt.Sprintf("i-batch-%s-%s", strings.Join(batchDate, "-"), batchID)
 
 	args := []string{
 		"intake-batch",
@@ -319,12 +323,12 @@ func startJob(
 							ImagePullPolicy: "Always",
 							Resources: corev1.ResourceRequirements{
 								Requests: corev1.ResourceList{
-									corev1.ResourceMemory: resource.MustParse("1000Mi"),
-									corev1.ResourceCPU:    resource.MustParse("1"),
+									corev1.ResourceMemory: resource.MustParse("500Mi"),
+									corev1.ResourceCPU:    resource.MustParse("0.5"),
 								},
 								Limits: corev1.ResourceList{
-									corev1.ResourceMemory: resource.MustParse("4000Mi"),
-									corev1.ResourceCPU:    resource.MustParse("2"),
+									corev1.ResourceMemory: resource.MustParse("550Mi"),
+									corev1.ResourceCPU:    resource.MustParse("0.7"),
 								},
 							},
 							EnvFrom: []corev1.EnvFromSource{
@@ -368,11 +372,8 @@ func startJob(
 	}
 	createdJob, err := clientset.BatchV1().Jobs(*k8sNS).Create(ctx, job, metav1.CreateOptions{})
 	if err != nil {
-		// TODO: Checking an error for a substring is pretty clumsy. Figure out if k8s client
-		// returns typed errors.
-		if strings.HasSuffix(err.Error(), "already exists") {
-			log.Printf("skipping %q because a job for it already exists (err %T = %#v)",
-				batchName, err, err)
+		if errors.IsAlreadyExists(err) {
+			log.Printf("skipping %q because a job for it already exists", batchName)
 			return nil
 		}
 		return fmt.Errorf("creating job: %w", err)
