@@ -91,7 +91,7 @@ func main() {
 	var readyBatches []string
 	switch *service {
 	case "s3":
-		readyBatches, err = getReadyBatchesS3(context.Background(), *inputBucket)
+		readyBatches, err = getReadyBatchesS3(context.Background(), *inputBucket, os.Getenv("AWS_ROLE_ARN"))
 		if err != nil {
 			log.Fatal(err)
 		}
@@ -110,11 +110,12 @@ func main() {
 	log.Print("done")
 }
 
-type tokenFetcher struct{}
+type tokenFetcher struct {
+	audience string
+}
 
 func (tf tokenFetcher) FetchToken(credentials.Context) ([]byte, error) {
-	audience := fmt.Sprintf("sts.amazonaws.com/%s", os.Getenv("AWS_ACCOUNT_ID"))
-	url := fmt.Sprintf("http://metadata.google.internal:80/computeMetadata/v1/instance/service-accounts/default/identity?audience=%s", audience)
+	url := fmt.Sprintf("http://metadata.google.internal:80/computeMetadata/v1/instance/service-accounts/default/identity?audience=%s", tf.audience)
 	req, err := http.NewRequest("GET", url, nil)
 	if err != nil {
 		return nil, fmt.Errorf("building request: %w", err)
@@ -136,7 +137,7 @@ func (tf tokenFetcher) FetchToken(credentials.Context) ([]byte, error) {
 	return bytes, nil
 }
 
-func getReadyBatchesS3(ctx context.Context, inputBucket string) ([]string, error) {
+func getReadyBatchesS3(ctx context.Context, inputBucket string, roleARN string) ([]string, error) {
 	parts := strings.SplitN(inputBucket, "/", 2)
 	region := parts[0]
 	bucket := parts[1]
@@ -145,11 +146,16 @@ func getReadyBatchesS3(ctx context.Context, inputBucket string) ([]string, error
 		return nil, fmt.Errorf("making AWS session: %w", err)
 	}
 
+	arnComponents := strings.Split(roleARN, ":")
+	if len(arnComponents) != 6 {
+		return nil, fmt.Errorf("invalid ARN: %q", roleARN)
+	}
+	audience := fmt.Sprintf("sts.amazonaws.com/%s", arnComponents[4])
+
 	stsSTS := sts.New(sess)
-	roleARN := os.Getenv("AWS_ROLE_ARN")
 	roleSessionName := ""
 	roleProvider := stscreds.NewWebIdentityRoleProviderWithToken(
-		stsSTS, roleARN, roleSessionName, tokenFetcher{})
+		stsSTS, roleARN, roleSessionName, tokenFetcher{audience})
 
 	credentials := credentials.NewCredentials(roleProvider)
 

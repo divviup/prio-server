@@ -268,10 +268,6 @@ resource "kubernetes_cron_job" "workflow_manager" {
                 name  = "AWS_ROLE_ARN"
                 value = var.ingestion_bucket_role
               }
-              env {
-                name  = "AWS_ACCOUNT_ID"
-                value = data.aws_caller_identity.current.account_id
-              }
             }
             # If we use any other restart policy, then when the job is finally
             # deemed to be a failure, Kubernetes will destroy the job, pod and
