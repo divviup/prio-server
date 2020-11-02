@@ -121,9 +121,8 @@ func validationBasename(s string, isFirst bool) string {
 func index(isFirst bool) string {
 	if isFirst {
 		return "0"
-	} else {
-		return "1"
 	}
+	return "1"
 }
 
 // contains returns true if the string str exists in the slice s
@@ -167,6 +166,7 @@ var ownValidationInput = flag.String("own-validation-input", "", "Bucket for inp
 var ownValidationIdentity = flag.String("own-validation-identity", "", "Identity to use with own validation bucket (Required for S3)")
 var peerValidationInput = flag.String("peer-validation-input", "", "Bucket for input of validation batches from peer (s3:// or gs://) (required)")
 var peerValidationIdentity = flag.String("peer-validation-identity", "", "Identity to use with peer validation bucket (Required for S3)")
+var facilitatorImage = flag.String("facilitator-image", "", "Name (optionally including repository) of facilitator image")
 
 func main() {
 	log.Printf("starting %s version %s - %s. Args: %s", os.Args[0], BuildID, BuildTime, os.Args[1:])
@@ -178,6 +178,9 @@ func main() {
 
 	if *intakeConfigMap == "" || *aggregateConfigMap == "" {
 		log.Fatal("--intake-batch-config-map and --aggregate-config-map are required")
+	}
+	if *facilitatorImage == "" {
+		log.Fatal("--facilitator-image is required")
 	}
 
 	ageLimit, err := time.ParseDuration(*maxAge)
@@ -587,7 +590,7 @@ func launchAggregationJob(ctx context.Context, readyBatches []string) error {
 						{
 							Args:            args,
 							Name:            "facile-container",
-							Image:           "us.gcr.io/prio-bringup-290620/prio-facilitator:latest",
+							Image:           *facilitatorImage,
 							ImagePullPolicy: "Always",
 							EnvFrom: []corev1.EnvFromSource{
 								{
@@ -703,7 +706,7 @@ func startIntakeJob(
 						{
 							Args:            args,
 							Name:            "facile-container",
-							Image:           "us.gcr.io/jsha-prio-bringup/letsencrypt/prio-facilitator:1.2.3",
+							Image:           *facilitatorImage,
 							ImagePullPolicy: "Always",
 							Resources: corev1.ResourceRequirements{
 								Requests: corev1.ResourceList{
