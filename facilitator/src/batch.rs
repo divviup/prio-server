@@ -18,6 +18,8 @@ use std::{
 };
 use uuid::Uuid;
 
+pub const AGGREGATION_DATE_FORMAT: &str = "%Y%m%d%H%M";
+
 /// Manages the paths to the different files in a batch
 pub struct Batch {
     header_path: String,
@@ -56,8 +58,8 @@ impl Batch {
         let batch_path = format!(
             "{}/{}-{}",
             aggregation_name,
-            aggregation_start.format(DATE_FORMAT),
-            aggregation_end.format(DATE_FORMAT)
+            aggregation_start.format(AGGREGATION_DATE_FORMAT),
+            aggregation_end.format(AGGREGATION_DATE_FORMAT)
         );
         let filename = format!("sum_{}", if is_first { 0 } else { 1 });
 
@@ -625,8 +627,8 @@ mod tests {
         let batch_path = format!(
             "{}/{}-{}",
             aggregation_name,
-            start.format(DATE_FORMAT),
-            end.format(DATE_FORMAT)
+            start.format(AGGREGATION_DATE_FORMAT),
+            end.format(AGGREGATION_DATE_FORMAT)
         );
         let first_filenames = &[
             "sum_0".to_owned(),
