@@ -152,6 +152,33 @@ ROLE
   }
 }
 
+# The bucket_role defined above is created in our AWS account and used to
+# access S3 buckets in a peer's AWS account. Besides _their_ bucket having a
+# policy that grants us access, we need to make sure _our_ role allows use of S3
+# API, hence this policy. Note it is not the same as the role assumption policy
+# defined inline in aws_iam_role.bucket_role.
+# TODO: Make this policy as restrictive as possible:
+# https://github.com/abetterinternet/prio-server/issues/140
+resource "aws_iam_role_policy" "bucket_role_policy" {
+  name = "${local.resource_prefix}-bucket-role-policy"
+  role = aws_iam_role.bucket_role.id
+
+  policy = <<POLICY
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Action": [
+        "s3:*"
+      ],
+      "Effect": "Allow",
+      "Resource": "*"
+    }
+  ]
+}
+POLICY
+}
+
 # If the ingestor authenticates using a GCP service account, this is the role in
 # AWS that their service account assumes. Note the "count" parameter in the
 # block, which seems to be the Terraform convention to conditionally create
@@ -254,7 +281,7 @@ resource "aws_s3_bucket" "peer_validation_bucket" {
     {
       "Effect": "Allow",
       "Principal": {
-        "AWS": "arn:aws:iam::${data.aws_caller_identity.current.account_id}:role/prio-${coalesce(var.test_peer_environment, var.test_peer_environment_with_fake_ingestors)}-${var.data_share_processor_name}-bucket-role"
+        "AWS": "${var.peer_share_processor_aws_account_id}"
       },
       "Action": [
         "s3:AbortMultipartUpload",
