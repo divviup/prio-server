@@ -27,7 +27,24 @@ If you're having problems, check `gcloud config list` and `kubectl config curren
 
 ## New clusters
 
-To add a data share processor to support a new PHA in an existing region, add their PHA name to the `peer_share_processor_names` variable in the relevant `variables/<environment>.tfvars` file. To bring up a whole new cluster, drop a `your-new-environment.tfvars` file in `variables`, fill in the required variables and use `ENV=your-new-environment make apply` to deploy it. Multiple environments may be deployed to the same GCP region.
+To add a data share processor to support a new PHA in an existing region, add their PHA name to the `peer_share_processor_names` variable in the relevant `variables/<environment>.tfvars` file.
+
+To bring up a whole new cluster, drop a `your-new-environment.tfvars` file in `variables`, fill in the required variables and then bootstrap it with:
+
+    ENV=your-new-environment make apply-bootstrap
+
+This will deploy just enough of an environment to permit peers to begin deploying resources. Once your environment is bootstrapped, and once all the other servers you intend to exchange data with have bootstrapped, finish the deploy with
+
+    ENV=your-new-environment make apply
+
+Once bootstrapped, subsequent deployments should use `ENV=your-new-environment make apply`. Multiple environments may be deployed to the same GCP region.
+
+For example, let's suppose you were setting up two environments, `test-1` and `test-2` and configuring them to exchange shares. Once you've set up their .tfvars to refer to each other (on which topic documentation will soon follow), you might do:
+
+    ENV=test-1 make apply-bootstrap
+    ENV=test-2 make apply-bootstrap
+    ENV=test-1 make apply
+    ENV=test-2 make apply
 
 ## kubectl configuration
 

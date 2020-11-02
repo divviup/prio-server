@@ -94,6 +94,15 @@ apply: prep ## Have terraform do the things. This will cost money.
 		-var-file="$(VARS)"
 	echo "If that succeeded, run 'terraform output --json | (cd ../deploy-tool/ ; go run main.go )'"
 
+.PHONY: apply-bootstrap
+apply-bootstrap: prep ## Have terraform bring up the minimal resources needed to bootstrap an env and permit peers to begin deploying
+	@terraform apply \
+		-lock=true \
+		-input=false \
+		-refresh=true \
+		-var-file="$(VARS)" \
+		-target=module.manifest
+
 .PHONY: apply-target
 apply-target: prep ## Have terraform do the things for a specific resource. This will cost money.
 	@echo "$(YELLOW)$(BOLD)[INFO]   $(RESET)"; echo "Example to type for the following question: module.gke.google_container_cluster.cluster"
