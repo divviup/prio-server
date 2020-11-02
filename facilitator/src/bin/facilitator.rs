@@ -701,7 +701,7 @@ fn main() -> Result<(), anyhow::Error> {
             // We created the bucket to which we wrote copies of our validation
             // shares, so it is simply provided by argument.
             let own_validation_bucket =
-                StoragePath::from_str(matches.value_of("own-output").unwrap())?;
+                StoragePath::from_str(sub_matches.value_of("own-input").unwrap())?;
             let own_identity = sub_matches.value_of("own-identity");
             let own_validation_transport = transport_for_path(own_validation_bucket, own_identity)?;
 
@@ -739,18 +739,20 @@ fn main() -> Result<(), anyhow::Error> {
 
             // We need the public keys the peer data share processor used to
             // sign messages, which we can obtain by argument or by discovering
-            // their specific manifest.
+            // their specific manifest. peer-public-key and
+            // peer-public-key-identifier have default values, so we must check
+            // peer-manifest-base-url first.
             let peer_share_processor_pub_key_map = match (
                 sub_matches.value_of("peer-public-key"),
                 sub_matches.value_of("peer-public-key-identifier"),
                 sub_matches.value_of("peer-manifest-base-url"),
             ) {
-                (Some(public_key), Some(public_key_identifier), _) => {
-                    public_key_map_from_arg(public_key, public_key_identifier)
-                }
                 (_, _, Some(manifest_base_url)) => {
                     SpecificManifest::from_https(manifest_base_url, instance_name)?
                         .batch_signing_public_keys()?
+                }
+                (Some(public_key), Some(public_key_identifier), _) => {
+                    public_key_map_from_arg(public_key, public_key_identifier)
                 }
                 _ => {
                     return Err(anyhow!(

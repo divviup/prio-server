@@ -268,10 +268,14 @@ resource "kubernetes_cron_job" "workflow_manager" {
               name  = "workflow-manager"
               image = "${var.container_registry}/${var.workflow_manager_image}:${var.workflow_manager_version}"
               args = [
+                "--is-first=${var.is_first ? "true" : "false"}",
                 "--k8s-namespace", var.kubernetes_namespace,
                 "--k8s-service-account", kubernetes_service_account.workflow_manager.metadata[0].name,
                 "--ingestor-input", "s3://${var.ingestion_bucket}",
                 "--ingestor-identity", var.ingestion_bucket_role,
+                "--own-validation-input", "gs://${var.own_validation_bucket}",
+                "--peer-validation-input", "s3://${var.peer_validation_bucket}",
+                "--peer-validation-identity", var.ingestion_bucket_role,
                 "--bsk-secret-name", kubernetes_secret.batch_signing_key.metadata[0].name,
                 "--pdks-secret-name", var.packet_decryption_key_kubernetes_secret,
                 "--intake-batch-config-map", kubernetes_config_map.intake_batch_job_config_map.metadata[0].name,
