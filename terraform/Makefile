@@ -101,7 +101,8 @@ apply-bootstrap: prep ## Have terraform bring up the minimal resources needed to
 		-input=false \
 		-refresh=true \
 		-var-file="$(VARS)" \
-		-target=module.manifest
+		-target=module.manifest \
+		-target=module.fake_server_resources
 
 .PHONY: apply-target
 apply-target: prep ## Have terraform do the things for a specific resource. This will cost money.

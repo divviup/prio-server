@@ -51,15 +51,14 @@ variable "portal_server_manifest_base_url" {
 }
 
 variable "test_peer_environment" {
-  type        = string
-  default     = ""
-  description = "Name of peer environment set up to test against this one (not to be used in production deployments). Should not be set alongside test_peer_environment_with_fake_ingestors."
-}
-
-variable "test_peer_environment_with_fake_ingestors" {
-  type        = string
-  default     = ""
-  description = "Name of peer environment which contains fake ingestion servers set up to test against this one (not to be used in production deployments). Should not be set alongside test_peer_environment."
+  type        = map(string)
+  default     = {}
+  description = <<DESCRIPTION
+Describes a pair of data share processor environments set up to test against
+each other. One environment, named in "env_with_ingestor", hosts a fake
+ingestion server. The other, named in "env_without_ingestor", does not. This
+variable should not be specified in production deployments.
+DESCRIPTION
 }
 
 variable "is_first" {
@@ -215,8 +214,8 @@ module "data_share_processors" {
   sum_part_bucket_service_account_email     = google_service_account.sum_part_bucket_writer.email
   portal_server_manifest_base_url           = var.portal_server_manifest_base_url
   own_manifest_base_url                     = module.manifest.base_url
-  test_peer_environment                     = var.test_peer_environment
-  test_peer_environment_with_fake_ingestors = var.test_peer_environment_with_fake_ingestors
+  test_peer_environment                     = var.test_peer_environment.env_without_ingestor
+  test_peer_environment_with_fake_ingestors = var.test_peer_environment.env_with_ingestor
   is_first                                  = var.is_first
 
   depends_on = [module.gke]
@@ -241,6 +240,16 @@ resource "google_service_account_iam_binding" "data_share_processors_to_sum_part
   members            = [for v in module.data_share_processors : v.service_account_email]
 }
 
+module "fake_server_resources" {
+  count                        = lookup(var.test_peer_environment, "env_with_ingestor", "") == "" ? 0 : 1
+  source                       = "./modules/fake_server_resources"
+  manifest_bucket              = module.manifest.bucket
+  gcp_region                   = var.gcp_region
+  environment                  = var.environment
+  sum_part_bucket_writer_email = google_service_account.sum_part_bucket_writer.email
+  ingestors                    = var.ingestors
+}
+
 output "manifest_bucket" {
   value = module.manifest.bucket
 }
@@ -259,5 +268,5 @@ output "specific_manifests" {
 }
 
 output "use_test_pha_decryption_key" {
-  value = var.test_peer_environment_with_fake_ingestors != ""
+  value = lookup(var.test_peer_environment, "env_without_ingestor", "") == var.environment
 }
