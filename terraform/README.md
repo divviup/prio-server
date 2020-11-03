@@ -52,6 +52,9 @@ The values must correspond to the names of the environments you are using. Pick 
 
     ENV=with-ingestor make apply-bootstrap
     ENV=without-ingestor make apply-bootstrap
+
+After the successful `apply-bootstrap` you may need to wait several minutes for managed TLS certificates to finish provisioning. Once those are in place, move on to the full deployment:
+
     ENV=with-ingestor make apply
     ENV=without-ingestor make apply
 

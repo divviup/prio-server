@@ -104,6 +104,16 @@ apply-bootstrap: prep ## Have terraform bring up the minimal resources needed to
 		-target=module.manifest \
 		-target=module.fake_server_resources
 
+.PHONY: destroy-bootstrap
+destroy-bootstrap: prep ## Have terraform destroy the resources brought up by apply-bootstrap
+	@terraform destroy \
+		-lock=true \
+		-input=false \
+		-refresh=true \
+		-var-file="$(VARS)" \
+		-target=module.manifest \
+		-target=module.fake_server_resources
+
 .PHONY: apply-target
 apply-target: prep ## Have terraform do the things for a specific resource. This will cost money.
 	@echo "$(YELLOW)$(BOLD)[INFO]   $(RESET)"; echo "Example to type for the following question: module.gke.google_container_cluster.cluster"
