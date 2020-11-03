@@ -274,6 +274,7 @@ func main() {
 		aggregationBatches = append(aggregationBatches, batchPath)
 	}
 	interval := aggregationInterval(aggregationPeriodParsed, gracePeriodParsed)
+	log.Printf("looking for batches to aggregate in interval %s", interval)
 	aggregationBatches = withinInterval(aggregationBatches, interval)
 
 	if err := launchAggregationJob(context.Background(), aggregationBatches, interval); err != nil {
