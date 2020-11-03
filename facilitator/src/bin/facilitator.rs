@@ -511,6 +511,7 @@ fn main() -> Result<(), anyhow::Error> {
                         .long("aggregation-start")
                         .value_name("DATE")
                         .help("Beginning of the timespan covered by the aggregation.")
+                        .required(true)
                         .validator(date_validator),
                 )
                 .arg(
@@ -518,6 +519,7 @@ fn main() -> Result<(), anyhow::Error> {
                         .long("aggregation-end")
                         .value_name("DATE")
                         .help("End of the timespan covered by the aggregation.")
+                        .required(true)
                         .validator(date_validator),
                 )
                 .add_manifest_base_url_argument(Entity::Ingestor)
