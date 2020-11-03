@@ -83,6 +83,10 @@ variable "sum_part_bucket_service_account_email" {
   type = string
 }
 
+variable "is_env_with_ingestor" {
+  type = bool
+}
+
 variable "test_peer_ingestion_bucket" {
   type = string
 }
@@ -305,7 +309,7 @@ resource "kubernetes_cron_job" "sample_maker" {
   # This sample maker acts as an ingestion server in our test setup. It only
   # gets created in one of the two envs, and writes to both env's ingestion
   # buckets.
-  count = var.test_peer_ingestion_bucket == "" ? 0 : 1
+  count = var.is_env_with_ingestor ? 1 : 0
   metadata {
     name      = "${var.environment}-${var.data_share_processor_name}-sample-maker"
     namespace = var.kubernetes_namespace
@@ -338,14 +342,28 @@ resource "kubernetes_cron_job" "sample_maker" {
                 "--peer-output", "s3://${var.test_peer_ingestion_bucket}",
                 "--peer-identity", var.ingestion_bucket_role,
                 "--aggregation-id", "kittens-seen",
+                # All instances of the sample maker use the same batch signing
+                # key, thus simulating being a single server.
+                "--batch-signing-private-key", "MIGHAgEAMBMGByqGSM49AgEGCCqGSM49AwEHBG0wawIBAQQggoa08rQR90Asvhy5bWIgFBDeGaO8FnVEF3PVpNVmDGChRANCAAQ2mZfm4UC73PkWsYz3Uub6UTIAFQCPGxouP1O1PlmntOpfLYdvyZDCuenAzv1oCfyToolNArNjwo/+harNn1fs",
+                "--batch-signing-private-key-identifier", "sample-maker-signing-key",
+                "--packet-count", "10",
+                # We use a fixed packet encryption key so that we can make sure
+                # to use the same one in the corresponding data share processor
+                # in the other env.
+                "--pha-ecies-private-key", "BIl6j+J6dYttxALdjISDv6ZI4/VWVEhUzaS05LgrsfswmbLOgNt9HUC2E0w+9RqZx3XMkdEHBHfNuCSMpOwofVSq3TfyKwn0NrftKisKKVSaTOt5seJ67P5QL4hxgPWvxw==",
+                # These parameters get recorded in Avro messages but otherwise
+                # do not affect any system behavior, so the values don't matter.
+                "--batch-start-time", "1000000000",
+                "--batch-end-time", "1000000100",
+                "--dimension", "123",
+                "--epsilon", "0.23",
               ]
               env {
                 name  = "AWS_ACCOUNT_ID"
                 value = data.aws_caller_identity.current.account_id
               }
-              # We intentionally do not specify PHA_ECIES_PRIVATE_KEY, so that
-              # facilitator will use the DEFAULT_PHA_ECIES_PRIVATE_KEY, which
-              # the facilitators in the peer test env have access to.
+              # We use the packet decryption key that was generated in this
+              # deploy to exercise that key provisioning flow.
               env {
                 name = "FACILITATOR_ECIES_PRIVATE_KEY"
                 value_from {
