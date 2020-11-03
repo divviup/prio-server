@@ -10,10 +10,13 @@ managed_dns_zone = {
   gcp_project = "prio-bringup-290620"
 }
 ingestors = {
-  ingestor-1 = "storage.googleapis.com/prio-demo-gcp-manifests/ingestor-1"
-  ingestor-2 = "storage.googleapis.com/prio-demo-gcp-manifests/ingestor-2"
+  ingestor-1 = "demo-gcp-peer.manifests.isrg-prio.org/ingestor-1"
+  ingestor-2 = "demo-gcp-peer.manifests.isrg-prio.org/ingestor-2"
 }
-peer_share_processor_manifest_base_url    = "demo-gcp.manifests.isrg-prio.org"
-portal_server_manifest_base_url           = "storage.googleapis.com/prio-demo-gcp-manifests/portal-server"
-test_peer_environment_with_fake_ingestors = "demo-gcp"
-is_first                                  = true
+peer_share_processor_manifest_base_url = "demo-gcp.manifests.isrg-prio.org"
+portal_server_manifest_base_url        = "demo-gcp-peer.manifests.isrg-prio.org/portal-server"
+test_peer_environment = {
+  env_with_ingestor    = "demo-gcp"
+  env_without_ingestor = "demo-gcp-peer"
+}
+is_first = true

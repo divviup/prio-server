@@ -15,10 +15,6 @@ use facilitator::{
     intake::BatchIntaker,
     manifest::{IngestionServerGlobalManifest, PortalServerGlobalManifest, SpecificManifest},
     sample::generate_ingestion_sample,
-    test_utils::{
-        DEFAULT_FACILITATOR_ECIES_PRIVATE_KEY, DEFAULT_FACILITATOR_SIGNING_PRIVATE_KEY,
-        DEFAULT_PHA_ECIES_PRIVATE_KEY,
-    },
     transport::{
         GCSTransport, LocalFileTransport, S3Transport, SignableTransport, Transport,
         VerifiableAndDecryptableTransport, VerifiableTransport,
@@ -160,7 +156,7 @@ impl<'a, 'b> AppArgumentAdder for App<'a, 'b> {
                 .value_name("BOOL")
                 .possible_value("true")
                 .possible_value("false")
-                .default_value("false")
+                .required(true)
                 .help(
                     "Whether this is the \"first\" server receiving a share, \
                     i.e., the PHA.",
@@ -173,7 +169,7 @@ impl<'a, 'b> AppArgumentAdder for App<'a, 'b> {
                 .long("instance-name")
                 .env("INSTANCE_NAME")
                 .value_name("NAME")
-                .default_value("fake-pha-fake-ingestor")
+                .required(true)
                 .help("Name of this data share processor")
                 .long_help(
                     "Name of this data share processor instance, to be used to \
@@ -214,7 +210,6 @@ impl<'a, 'b> AppArgumentAdder for App<'a, 'b> {
                 .env(name_env)
                 .value_name("PATH")
                 .validator(path_validator)
-                .default_value(".")
                 .help("Storage path (gs://, s3:// or local dir name)"),
         )
         .arg(
@@ -238,8 +233,6 @@ impl<'a, 'b> AppArgumentAdder for App<'a, 'b> {
                     "Batch signing public key for the {}",
                     entity.str()
                 )))
-                .default_value(DEFAULT_FACILITATOR_SIGNING_PRIVATE_KEY)
-                .hide_default_value(true)
                 .validator(b64_validator),
         )
         .arg(
@@ -249,8 +242,7 @@ impl<'a, 'b> AppArgumentAdder for App<'a, 'b> {
                 .help(leak_string(format!(
                     "Identifier for the {}'s batch keypair",
                     entity.str()
-                )))
-                .default_value("default-batch-signing-key-id"),
+                ))),
         )
     }
 
@@ -264,11 +256,9 @@ impl<'a, 'b> AppArgumentAdder for App<'a, 'b> {
                 .long_help(
                     "Base64 encoded PKCS#8 document containing P-256 \
                     batch signing private key to be used by this server when \
-                    sending messages to other servers. If not specified, a \
-                    fixed private key is used.",
+                    sending messages to other servers.",
                 )
-                .default_value(DEFAULT_FACILITATOR_SIGNING_PRIVATE_KEY)
-                .hide_default_value(true)
+                .required(true)
                 .validator(b64_validator),
         )
         .arg(
@@ -283,8 +273,7 @@ impl<'a, 'b> AppArgumentAdder for App<'a, 'b> {
                     or specific manifest. Used to construct \
                     PrioBatchSignature messages.",
                 )
-                .default_value("default-batch-signing-key-id")
-                .hide_default_value(true),
+                .required(true),
         )
     }
 
@@ -303,8 +292,7 @@ impl<'a, 'b> AppArgumentAdder for App<'a, 'b> {
                 .min_values(1)
                 .use_delimiter(true)
                 .validator(b64_validator)
-                .default_value(DEFAULT_FACILITATOR_ECIES_PRIVATE_KEY)
-                .hide_default_value(true),
+                .required(true),
         )
     }
 }
@@ -343,7 +331,7 @@ fn main() -> Result<(), anyhow::Error> {
                     Arg::with_name("aggregation-id")
                         .long("aggregation-id")
                         .value_name("ID")
-                        .default_value("fake-aggregation")
+                        .required(true)
                         .help("Name of the aggregation"),
                 )
                 .arg(
@@ -372,7 +360,7 @@ fn main() -> Result<(), anyhow::Error> {
                         .long("dimension")
                         .short("d")
                         .value_name("INT")
-                        .default_value("123")
+                        .required(true)
                         .validator(num_validator::<i32>)
                         .help(
                             "Length in bits of the data packets to generate \
@@ -385,7 +373,7 @@ fn main() -> Result<(), anyhow::Error> {
                         .long("packet-count")
                         .short("p")
                         .value_name("INT")
-                        .default_value("10")
+                        .required(true)
                         .validator(num_validator::<usize>)
                         .help("Number of data packets to generate"),
                 )
@@ -398,13 +386,7 @@ fn main() -> Result<(), anyhow::Error> {
                             "Base64 encoded ECIES private key for the PHA \
                             server",
                         )
-                        .long_help(
-                            "Base64 encoded private key for the PHA \
-                            server. If not specified, a fixed private key will \
-                            be used.",
-                        )
-                        .default_value(DEFAULT_PHA_ECIES_PRIVATE_KEY)
-                        .hide_default_value(true)
+                        .required(true)
                         .validator(b64_validator),
                 )
                 .arg(
@@ -416,13 +398,7 @@ fn main() -> Result<(), anyhow::Error> {
                             "Base64 encoded ECIES private key for the \
                             facilitator server",
                         )
-                        .long_help(
-                            "Base64 encoded ECIES private key for the \
-                            facilitator server. If not specified, a fixed \
-                            private key will be used.",
-                        )
-                        .default_value(DEFAULT_FACILITATOR_ECIES_PRIVATE_KEY)
-                        .hide_default_value(true)
+                        .required(true)
                         .validator(b64_validator),
                 )
                 .add_batch_signing_key_arguments()
@@ -434,7 +410,7 @@ fn main() -> Result<(), anyhow::Error> {
                             "Differential privacy parameter for local \
                             randomization before aggregation",
                         )
-                        .default_value("0.23")
+                        .required(true)
                         .validator(num_validator::<f64>),
                 )
                 .arg(
@@ -442,7 +418,7 @@ fn main() -> Result<(), anyhow::Error> {
                         .long("batch-start-time")
                         .value_name("MILLIS")
                         .help("Start of timespan covered by the batch, in milliseconds since epoch")
-                        .default_value("1000000000")
+                        .required(true)
                         .validator(num_validator::<i64>),
                 )
                 .arg(
@@ -450,7 +426,7 @@ fn main() -> Result<(), anyhow::Error> {
                         .long("batch-end-time")
                         .value_name("MILLIS")
                         .help("End of timespan covered by the batch, in milliseconds since epoch")
-                        .default_value("1000000100")
+                        .required(true)
                         .validator(num_validator::<i64>),
                 ),
         )
@@ -463,17 +439,15 @@ fn main() -> Result<(), anyhow::Error> {
                     Arg::with_name("aggregation-id")
                         .long("aggregation-id")
                         .value_name("ID")
-                        .default_value("fake-aggregation")
+                        .required(true)
                         .help("Name of the aggregation"),
                 )
                 .arg(
                     Arg::with_name("batch-id")
                         .long("batch-id")
                         .value_name("UUID")
-                        .help(
-                            "UUID of the batch. If omitted, a UUID is \
-                            randomly generated.",
-                        )
+                        .help("UUID of the batch.")
+                        .required(true)
                         .validator(uuid_validator),
                 )
                 .arg(
@@ -481,11 +455,8 @@ fn main() -> Result<(), anyhow::Error> {
                         .long("date")
                         .value_name("DATE")
                         .help("Date for the batch in YYYY/mm/dd/HH/MM format")
-                        .long_help(
-                            "Date for the batch in YYYY/mm/dd/HH/MM format. If \
-                            omitted, the current date is used.",
-                        )
-                        .validator(date_validator),
+                        .validator(date_validator)
+                        .required(true),
                 )
                 .add_packet_decryption_key_argument()
                 .add_batch_public_key_arguments(Entity::Ingestor)
@@ -505,7 +476,7 @@ fn main() -> Result<(), anyhow::Error> {
                     Arg::with_name("aggregation-id")
                         .long("aggregation-id")
                         .value_name("ID")
-                        .default_value("fake-aggregation")
+                        .required(true)
                         .help("Name of the aggregation"),
                 )
                 .arg(
@@ -544,10 +515,7 @@ fn main() -> Result<(), anyhow::Error> {
                         .long("aggregation-start")
                         .value_name("DATE")
                         .help("Beginning of the timespan covered by the aggregation.")
-                        .long_help(
-                            "Beginning of the timespan covered by the \
-                            aggregation. If omitted, the current time is used.",
-                        )
+                        .required(true)
                         .validator(date_validator),
                 )
                 .arg(
@@ -555,10 +523,7 @@ fn main() -> Result<(), anyhow::Error> {
                         .long("aggregation-end")
                         .value_name("DATE")
                         .help("End of the timespan covered by the aggregation.")
-                        .long_help(
-                            "End of the timespan covered by the aggregation \
-                            If omitted, the current time is used.",
-                        )
+                        .required(true)
                         .validator(date_validator),
                 )
                 .add_manifest_base_url_argument(Entity::Ingestor)
@@ -681,13 +646,9 @@ fn main() -> Result<(), anyhow::Error> {
 
             let mut batch_intaker = BatchIntaker::new(
                 &sub_matches.value_of("aggregation-id").unwrap(),
-                &sub_matches
-                    .value_of("batch-id")
-                    .map_or_else(Uuid::new_v4, |v| Uuid::parse_str(v).unwrap()),
-                &sub_matches.value_of("date").map_or_else(
-                    || Utc::now().naive_utc(),
-                    |v| NaiveDateTime::parse_from_str(&v, DATE_FORMAT).unwrap(),
-                ),
+                &Uuid::parse_str(sub_matches.value_of("batch-id").unwrap()).unwrap(),
+                &NaiveDateTime::parse_from_str(&sub_matches.value_of("date").unwrap(), DATE_FORMAT)
+                    .unwrap(),
                 &mut intake_transport,
                 &mut peer_validation_transport,
                 &mut own_validation_transport,
@@ -810,14 +771,16 @@ fn main() -> Result<(), anyhow::Error> {
             let batch_info: Vec<_> = batch_ids.into_iter().zip(batch_dates).collect();
             BatchAggregator::new(
                 &sub_matches.value_of("aggregation-id").unwrap(),
-                &sub_matches.value_of("aggregation-start").map_or_else(
-                    || Utc::now().naive_utc(),
-                    |v| NaiveDateTime::parse_from_str(&v, DATE_FORMAT).unwrap(),
-                ),
-                &sub_matches.value_of("aggregation-end").map_or_else(
-                    || Utc::now().naive_utc(),
-                    |v| NaiveDateTime::parse_from_str(&v, DATE_FORMAT).unwrap(),
-                ),
+                &NaiveDateTime::parse_from_str(
+                    &sub_matches.value_of("aggregation-start").unwrap(),
+                    DATE_FORMAT,
+                )
+                .unwrap(),
+                &NaiveDateTime::parse_from_str(
+                    &sub_matches.value_of("aggregation-end").unwrap(),
+                    DATE_FORMAT,
+                )
+                .unwrap(),
                 is_first,
                 &mut intake_transport,
                 &mut VerifiableTransport {

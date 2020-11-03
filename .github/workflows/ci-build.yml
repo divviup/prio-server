@@ -39,6 +39,8 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v2
+      - name: Install lcov
+        run: sudo apt install lcov -y
       - name: Install rust
         uses: actions-rs/toolchain@v1
         with:
@@ -55,6 +57,8 @@ jobs:
           RUSTDOCFLAGS: '-Zprofile -Ccodegen-units=1 -Cinline-threshold=0 -Clink-dead-code -Coverflow-checks=off -Cpanic=abort -Zpanic_abort_tests'
       - name: Get code coverage
         run: grcov ./target/debug -s . --llvm --branch --guess-directory-when-missing --ignore-not-existing -t lcov -o coverage.txt
+      - name: Clean lcov file
+        run: lcov --extract coverage.txt -o coverage.txt 'src/*'
       - name: Upload test coverage
         if: success()
         uses: codecov/codecov-action@v1

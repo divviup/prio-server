@@ -59,11 +59,9 @@ variable "portal_server_manifest_base_url" {
 }
 
 variable "test_peer_environment" {
-  type = string
-}
-
-variable "test_peer_environment_with_fake_ingestors" {
-  type = string
+  type        = map(string)
+  default     = {}
+  description = "See main.tf for discussion."
 }
 
 variable "is_first" {
@@ -71,7 +69,9 @@ variable "is_first" {
 }
 
 locals {
-  resource_prefix = "prio-${var.environment}-${var.data_share_processor_name}"
+  resource_prefix         = "prio-${var.environment}-${var.data_share_processor_name}"
+  is_env_with_ingestor    = lookup(var.test_peer_environment, "env_with_ingestor", "") == var.environment
+  is_env_without_ingestor = lookup(var.test_peer_environment, "env_without_ingestor", "") == var.environment
   # There are four cases for who is writing to this data share processor's
   # ingestion bucket, listed in the order we check for them:
   #
@@ -88,10 +88,10 @@ locals {
   #     aws_iam_role.ingestor_bucket_writer_role and grant it write access.
   # 4 - This is a non-test environment for an ingestor that advertises an AWS
   #     role. We grant that role write access.
-  ingestion_bucket_writer_role_arn = var.test_peer_environment != "" ? (
+  ingestion_bucket_writer_role_arn = local.is_env_with_ingestor ? (
     aws_iam_role.bucket_role.arn
-    ) : var.test_peer_environment_with_fake_ingestors != "" ? (
-    "arn:aws:iam::${data.aws_caller_identity.current.account_id}:role/prio-${var.test_peer_environment_with_fake_ingestors}-${var.data_share_processor_name}-bucket-role"
+    ) : local.is_env_without_ingestor ? (
+    "arn:aws:iam::${data.aws_caller_identity.current.account_id}:role/prio-${var.test_peer_environment.env_with_ingestor}-${var.data_share_processor_name}-bucket-role"
     ) : var.ingestor_gcp_service_account_id != "" ? (
     aws_iam_role.ingestor_bucket_writer_role[0].arn
     ) : (
@@ -104,8 +104,8 @@ locals {
   # ingestors can write ingestion batches to them. This assumes that the
   # other test environment follows our naming convention and that they are in
   # the same AWS region as we are.
-  test_peer_ingestion_bucket = var.test_peer_environment != "" ? (
-    "${aws_s3_bucket.ingestion_bucket.region}/prio-${var.test_peer_environment}-${var.data_share_processor_name}-ingestion"
+  test_peer_ingestion_bucket = local.is_env_with_ingestor ? (
+    "${aws_s3_bucket.ingestion_bucket.region}/prio-${var.test_peer_environment.env_without_ingestor}-${var.data_share_processor_name}-ingestion"
   ) : ""
 }
 
@@ -361,6 +361,7 @@ module "kubernetes" {
   own_manifest_base_url                   = var.own_manifest_base_url
   sum_part_bucket_service_account_email   = var.sum_part_bucket_service_account_email
   portal_server_manifest_base_url         = var.portal_server_manifest_base_url
+  is_env_with_ingestor                    = local.is_env_with_ingestor
   test_peer_ingestion_bucket              = local.test_peer_ingestion_bucket
   is_first                                = var.is_first
 }

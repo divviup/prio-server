@@ -27,7 +27,36 @@ If you're having problems, check `gcloud config list` and `kubectl config curren
 
 ## New clusters
 
-To add a data share processor to support a new PHA in an existing region, add their PHA name to the `peer_share_processor_names` variable in the relevant `variables/<environment>.tfvars` file. To bring up a whole new cluster, drop a `your-new-environment.tfvars` file in `variables`, fill in the required variables and use `ENV=your-new-environment make apply` to deploy it. Multiple environments may be deployed to the same GCP region.
+To add a data share processor to support a new PHA in an existing region, add their PHA name to the `peer_share_processor_names` variable in the relevant `variables/<environment>.tfvars` file.
+
+To bring up a whole new cluster, drop a `your-new-environment.tfvars` file in `variables`, fill in the required variables and then bootstrap it with:
+
+    ENV=your-new-environment make apply-bootstrap
+
+This will deploy just enough of an environment to permit peers to begin deploying resources. Once your environment is bootstrapped, and once all the other servers you intend to exchange data with have bootstrapped, finish the deploy with
+
+    ENV=your-new-environment make apply
+
+Once bootstrapped, subsequent deployments should use `ENV=your-new-environment make apply`. Multiple environments may be deployed to the same GCP region.
+
+## Paired test environments
+
+We have support for creating two paired test environments which can exchange validation shares, along with a convincing simulation of ingestion servers and a portal server. To do this, you will need to create two `.tfvars` files, and on top of the usual variables, each must contain a variable like:
+
+    test_peer_environment = {
+      env_with_ingestor    = "with-ingestor"
+      env_without_ingestor = "without-ingestor"
+    }
+
+The values must correspond to the names of the environments you are using. Pick one of them to be the environment with ingestors. From there, you should be able to bring up the two environments like so:
+
+    ENV=with-ingestor make apply-bootstrap
+    ENV=without-ingestor make apply-bootstrap
+
+After the successful `apply-bootstrap` you may need to wait several minutes for managed TLS certificates to finish provisioning. Once those are in place, move on to the full deployment:
+
+    ENV=with-ingestor make apply
+    ENV=without-ingestor make apply
 
 ## kubectl configuration
 

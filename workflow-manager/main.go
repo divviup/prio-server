@@ -1,8 +1,8 @@
 // workflow-manager looks for batches to be processed from an input bucket,
-// and spins up facilitator jobs to process those batches.
+// and spins up `facilitator intake-batch` jobs to process those batches.
 //
-// Right now workflow-manager is just a stub that demonstrates reading from a
-// GCS bucket and talking to the Kubernetes API.
+// It also looks for batches that have been intake'd, and spins up
+// `facilitator aggregate` jobs to aggregate them and write to a portal bucket.
 package main
 
 import (
@@ -103,18 +103,18 @@ func (b *batchPath) dateString() string {
 
 func basename(s string, infix string) string {
 	s = strings.TrimSuffix(s, fmt.Sprintf(".%s", infix))
-	s = strings.TrimSuffix(s, fmt.Sprintf(".avro", infix))
-	s = strings.TrimSuffix(s, fmt.Sprintf(".sig", infix))
+	s = strings.TrimSuffix(s, fmt.Sprintf(".%s.avro", infix))
+	s = strings.TrimSuffix(s, fmt.Sprintf(".%s.sig", infix))
 	return s
 }
 
-// index returns the appropriate string to use in construction of filenames
+// index returns the appropriate int to use in construction of filenames
 // based on whether the file creator was the "first" aka PHA server.
-func index(isFirst bool) string {
+func index(isFirst bool) int {
 	if isFirst {
-		return "0"
+		return 0
 	}
-	return "1"
+	return 1
 }
 
 // contains returns true if the string str exists in the slice s
@@ -146,7 +146,7 @@ func checkStoragePath(arg string, val string) (string, string) {
 
 var k8sNS = flag.String("k8s-namespace", "", "Kubernetes namespace")
 var isFirst = flag.Bool("is-first", false, "Whether this set of servers is \"first\", aka PHA servers")
-var maxAge = flag.String("max-age", "1h", "Max age (in Go duration format) for batches to be worth processing.")
+var maxAge = flag.String("intake-max-age", "1h", "Max age (in Go duration format) for intake batches to be worth processing.")
 var k8sServiceAccount = flag.String("k8s-service-account", "", "Kubernetes service account for intake and aggregate jobs")
 var bskSecretName = flag.String("bsk-secret-name", "", "Name of k8s secret for batch signing key")
 var pdksSecretName = flag.String("pdks-secret-name", "", "Name of k8s secret for packet decrypt keys")
@@ -159,6 +159,8 @@ var ownValidationIdentity = flag.String("own-validation-identity", "", "Identity
 var peerValidationInput = flag.String("peer-validation-input", "", "Bucket for input of validation batches from peer (s3:// or gs://) (required)")
 var peerValidationIdentity = flag.String("peer-validation-identity", "", "Identity to use with peer validation bucket (Required for S3)")
 var facilitatorImage = flag.String("facilitator-image", "", "Name (optionally including repository) of facilitator image")
+var aggregationPeriod = flag.String("aggregation-period", "3h", "How much time each aggregation covers")
+var gracePeriod = flag.String("grace-period", "1h", "Wait this amount of time after the end of an aggregation timeslice to run the aggregation")
 
 func main() {
 	log.Printf("starting %s version %s - %s. Args: %s", os.Args[0], BuildID, BuildTime, os.Args[1:])
@@ -184,9 +186,19 @@ func main() {
 		log.Fatal("--facilitator-image is required")
 	}
 
-	ageLimit, err := time.ParseDuration(*maxAge)
+	maxAgeParsed, err := time.ParseDuration(*maxAge)
 	if err != nil {
-		log.Fatal(err)
+		log.Fatalf("--max-age: %s", err)
+	}
+
+	gracePeriodParsed, err := time.ParseDuration(*gracePeriod)
+	if err != nil {
+		log.Fatalf("--grace-period: %s", err)
+	}
+
+	aggregationPeriodParsed, err := time.ParseDuration(*aggregationPeriod)
+	if err != nil {
+		log.Fatalf("--aggregation-time-slice: %s", err)
 	}
 
 	intakeFiles, err := intakeBucket.listFiles(context.Background())
@@ -199,7 +211,7 @@ func main() {
 		log.Fatal(err)
 	}
 
-	if err := launchIntake(context.Background(), intakeBatches, ageLimit); err != nil {
+	if err := launchIntake(context.Background(), intakeBatches, maxAgeParsed); err != nil {
 		log.Fatal(err)
 	}
 
@@ -229,7 +241,13 @@ func main() {
 
 	log.Printf("found %d peer validations", len(peerValidationBatches))
 
-	if err := launchAggregationJob(context.Background(), peerValidationBatches); err != nil {
+	// TODO: Check that both peer and own have something.
+	var aggregationBatches = peerValidationBatches
+	interval := aggregationInterval(aggregationPeriodParsed, gracePeriodParsed)
+	log.Printf("looking for batches to aggregate in interval %s", interval)
+	aggregationBatches = withinInterval(aggregationBatches, interval)
+
+	if err := launchAggregationJob(context.Background(), aggregationBatches, interval); err != nil {
 		log.Fatal(err)
 	}
 
@@ -386,10 +404,10 @@ func readyBatches(files []string, infix string) ([]*batchPath, error) {
 		if strings.HasSuffix(name, fmt.Sprintf(".%s", infix)) {
 			b.metadata = true
 		}
-		if strings.HasSuffix(name, fmt.Sprintf("%s.avro", infix)) {
+		if strings.HasSuffix(name, fmt.Sprintf(".%s.avro", infix)) {
 			b.avro = true
 		}
-		if strings.HasSuffix(name, fmt.Sprintf("%s.batch.sig", infix)) {
+		if strings.HasSuffix(name, fmt.Sprintf(".%s.batch.sig", infix)) {
 			b.sig = true
 		}
 	}
@@ -401,164 +419,48 @@ func readyBatches(files []string, infix string) ([]*batchPath, error) {
 	return output, nil
 }
 
-func getIntakeBatchesGS(ctx context.Context, inputBucket string) ([]string, error) {
-	client, err := storage.NewClient(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("storage.newClient: %w", err)
-	}
-
-	batches := make(map[string]*batch)
-	bkt := client.Bucket(inputBucket)
-	query := &storage.Query{Prefix: ""}
-
-	log.Printf("looking for ready batches in gs://%s as (ambient service account)", inputBucket)
-	it := bkt.Objects(ctx, query)
-	for {
-		attrs, err := it.Next()
-		if err == iterator.Done {
-			break
-		}
-		if err != nil {
-			return nil, fmt.Errorf("iterating on inputBucket objects from %q: %w", inputBucket, err)
-		}
-		name := attrs.Name
-		basename := ingestionBasename(name)
-		if batches[basename] == nil {
-			batches[basename] = new(batch)
-		}
-		b := batches[basename]
-		if strings.HasSuffix(name, ".batch") {
-			b.metadata = true
-		}
-		if strings.HasSuffix(name, ".batch.avro") {
-			b.avro = true
-		}
-		if strings.HasSuffix(name, ".batch.sig") {
-			b.sig = true
-		}
-	}
-
-	var readyBatches []string
-	for k, v := range batches {
-		if v.metadata && v.avro && v.sig {
-			readyBatches = append(readyBatches, k)
-		}
-	}
-
-	return readyBatches, nil
+// interval represents a half-open interval of time.
+// It includes `begin` and excludes `end`.
+type interval struct {
+	begin time.Time
+	end   time.Time
 }
 
-func getValidationBatchesGS(ctx context.Context, validationsBucket string, isFirst bool, filter []string) ([]string, error) {
-	client, err := storage.NewClient(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("storage.newClient: %w", err)
-	}
-
-	batches := make(map[string]*batch)
-	bkt := client.Bucket(validationsBucket)
-	query := &storage.Query{Prefix: ""}
-	it := bkt.Objects(ctx, query)
-	for {
-		attrs, err := it.Next()
-		if err == iterator.Done {
-			break
-		}
-		if err != nil {
-			return nil, fmt.Errorf("iterating on inputBucket objects from %q: %w", validationsBucket, err)
-		}
-		name := attrs.Name
-		basename := validationBasename(name, isFirst)
-		if !contains(filter, basename) {
-			log.Printf("ignoring batch %s", basename)
-			continue
-		}
-		if batches[basename] == nil {
-			batches[basename] = new(batch)
-		}
-		b := batches[basename]
-		if strings.HasSuffix(name, fmt.Sprintf(".validity_%s", index(isFirst))) {
-			b.metadata = true
-		}
-		if strings.HasSuffix(name, fmt.Sprintf(".validity_%s.avro", index(isFirst))) {
-			b.avro = true
-		}
-		if strings.HasSuffix(name, fmt.Sprintf(".validity_%s.sig", index(isFirst))) {
-			b.sig = true
-		}
-	}
-
-	var readyBatches []string
-	for k, v := range batches {
-		if v.metadata && v.avro && v.sig {
-			readyBatches = append(readyBatches, k)
-		}
-	}
-
-	return readyBatches, nil
+func (inter interval) String() string {
+	return fmt.Sprintf("%s to %s", fmtTime(inter.begin), fmtTime(inter.end))
 }
 
-func getValidationBatchesS3(ctx context.Context, validationsBucket string, isFirst bool, filter []string, roleARN string) ([]string, error) {
-	parts := strings.SplitN(validationsBucket, "/", 2)
-	region := parts[0]
-	bucket := parts[1]
-	sess, err := aws_session.NewSession()
-	if err != nil {
-		return nil, fmt.Errorf("making AWS session: %w", err)
-	}
-
-	arnComponents := strings.Split(roleARN, ":")
-	if len(arnComponents) != 6 {
-		return nil, fmt.Errorf("invalid ARN: %q", roleARN)
-	}
-	audience := fmt.Sprintf("sts.amazonaws.com/%s", arnComponents[4])
-	stsSTS := sts.New(sess)
-	roleSessionName := ""
-	roleProvider := stscreds.NewWebIdentityRoleProviderWithToken(
-		stsSTS, roleARN, roleSessionName, tokenFetcher{audience})
-
-	credentials := credentials.NewCredentials(roleProvider)
-
-	config := aws.NewConfig().
-		WithRegion(region).
-		WithCredentials(credentials)
-	svc := s3.New(sess, config)
-	resp, err := svc.ListObjectsV2(&s3.ListObjectsV2Input{Bucket: aws.String(bucket)})
-	if err != nil {
-		return nil, fmt.Errorf("Unable to list items in bucket %q, %w", validationsBucket, err)
-	}
-	batches := make(map[string]*batch)
-	for _, item := range resp.Contents {
-		name := *item.Key
-		basename := validationBasename(name, isFirst)
-		if !contains(filter, basename) {
-			log.Printf("ignoring batch %s", basename)
-			continue
-		}
-		if batches[basename] == nil {
-			batches[basename] = new(batch)
-		}
-		b := batches[basename]
-		if strings.HasSuffix(name, fmt.Sprintf(".validity_%s", index(isFirst))) {
-			b.metadata = true
-		}
-		if strings.HasSuffix(name, fmt.Sprintf(".validity_%s.avro", index(isFirst))) {
-			b.avro = true
-		}
-		if strings.HasSuffix(name, fmt.Sprintf(".validity_%s.sig", index(isFirst))) {
-			b.sig = true
-		}
-	}
-
-	var readyBatches []string
-	for k, v := range batches {
-		if v.metadata && v.avro && v.sig {
-			readyBatches = append(readyBatches, k)
-		}
-	}
-	return readyBatches, nil
+// fmtTime returns the input time in the same style expected by facilitator/lib.rs,
+// currently "%Y/%m/%d/%H/%M"
+func fmtTime(t time.Time) string {
+	return t.Format("2006/01/02/15/04")
 }
 
-func launchAggregationJob(ctx context.Context, readyBatches []*batchPath) error {
+// aggregationInterval calculates the interval we want to run an aggregation for, if any.
+// That is whatever interval is `gracePeriod` earlier than now and aligned on multiples
+// of `aggregationPeriod` (relative to the zero time).
+func aggregationInterval(aggregationPeriod, gracePeriod time.Duration) interval {
+	var output interval
+	output.end = time.Now().Add(-gracePeriod).Truncate(aggregationPeriod)
+	output.begin = output.end.Add(-aggregationPeriod)
+	return output
+}
+
+// withinInterval returns the subset of `batchPath`s that are within the given interval.
+func withinInterval(batches []*batchPath, inter interval) []*batchPath {
+	var output []*batchPath
+	for _, bp := range batches {
+		// We use Before twice rather than Before and after, because Before is <,
+		// and After is >, but we are processing a half-open interval so we need
+		// >= and <.
+		if !bp.time.Before(inter.begin) && bp.time.Before(inter.end) {
+			output = append(output, bp)
+		}
+	}
+	return output
+}
+
+func launchAggregationJob(ctx context.Context, readyBatches []*batchPath, inter interval) error {
 	if len(readyBatches) == 0 {
 		log.Printf("no batches to aggregate")
 		return nil
@@ -572,53 +474,30 @@ func launchAggregationJob(ctx context.Context, readyBatches []*batchPath) error 
 	if err != nil {
 		return fmt.Errorf("clientset: %w", err)
 	}
-	aggregationID := ""
-	var earliestBatch *batchPath
-	var latestBatch *batchPath
-	batchIDs := []string{}
-	batchTimes := []string{}
-
-	for _, batchName := range readyBatches {
-		batchPath, err := newBatchPath(batchName)
-		if err != nil {
-			return err
-		}
-		batchIDs = append(batchIDs, batchPath.ID)
-		batchTimes = append(batchTimes, batchPath.dateString())
-
-		// All batches should have the same aggregation ID?
-		if aggregationID != "" && aggregationID != batchPath.aggregationID {
-			return fmt.Errorf("found batch with aggregation ID %s, wanted %s", batchPath.aggregationID, aggregationID)
-		}
-		aggregationID = batchPath.aggregationID
-
-		// Find earliest and latest batch in the aggregation
-		if earliestBatch == nil || batchPath.time.Before(earliestBatch.time) {
-			earliestBatch = &batchPath
-		}
-		if latestBatch == nil || batchPath.time.After(latestBatch.time) {
-			latestBatch = &batchPath
-		}
-	}
+	aggregationID := readyBatches[0].aggregationID
 
 	args := []string{
 		"aggregate",
 		"--aggregation-id", aggregationID,
-		"--aggregation-start", earliestBatch.dateString(),
-		"--aggregation-end", latestBatch.dateString(),
+		"--aggregation-start", fmtTime(inter.begin),
+		"--aggregation-end", fmtTime(inter.end),
 	}
-	for _, batchID := range batchIDs {
+	for _, batchPath := range readyBatches {
 		args = append(args, "--batch-id")
-		args = append(args, batchID)
-	}
-	for _, batchTime := range batchTimes {
+		args = append(args, batchPath.ID)
 		args = append(args, "--batch-time")
-		args = append(args, batchTime)
+		args = append(args, batchPath.dateString())
+
+		// All batches should have the same aggregation ID?
+		if aggregationID != batchPath.aggregationID {
+			return fmt.Errorf("found batch with aggregation ID %s, wanted %s", batchPath.aggregationID, aggregationID)
+		}
+		aggregationID = batchPath.aggregationID
 	}
 
-	jobName := strings.ReplaceAll(fmt.Sprintf("a-%s", earliestBatch.dateString()), "/", "-")
+	jobName := fmt.Sprintf("a-%s", strings.ReplaceAll(fmtTime(inter.begin), "/", "-"))
 
-	log.Printf("starting aggregation job with args %s", args)
+	log.Printf("starting aggregation job %s (interval %s) with args %s", jobName, inter, args)
 
 	job := &batchv1.Job{
 		ObjectMeta: metav1.ObjectMeta{
@@ -684,7 +563,7 @@ func launchAggregationJob(ctx context.Context, readyBatches []*batchPath) error 
 		}
 		return fmt.Errorf("creating job: %w", err)
 	}
-	log.Printf("Created job %q: %#v", jobName, createdJob.ObjectMeta.UID)
+	log.Printf("Created job %q: %s", jobName, createdJob.ObjectMeta.UID)
 
 	return nil
 }
@@ -704,7 +583,7 @@ func launchIntake(ctx context.Context, readyBatches []*batchPath, ageLimit time.
 	log.Printf("starting %d jobs", len(readyBatches))
 	for _, batch := range readyBatches {
 		if err := startIntakeJob(ctx, clientset, batch, ageLimit); err != nil {
-			return fmt.Errorf("starting job for batch %q: %w", batch, err)
+			return fmt.Errorf("starting job for batch %v: %w", *batch, err)
 		}
 	}
 	return nil
@@ -804,7 +683,7 @@ func startIntakeJob(
 		}
 		return fmt.Errorf("creating job: %w", err)
 	}
-	log.Printf("Created job %q: %#v", jobName, createdJob.ObjectMeta.UID)
+	log.Printf("Created job %q: %s", jobName, createdJob.ObjectMeta.UID)
 
 	return nil
 }
