@@ -93,6 +93,10 @@ func newBatchPath(batchName string) (*batchPath, error) {
 	}, nil
 }
 
+func (b *batchPath) String() string {
+	return fmt.Sprintf("{%s %s %s %s metadata:%t avro:%t sig:%t}", b.aggregationID, b.dateComponents, b.ID, b.time, b.metadata, b.avro, b.sig)
+}
+
 func (b *batchPath) path() string {
 	return strings.Join([]string{b.aggregationID, b.dateString(), b.ID}, "/")
 }
@@ -394,8 +398,9 @@ func readyBatches(files []string, infix string) ([]*batchPath, error) {
 	for _, name := range files {
 		basename := basename(name, infix)
 		b := batches[basename]
+		var err error
 		if b == nil {
-			b, err := newBatchPath(basename)
+			b, err = newBatchPath(basename)
 			if err != nil {
 				return nil, err
 			}
@@ -407,7 +412,7 @@ func readyBatches(files []string, infix string) ([]*batchPath, error) {
 		if strings.HasSuffix(name, fmt.Sprintf(".%s.avro", infix)) {
 			b.avro = true
 		}
-		if strings.HasSuffix(name, fmt.Sprintf(".%s.batch.sig", infix)) {
+		if strings.HasSuffix(name, fmt.Sprintf(".%s.sig", infix)) {
 			b.sig = true
 		}
 	}
@@ -583,7 +588,7 @@ func launchIntake(ctx context.Context, readyBatches []*batchPath, ageLimit time.
 	log.Printf("starting %d jobs", len(readyBatches))
 	for _, batch := range readyBatches {
 		if err := startIntakeJob(ctx, clientset, batch, ageLimit); err != nil {
-			return fmt.Errorf("starting job for batch %v: %w", *batch, err)
+			return fmt.Errorf("starting job for batch %s: %w", batch, err)
 		}
 	}
 	return nil
@@ -597,7 +602,7 @@ func startIntakeJob(
 ) error {
 	age := time.Now().Sub(batchPath.time)
 	if age > ageLimit {
-		log.Printf("skipping batch %v because it is too old (%s)", *batchPath, age)
+		log.Printf("skipping batch %s because it is too old (%s)", batchPath, age)
 		return nil
 	}
 
@@ -609,7 +614,7 @@ func startIntakeJob(
 		"--batch-id", batchPath.ID,
 		"--date", batchPath.dateString(),
 	}
-	log.Printf("starting job for batch %v with args %s", *batchPath, args)
+	log.Printf("starting job for batch %s with args %s", batchPath, args)
 	job := &batchv1.Job{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      jobName,
@@ -678,7 +683,7 @@ func startIntakeJob(
 	createdJob, err := clientset.BatchV1().Jobs(*k8sNS).Create(ctx, job, metav1.CreateOptions{})
 	if err != nil {
 		if errors.IsAlreadyExists(err) {
-			log.Printf("skipping %v because a job for it already exists", *batchPath)
+			log.Printf("skipping %s because a job for it already exists", batchPath)
 			return nil
 		}
 		return fmt.Errorf("creating job: %w", err)
