@@ -39,7 +39,11 @@ fn date_validator(s: String) -> Result<(), String> {
 }
 
 fn b64_validator(s: String) -> Result<(), String> {
-    base64::decode(s).map(|_| ()).map_err(|e| e.to_string())
+    if s == "not-a-real-key" {
+        return Err("'not-a-real-key'. Run deploy-tool to generate secrets".to_string());
+    }
+    base64::decode(s).map_err(|e| format!("decoding base64: {}", e))?;
+    Ok(())
 }
 
 fn uuid_validator(s: String) -> Result<(), String> {
