@@ -39,12 +39,21 @@ This will deploy just enough of an environment to permit peers to begin deployin
 
 Once bootstrapped, subsequent deployments should use `ENV=your-new-environment make apply`. Multiple environments may be deployed to the same GCP region.
 
-For example, let's suppose you were setting up two environments, `test-1` and `test-2` and configuring them to exchange shares. Once you've set up their .tfvars to refer to each other (on which topic documentation will soon follow), you might do:
+## Paired test environments
 
-    ENV=test-1 make apply-bootstrap
-    ENV=test-2 make apply-bootstrap
-    ENV=test-1 make apply
-    ENV=test-2 make apply
+We have support for creating two paired test environments which can exchange validation shares, along with a convincing simulation of ingestion servers and a portal server. To do this, you will need to create two `.tfvars` files, and on top of the usual variables, each must contain a variable like:
+
+    test_peer_environment = {
+      env_with_ingestor    = "with-ingestor"
+      env_without_ingestor = "without-ingestor"
+    }
+
+The values must correspond to the names of the environments you are using. Pick one of them to be the environment with ingestors. From there, you should be able to bring up the two environments like so:
+
+    ENV=with-ingestor make apply-bootstrap
+    ENV=without-ingestor make apply-bootstrap
+    ENV=with-ingestor make apply
+    ENV=without-ingestor make apply
 
 ## kubectl configuration
 
