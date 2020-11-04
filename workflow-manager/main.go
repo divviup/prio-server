@@ -58,9 +58,12 @@ type batchPath struct {
 	dateComponents []string
 	ID             string
 	time           time.Time
+	metadata       bool
+	avro           bool
+	sig            bool
 }
 
-func newBatchPath(batchName string) (batchPath, error) {
+func newBatchPath(batchName string) (*batchPath, error) {
 	// batchName is like "kittens-seen/2020/10/31/20/29/b8a5579a-f984-460a-a42d-2813cbf57771"
 	pathComponents := strings.Split(batchName, "/")
 	batchID := pathComponents[len(pathComponents)-1]
@@ -68,26 +71,30 @@ func newBatchPath(batchName string) (batchPath, error) {
 	batchDate := pathComponents[1 : len(pathComponents)-1]
 
 	if len(batchDate) != 5 {
-		return batchPath{}, fmt.Errorf("malformed date in %q. Expected 5 date components, got %d", batchName, len(batchDate))
+		return nil, fmt.Errorf("malformed date in %q. Expected 5 date components, got %d", batchName, len(batchDate))
 	}
 
 	var dateComponents []int
 	for _, c := range batchDate {
 		parsed, err := strconv.ParseInt(c, 10, 64)
 		if err != nil {
-			return batchPath{}, fmt.Errorf("parsing date component %q in %q: %w", c, batchName, err)
+			return nil, fmt.Errorf("parsing date component %q in %q: %w", c, batchName, err)
 		}
 		dateComponents = append(dateComponents, int(parsed))
 	}
 	batchTime := time.Date(dateComponents[0], time.Month(dateComponents[1]),
 		dateComponents[2], dateComponents[3], dateComponents[4], 0, 0, time.UTC)
 
-	return batchPath{
+	return &batchPath{
 		aggregationID:  aggregationID,
 		dateComponents: batchDate,
 		ID:             batchID,
 		time:           batchTime,
 	}, nil
+}
+
+func (b *batchPath) String() string {
+	return fmt.Sprintf("{%s %s %s %s metadata:%t avro:%t sig:%t}", b.aggregationID, b.dateComponents, b.ID, b.time, b.metadata, b.avro, b.sig)
 }
 
 func (b *batchPath) path() string {
@@ -98,31 +105,22 @@ func (b *batchPath) dateString() string {
 	return strings.Join(b.dateComponents, "/")
 }
 
-// ingestionBasename returns the full name of the batch with any of the type
-// suffixes removed. All files that are part of a batch have the same basename.
-func ingestionBasename(s string) string {
-	s = strings.TrimSuffix(s, ".batch")
-	s = strings.TrimSuffix(s, ".batch.avro")
-	s = strings.TrimSuffix(s, ".batch.sig")
+// basename returns s, with any type suffixes stripped off. The type suffixes are determined by
+// `infix`, which is one of "batch", "validity_0", or "validity_1".
+func basename(s string, infix string) string {
+	s = strings.TrimSuffix(s, fmt.Sprintf(".%s", infix))
+	s = strings.TrimSuffix(s, fmt.Sprintf(".%s.avro", infix))
+	s = strings.TrimSuffix(s, fmt.Sprintf(".%s.sig", infix))
 	return s
 }
 
-// validationBasename returns the full name of the batch with any of the type
-// suffixes removed. All files that are part of a batch have the same basename.
-func validationBasename(s string, isFirst bool) string {
-	s = strings.TrimSuffix(s, fmt.Sprintf(".validity_%s", index(isFirst)))
-	s = strings.TrimSuffix(s, fmt.Sprintf(".validity_%s.avro", index(isFirst)))
-	s = strings.TrimSuffix(s, fmt.Sprintf(".validity_%s.sig", index(isFirst)))
-	return s
-}
-
-// index returns the appropriate string to use in construction of filenames
+// index returns the appropriate int to use in construction of filenames
 // based on whether the file creator was the "first" aka PHA server.
-func index(isFirst bool) string {
+func index(isFirst bool) int {
 	if isFirst {
-		return "0"
+		return 0
 	}
-	return "1"
+	return 1
 }
 
 // contains returns true if the string str exists in the slice s
@@ -134,22 +132,6 @@ func contains(s []string, str string) bool {
 	}
 
 	return false
-}
-
-// checkStoragePath checks that the provided value is present and that it is
-// either an S3 or GCS bucket URL, and aborts the program with an error message
-// if not. Otherwise returns a tuple whose first member is the storage service
-// as "s3" or "gs", and whose second is the bucket name (including region, in
-// the S3 case).
-func checkStoragePath(arg string, val string) (string, string) {
-	if val == "" {
-		log.Fatalf("%s is required", arg)
-	}
-	if !strings.HasPrefix(val, "s3://") && !strings.HasPrefix(val, "gs://") {
-		log.Fatalf("invalid %s: %q", arg, val)
-	}
-
-	return val[0:2], val[5:]
 }
 
 var k8sNS = flag.String("k8s-namespace", "", "Kubernetes namespace")
@@ -174,9 +156,18 @@ func main() {
 	log.Printf("starting %s version %s - %s. Args: %s", os.Args[0], BuildID, BuildTime, os.Args[1:])
 	flag.Parse()
 
-	ingestorService, ingestorInputBucket := checkStoragePath("--ingestor-input", *ingestorInput)
-	ownValidationService, ownValidationInputBucket := checkStoragePath("--own-validation-input", *ownValidationInput)
-	peerValidationService, peerValidationInputBucket := checkStoragePath("--peer-validation-input", *peerValidationInput)
+	ownValidationBucket, err := newBucket(*ownValidationInput, *ownValidationIdentity)
+	if err != nil {
+		log.Fatalf("--ingestor-input: %s", err)
+	}
+	peerValidationBucket, err := newBucket(*peerValidationInput, *peerValidationIdentity)
+	if err != nil {
+		log.Fatalf("--ingestor-input: %s", err)
+	}
+	intakeBucket, err := newBucket(*ingestorInput, *ingestorIdentity)
+	if err != nil {
+		log.Fatalf("--ingestor-input: %s", err)
+	}
 
 	if *intakeConfigMap == "" || *aggregateConfigMap == "" {
 		log.Fatal("--intake-batch-config-map and --aggregate-config-map are required")
@@ -200,79 +191,48 @@ func main() {
 		log.Fatalf("--aggregation-time-slice: %s", err)
 	}
 
-	var intakeBatches []string
-	switch ingestorService {
-	case "s3":
-		intakeBatches, err = getIntakeBatchesS3(context.Background(), ingestorInputBucket, *ingestorIdentity)
-		if err != nil {
-			log.Fatal(err)
-		}
-	case "gs":
-		intakeBatches, err = getIntakeBatchesGS(context.Background(), ingestorInputBucket)
-		if err != nil {
-			log.Fatal(err)
-		}
-	default:
-		log.Fatalf("unknown service %s", ingestorService)
+	intakeFiles, err := intakeBucket.listFiles(context.Background())
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	intakeBatches, err := readyBatches(intakeFiles, "batch")
+	if err != nil {
+		log.Fatal(err)
 	}
 
 	if err := launchIntake(context.Background(), intakeBatches, maxAgeParsed); err != nil {
 		log.Fatal(err)
 	}
 
-	log.Printf("found %d ready ingestions", len(intakeBatches))
+	ownValidationFiles, err := ownValidationBucket.listFiles(context.Background())
+	if err != nil {
+		log.Fatal(err)
+	}
 
-	var ownValidationBatches []string
-	switch ownValidationService {
-	case "s3":
-		ownValidationBatches, err = getValidationBatchesS3(context.Background(),
-			ownValidationInputBucket, *isFirst, intakeBatches, *ownValidationIdentity)
-		if err != nil {
-			log.Fatal(err)
-		}
-	case "gs":
-		ownValidationBatches, err = getValidationBatchesGS(context.Background(),
-			ownValidationInputBucket, *isFirst, intakeBatches)
-		if err != nil {
-			log.Fatal(err)
-		}
-	default:
-		log.Fatalf("unknown service %s", ownValidationService)
+	ownValidityInfix := fmt.Sprintf("validity_%d", index(*isFirst))
+	ownValidationBatches, err := readyBatches(ownValidationFiles, ownValidityInfix)
+	if err != nil {
+		log.Fatal(err)
 	}
 
 	log.Printf("found %d own validations", len(ownValidationBatches))
 
-	var peerValidationBatches []string
-	switch peerValidationService {
-	case "s3":
-		// These are the peer's validation, and if we were first, then they were
-		// not, so negate parseIsFirst's result
-		peerValidationBatches, err = getValidationBatchesS3(context.Background(),
-			peerValidationInputBucket, !*isFirst, ownValidationBatches, *peerValidationIdentity)
-		if err != nil {
-			log.Fatal(err)
-		}
-	case "gs":
-		peerValidationBatches, err = getValidationBatchesGS(context.Background(),
-			peerValidationInputBucket, !*isFirst, ownValidationBatches)
-		if err != nil {
-			log.Fatal(err)
-		}
-	default:
-		log.Fatalf("unknown service %s", ownValidationService)
+	peerValidationFiles, err := peerValidationBucket.listFiles(context.Background())
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	peerValidityInfix := fmt.Sprintf("validity_%d", index(!*isFirst))
+	peerValidationBatches, err := readyBatches(peerValidationFiles, peerValidityInfix)
+	if err != nil {
+		log.Fatal(err)
 	}
 
 	log.Printf("found %d peer validations", len(peerValidationBatches))
 
-	var aggregationBatches []batchPath
-	for _, v := range peerValidationBatches {
-		batchPath, err := newBatchPath(v)
-		if err != nil {
-			log.Printf("skipping malformed batch name %q: %s", v, err)
-			continue
-		}
-		aggregationBatches = append(aggregationBatches, batchPath)
-	}
+	// TODO: Check that both peer and own have something.
+	var aggregationBatches = peerValidationBatches
 	interval := aggregationInterval(aggregationPeriodParsed, gracePeriodParsed)
 	log.Printf("looking for batches to aggregate in interval %s", interval)
 	aggregationBatches = withinInterval(aggregationBatches, interval)
@@ -311,8 +271,47 @@ func (tf tokenFetcher) FetchToken(credentials.Context) ([]byte, error) {
 	return bytes, nil
 }
 
-func getIntakeBatchesS3(ctx context.Context, inputBucket string, roleARN string) ([]string, error) {
-	parts := strings.SplitN(inputBucket, "/", 2)
+type bucket struct {
+	service string // "s3" or "gs"
+	// bucketName includes the region for S3
+	bucketName string
+	identity   string
+}
+
+func newBucket(bucketURL, identity string) (*bucket, error) {
+	if bucketURL == "" {
+		log.Fatalf("empty bucket URL")
+	}
+	if !strings.HasPrefix(bucketURL, "s3://") && !strings.HasPrefix(bucketURL, "gs://") {
+		return nil, fmt.Errorf("invalid bucket %q with identity %q", bucketURL, identity)
+	}
+	if strings.HasPrefix(bucketURL, "gs://") && identity != "" {
+		return nil, fmt.Errorf("workflow-manager doesn't support alternate identities (%s) for gs:// bucket (%q)",
+			identity, bucketURL)
+	}
+	return &bucket{
+		service:    bucketURL[0:2],
+		bucketName: bucketURL[5:],
+		identity:   identity,
+	}, nil
+}
+
+func (b *bucket) listFiles(ctx context.Context) ([]string, error) {
+	switch b.service {
+	case "s3":
+		return b.listFilesS3(ctx)
+	case "gs":
+		return b.listFilesGS(ctx)
+	default:
+		return nil, fmt.Errorf("invalid storage service %q", b.service)
+	}
+}
+
+func (b *bucket) listFilesS3(ctx context.Context) ([]string, error) {
+	parts := strings.SplitN(b.bucketName, "/", 2)
+	if len(parts) != 2 {
+		return nil, fmt.Errorf("invalid S3 bucket name %q", b.bucketName)
+	}
 	region := parts[0]
 	bucket := parts[1]
 	sess, err := aws_session.NewSession()
@@ -320,19 +319,22 @@ func getIntakeBatchesS3(ctx context.Context, inputBucket string, roleARN string)
 		return nil, fmt.Errorf("making AWS session: %w", err)
 	}
 
-	arnComponents := strings.Split(roleARN, ":")
+	arnComponents := strings.Split(b.identity, ":")
+	if arnComponents[0] != "arn" {
+		return nil, fmt.Errorf("invalid AWS identity %q. Must start with \"arn:\"", b.identity)
+	}
 	if len(arnComponents) != 6 {
-		return nil, fmt.Errorf("invalid ARN: %q", roleARN)
+		return nil, fmt.Errorf("invalid ARN: %q", b.identity)
 	}
 	audience := fmt.Sprintf("sts.amazonaws.com/%s", arnComponents[4])
 
 	stsSTS := sts.New(sess)
 	roleSessionName := ""
 	roleProvider := stscreds.NewWebIdentityRoleProviderWithToken(
-		stsSTS, roleARN, roleSessionName, tokenFetcher{audience})
+		stsSTS, b.identity, roleSessionName, tokenFetcher{audience})
 
 	credentials := credentials.NewCredentials(roleProvider)
-	log.Printf("looking for ready batches in s3://%s as %s", bucket, roleARN)
+	log.Printf("listing files in s3://%s as %s", bucket, b.identity)
 
 	config := aws.NewConfig().
 		WithRegion(region).
@@ -340,50 +342,29 @@ func getIntakeBatchesS3(ctx context.Context, inputBucket string, roleARN string)
 	svc := s3.New(sess, config)
 	resp, err := svc.ListObjectsV2(&s3.ListObjectsV2Input{Bucket: aws.String(bucket)})
 	if err != nil {
-		return nil, fmt.Errorf("Unable to list items in bucket %q, %w", inputBucket, err)
+		return nil, fmt.Errorf("Unable to list items in bucket %q, %w", b.bucketName, err)
 	}
-	batches := make(map[string]*batch)
+	var output []string
 	for _, item := range resp.Contents {
-		name := *item.Key
-		basename := ingestionBasename(name)
-		if batches[basename] == nil {
-			batches[basename] = new(batch)
-		}
-		b := batches[basename]
-		if strings.HasSuffix(name, ".batch") {
-			b.metadata = true
-		}
-		if strings.HasSuffix(name, ".batch.avro") {
-			b.avro = true
-		}
-		if strings.HasSuffix(name, ".batch.sig") {
-			b.sig = true
-		}
+		output = append(output, *item.Key)
 	}
-
-	var readyBatches []string
-	for k, v := range batches {
-		if v.metadata && v.avro && v.sig {
-			log.Printf("ready: %s", k)
-			readyBatches = append(readyBatches, k)
-		} else {
-			log.Printf("unready: %s", k)
-		}
-	}
-	return readyBatches, nil
+	return output, nil
 }
 
-func getIntakeBatchesGS(ctx context.Context, inputBucket string) ([]string, error) {
+func (b *bucket) listFilesGS(ctx context.Context) ([]string, error) {
+	if b.identity != "" {
+		return nil, fmt.Errorf("workflow-manager doesn't support non-default identity %q for GS bucket %q", b.identity, b.bucketName)
+	}
 	client, err := storage.NewClient(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("storage.newClient: %w", err)
 	}
 
-	batches := make(map[string]*batch)
-	bkt := client.Bucket(inputBucket)
+	bkt := client.Bucket(b.bucketName)
 	query := &storage.Query{Prefix: ""}
 
-	log.Printf("looking for ready batches in gs://%s as (ambient service account)", inputBucket)
+	log.Printf("looking for ready batches in gs://%s as (ambient service account)", b.bucketName)
+	var output []string
 	it := bkt.Objects(ctx, query)
 	for {
 		attrs, err := it.Next()
@@ -391,152 +372,42 @@ func getIntakeBatchesGS(ctx context.Context, inputBucket string) ([]string, erro
 			break
 		}
 		if err != nil {
-			return nil, fmt.Errorf("iterating on inputBucket objects from %q: %w", inputBucket, err)
+			return nil, fmt.Errorf("iterating on inputBucket objects from %q: %w", b.bucketName, err)
 		}
-		name := attrs.Name
-		basename := ingestionBasename(name)
-		if batches[basename] == nil {
-			batches[basename] = new(batch)
-		}
-		b := batches[basename]
-		if strings.HasSuffix(name, ".batch") {
-			b.metadata = true
-		}
-		if strings.HasSuffix(name, ".batch.avro") {
-			b.avro = true
-		}
-		if strings.HasSuffix(name, ".batch.sig") {
-			b.sig = true
-		}
+		output = append(output, attrs.Name)
 	}
-
-	var readyBatches []string
-	for k, v := range batches {
-		if v.metadata && v.avro && v.sig {
-			log.Printf("ready: %s", k)
-			readyBatches = append(readyBatches, k)
-		} else {
-			log.Printf("unready: %s", k)
-		}
-	}
-
-	return readyBatches, nil
+	return output, nil
 }
 
-func getValidationBatchesGS(ctx context.Context, validationsBucket string, isFirst bool, filter []string) ([]string, error) {
-	client, err := storage.NewClient(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("storage.newClient: %w", err)
-	}
-
-	batches := make(map[string]*batch)
-	bkt := client.Bucket(validationsBucket)
-	query := &storage.Query{Prefix: ""}
-	it := bkt.Objects(ctx, query)
-	for {
-		attrs, err := it.Next()
-		if err == iterator.Done {
-			break
-		}
-		if err != nil {
-			return nil, fmt.Errorf("iterating on inputBucket objects from %q: %w", validationsBucket, err)
-		}
-		name := attrs.Name
-		basename := validationBasename(name, isFirst)
-		if !contains(filter, basename) {
-			log.Printf("ignoring batch %s", basename)
-			continue
-		}
-		if batches[basename] == nil {
-			batches[basename] = new(batch)
-		}
+func readyBatches(files []string, infix string) ([]*batchPath, error) {
+	batches := make(map[string]*batchPath)
+	for _, name := range files {
+		basename := basename(name, infix)
 		b := batches[basename]
-		if strings.HasSuffix(name, fmt.Sprintf(".validity_%s", index(isFirst))) {
+		var err error
+		if b == nil {
+			b, err = newBatchPath(basename)
+			if err != nil {
+				return nil, err
+			}
+			batches[basename] = b
+		}
+		if strings.HasSuffix(name, fmt.Sprintf(".%s", infix)) {
 			b.metadata = true
 		}
-		if strings.HasSuffix(name, fmt.Sprintf(".validity_%s.avro", index(isFirst))) {
+		if strings.HasSuffix(name, fmt.Sprintf(".%s.avro", infix)) {
 			b.avro = true
 		}
-		if strings.HasSuffix(name, fmt.Sprintf(".validity_%s.sig", index(isFirst))) {
+		if strings.HasSuffix(name, fmt.Sprintf(".%s.sig", infix)) {
 			b.sig = true
 		}
 	}
 
-	var readyBatches []string
-	for k, v := range batches {
-		if v.metadata && v.avro && v.sig {
-			log.Printf("ready: %s", k)
-			readyBatches = append(readyBatches, k)
-		} else {
-			log.Printf("unready: %s", k)
-		}
+	var output []*batchPath
+	for _, v := range batches {
+		output = append(output, v)
 	}
-
-	return readyBatches, nil
-}
-
-func getValidationBatchesS3(ctx context.Context, validationsBucket string, isFirst bool, filter []string, roleARN string) ([]string, error) {
-	parts := strings.SplitN(validationsBucket, "/", 2)
-	region := parts[0]
-	bucket := parts[1]
-	sess, err := aws_session.NewSession()
-	if err != nil {
-		return nil, fmt.Errorf("making AWS session: %w", err)
-	}
-
-	arnComponents := strings.Split(roleARN, ":")
-	if len(arnComponents) != 6 {
-		return nil, fmt.Errorf("invalid ARN: %q", roleARN)
-	}
-	audience := fmt.Sprintf("sts.amazonaws.com/%s", arnComponents[4])
-	stsSTS := sts.New(sess)
-	roleSessionName := ""
-	roleProvider := stscreds.NewWebIdentityRoleProviderWithToken(
-		stsSTS, roleARN, roleSessionName, tokenFetcher{audience})
-
-	credentials := credentials.NewCredentials(roleProvider)
-
-	config := aws.NewConfig().
-		WithRegion(region).
-		WithCredentials(credentials)
-	svc := s3.New(sess, config)
-	resp, err := svc.ListObjectsV2(&s3.ListObjectsV2Input{Bucket: aws.String(bucket)})
-	if err != nil {
-		return nil, fmt.Errorf("Unable to list items in bucket %q, %w", validationsBucket, err)
-	}
-	batches := make(map[string]*batch)
-	for _, item := range resp.Contents {
-		name := *item.Key
-		basename := validationBasename(name, isFirst)
-		if !contains(filter, basename) {
-			log.Printf("ignoring batch %s", basename)
-			continue
-		}
-		if batches[basename] == nil {
-			batches[basename] = new(batch)
-		}
-		b := batches[basename]
-		if strings.HasSuffix(name, fmt.Sprintf(".validity_%s", index(isFirst))) {
-			b.metadata = true
-		}
-		if strings.HasSuffix(name, fmt.Sprintf(".validity_%s.avro", index(isFirst))) {
-			b.avro = true
-		}
-		if strings.HasSuffix(name, fmt.Sprintf(".validity_%s.sig", index(isFirst))) {
-			b.sig = true
-		}
-	}
-
-	var readyBatches []string
-	for k, v := range batches {
-		if v.metadata && v.avro && v.sig {
-			log.Printf("ready: %s", k)
-			readyBatches = append(readyBatches, k)
-		} else {
-			log.Printf("unready: %s", k)
-		}
-	}
-	return readyBatches, nil
+	return output, nil
 }
 
 // interval represents a half-open interval of time.
@@ -567,8 +438,8 @@ func aggregationInterval(aggregationPeriod, gracePeriod time.Duration) interval 
 }
 
 // withinInterval returns the subset of `batchPath`s that are within the given interval.
-func withinInterval(batches []batchPath, inter interval) []batchPath {
-	var output []batchPath
+func withinInterval(batches []*batchPath, inter interval) []*batchPath {
+	var output []*batchPath
 	for _, bp := range batches {
 		// We use Before twice rather than Before and after, because Before is <,
 		// and After is >, but we are processing a half-open interval so we need
@@ -580,7 +451,7 @@ func withinInterval(batches []batchPath, inter interval) []batchPath {
 	return output
 }
 
-func launchAggregationJob(ctx context.Context, readyBatches []batchPath, inter interval) error {
+func launchAggregationJob(ctx context.Context, readyBatches []*batchPath, inter interval) error {
 	if len(readyBatches) == 0 {
 		log.Printf("no batches to aggregate")
 		return nil
@@ -688,7 +559,7 @@ func launchAggregationJob(ctx context.Context, readyBatches []batchPath, inter i
 	return nil
 }
 
-func launchIntake(ctx context.Context, readyBatches []string, ageLimit time.Duration) error {
+func launchIntake(ctx context.Context, readyBatches []*batchPath, ageLimit time.Duration) error {
 	// This uses the credentials that an instance running in the k8s cluster
 	// gets automatically, via automount_service_account_token in the Terraform config.
 	config, err := rest.InClusterConfig()
@@ -701,9 +572,9 @@ func launchIntake(ctx context.Context, readyBatches []string, ageLimit time.Dura
 	}
 
 	log.Printf("starting %d jobs", len(readyBatches))
-	for _, batchName := range readyBatches {
-		if err := startIntakeJob(ctx, clientset, batchName, ageLimit); err != nil {
-			return fmt.Errorf("starting job for batch %q: %w", batchName, err)
+	for _, batch := range readyBatches {
+		if err := startIntakeJob(ctx, clientset, batch, ageLimit); err != nil {
+			return fmt.Errorf("starting job for batch %s: %w", batch, err)
 		}
 	}
 	return nil
@@ -712,17 +583,12 @@ func launchIntake(ctx context.Context, readyBatches []string, ageLimit time.Dura
 func startIntakeJob(
 	ctx context.Context,
 	clientset *kubernetes.Clientset,
-	batchName string,
+	batchPath *batchPath,
 	ageLimit time.Duration,
 ) error {
-	batchPath, err := newBatchPath(batchName)
-	if err != nil {
-		return err
-	}
-
 	age := time.Now().Sub(batchPath.time)
 	if age > ageLimit {
-		log.Printf("skipping batch %q because it is too old (%s)", batchName, age)
+		log.Printf("skipping batch %s because it is too old (%s)", batchPath, age)
 		return nil
 	}
 
@@ -734,7 +600,7 @@ func startIntakeJob(
 		"--batch-id", batchPath.ID,
 		"--date", batchPath.dateString(),
 	}
-	log.Printf("starting job for batch %q with args %s", batchName, args)
+	log.Printf("starting job for batch %s with args %s", batchPath, args)
 	job := &batchv1.Job{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      jobName,
@@ -803,7 +669,7 @@ func startIntakeJob(
 	createdJob, err := clientset.BatchV1().Jobs(*k8sNS).Create(ctx, job, metav1.CreateOptions{})
 	if err != nil {
 		if errors.IsAlreadyExists(err) {
-			log.Printf("skipping %q because a job for it already exists", batchName)
+			log.Printf("skipping %s because a job for it already exists", batchPath)
 			return nil
 		}
 		return fmt.Errorf("creating job: %w", err)
