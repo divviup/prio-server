@@ -24,7 +24,7 @@ variable "machine_type" {
   default = "e2.small"
 }
 
-variable "peer_share_processor_names" {
+variable "localities" {
   type = list(string)
 }
 
@@ -145,14 +145,14 @@ data "http" "peer_share_processor_global_manifest" {
   url = "https://${var.peer_share_processor_manifest_base_url}/global-manifest.json"
 }
 
-# While we create a distinct data share processor for each (ingestor, peer data
-# share processor) pair, we only create one packet decryption key for each peer
-# data share processor, and use it for all ingestors. Since the secret must be
-# in a namespace and accessible from both data share processors, that means both
-# data share processors must be in a single Kubernetes namespace, which we
-# create here and pass into the data share processor module.
+# While we create a distinct data share processor for each (ingestor, locality)
+# pair, we only create one packet decryption key for each locality, and use it
+# for all ingestors. Since the secret must be in a namespace and accessible
+# from all of our data share processors, that means all data share processors
+# associated with a given ingestor must be in a single Kubernetes namespace,
+# which we create here and pass into the data share processor module.
 resource "kubernetes_namespace" "namespaces" {
-  for_each = toset(var.peer_share_processor_names)
+  for_each = toset(var.localities)
   metadata {
     name = each.key
     annotations = {
@@ -162,7 +162,7 @@ resource "kubernetes_namespace" "namespaces" {
 }
 
 resource "kubernetes_secret" "ingestion_packet_decryption_keys" {
-  for_each = toset(var.peer_share_processor_names)
+  for_each = toset(var.localities)
   metadata {
     name      = "${var.environment}-${each.key}-ingestion-packet-decryption-key"
     namespace = kubernetes_namespace.namespaces[each.key].metadata[0].name
@@ -181,12 +181,13 @@ resource "kubernetes_secret" "ingestion_packet_decryption_keys" {
   }
 }
 
-# Now, we take the set product of peer share processor names x ingestor names to
+# Now, we take the set product of localities x ingestor names to
 # get the config values for all the data share processors we need to create.
 locals {
-  peer_ingestor_pairs = {
-    for pair in setproduct(toset(var.peer_share_processor_names), keys(var.ingestors)) :
+  locality_ingestor_pairs = {
+    for pair in setproduct(toset(var.localities), keys(var.ingestors)) :
     "${pair[0]}-${pair[1]}" => {
+      ingestor                                = pair[1]
       kubernetes_namespace                    = kubernetes_namespace.namespaces[pair[0]].metadata[0].name
       packet_decryption_key_kubernetes_secret = kubernetes_secret.ingestion_packet_decryption_keys[pair[0]].metadata[0].name
       ingestor_aws_role_arn                   = lookup(jsondecode(data.http.ingestor_global_manifests[pair[1]].body).server-identity, "aws-iam-entity", "")
@@ -197,10 +198,11 @@ locals {
 }
 
 module "data_share_processors" {
-  for_each                                = local.peer_ingestor_pairs
+  for_each                                = local.locality_ingestor_pairs
   source                                  = "./modules/data_share_processor"
   environment                             = var.environment
   data_share_processor_name               = each.key
+  ingestor                                = each.value.ingestor
   gcp_region                              = var.gcp_region
   gcp_project                             = var.gcp_project
   kubernetes_namespace                    = each.value.kubernetes_namespace

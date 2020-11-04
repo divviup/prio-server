@@ -27,7 +27,7 @@ If you're having problems, check `gcloud config list` and `kubectl config curren
 
 ## New clusters
 
-To add a data share processor to support a new PHA in an existing region, add their PHA name to the `peer_share_processor_names` variable in the relevant `variables/<environment>.tfvars` file.
+To add a data share processor to support a new locality, add that locality's name to the `localities` variable in the relevant `variables/<environment>.tfvars` file.
 
 To bring up a whole new cluster, drop a `your-new-environment.tfvars` file in `variables`, fill in the required variables and then bootstrap it with:
 

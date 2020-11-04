@@ -1,3 +1,7 @@
+variable "ingestor" {
+  type = string
+}
+
 variable "data_share_processor_name" {
   type = string
 }
@@ -347,6 +351,7 @@ resource "google_storage_bucket_iam_binding" "own_validation_bucket_admin" {
 module "kubernetes" {
   source                                  = "../../modules/kubernetes/"
   data_share_processor_name               = var.data_share_processor_name
+  ingestor                                = var.ingestor
   gcp_project                             = var.gcp_project
   environment                             = var.environment
   kubernetes_namespace                    = var.kubernetes_namespace

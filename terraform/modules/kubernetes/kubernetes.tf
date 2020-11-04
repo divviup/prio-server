@@ -1,3 +1,7 @@
+variable "ingestor" {
+  type = string
+}
+
 variable "data_share_processor_name" {
   type = string
 }
@@ -250,7 +254,7 @@ resource "kubernetes_config_map" "aggregate_job_config_map" {
 
 resource "kubernetes_cron_job" "workflow_manager" {
   metadata {
-    name      = "${var.environment}-${var.data_share_processor_name}-workflow-manager"
+    name      = "workflow-manager-${var.ingestor}-${var.environment}"
     namespace = var.kubernetes_namespace
 
     annotations = {
@@ -311,7 +315,7 @@ resource "kubernetes_cron_job" "sample_maker" {
   # buckets.
   count = var.is_env_with_ingestor ? 1 : 0
   metadata {
-    name      = "${var.environment}-${var.data_share_processor_name}-sample-maker"
+    name      = "sample-maker-${var.ingestor}-${var.environment}"
     namespace = var.kubernetes_namespace
 
     annotations = {
