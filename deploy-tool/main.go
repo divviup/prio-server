@@ -278,8 +278,10 @@ func main() {
 		destination := fmt.Sprintf("gs://%s/%s-manifest.json",
 			terraformOutput.ManifestBucket.Value, dataShareProcessorName)
 		log.Printf("uploading specific manifest %s", destination)
-		gsutil := exec.Command("gsutil", "-h",
-			"Content-Type:application/json", "cp", "-", destination)
+		gsutil := exec.Command("gsutil",
+			"-h", "Content-Type:application/json",
+			"-h", "Cache-Control:no-cache",
+			"cp", "-", destination)
 		stdin, err := gsutil.StdinPipe()
 		if err != nil {
 			log.Fatalf("could not get pipe to gsutil stdin: %v", err)
