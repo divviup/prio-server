@@ -105,6 +105,8 @@ func (b *batchPath) dateString() string {
 	return strings.Join(b.dateComponents, "/")
 }
 
+// basename returns s, with any type suffixes stripped off. The type suffixes are determined by
+// `infix`, which is one of "batch", "validity_0", or "validity_1".
 func basename(s string, infix string) string {
 	s = strings.TrimSuffix(s, fmt.Sprintf(".%s", infix))
 	s = strings.TrimSuffix(s, fmt.Sprintf(".%s.avro", infix))
@@ -130,22 +132,6 @@ func contains(s []string, str string) bool {
 	}
 
 	return false
-}
-
-// checkStoragePath checks that the provided value is present and that it is
-// either an S3 or GCS bucket URL, and aborts the program with an error message
-// if not. Otherwise returns a tuple whose first member is the storage service
-// as "s3" or "gs", and whose second is the bucket name (including region, in
-// the S3 case).
-func checkStoragePath(arg string, val string) (string, string) {
-	if val == "" {
-		log.Fatalf("%s is required", arg)
-	}
-	if !strings.HasPrefix(val, "s3://") && !strings.HasPrefix(val, "gs://") {
-		log.Fatalf("invalid %s: %q", arg, val)
-	}
-
-	return val[0:2], val[5:]
 }
 
 var k8sNS = flag.String("k8s-namespace", "", "Kubernetes namespace")
