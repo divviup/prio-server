@@ -220,6 +220,7 @@ resource "kubernetes_config_map" "intake_batch_job_config_map" {
     PEER_MANIFEST_BASE_URL               = "https://${var.peer_manifest_base_url}"
     OWN_OUTPUT                           = "gs://${var.own_validation_bucket}"
     RUST_LOG                             = "info"
+    RUST_BACKTRACE                       = "1"
   }
 }
 
@@ -249,6 +250,7 @@ resource "kubernetes_config_map" "aggregate_job_config_map" {
     PORTAL_IDENTITY                      = var.sum_part_bucket_service_account_email
     PORTAL_MANIFEST_BASE_URL             = "https://${var.portal_server_manifest_base_url}"
     RUST_LOG                             = "info"
+    RUST_BACKTRACE                       = "1"
   }
 }
 
@@ -362,6 +364,14 @@ resource "kubernetes_cron_job" "sample_maker" {
                 "--dimension", "123",
                 "--epsilon", "0.23",
               ]
+              env {
+                name  = "RUST_LOG"
+                value = "1"
+              }
+              env {
+                name  = "RUST_BACKTRACE"
+                value = "1"
+              }
               env {
                 name  = "AWS_ACCOUNT_ID"
                 value = data.aws_caller_identity.current.account_id
