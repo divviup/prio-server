@@ -12,7 +12,7 @@ variable "environment" {
 
 variable "container_registry" {
   type    = string
-  default = "letsencrypt"
+  default = "us.gcr.io/jsha-prio-bringup/letsencrypt"
 }
 
 variable "workflow_manager_image" {
@@ -366,7 +366,7 @@ resource "kubernetes_cron_job" "sample_maker" {
               ]
               env {
                 name  = "RUST_LOG"
-                value = "1"
+                value = "info"
               }
               env {
                 name  = "RUST_BACKTRACE"
