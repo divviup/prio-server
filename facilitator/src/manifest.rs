@@ -87,7 +87,10 @@ fn public_key_from_pem(pem_key: &str) -> Result<UnparsedPublicKey<Vec<u8>>> {
     // blob inside the PEM has the expected prefix for this kind of key in
     // this kind of encoding, as suggested in this GitHub issue on ring:
     // https://github.com/briansmith/ring/issues/881
-    let pem = pem::parse(&pem_key).context("failed to parse key as PEM")?;
+    if pem_key == "" {
+        return Err(anyhow!("empty PEM input"));
+    }
+    let pem = pem::parse(&pem_key).context(format!("failed to parse key as PEM: {}", pem_key))?;
     if pem.tag != "PUBLIC KEY" {
         return Err(anyhow!(
             "key for identifier {} is not a PEM encoded public key"
