@@ -547,260 +547,256 @@ fn main() -> Result<(), anyhow::Error> {
         // The configuration of the Args above should guarantee that the
         // various parameters are present and valid, so it is safe to use
         // unwrap() here.
-        ("generate-ingestion-sample", Some(sub_matches)) => {
-            let peer_output_path =
-                StoragePath::from_str(sub_matches.value_of("peer-output").unwrap())?;
-            let peer_identity = sub_matches.value_of("peer-identity");
-            let mut peer_transport = transport_for_path(peer_output_path, peer_identity)?;
-
-            let own_output_path =
-                StoragePath::from_str(sub_matches.value_of("own-output").unwrap())?;
-            let own_identity = sub_matches.value_of("own-identity");
-            let mut own_transport = transport_for_path(own_output_path, own_identity)?;
-            let ingestor_batch_signing_key = batch_signing_key_from_arg(sub_matches)?;
-
-            generate_ingestion_sample(
-                &mut *peer_transport,
-                &mut *own_transport,
-                &sub_matches
-                    .value_of("batch-id")
-                    .map_or_else(Uuid::new_v4, |v| Uuid::parse_str(v).unwrap()),
-                &sub_matches.value_of("aggregation-id").unwrap(),
-                &sub_matches.value_of("date").map_or_else(
-                    || Utc::now().naive_utc(),
-                    |v| NaiveDateTime::parse_from_str(&v, DATE_FORMAT).unwrap(),
-                ),
-                &PrivateKey::from_base64(sub_matches.value_of("pha-ecies-private-key").unwrap())
-                    .unwrap(),
-                &PrivateKey::from_base64(
-                    sub_matches
-                        .value_of("facilitator-ecies-private-key")
-                        .unwrap(),
-                )
-                .unwrap(),
-                &ingestor_batch_signing_key,
-                sub_matches
-                    .value_of("dimension")
-                    .unwrap()
-                    .parse::<i32>()
-                    .unwrap(),
-                sub_matches
-                    .value_of("packet-count")
-                    .unwrap()
-                    .parse::<usize>()
-                    .unwrap(),
-                sub_matches
-                    .value_of("epsilon")
-                    .unwrap()
-                    .parse::<f64>()
-                    .unwrap(),
-                sub_matches
-                    .value_of("batch-start-time")
-                    .unwrap()
-                    .parse::<i64>()
-                    .unwrap(),
-                sub_matches
-                    .value_of("batch-end-time")
-                    .unwrap()
-                    .parse::<i64>()
-                    .unwrap(),
-            )?;
-            Ok(())
-        }
-        ("intake-batch", Some(sub_matches)) => {
-            let mut intake_transport = intake_transport_from_args(sub_matches)?;
-
-            // We need the bucket to which we will write validations for the
-            // peer data share processor, which can either be fetched from the
-            // peer manifest or provided directly via command line argument. We
-            // check the manifest argument first because peer-output will always
-            // have at least the default value ".".
-            let peer_validation_bucket =
-                if let Some(base_url) = sub_matches.value_of("peer-manifest-base-url") {
-                    SpecificManifest::from_https(
-                        base_url,
-                        sub_matches.value_of("instance-name").unwrap(),
-                    )?
-                    .validation_bucket()
-                } else if let Some(path) = sub_matches.value_of("peer-output") {
-                    StoragePath::from_str(path)
-                } else {
-                    Err(anyhow!("peer-output or peer-manifest-base-url required."))
-                }?;
-
-            let peer_identity = sub_matches.value_of("peer-identity");
-            let mut peer_validation_transport = SignableTransport {
-                transport: transport_for_path(peer_validation_bucket, peer_identity)?,
-                batch_signing_key: batch_signing_key_from_arg(sub_matches)?,
-            };
-
-            // We created the bucket to which we write copies of our validation
-            // shares, so it is simply provided by argument.
-            let own_validation_bucket =
-                StoragePath::from_str(sub_matches.value_of("own-output").unwrap())?;
-            let own_identity = sub_matches.value_of("own-identity");
-            let mut own_validation_transport = SignableTransport {
-                transport: transport_for_path(own_validation_bucket, own_identity)?,
-                batch_signing_key: batch_signing_key_from_arg(sub_matches)?,
-            };
-
-            let mut batch_intaker = BatchIntaker::new(
-                &sub_matches.value_of("aggregation-id").unwrap(),
-                &Uuid::parse_str(sub_matches.value_of("batch-id").unwrap()).unwrap(),
-                &NaiveDateTime::parse_from_str(&sub_matches.value_of("date").unwrap(), DATE_FORMAT)
-                    .unwrap(),
-                &mut intake_transport,
-                &mut peer_validation_transport,
-                &mut own_validation_transport,
-                is_first_from_arg(sub_matches),
-            )?;
-            batch_intaker.generate_validation_share()?;
-            Ok(())
-        }
-        ("aggregate", Some(sub_matches)) => {
-            let instance_name = sub_matches.value_of("instance-name").unwrap();
-            let is_first = is_first_from_arg(sub_matches);
-
-            let mut intake_transport = intake_transport_from_args(sub_matches)?;
-
-            // We created the bucket to which we wrote copies of our validation
-            // shares, so it is simply provided by argument.
-            let own_validation_bucket =
-                StoragePath::from_str(sub_matches.value_of("own-input").unwrap())?;
-            let own_identity = sub_matches.value_of("own-identity");
-            let own_validation_transport = transport_for_path(own_validation_bucket, own_identity)?;
-
-            // To read our own validation shares, we require our own public keys
-            // which we discover in our own specific manifest.
-            let own_public_key_map = match (
-                sub_matches.value_of("batch-signing-private-key"),
-                sub_matches.value_of("batch-signing-private-key-identifier"),
-                sub_matches.value_of("own-manifest-base-url"),
-            ) {
-                (Some(private_key), Some(private_key_identifier), _) => {
-                    public_key_map_from_arg(private_key, private_key_identifier)
-                }
-                (_, _, Some(manifest_base_url)) => {
-                    SpecificManifest::from_https(manifest_base_url, instance_name)?
-                        .batch_signing_public_keys()?
-                }
-                _ => {
-                    return Err(anyhow!(
-                        "batch-signing-private-key and \
-                        batch-signing-private-key-identifier are required if \
-                        own-manifest-base-url is not provided."
-                    ))
-                }
-            };
-
-            // We created the bucket that peers wrote validations into, and so
-            // it is simply provided via argument.
-            let peer_validation_bucket =
-                StoragePath::from_str(sub_matches.value_of("peer-input").unwrap())?;
-            let peer_identity = sub_matches.value_of("peer-identity");
-
-            let peer_validation_transport =
-                transport_for_path(peer_validation_bucket, peer_identity)?;
-
-            // We need the public keys the peer data share processor used to
-            // sign messages, which we can obtain by argument or by discovering
-            // their specific manifest. peer-public-key and
-            // peer-public-key-identifier have default values, so we must check
-            // peer-manifest-base-url first.
-            let peer_share_processor_pub_key_map = match (
-                sub_matches.value_of("peer-public-key"),
-                sub_matches.value_of("peer-public-key-identifier"),
-                sub_matches.value_of("peer-manifest-base-url"),
-            ) {
-                (_, _, Some(manifest_base_url)) => {
-                    SpecificManifest::from_https(manifest_base_url, instance_name)?
-                        .batch_signing_public_keys()?
-                }
-                (Some(public_key), Some(public_key_identifier), _) => {
-                    public_key_map_from_arg(public_key, public_key_identifier)
-                }
-                _ => {
-                    return Err(anyhow!(
-                        "peer-public-key and peer-public-key-identifier are \
-                        required if peer-manifest-base-url is not provided."
-                    ))
-                }
-            };
-
-            // We need the portal server owned bucket to which to write sum part
-            // messages aka aggregations. We can discover it from the portal
-            // server global manifest, or we can get that from an argument. We
-            // check for the manifest first since portal-output will always have
-            // the default value ".".
-            let portal_bucket = match (
-                sub_matches.value_of("portal-manifest-base-url"),
-                sub_matches.value_of("portal-output"),
-            ) {
-                (Some(manifest_base_url), _) => {
-                    PortalServerGlobalManifest::from_https(manifest_base_url)?
-                        .sum_part_bucket(is_first)
-                }
-                (_, Some(path)) => StoragePath::from_str(path),
-                _ => Err(anyhow!(
-                    "portal-output or portal-manifest-base-url required"
-                )),
-            }?;
-            let portal_identity = sub_matches.value_of("portal-identity");
-            let aggregation_transport = transport_for_path(portal_bucket, portal_identity)?;
-
-            // Get the key we will use to sign sum part messages sent to the
-            // portal server.
-            let batch_signing_key = batch_signing_key_from_arg(sub_matches)?;
-
-            let batch_ids: Vec<Uuid> = sub_matches
-                .values_of("batch-id")
-                .context("no batch-id")?
-                .map(|v| Uuid::parse_str(v).unwrap())
-                .collect();
-            let batch_dates: Vec<NaiveDateTime> = sub_matches
-                .values_of("batch-time")
-                .context("no batch-time")?
-                .map(|s| NaiveDateTime::parse_from_str(&s, DATE_FORMAT).unwrap())
-                .collect();
-            if batch_ids.len() != batch_dates.len() {
-                return Err(anyhow!(
-                    "must provide same number of batch-id and batch-date values"
-                ));
-            }
-
-            let batch_info: Vec<_> = batch_ids.into_iter().zip(batch_dates).collect();
-            BatchAggregator::new(
-                &sub_matches.value_of("aggregation-id").unwrap(),
-                &NaiveDateTime::parse_from_str(
-                    &sub_matches.value_of("aggregation-start").unwrap(),
-                    DATE_FORMAT,
-                )
-                .unwrap(),
-                &NaiveDateTime::parse_from_str(
-                    &sub_matches.value_of("aggregation-end").unwrap(),
-                    DATE_FORMAT,
-                )
-                .unwrap(),
-                is_first,
-                &mut intake_transport,
-                &mut VerifiableTransport {
-                    transport: own_validation_transport,
-                    batch_signing_public_keys: own_public_key_map,
-                },
-                &mut VerifiableTransport {
-                    transport: peer_validation_transport,
-                    batch_signing_public_keys: peer_share_processor_pub_key_map,
-                },
-                &mut SignableTransport {
-                    transport: aggregation_transport,
-                    batch_signing_key,
-                },
-            )?
-            .generate_sum_part(&batch_info)?;
-            Ok(())
-        }
+        ("generate-ingestion-sample", Some(sub_matches)) => generate_sample(sub_matches),
+        ("intake-batch", Some(sub_matches)) => intake_batch(sub_matches),
+        ("aggregate", Some(sub_matches)) => aggregate(sub_matches),
         (_, _) => Ok(()),
     }
+}
+
+fn generate_sample(sub_matches: &ArgMatches) -> Result<(), anyhow::Error> {
+    let peer_output_path = StoragePath::from_str(sub_matches.value_of("peer-output").unwrap())?;
+    let peer_identity = sub_matches.value_of("peer-identity");
+    let mut peer_transport = transport_for_path(peer_output_path, peer_identity)?;
+
+    let own_output_path = StoragePath::from_str(sub_matches.value_of("own-output").unwrap())?;
+    let own_identity = sub_matches.value_of("own-identity");
+    let mut own_transport = transport_for_path(own_output_path, own_identity)?;
+    let ingestor_batch_signing_key = batch_signing_key_from_arg(sub_matches)?;
+
+    generate_ingestion_sample(
+        &mut *peer_transport,
+        &mut *own_transport,
+        &sub_matches
+            .value_of("batch-id")
+            .map_or_else(Uuid::new_v4, |v| Uuid::parse_str(v).unwrap()),
+        &sub_matches.value_of("aggregation-id").unwrap(),
+        &sub_matches.value_of("date").map_or_else(
+            || Utc::now().naive_utc(),
+            |v| NaiveDateTime::parse_from_str(&v, DATE_FORMAT).unwrap(),
+        ),
+        &PrivateKey::from_base64(sub_matches.value_of("pha-ecies-private-key").unwrap()).unwrap(),
+        &PrivateKey::from_base64(
+            sub_matches
+                .value_of("facilitator-ecies-private-key")
+                .unwrap(),
+        )
+        .unwrap(),
+        &ingestor_batch_signing_key,
+        sub_matches
+            .value_of("dimension")
+            .unwrap()
+            .parse::<i32>()
+            .unwrap(),
+        sub_matches
+            .value_of("packet-count")
+            .unwrap()
+            .parse::<usize>()
+            .unwrap(),
+        sub_matches
+            .value_of("epsilon")
+            .unwrap()
+            .parse::<f64>()
+            .unwrap(),
+        sub_matches
+            .value_of("batch-start-time")
+            .unwrap()
+            .parse::<i64>()
+            .unwrap(),
+        sub_matches
+            .value_of("batch-end-time")
+            .unwrap()
+            .parse::<i64>()
+            .unwrap(),
+    )?;
+    Ok(())
+}
+
+fn intake_batch(sub_matches: &ArgMatches) -> Result<(), anyhow::Error> {
+    let mut intake_transport = intake_transport_from_args(sub_matches)?;
+
+    // We need the bucket to which we will write validations for the
+    // peer data share processor, which can either be fetched from the
+    // peer manifest or provided directly via command line argument. We
+    // check the manifest argument first because peer-output will always
+    // have at least the default value ".".
+    let peer_validation_bucket =
+        if let Some(base_url) = sub_matches.value_of("peer-manifest-base-url") {
+            SpecificManifest::from_https(base_url, sub_matches.value_of("instance-name").unwrap())?
+                .validation_bucket()
+        } else if let Some(path) = sub_matches.value_of("peer-output") {
+            StoragePath::from_str(path)
+        } else {
+            Err(anyhow!("peer-output or peer-manifest-base-url required."))
+        }?;
+
+    let peer_identity = sub_matches.value_of("peer-identity");
+    let mut peer_validation_transport = SignableTransport {
+        transport: transport_for_path(peer_validation_bucket, peer_identity)?,
+        batch_signing_key: batch_signing_key_from_arg(sub_matches)?,
+    };
+
+    // We created the bucket to which we write copies of our validation
+    // shares, so it is simply provided by argument.
+    let own_validation_bucket = StoragePath::from_str(sub_matches.value_of("own-output").unwrap())?;
+    let own_identity = sub_matches.value_of("own-identity");
+    let mut own_validation_transport = SignableTransport {
+        transport: transport_for_path(own_validation_bucket, own_identity)?,
+        batch_signing_key: batch_signing_key_from_arg(sub_matches)?,
+    };
+
+    let mut batch_intaker = BatchIntaker::new(
+        &sub_matches.value_of("aggregation-id").unwrap(),
+        &Uuid::parse_str(sub_matches.value_of("batch-id").unwrap()).unwrap(),
+        &NaiveDateTime::parse_from_str(&sub_matches.value_of("date").unwrap(), DATE_FORMAT)
+            .unwrap(),
+        &mut intake_transport,
+        &mut peer_validation_transport,
+        &mut own_validation_transport,
+        is_first_from_arg(sub_matches),
+    )?;
+    batch_intaker.generate_validation_share()?;
+    Ok(())
+}
+
+fn aggregate(sub_matches: &ArgMatches) -> Result<(), anyhow::Error> {
+    let instance_name = sub_matches.value_of("instance-name").unwrap();
+    let is_first = is_first_from_arg(sub_matches);
+
+    let mut intake_transport = intake_transport_from_args(sub_matches)?;
+
+    // We created the bucket to which we wrote copies of our validation
+    // shares, so it is simply provided by argument.
+    let own_validation_bucket = StoragePath::from_str(sub_matches.value_of("own-input").unwrap())?;
+    let own_identity = sub_matches.value_of("own-identity");
+    let own_validation_transport = transport_for_path(own_validation_bucket, own_identity)?;
+
+    // To read our own validation shares, we require our own public keys
+    // which we discover in our own specific manifest.
+    let own_public_key_map = match (
+        sub_matches.value_of("batch-signing-private-key"),
+        sub_matches.value_of("batch-signing-private-key-identifier"),
+        sub_matches.value_of("own-manifest-base-url"),
+    ) {
+        (Some(private_key), Some(private_key_identifier), _) => {
+            public_key_map_from_arg(private_key, private_key_identifier)
+        }
+        (_, _, Some(manifest_base_url)) => {
+            SpecificManifest::from_https(manifest_base_url, instance_name)?
+                .batch_signing_public_keys()?
+        }
+        _ => {
+            return Err(anyhow!(
+                "batch-signing-private-key and \
+                        batch-signing-private-key-identifier are required if \
+                        own-manifest-base-url is not provided."
+            ))
+        }
+    };
+
+    // We created the bucket that peers wrote validations into, and so
+    // it is simply provided via argument.
+    let peer_validation_bucket =
+        StoragePath::from_str(sub_matches.value_of("peer-input").unwrap())?;
+    let peer_identity = sub_matches.value_of("peer-identity");
+
+    let peer_validation_transport = transport_for_path(peer_validation_bucket, peer_identity)?;
+
+    // We need the public keys the peer data share processor used to
+    // sign messages, which we can obtain by argument or by discovering
+    // their specific manifest. peer-public-key and
+    // peer-public-key-identifier have default values, so we must check
+    // peer-manifest-base-url first.
+    let peer_share_processor_pub_key_map = match (
+        sub_matches.value_of("peer-public-key"),
+        sub_matches.value_of("peer-public-key-identifier"),
+        sub_matches.value_of("peer-manifest-base-url"),
+    ) {
+        (_, _, Some(manifest_base_url)) => {
+            SpecificManifest::from_https(manifest_base_url, instance_name)?
+                .batch_signing_public_keys()?
+        }
+        (Some(public_key), Some(public_key_identifier), _) => {
+            public_key_map_from_arg(public_key, public_key_identifier)
+        }
+        _ => {
+            return Err(anyhow!(
+                "peer-public-key and peer-public-key-identifier are \
+                        required if peer-manifest-base-url is not provided."
+            ))
+        }
+    };
+
+    // We need the portal server owned bucket to which to write sum part
+    // messages aka aggregations. We can discover it from the portal
+    // server global manifest, or we can get that from an argument. We
+    // check for the manifest first since portal-output will always have
+    // the default value ".".
+    let portal_bucket = match (
+        sub_matches.value_of("portal-manifest-base-url"),
+        sub_matches.value_of("portal-output"),
+    ) {
+        (Some(manifest_base_url), _) => {
+            PortalServerGlobalManifest::from_https(manifest_base_url)?.sum_part_bucket(is_first)
+        }
+        (_, Some(path)) => StoragePath::from_str(path),
+        _ => Err(anyhow!(
+            "portal-output or portal-manifest-base-url required"
+        )),
+    }?;
+    let portal_identity = sub_matches.value_of("portal-identity");
+    let aggregation_transport = transport_for_path(portal_bucket, portal_identity)?;
+
+    // Get the key we will use to sign sum part messages sent to the
+    // portal server.
+    let batch_signing_key = batch_signing_key_from_arg(sub_matches)?;
+
+    let batch_ids: Vec<Uuid> = sub_matches
+        .values_of("batch-id")
+        .context("no batch-id")?
+        .map(|v| Uuid::parse_str(v).unwrap())
+        .collect();
+    let batch_dates: Vec<NaiveDateTime> = sub_matches
+        .values_of("batch-time")
+        .context("no batch-time")?
+        .map(|s| NaiveDateTime::parse_from_str(&s, DATE_FORMAT).unwrap())
+        .collect();
+    if batch_ids.len() != batch_dates.len() {
+        return Err(anyhow!(
+            "must provide same number of batch-id and batch-date values"
+        ));
+    }
+
+    let batch_info: Vec<_> = batch_ids.into_iter().zip(batch_dates).collect();
+    BatchAggregator::new(
+        &sub_matches.value_of("aggregation-id").unwrap(),
+        &NaiveDateTime::parse_from_str(
+            &sub_matches.value_of("aggregation-start").unwrap(),
+            DATE_FORMAT,
+        )
+        .unwrap(),
+        &NaiveDateTime::parse_from_str(
+            &sub_matches.value_of("aggregation-end").unwrap(),
+            DATE_FORMAT,
+        )
+        .unwrap(),
+        is_first,
+        &mut intake_transport,
+        &mut VerifiableTransport {
+            transport: own_validation_transport,
+            batch_signing_public_keys: own_public_key_map,
+        },
+        &mut VerifiableTransport {
+            transport: peer_validation_transport,
+            batch_signing_public_keys: peer_share_processor_pub_key_map,
+        },
+        &mut SignableTransport {
+            transport: aggregation_transport,
+            batch_signing_key,
+        },
+    )?
+    .generate_sum_part(&batch_info)?;
+    Ok(())
 }
 
 fn is_first_from_arg(matches: &ArgMatches) -> bool {
