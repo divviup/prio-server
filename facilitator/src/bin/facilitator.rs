@@ -617,9 +617,7 @@ fn intake_batch(sub_matches: &ArgMatches) -> Result<(), anyhow::Error> {
 
     // We need the bucket to which we will write validations for the
     // peer data share processor, which can either be fetched from the
-    // peer manifest or provided directly via command line argument. We
-    // check the manifest argument first because peer-output will always
-    // have at least the default value ".".
+    // peer manifest or provided directly via command line argument.
     let peer_validation_bucket =
         if let Some(base_url) = sub_matches.value_of("peer-manifest-base-url") {
             SpecificManifest::from_https(base_url, sub_matches.value_of("instance-name").unwrap())?
@@ -655,8 +653,7 @@ fn intake_batch(sub_matches: &ArgMatches) -> Result<(), anyhow::Error> {
         &mut own_validation_transport,
         is_first_from_arg(sub_matches),
     )?;
-    batch_intaker.generate_validation_share()?;
-    Ok(())
+    batch_intaker.generate_validation_share()
 }
 
 fn aggregate(sub_matches: &ArgMatches) -> Result<(), anyhow::Error> {
@@ -704,9 +701,7 @@ fn aggregate(sub_matches: &ArgMatches) -> Result<(), anyhow::Error> {
 
     // We need the public keys the peer data share processor used to
     // sign messages, which we can obtain by argument or by discovering
-    // their specific manifest. peer-public-key and
-    // peer-public-key-identifier have default values, so we must check
-    // peer-manifest-base-url first.
+    // their specific manifest.
     let peer_share_processor_pub_key_map = match (
         sub_matches.value_of("peer-public-key"),
         sub_matches.value_of("peer-public-key-identifier"),
@@ -729,9 +724,7 @@ fn aggregate(sub_matches: &ArgMatches) -> Result<(), anyhow::Error> {
 
     // We need the portal server owned bucket to which to write sum part
     // messages aka aggregations. We can discover it from the portal
-    // server global manifest, or we can get that from an argument. We
-    // check for the manifest first since portal-output will always have
-    // the default value ".".
+    // server global manifest, or we can get that from an argument.
     let portal_bucket = match (
         sub_matches.value_of("portal-manifest-base-url"),
         sub_matches.value_of("portal-output"),
