@@ -353,11 +353,10 @@ func (b *bucket) listFilesS3(ctx context.Context) ([]string, error) {
 	var output []string
 	var nextContinuationToken string = ""
 	for {
-		// We choose a lower number than the default max of 1000 to ensure we exercise the
-		// cursoring case regularly.
-		var hundred int64 = 100
 		input := &s3.ListObjectsV2Input{
-			MaxKeys: &hundred,
+			// We choose a lower number than the default max of 1000 to ensure we exercise the
+			// cursoring case regularly.
+			MaxKeys: aws.Int64(100),
 			Bucket:  aws.String(bucket),
 		}
 		if nextContinuationToken != "" {
