@@ -490,12 +490,14 @@ func launchAggregationJob(ctx context.Context, readyBatches []*batchPath, inter 
 
 	log.Printf("starting aggregation job %s (interval %s) with args %s", jobName, inter, args)
 
+	var one int32 = 1
 	job := &batchv1.Job{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      jobName,
 			Namespace: *k8sNS,
 		},
 		Spec: batchv1.JobSpec{
+			BackoffLimit: &one,
 			Template: corev1.PodTemplateSpec{
 				Spec: corev1.PodSpec{
 					ServiceAccountName: *k8sServiceAccount,
@@ -601,12 +603,14 @@ func startIntakeJob(
 		"--date", batchPath.dateString(),
 	}
 	log.Printf("starting job for batch %s with args %s", batchPath, args)
+	var one int32 = 1
 	job := &batchv1.Job{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      jobName,
 			Namespace: *k8sNS,
 		},
 		Spec: batchv1.JobSpec{
+			BackoffLimit: &one,
 			Template: corev1.PodTemplateSpec{
 				Spec: corev1.PodSpec{
 					ServiceAccountName: *k8sServiceAccount,
