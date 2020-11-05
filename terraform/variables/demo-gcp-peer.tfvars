@@ -1,10 +1,10 @@
-environment                = "demo-gcp-peer"
-gcp_region                 = "us-west1"
-gcp_project                = "prio-bringup-290620"
-machine_type               = "e2-small"
-localities                 = ["narnia", "gondor", "asgard"]
-aws_region                 = "us-west-1"
-manifest_domain            = "isrg-prio.org"
+environment     = "demo-gcp-peer"
+gcp_region      = "us-west1"
+gcp_project     = "prio-bringup-290620"
+machine_type    = "e2-small"
+localities      = ["narnia", "gondor", "asgard"]
+aws_region      = "us-west-1"
+manifest_domain = "isrg-prio.org"
 managed_dns_zone = {
   name        = "manifests"
   gcp_project = "prio-bringup-290620"
