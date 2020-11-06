@@ -1,4 +1,4 @@
-use anyhow::{Context, Result};
+use anyhow::{anyhow, Context, Result};
 use chrono::Duration;
 use once_cell::sync::Lazy;
 use regex::Regex;
@@ -162,6 +162,39 @@ impl<'de> Deserialize<'de> for StoragePath {
     fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         let s = String::deserialize(deserializer)?;
         s.parse().map_err(de::Error::custom)
+    }
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub enum ManifestKind {
+    IngestorGlobal,
+    DataShareProcessorGlobal,
+    DataShareProcessorSpecific,
+    PortalServerGlobal,
+}
+
+impl FromStr for ManifestKind {
+    type Err = anyhow::Error;
+
+    fn from_str(s: &str) -> Result<ManifestKind> {
+        match s {
+            "ingestor-global" => Ok(ManifestKind::IngestorGlobal),
+            "data-share-processor-global" => Ok(ManifestKind::DataShareProcessorGlobal),
+            "data-share-processor-specific" => Ok(ManifestKind::DataShareProcessorSpecific),
+            "portal-global" => Ok(ManifestKind::PortalServerGlobal),
+            _ => Err(anyhow!(format!("unrecognized manifest kind {}", s))),
+        }
+    }
+}
+
+impl Display for ManifestKind {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        match self {
+            ManifestKind::IngestorGlobal => write!(f, "ingestor-global"),
+            ManifestKind::DataShareProcessorGlobal => write!(f, "data-share-processor-global"),
+            ManifestKind::DataShareProcessorSpecific => write!(f, "data-share-processor-specific"),
+            ManifestKind::PortalServerGlobal => write!(f, "portal-global"),
+        }
     }
 }
 

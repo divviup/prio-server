@@ -6,14 +6,17 @@ use ring::signature::{
     EcdsaKeyPair, KeyPair, UnparsedPublicKey, ECDSA_P256_SHA256_ASN1,
     ECDSA_P256_SHA256_ASN1_SIGNING,
 };
-use std::{collections::HashMap, str::FromStr};
+use std::{collections::HashMap, fs::File, str::FromStr};
 use uuid::Uuid;
 
 use facilitator::{
     aggregation::BatchAggregator,
-    config::{Identity, StoragePath},
+    config::{Identity, ManifestKind, StoragePath},
     intake::BatchIntaker,
-    manifest::{IngestionServerGlobalManifest, PortalServerGlobalManifest, SpecificManifest},
+    manifest::{
+        DataShareProcessorGlobalManifest, IngestionServerGlobalManifest,
+        PortalServerGlobalManifest, SpecificManifest,
+    },
     sample::generate_ingestion_sample,
     transport::{
         GCSTransport, LocalFileTransport, S3Transport, SignableTransport, Transport,
@@ -539,6 +542,50 @@ fn main() -> Result<(), anyhow::Error> {
                 .add_packet_decryption_key_argument()
                 .add_batch_signing_key_arguments()
         )
+        .subcommand(
+            SubCommand::with_name("lint-manifest")
+            .about("Validate and print out global or specific manifests")
+            .arg(
+                Arg::with_name("manifest-base-url")
+                    .long("manifest-base-url")
+                    .value_name("URL")
+                    .help("base URL relative to which manifests may be fetched")
+                    .long_help(
+                        "base URL relative to which manifests may be fetched \
+                        over HTTPS. Should be in the form \"https://foo.com\"."
+                    )
+                    .required_unless("manifest-path")
+            )
+            .arg(
+                Arg::with_name("manifest-path")
+                    .long("manifest-path")
+                    .value_name("PATH")
+                    .help("path to local manifest file to lint")
+                    .required_unless("manifest-base-url")
+            )
+            .arg(
+                Arg::with_name("manifest-kind")
+                    .long("manifest-kind")
+                    .value_name("KIND")
+                    .help("kind of manifest to locate and parse")
+                    .possible_value(leak_string(ManifestKind::IngestorGlobal.to_string()))
+                    .possible_value(leak_string(ManifestKind::DataShareProcessorGlobal.to_string()))
+                    .possible_value(leak_string(ManifestKind::DataShareProcessorSpecific.to_string()))
+                    .possible_value(leak_string(ManifestKind::PortalServerGlobal.to_string()))
+                    .required(true)
+                )
+            .arg(
+                Arg::with_name("instance")
+                    .long("instance")
+                    .value_name("LOCALITY-TECH_GIANT")
+                    .help("the instance name whose manifest is to be fetched")
+                    .long_help(
+                        leak_string(format!("the instance name whose manifest is to be fetched, \
+                        e.g., \"mi-google\". Required if manifest-kind={}.",
+                        ManifestKind::DataShareProcessorSpecific))
+                    )
+            )
+        )
         .get_matches();
 
     let _verbose = matches.is_present("verbose");
@@ -550,6 +597,7 @@ fn main() -> Result<(), anyhow::Error> {
         ("generate-ingestion-sample", Some(sub_matches)) => generate_sample(sub_matches),
         ("intake-batch", Some(sub_matches)) => intake_batch(sub_matches),
         ("aggregate", Some(sub_matches)) => aggregate(sub_matches),
+        ("lint-manifest", Some(sub_matches)) => lint_manifest(sub_matches),
         (_, _) => Ok(()),
     }
 }
@@ -790,6 +838,76 @@ fn aggregate(sub_matches: &ArgMatches) -> Result<(), anyhow::Error> {
         },
     )?
     .generate_sum_part(&batch_info)?;
+    Ok(())
+}
+
+fn lint_manifest(sub_matches: &ArgMatches) -> Result<(), anyhow::Error> {
+    let manifest_base_url = sub_matches.value_of("manifest-base-url");
+    let manifest_file_reader = match sub_matches.value_of("manifest-path") {
+        Some(path) => Some(File::open(path).context("failed to open manifest file")?),
+        None => None,
+    };
+
+    let manifest_kind = ManifestKind::from_str(
+        sub_matches
+            .value_of("manifest-kind")
+            .context("manifest-kind is required")?,
+    )?;
+
+    match manifest_kind {
+        ManifestKind::IngestorGlobal => {
+            let manifest = if let Some(base_url) = manifest_base_url {
+                IngestionServerGlobalManifest::from_https(base_url)?
+            } else if let Some(reader) = manifest_file_reader {
+                IngestionServerGlobalManifest::from_reader(reader)?
+            } else {
+                return Err(anyhow!(
+                    "one of manifest-base-url or manifest-path is required"
+                ));
+            };
+            println!("Valid: {:?}\n{:#?}", manifest.validate(), manifest);
+        }
+        ManifestKind::DataShareProcessorGlobal => {
+            let manifest = if let Some(base_url) = manifest_base_url {
+                DataShareProcessorGlobalManifest::from_https(base_url)?
+            } else if let Some(reader) = manifest_file_reader {
+                DataShareProcessorGlobalManifest::from_reader(reader)?
+            } else {
+                return Err(anyhow!(
+                    "one of manifest-base-url or manifest-path is required"
+                ));
+            };
+            println!("{:#?}", manifest);
+        }
+        ManifestKind::DataShareProcessorSpecific => {
+            let instance = sub_matches
+                .value_of("instance")
+                .context("instance is required when manifest-kind=data-share-processor-specific")?;
+            let manifest = if let Some(base_url) = manifest_base_url {
+                SpecificManifest::from_https(base_url, instance)?
+            } else if let Some(reader) = manifest_file_reader {
+                SpecificManifest::from_reader(reader)?
+            } else {
+                return Err(anyhow!(
+                    "one of manifest-base-url or manifest-path is required"
+                ));
+            };
+            println!("Valid: {:?}\n{:#?}", manifest.validate(), manifest);
+        }
+        ManifestKind::PortalServerGlobal => {
+            let manifest = if let Some(base_url) = manifest_base_url {
+                PortalServerGlobalManifest::from_https(base_url)?
+            } else if let Some(reader) = manifest_file_reader {
+                PortalServerGlobalManifest::from_reader(reader)?
+            } else {
+                return Err(anyhow!(
+                    "one of manifest-base-url or manifest-path is required"
+                ));
+            };
+            println!("Valid: {:?}\n{:#?}", manifest.validate(), manifest);
+        }
+    }
+
     Ok(())
 }
 
