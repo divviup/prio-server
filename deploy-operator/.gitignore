@@ -1,10 +1,5 @@
 
 # Binaries for programs and plugins
-*.exe
-*.exe~
-*.dll
-*.so
-*.dylib
 bin
 
 # Test binary, build with `go test -c`
@@ -14,11 +9,4 @@ bin
 *.out
 
 # Kubernetes Generated files - skip generated files, except for vendored files
-
 !vendor/**/zz_generated.*
-
-# editor and IDE paraphernalia
-.idea
-*.swp
-*.swo
-*~

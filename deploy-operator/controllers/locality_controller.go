@@ -1,6 +1,4 @@
 /*
-
-
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
 You may obtain a copy of the License at
@@ -19,6 +17,8 @@ package controllers
 import (
 	"context"
 	"fmt"
+	"strings"
+
 	"github.com/go-logr/logr"
 	v1 "k8s.io/api/batch/v1"
 	"k8s.io/api/batch/v1beta1"
@@ -27,7 +27,6 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
-	"strings"
 
 	priov1 "github.com/abetterinternet/prio-server/deploy-operator/api/v1"
 )
