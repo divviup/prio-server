@@ -4,4 +4,9 @@ metadata:
   name: locality-sample
 spec:
   # Add fields here
-  foo: bar
+  manifestBucketLocation: SomeLocation
+  dataShareProcessors:
+    - Some Value
+    - Another Value
+    - Yet Another Value
+  schedule: 1 0 * * *

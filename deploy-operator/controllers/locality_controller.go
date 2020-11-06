@@ -43,7 +43,7 @@ type LocalityReconciler struct {
 
 const (
 	jobNameField    = ".metadata.name"
-	jobName         = "keyRotator"
+	jobName         = "key-rotator"
 	keyRotatorImage = "keyRotator:latest"
 )
 
@@ -78,8 +78,8 @@ func (r *LocalityReconciler) Reconcile(req ctrl.Request) (ctrl.Result, error) {
 
 		return ctrl.Result{}, err
 	}
-
-	switch cronJobs.Size() {
+	r.Log.Info("List of cronjobs returned", "cronjobs", cronJobs, "cronjobs size", len(cronJobs.Items))
+	switch len(cronJobs.Items) {
 	case 0:
 		ret, err = r.scheduleNewJob(&locality)
 		if err != nil {
@@ -175,6 +175,13 @@ func (r *LocalityReconciler) validate(locality *priov1.Locality) (ctrl.Result, e
 }
 
 func (r *LocalityReconciler) SetupWithManager(mgr ctrl.Manager) error {
+	if err := mgr.GetFieldIndexer().IndexField(&v1beta1.CronJob{}, jobNameField, func(rawObj runtime.Object) []string {
+		job := rawObj.(*v1beta1.CronJob)
+
+		return []string{job.Name}
+	}); err != nil {
+		return err
+	}
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&priov1.Locality{}).
 		Owns(&v1beta1.CronJob{}).
