@@ -506,7 +506,7 @@ func launchAggregationJobs(ctx context.Context, batchesByID aggregationMap, inte
 		if len(idForJobName) > 30 {
 			idForJobName = idForJobName[:30]
 		}
-		jobName := fmt.Sprintf("a-%s", strings.ReplaceAll(fmtTime(inter.begin), "/", "-"))
+		jobName := fmt.Sprintf("a-%s-%s", idForJobName, strings.ReplaceAll(fmtTime(inter.begin), "/", "-"))
 
 		log.Printf("starting aggregation job %s (interval %s) with args %s", jobName, inter, args)
 
