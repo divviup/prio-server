@@ -14,6 +14,14 @@ To generate sample ingestion data, see the `generate-ingestion-sample` command a
 
 To build a Docker image, try `docker build -t my-image-repository/facilitator:x.y.z -f facilitator/Dockerfile .` *from the root directory of `prio-server`*. This is important because building `facilitator` depends on the schema files in `avro-schema`.
 
+## Linting manifest files
+
+The `facilitator lint-manifest` subcommand can validate the various manifest files used in the system. See that subcommand's help text for more information on usage.
+
+## Working with Avro files
+
+If you want to examine Avro-encoded messages, you can use the `avro-tools` jar from the [Apache Avro project's releases](https://downloads.apache.org/avro/avro-1.10.0/java/), and then [use it from the command line to examine individual Avro encoded objects](https://www.michael-noll.com/blog/2013/03/17/reading-and-writing-avro-files-from-the-command-line/).
+
 ## References
 
 [Prio Data Share Batch IDL](https://docs.google.com/document/d/1L06dpE7OcC4CXho2UswrfHrnWKtbA9aSSmO_5o7Ku6I/edit#heading=h.3kq1yexquq2g)
