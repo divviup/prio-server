@@ -129,8 +129,14 @@ func (r *LocalityReconciler) createJobFromCronJob(cronJob *v1beta1.CronJob) v1.J
 
 func (r *LocalityReconciler) createCronJobTemplate(locality *priov1.Locality) v1beta1.CronJob {
 	env := []v12.EnvVar{
+		{Name: "KR_ENVIRONMENT_NAME", Value: locality.Spec.EnvironmentName},
 		{Name: "KR_MANIFEST_BUCKET_LOCATION", Value: locality.Spec.ManifestBucketLocation},
 		{Name: "KR_DATA_SHARE_PROCESSORS", Value: strings.Join(locality.Spec.DataShareProcessors, ",")},
+		{Name: "KR_LOCALITY", ValueFrom: &v12.EnvVarSource{
+			FieldRef: &v12.ObjectFieldSelector{
+				FieldPath: "metadata.namespace",
+			},
+		}},
 	}
 
 	containers := []v12.Container{{

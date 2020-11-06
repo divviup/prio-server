@@ -3,7 +3,7 @@ kind: Locality
 metadata:
   name: locality-sample
 spec:
-  # Add fields here
+  environmentName: prio-demo
   manifestBucketLocation: SomeLocation
   dataShareProcessors:
     - Some Value

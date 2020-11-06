@@ -20,6 +20,9 @@ import (
 
 // LocalitySpec defines the desired state of Locality
 type LocalitySpec struct {
+	// EnvironmentName is the name of the environment for prio
+	EnvironmentName string `json:"environmentName"`
+
 	// ManifestBucketLocation is the location that the manifest buckets are stored
 	ManifestBucketLocation string `json:"manifestBucketLocation"`
 
