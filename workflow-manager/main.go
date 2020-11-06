@@ -13,6 +13,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -246,8 +247,9 @@ func main() {
 	interval := aggregationInterval(aggregationPeriodParsed, gracePeriodParsed)
 	log.Printf("looking for batches to aggregate in interval %s", interval)
 	aggregationBatches = withinInterval(aggregationBatches, interval)
+	aggregationMap := groupByAggregationID(aggregationBatches)
 
-	if err := launchAggregationJob(context.Background(), aggregationBatches, interval); err != nil {
+	if err := launchAggregationJobs(context.Background(), aggregationMap, interval); err != nil {
 		log.Fatal(err)
 	}
 
@@ -479,8 +481,18 @@ func withinInterval(batches []*batchPath, inter interval) []*batchPath {
 	return output
 }
 
-func launchAggregationJob(ctx context.Context, readyBatches []*batchPath, inter interval) error {
-	if len(readyBatches) == 0 {
+type aggregationMap map[string][]*batchPath
+
+func groupByAggregationID(batches []*batchPath) aggregationMap {
+	output := make(aggregationMap)
+	for _, v := range batches {
+		output[v.aggregationID] = append(output[v.aggregationID], v)
+	}
+	return output
+}
+
+func launchAggregationJobs(ctx context.Context, batchesByID aggregationMap, inter interval) error {
+	if len(batchesByID) == 0 {
 		log.Printf("no batches to aggregate")
 		return nil
 	}
@@ -493,78 +505,87 @@ func launchAggregationJob(ctx context.Context, readyBatches []*batchPath, inter 
 	if err != nil {
 		return fmt.Errorf("clientset: %w", err)
 	}
-	aggregationID := readyBatches[0].aggregationID
 
-	args := []string{
-		"aggregate",
-		"--aggregation-id", aggregationID,
-		"--aggregation-start", fmtTime(inter.begin),
-		"--aggregation-end", fmtTime(inter.end),
-	}
-	for _, batchPath := range readyBatches {
-		args = append(args, "--batch-id")
-		args = append(args, batchPath.ID)
-		args = append(args, "--batch-time")
-		args = append(args, batchPath.dateString())
+	for _, readyBatches := range batchesByID {
+		aggregationID := readyBatches[0].aggregationID
 
-		// All batches should have the same aggregation ID?
-		if aggregationID != batchPath.aggregationID {
-			return fmt.Errorf("found batch with aggregation ID %s, wanted %s", batchPath.aggregationID, aggregationID)
+		args := []string{
+			"aggregate",
+			"--aggregation-id", aggregationID,
+			"--aggregation-start", fmtTime(inter.begin),
+			"--aggregation-end", fmtTime(inter.end),
 		}
-		aggregationID = batchPath.aggregationID
-	}
+		for _, batchPath := range readyBatches {
+			args = append(args, "--batch-id")
+			args = append(args, batchPath.ID)
+			args = append(args, "--batch-time")
+			args = append(args, batchPath.dateString())
 
-	jobName := fmt.Sprintf("a-%s", strings.ReplaceAll(fmtTime(inter.begin), "/", "-"))
+			// All batches should have the same aggregation ID?
+			if aggregationID != batchPath.aggregationID {
+				return fmt.Errorf("found batch with aggregation ID %s, wanted %s", batchPath.aggregationID, aggregationID)
+			}
+		}
 
-	log.Printf("starting aggregation job %s (interval %s) with args %s", jobName, inter, args)
+		// Embed the aggregation ID in the job name, but remove characters that aren't valid in DNS
+		// names, and also restrict the length so we don't go over the limit of 63 characters.
+		re := regexp.MustCompile("[^A-Za-z0-9-]")
+		idForJobName := re.ReplaceAllLiteralString(aggregationID, "-")
+		if len(idForJobName) > 30 {
+			idForJobName = idForJobName[:30]
+		}
+		jobName := fmt.Sprintf("a-%s-%s", idForJobName, strings.ReplaceAll(fmtTime(inter.begin), "/", "-"))
 
-	var one int32 = 1
-	job := &batchv1.Job{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      jobName,
-			Namespace: *k8sNS,
-		},
-		Spec: batchv1.JobSpec{
-			BackoffLimit: &one,
-			Template: corev1.PodTemplateSpec{
-				Spec: corev1.PodSpec{
-					ServiceAccountName: *k8sServiceAccount,
-					RestartPolicy:      "Never",
-					Containers: []corev1.Container{
-						{
-							Args:            args,
-							Name:            "facile-container",
-							Image:           *facilitatorImage,
-							ImagePullPolicy: "Always",
-							EnvFrom: []corev1.EnvFromSource{
-								{
-									ConfigMapRef: &corev1.ConfigMapEnvSource{
-										LocalObjectReference: corev1.LocalObjectReference{
-											Name: *aggregateConfigMap,
+		log.Printf("starting aggregation job %s (interval %s) with args %s", jobName, inter, args)
+
+		var one int32 = 1
+		job := &batchv1.Job{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      jobName,
+				Namespace: *k8sNS,
+			},
+			Spec: batchv1.JobSpec{
+				BackoffLimit: &one,
+				Template: corev1.PodTemplateSpec{
+					Spec: corev1.PodSpec{
+						ServiceAccountName: *k8sServiceAccount,
+						RestartPolicy:      "Never",
+						Containers: []corev1.Container{
+							{
+								Args:            args,
+								Name:            "facile-container",
+								Image:           *facilitatorImage,
+								ImagePullPolicy: "Always",
+								EnvFrom: []corev1.EnvFromSource{
+									{
+										ConfigMapRef: &corev1.ConfigMapEnvSource{
+											LocalObjectReference: corev1.LocalObjectReference{
+												Name: *aggregateConfigMap,
+											},
 										},
 									},
 								},
-							},
-							Env: []corev1.EnvVar{
-								{
-									Name: "BATCH_SIGNING_PRIVATE_KEY",
-									ValueFrom: &corev1.EnvVarSource{
-										SecretKeyRef: &corev1.SecretKeySelector{
-											LocalObjectReference: corev1.LocalObjectReference{
-												Name: *bskSecretName,
+								Env: []corev1.EnvVar{
+									{
+										Name: "BATCH_SIGNING_PRIVATE_KEY",
+										ValueFrom: &corev1.EnvVarSource{
+											SecretKeyRef: &corev1.SecretKeySelector{
+												LocalObjectReference: corev1.LocalObjectReference{
+													Name: *bskSecretName,
+												},
+												Key: "secret_key",
 											},
-											Key: "secret_key",
 										},
 									},
-								},
-								{
-									Name: "PACKET_DECRYPTION_KEYS",
-									ValueFrom: &corev1.EnvVarSource{
-										SecretKeyRef: &corev1.SecretKeySelector{
-											LocalObjectReference: corev1.LocalObjectReference{
-												Name: *pdksSecretName,
+									{
+										Name: "PACKET_DECRYPTION_KEYS",
+										ValueFrom: &corev1.EnvVarSource{
+											SecretKeyRef: &corev1.SecretKeySelector{
+												LocalObjectReference: corev1.LocalObjectReference{
+													Name: *pdksSecretName,
+												},
+												Key: "secret_key",
 											},
-											Key: "secret_key",
 										},
 									},
 								},
@@ -573,18 +594,19 @@ func launchAggregationJob(ctx context.Context, readyBatches []*batchPath, inter 
 					},
 				},
 			},
-		},
-	}
-	createdJob, err := clientset.BatchV1().Jobs(*k8sNS).Create(ctx, job, metav1.CreateOptions{})
-	if err != nil {
-		if errors.IsAlreadyExists(err) {
-			log.Printf("skipping %q because a job for it already exists (err %T = %#v)",
-				jobName, err, err)
-			return nil
 		}
-		return fmt.Errorf("creating job: %w", err)
+		createdJob, err := clientset.BatchV1().Jobs(*k8sNS).Create(ctx, job, metav1.CreateOptions{})
+		if err != nil {
+			if errors.IsAlreadyExists(err) {
+				log.Printf("skipping %q because a job for it already exists (err %T = %#v)",
+					jobName, err, err)
+				continue
+			}
+			log.Printf("creating job: %s", err)
+			continue
+		}
+		log.Printf("Created job %q: %s", jobName, createdJob.ObjectMeta.UID)
 	}
-	log.Printf("Created job %q: %s", jobName, createdJob.ObjectMeta.UID)
 
 	return nil
 }
