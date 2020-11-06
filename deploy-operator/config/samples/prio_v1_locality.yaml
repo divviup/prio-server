@@ -1,0 +1,7 @@
+apiVersion: prio.isrg-prio.org/v1
+kind: Locality
+metadata:
+  name: locality-sample
+spec:
+  # Add fields here
+  foo: bar

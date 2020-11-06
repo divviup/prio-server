@@ -1,0 +1,76 @@
+
+---
+apiVersion: apiextensions.k8s.io/v1beta1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.3.0
+  creationTimestamp: null
+  name: localities.prio.isrg-prio.org
+spec:
+  group: prio.isrg-prio.org
+  names:
+    kind: Locality
+    listKind: LocalityList
+    plural: localities
+    singular: locality
+  scope: Namespaced
+  subresources:
+    status: {}
+  validation:
+    openAPIV3Schema:
+      description: Locality is the Schema for the localities API
+      properties:
+        apiVersion:
+          description: 'APIVersion defines the versioned schema of this representation
+            of an object. Servers should convert recognized schemas to the latest
+            internal value, and may reject unrecognized values. More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources'
+          type: string
+        kind:
+          description: 'Kind is a string value representing the REST resource this
+            object represents. Servers may infer this from the endpoint the client
+            submits requests to. Cannot be updated. In CamelCase. More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds'
+          type: string
+        metadata:
+          type: object
+        spec:
+          description: LocalitySpec defines the desired state of Locality
+          properties:
+            dataShareProcessors:
+              description: DataShareProcessors is the list of data share processors
+              items:
+                type: string
+              type: array
+            manifestBucketLocation:
+              description: ManifestBucketLocation is the location that the manifest
+                buckets are stored
+              type: string
+            schedule:
+              description: Schedule is the cron job schedule as defined by https://en.wikipedia.org/wiki/Cron
+              type: string
+          required:
+          - dataShareProcessors
+          - manifestBucketLocation
+          - schedule
+          type: object
+        status:
+          description: LocalityStatus defines the observed state of Locality
+          properties:
+            lastKeyRotationRun:
+              description: LastKeyRotationJob is the last time a key rotation job
+                ran and updated this Resource
+              format: date-time
+              type: string
+          type: object
+      type: object
+  version: v1
+  versions:
+  - name: v1
+    served: true
+    storage: true
+status:
+  acceptedNames:
+    kind: ""
+    plural: ""
+  conditions: []
+  storedVersions: []

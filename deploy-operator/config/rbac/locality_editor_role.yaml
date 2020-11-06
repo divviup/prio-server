@@ -1,0 +1,24 @@
+# permissions for end users to edit localities.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: locality-editor-role
+rules:
+- apiGroups:
+  - prio.isrg-prio.org
+  resources:
+  - localities
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - prio.isrg-prio.org
+  resources:
+  - localities/status
+  verbs:
+  - get
