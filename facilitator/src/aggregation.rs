@@ -28,6 +28,7 @@ pub struct BatchAggregator<'a> {
 impl<'a> BatchAggregator<'a> {
     #[allow(clippy::too_many_arguments)] // Grandfathered in
     pub fn new(
+        instance_name: &'a str,
         aggregation_name: &'a str,
         aggregation_start: &'a NaiveDateTime,
         aggregation_end: &'a NaiveDateTime,
@@ -47,6 +48,7 @@ impl<'a> BatchAggregator<'a> {
             ingestion_transport,
             aggregation_batch: BatchWriter::new(
                 Batch::new_sum(
+                    instance_name,
                     aggregation_name,
                     aggregation_start,
                     aggregation_end,
