@@ -14,6 +14,7 @@ import (
 	"net/http"
 	"os"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -40,19 +41,8 @@ import (
 // BuildID is generated at build time and contains the branch and short hash.
 var BuildID string
 
-//BuildTime is generated at build time and contains the build time.
+// BuildTime is generated at build time and contains the build time.
 var BuildTime string
-
-// batchMap is used to store information about a batch, indexed by the basename
-// of that batch.
-type batchMap map[string]*batch
-
-// batch is used to determine whether all elements of a batch are present.
-type batch struct {
-	metadata bool
-	avro     bool
-	sig      bool
-}
 
 type batchPath struct {
 	aggregationID  string
@@ -62,6 +52,20 @@ type batchPath struct {
 	metadata       bool
 	avro           bool
 	sig            bool
+}
+
+type batchPathList []*batchPath
+
+func (bpl batchPathList) Len() int {
+	return len(bpl)
+}
+
+func (bpl batchPathList) Less(i, j int) bool {
+	return bpl[i].time.Before(bpl[j].time)
+}
+
+func (bpl batchPathList) Swap(i, j int) {
+	bpl[i], bpl[j] = bpl[j], bpl[i]
 }
 
 func newBatchPath(batchName string) (*batchPath, error) {
@@ -95,7 +99,7 @@ func newBatchPath(batchName string) (*batchPath, error) {
 }
 
 func (b *batchPath) String() string {
-	return fmt.Sprintf("{%s %s %s %s metadata:%t avro:%t sig:%t}", b.aggregationID, b.dateComponents, b.ID, b.time, b.metadata, b.avro, b.sig)
+	return fmt.Sprintf("{%s %s %s files:%d%d%d}", b.aggregationID, b.dateComponents, b.ID, index(!b.metadata), index(!b.avro), index(!b.sig))
 }
 
 func (b *batchPath) path() string {
@@ -202,7 +206,13 @@ func main() {
 		log.Fatal(err)
 	}
 
-	if err := launchIntake(context.Background(), intakeBatches, maxAgeParsed); err != nil {
+	currentIntakeBatches := withinInterval(intakeBatches, interval{
+		begin: time.Now().Add(-maxAgeParsed),
+		end:   time.Now().Add(24 * time.Hour),
+	})
+	log.Printf("skipping %d batches as too old", len(intakeBatches)-len(currentIntakeBatches))
+
+	if err := launchIntake(context.Background(), currentIntakeBatches, maxAgeParsed); err != nil {
 		log.Fatal(err)
 	}
 
@@ -342,13 +352,29 @@ func (b *bucket) listFilesS3(ctx context.Context) ([]string, error) {
 		WithRegion(region).
 		WithCredentials(credentials)
 	svc := s3.New(sess, config)
-	resp, err := svc.ListObjectsV2(&s3.ListObjectsV2Input{Bucket: aws.String(bucket)})
-	if err != nil {
-		return nil, fmt.Errorf("Unable to list items in bucket %q, %w", b.bucketName, err)
-	}
 	var output []string
-	for _, item := range resp.Contents {
-		output = append(output, *item.Key)
+	var nextContinuationToken string = ""
+	for {
+		input := &s3.ListObjectsV2Input{
+			// We choose a lower number than the default max of 1000 to ensure we exercise the
+			// cursoring case regularly.
+			MaxKeys: aws.Int64(100),
+			Bucket:  aws.String(bucket),
+		}
+		if nextContinuationToken != "" {
+			input.ContinuationToken = &nextContinuationToken
+		}
+		resp, err := svc.ListObjectsV2(input)
+		if err != nil {
+			return nil, fmt.Errorf("Unable to list items in bucket %q, %w", b.bucketName, err)
+		}
+		for _, item := range resp.Contents {
+			output = append(output, *item.Key)
+		}
+		if !*resp.IsTruncated {
+			break
+		}
+		nextContinuationToken = *resp.NextContinuationToken
 	}
 	return output, nil
 }
@@ -409,6 +435,8 @@ func readyBatches(files []string, infix string) ([]*batchPath, error) {
 	for _, v := range batches {
 		output = append(output, v)
 	}
+	sort.Sort(batchPathList(output))
+
 	return output, nil
 }
 

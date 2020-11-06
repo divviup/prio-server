@@ -762,6 +762,7 @@ fn aggregate(sub_matches: &ArgMatches) -> Result<(), anyhow::Error> {
 
     let batch_info: Vec<_> = batch_ids.into_iter().zip(batch_dates).collect();
     BatchAggregator::new(
+        instance_name,
         &sub_matches.value_of("aggregation-id").unwrap(),
         &NaiveDateTime::parse_from_str(
             &sub_matches.value_of("aggregation-start").unwrap(),
