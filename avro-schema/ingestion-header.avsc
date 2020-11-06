@@ -15,11 +15,11 @@
             "doc": "a name for this specific aggregation"
         },
         {
-        {
             "name": "region",
             "type": "string",
             "doc": "ISO code corresponding to locality of the data in this batch"
         },
+        {
             "name": "bins",
             "type": "int",
             "doc": "number of bins for this aggregation"
