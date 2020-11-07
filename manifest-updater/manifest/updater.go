@@ -5,7 +5,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
 )
 
@@ -27,31 +26,31 @@ func NewUpdater(environmentName string, locality string, manifestBucketLocation 
 	}, nil
 }
 
-func (u *Updater) UpdateDataShareSpecificManifest(key *BatchSigningPublicKey, certificate *PacketEncryptionCertificate) error {
-	if key == nil && certificate == nil {
+func (u *Updater) UpdateDataShareSpecificManifest(keys map[string]BatchSigningPublicKeys, certificate *PacketEncryptionCertificate) error {
+	if keys == nil && certificate == nil {
 		return nil
 	}
 
 	store, err := u.getStorageClient()
 	if err != nil {
-		return errors.Wrap(err, "getting storage client failed")
+		return fmt.Errorf("getting storage client failed: %w", err)
 	}
 
 	for _, dsp := range u.dataShareProcessors {
 		manifest, err := u.readExistingManifest(store, dsp)
 		if err != nil {
-			return errors.Wrap(err, "manifest file not read properly")
+			return fmt.Errorf("manifest file not read properly: %w", err)
 		}
-		if key != nil {
-			manifest.BatchSigningPublicKeys[u.constructBatchSigningLookupKey(dsp)] = *key
+		if keys != nil {
+			manifest.BatchSigningPublicKeys = keys[dsp]
 		}
 		if certificate != nil {
-			manifest.PacketEncryptionCertificates[u.constructPacketEncryptionLookupKey(dsp)] = *certificate
+			manifest.PacketEncryptionCertificates = map[string]PacketEncryptionCertificate{u.constructPacketEncryptionLookupKey(dsp): *certificate}
 		}
 
 		err = u.writeManifest(store, manifest, dsp)
 		if err != nil {
-			return errors.Wrap(err, "manifest file not read properly")
+			return fmt.Errorf("manifest file not written properly: %w", err)
 		}
 	}
 
@@ -63,7 +62,7 @@ func (u *Updater) readExistingManifest(store *storage.BucketHandle, dataSharePro
 	manifestObj := store.Object(fmt.Sprintf("%s-%s-manifest.json", u.locality, dataShareProcessor))
 	r, err := manifestObj.NewReader(context.Background())
 	if err != nil {
-		return nil, errors.Wrap(err, "reading from the manifest failed")
+		return nil, fmt.Errorf("reading from the manifest failed: %w", err)
 	}
 
 	defer func() {
@@ -76,7 +75,7 @@ func (u *Updater) readExistingManifest(store *storage.BucketHandle, dataSharePro
 	manifest := &DataShareSpecificManifest{}
 	err = json.NewDecoder(r).Decode(manifest)
 	if err != nil {
-		return nil, errors.Wrap(err, "decoding manifest json failed")
+		return nil, fmt.Errorf("decoding manifest json failed: %w", err)
 	}
 
 	return manifest, nil
@@ -100,7 +99,7 @@ func (u *Updater) writeManifest(store *storage.BucketHandle, manifest *DataShare
 
 	err := json.NewEncoder(w).Encode(manifest)
 	if err != nil {
-		return errors.Wrap(err, "encoding manifest json failed")
+		return fmt.Errorf("encoding manifest json failed: %w", err)
 	}
 	return nil
 }
@@ -116,7 +115,7 @@ func (u *Updater) constructPacketEncryptionLookupKey(dataShareProcessor string) 
 func (u *Updater) getStorageClient() (*storage.BucketHandle, error) {
 	client, err := storage.NewClient(context.Background())
 	if err != nil {
-		return nil, errors.Wrap(err, "unable to create a new storage client from background credentials")
+		return nil, fmt.Errorf("unable to create a new storage client from background credentials: %w", err)
 	}
 
 	bucket := client.Bucket(u.manifestBucketLocation)

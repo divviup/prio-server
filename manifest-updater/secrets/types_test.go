@@ -15,9 +15,13 @@ func TestPrioKeyMarshallAndUnmarshall(t *testing.T) {
 	}
 
 	key := PrioKey{key: p256Key}
-	x92 := key.MarshallX962UncompressedPrivateKey()
+	x92 := key.marshallX962UncompressedPrivateKey()
 
 	newKey := PrioKeyFromX962UncompressedKey(x92)
 
-	key.key.Equal(newKey.key)
+	equality := key.key.Equal(newKey.key)
+
+	if !equality {
+		t.Errorf("generated key and deseralized key not the same")
+	}
 }

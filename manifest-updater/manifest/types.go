@@ -15,7 +15,7 @@ type DataShareSpecificManifest struct {
 	// BatchSigningPublicKeys maps key identifiers to batch signing public keys.
 	// These are the keys that peers reading batches emitted by this data share
 	// processor use to verify signatures.
-	BatchSigningPublicKeys map[string]BatchSigningPublicKey `json:"batch-signing-public-keys"`
+	BatchSigningPublicKeys BatchSigningPublicKeys `json:"batch-signing-public-keys"`
 	// PacketEncryptionCertificates maps key identifiers to packet encryption
 	// certificates. The values are PEM encoded X.509 certificates, which
 	// contain the public key corresponding to the private key that the data
@@ -23,6 +23,8 @@ type DataShareSpecificManifest struct {
 	// packets.
 	PacketEncryptionCertificates map[string]PacketEncryptionCertificate `json:"packet-encryption-certificates"`
 }
+
+type BatchSigningPublicKeys = map[string]BatchSigningPublicKey
 
 // BatchSigningPublicKey represents a public key used for batch signing.
 type BatchSigningPublicKey struct {

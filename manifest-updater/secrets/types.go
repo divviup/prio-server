@@ -13,7 +13,8 @@ import (
 
 type PrioKey struct {
 	key            *ecdsa.PrivateKey
-	KubeIdentifier string
+	KubeIdentifier *string
+	Expiration     *string
 }
 
 func NewPrioKey() (*PrioKey, error) {
@@ -48,7 +49,7 @@ func PrioKeyFromX962UncompressedKey(key []byte) PrioKey {
 	}
 }
 
-func (p *PrioKey) MarshallX962UncompressedPrivateKey() []byte {
+func (p *PrioKey) marshallX962UncompressedPrivateKey() []byte {
 	marshalledPublicKey := elliptic.Marshal(elliptic.P256(), p.key.PublicKey.X, p.key.PublicKey.Y)
 	return append(marshalledPublicKey, p.key.D.Bytes()...)
 }

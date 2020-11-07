@@ -54,7 +54,7 @@ func init() {
 	rootCmd.PersistentFlags().String("environment_name", "", "Name of the environment")
 	rootCmd.PersistentFlags().String("locality", "", "Name of locality")
 	rootCmd.PersistentFlags().String("manifest_bucket_location", "", "Manifest bucket location")
-	rootCmd.PersistentFlags().StringSlice("data_share_processors", make([]string, 0), "List of datashare processors")
+	rootCmd.PersistentFlags().StringSlice("data_share_processors", []string{}, "List of datashare processors")
 
 	//if err := rootCmd.MarkPersistentFlagRequired("environment_name"); err != nil {
 	//	log.Fatalf("environment_name missing")

@@ -3,14 +3,12 @@ package cmd
 import (
 	"crypto/rand"
 	"crypto/x509"
+	"fmt"
 	"github.com/abetterinternet/prio-server/manifest-updater/manifest"
 	"github.com/abetterinternet/prio-server/manifest-updater/secrets"
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
-	"os"
-	"os/signal"
-	"syscall"
 )
 
 func init() {
@@ -35,40 +33,69 @@ var runCmd = &cobra.Command{
 			},
 		).Info("Starting the updater...")
 
+		var packetEncryptionCertificate *manifest.PacketEncryptionCertificate
+		var dspSigningKeys map[string]manifest.BatchSigningPublicKeys
+
 		kube, _ := secrets.NewKube(environmentName, dsps)
 
-		key, err := kube.ReconcilePacketEncryptionKey()
+		packetEncryptionKey, err := kube.ReconcilePacketEncryptionKey()
 		if err != nil {
 			log.Fatal(err)
 		}
-		cert, err := key.CreatePemEncodedCertificateRequest(rand.Reader, new(x509.CertificateRequest))
+		if packetEncryptionKey != nil {
+			cert, err := packetEncryptionKey.CreatePemEncodedCertificateRequest(rand.Reader, new(x509.CertificateRequest))
+			if err != nil {
+				log.Fatal(err)
+			}
+
+			packetEncryptionCertificate = &manifest.PacketEncryptionCertificate{Certificate: cert}
+		}
+
+		batchSigningKeys, err := kube.ReconcileBatchSigningKey()
 		if err != nil {
 			log.Fatal(err)
 		}
-
-		packet := &manifest.PacketEncryptionCertificate{Certificate: cert}
-
-		updater, _ := manifest.NewUpdater(environmentName, locality, manifestBucket, dsps)
-		err = updater.UpdateDataShareSpecificManifest(&manifest.BatchSigningPublicKey{
-			PublicKey:  "TEST",
-			Expiration: "TEST",
-		}, packet)
-
-		if err != nil {
-			log.Fatal(err)
-		}
-
-		terminate := make(chan os.Signal, 1)
-		signal.Notify(terminate, syscall.SIGINT, syscall.SIGTERM)
-
-		toTerminate := <-terminate
-		for {
-			if toTerminate != nil {
-				// TODO what should we do when this happens?
-				break
+		if batchSigningKeys != nil {
+			dspSigningKeys, err = prioKeysToBatchSigningManifests(batchSigningKeys)
+			if err != nil {
+				log.Fatal(err)
 			}
 		}
 
+		updater, _ := manifest.NewUpdater(environmentName, locality, manifestBucket, dsps)
+		err = updater.UpdateDataShareSpecificManifest(dspSigningKeys, packetEncryptionCertificate)
+
+		if err != nil {
+			log.Fatal(err)
+		}
 		return nil
 	},
+}
+
+func prioKeysToBatchSigningManifests(keys map[string][]*secrets.PrioKey) (map[string]manifest.BatchSigningPublicKeys, error) {
+	results := make(map[string]manifest.BatchSigningPublicKeys)
+	for dataShareProcessor, prioKeys := range keys {
+		publicKeys := make(manifest.BatchSigningPublicKeys)
+		results[dataShareProcessor] = publicKeys
+
+		for _, key := range prioKeys {
+			publicKey, err := key.GetPemEncodedPublicKey()
+			if err != nil {
+				return nil, err
+			}
+			if key.KubeIdentifier == nil {
+				return nil, fmt.Errorf("kubeidentifier was nil")
+			}
+
+			if key.Expiration == nil {
+				return nil, fmt.Errorf("expiration was nil")
+			}
+
+			publicKeys[*key.KubeIdentifier] = manifest.BatchSigningPublicKey{
+				PublicKey:  publicKey,
+				Expiration: *key.Expiration,
+			}
+		}
+	}
+	return results, nil
 }

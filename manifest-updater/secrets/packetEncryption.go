@@ -2,11 +2,8 @@ package secrets
 
 import (
 	"context"
-	"crypto/ecdsa"
-	"crypto/elliptic"
 	"encoding/base64"
 	"fmt"
-	"github.com/pkg/errors"
 	corev1 "k8s.io/api/core/v1"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"time"
@@ -57,7 +54,7 @@ func (k *Kube) deletePacketEncryptionSecret(secret *corev1.Secret) error {
 	deletion = 0
 
 	if err := sApi.Delete(context.Background(), secret.Name, v1.DeleteOptions{GracePeriodSeconds: &deletion}); err != nil {
-		return errors.Wrap(err, "unable to delete")
+		return fmt.Errorf("unable to delete: %w", err)
 	}
 
 	return nil
@@ -80,7 +77,7 @@ func (k *Kube) createAndStorePacketEncryptionKey() (*PrioKey, error) {
 		Immutable: &immutable,
 
 		StringData: map[string]string{
-			secretKeyMap: base64.StdEncoding.EncodeToString(key.MarshallX962UncompressedPrivateKey()),
+			secretKeyMap: base64.StdEncoding.EncodeToString(key.marshallX962UncompressedPrivateKey()),
 		},
 	}
 
@@ -88,18 +85,10 @@ func (k *Kube) createAndStorePacketEncryptionKey() (*PrioKey, error) {
 	created, err := sApi.Create(context.Background(), &secret, v1.CreateOptions{})
 
 	if err != nil {
-		return nil, errors.Wrap(err, "failed to store secret")
+		return nil, fmt.Errorf("failed to store secret: %w", err)
 	}
 
-	key.KubeIdentifier = created.Name
+	key.KubeIdentifier = &created.Name
 
 	return key, err
-}
-
-// marshalX962UncompressedPrivateKey encodes a P-256 private key into the format
-// expected by libprio-rs encrypt::PrivateKey, which is the X9.62 uncompressed
-// public key concatenated with the secret scalar.
-func marshalX962UncompressedPrivateKey(ecdsaKey *ecdsa.PrivateKey) ([]byte, error) {
-	marshaledPublicKey := elliptic.Marshal(elliptic.P256(), ecdsaKey.PublicKey.X, ecdsaKey.PublicKey.Y)
-	return append(marshaledPublicKey, ecdsaKey.D.Bytes()...), nil
 }
