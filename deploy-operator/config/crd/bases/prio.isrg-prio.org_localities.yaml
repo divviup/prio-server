@@ -41,6 +41,9 @@ spec:
               items:
                 type: string
               type: array
+            environmentName:
+              description: EnvironmentName is the name of the environment for prio
+              type: string
             manifestBucketLocation:
               description: ManifestBucketLocation is the location that the manifest
                 buckets are stored
@@ -50,6 +53,7 @@ spec:
               type: string
           required:
           - dataShareProcessors
+          - environmentName
           - manifestBucketLocation
           - schedule
           type: object
