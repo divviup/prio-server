@@ -41,15 +41,18 @@ type LocalityReconciler struct {
 }
 
 const (
-	jobNameField    = ".metadata.name"
-	jobName         = "key-rotator"
-	keyRotatorImage = "keyRotator:latest"
+	jobNameField       = ".metadata.name"
+	jobName            = "key-rotator"
+	keyRotatorImage    = "us.gcr.io/prio-bringup-290620/manifest-updater:latest"
+	serviceAccountName = "manifest-updater"
 )
 
 // +kubebuilder:rbac:groups=prio.isrg-prio.org,resources=localities,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=prio.isrg-prio.org,resources=localities/status,verbs=get;update;patch
 // +kubebuilder:rbac:groups=batch,resources=cronjobs,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=batch,resources=cronjobs/status,verbs=get
+// +kubebuilder:rbac:groups=batch,resources=jobs,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=batch,resources=jobs/status,verbs=get
 
 func (r *LocalityReconciler) Reconcile(req ctrl.Request) (ctrl.Result, error) {
 	r.ctx = context.Background()
@@ -131,7 +134,7 @@ func (r *LocalityReconciler) createCronJobTemplate(locality *priov1.Locality) v1
 	env := []v12.EnvVar{
 		{Name: "KR_ENVIRONMENT_NAME", Value: locality.Spec.EnvironmentName},
 		{Name: "KR_MANIFEST_BUCKET_LOCATION", Value: locality.Spec.ManifestBucketLocation},
-		{Name: "KR_DATA_SHARE_PROCESSORS", Value: strings.Join(locality.Spec.DataShareProcessors, ",")},
+		{Name: "KR_DATA_SHARE_PROCESSORS", Value: strings.Join(locality.Spec.DataShareProcessors, " ")},
 		{Name: "KR_LOCALITY", ValueFrom: &v12.EnvVarSource{
 			FieldRef: &v12.ObjectFieldSelector{
 				FieldPath: "metadata.namespace",
@@ -160,8 +163,9 @@ func (r *LocalityReconciler) createCronJobTemplate(locality *priov1.Locality) v1
 				Spec: v1.JobSpec{
 					Template: v12.PodTemplateSpec{
 						Spec: v12.PodSpec{
-							Containers:    containers,
-							RestartPolicy: v12.RestartPolicyOnFailure,
+							Containers:         containers,
+							RestartPolicy:      v12.RestartPolicyOnFailure,
+							ServiceAccountName: serviceAccountName,
 						},
 					},
 				},

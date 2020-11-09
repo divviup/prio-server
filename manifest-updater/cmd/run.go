@@ -36,7 +36,7 @@ var runCmd = &cobra.Command{
 		var packetEncryptionCertificate *manifest.PacketEncryptionCertificate
 		var dspSigningKeys map[string]manifest.BatchSigningPublicKeys
 
-		kube, _ := secrets.NewKube(environmentName, dsps)
+		kube, _ := secrets.NewKube(locality, dsps)
 
 		packetEncryptionKey, err := kube.ReconcilePacketEncryptionKey()
 		if err != nil {
