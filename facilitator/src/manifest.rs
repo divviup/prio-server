@@ -171,8 +171,9 @@ struct IngestionServerIdentity {
     aws_iam_entity: Option<String>,
     /// The numeric identifier of the GCP service account that this ingestion
     /// server uses to authenticate via OIDC identity federation to access
-    /// ingestion buckets.
-    google_service_account: Option<u64>,
+    /// ingestion buckets. While this field's value is a number, facilitator
+    /// treats it as an opaque string.
+    google_service_account: Option<String>,
 }
 
 /// Represents an ingestion server's global manifest.
@@ -696,7 +697,7 @@ mod tests {
 {
     "format": 0,
     "server-identity": {
-        "google-service-account": 123456789012345
+        "google-service-account": "112310747466759665351"
     },
     "batch-signing-public-keys": {
         "key-identifier-2": {
@@ -729,7 +730,7 @@ mod tests {
         assert_eq!(manifest.server_identity.aws_iam_entity, None);
         assert_eq!(
             manifest.server_identity.google_service_account,
-            Some(123456789012345)
+            Some("112310747466759665351".to_owned())
         );
         let batch_signing_public_keys = manifest.batch_signing_public_keys().unwrap();
         batch_signing_public_keys.get("key-identifier-2").unwrap();
