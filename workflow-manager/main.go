@@ -38,11 +38,8 @@ import (
 	"k8s.io/client-go/rest"
 )
 
-// BuildID is generated at build time and contains the branch and short hash.
-var BuildID string
-
-// BuildTime is generated at build time and contains the build time.
-var BuildTime string
+// BuildInfo is generated at build time - see the Dockerfile.
+var BuildInfo string
 
 type batchPath struct {
 	aggregationID  string
@@ -158,7 +155,7 @@ var aggregationPeriod = flag.String("aggregation-period", "3h", "How much time e
 var gracePeriod = flag.String("grace-period", "1h", "Wait this amount of time after the end of an aggregation timeslice to run the aggregation")
 
 func main() {
-	log.Printf("starting %s version %s - %s. Args: %s", os.Args[0], BuildID, BuildTime, os.Args[1:])
+	log.Printf("starting %s version %s. Args: %s", os.Args[0], BuildInfo, os.Args[1:])
 	flag.Parse()
 
 	ownValidationBucket, err := newBucket(*ownValidationInput, *ownValidationIdentity)
