@@ -325,9 +325,8 @@ resource "google_storage_bucket_object" "specific_manifest" {
   cache_control = "no-cache"
   content = jsonencode({
     format                     = 1
-    ingestion-bucket           = "${aws_s3_bucket.ingestion_bucket.region}/${aws_s3_bucket.ingestion_bucket.bucket}",
-    ingestion-identity         = local.ingestion_bucket_writer_role_arn
-    peer-validation-bucket     = "${aws_s3_bucket.peer_validation_bucket.region}/${aws_s3_bucket.peer_validation_bucket.bucket}",
+    ingestion-bucket           = local.ingestion_bucket_url
+    peer-validation-bucket     = local.local_peer_validation_bucket_url
     batch-signing-public-keys  = {}
     packet-encryption-key-csrs = {}
   })
