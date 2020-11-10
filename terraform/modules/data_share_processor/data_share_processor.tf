@@ -72,6 +72,14 @@ variable "is_first" {
   type = bool
 }
 
+variable "aggregation_period" {
+  type = string
+}
+
+variable "aggregation_grace_period" {
+  type = string
+}
+
 locals {
   resource_prefix         = "prio-${var.environment}-${var.data_share_processor_name}"
   is_env_with_ingestor    = lookup(var.test_peer_environment, "env_with_ingestor", "") == var.environment
@@ -369,6 +377,8 @@ module "kubernetes" {
   is_env_with_ingestor                    = local.is_env_with_ingestor
   test_peer_ingestion_bucket              = local.test_peer_ingestion_bucket
   is_first                                = var.is_first
+  aggregation_period                      = var.aggregation_period
+  aggregation_grace_period                = var.aggregation_grace_period
 }
 
 output "data_share_processor_name" {

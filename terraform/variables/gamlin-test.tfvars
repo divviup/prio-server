@@ -15,3 +15,5 @@ ingestors = {
 peer_share_processor_manifest_base_url = "gamlin-test.manifests.isrg-prio.org/pha"
 portal_server_manifest_base_url        = "gamlin-test.manifests.isrg-prio.org/portal-server"
 is_first                               = false
+aggregation_period                     = "30m"
+aggregation_grace_period               = "30m"
