@@ -231,7 +231,7 @@ impl Transport for GCSTransport {
 
     fn get(&mut self, key: &str) -> Result<Box<dyn Read>> {
         info!(
-            "get {}{} as {:?}",
+            "get {}/{} as {:?}",
             self.path, key, self.oauth_token_provider
         );
         // Per API reference, the object key must be URL encoded.
@@ -270,7 +270,7 @@ impl Transport for GCSTransport {
 
     fn put(&mut self, key: &str) -> Result<Box<dyn TransportWriter>> {
         info!(
-            "put {}{} as {:?}",
+            "put {}/{} as {:?}",
             self.path, key, self.oauth_token_provider
         );
         // The Oauth token will only be used once, during the call to
