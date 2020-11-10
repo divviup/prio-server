@@ -296,7 +296,7 @@ func newBucket(bucketURL, identity string) (*bucket, error) {
 	if !strings.HasPrefix(bucketURL, "s3://") && !strings.HasPrefix(bucketURL, "gs://") {
 		return nil, fmt.Errorf("invalid bucket %q with identity %q", bucketURL, identity)
 	}
-	if strings.HasPrefix(bucketURL, "gs://") && identity != "" {
+	if strings.HasPrefix(bucketURL, "gs://") && identity != "" && identity != "default" {
 		return nil, fmt.Errorf("workflow-manager doesn't support alternate identities (%s) for gs:// bucket (%q)",
 			identity, bucketURL)
 	}
@@ -384,7 +384,7 @@ func (b *bucket) listFilesS3(ctx context.Context) ([]string, error) {
 }
 
 func (b *bucket) listFilesGS(ctx context.Context) ([]string, error) {
-	if b.identity != "" {
+	if b.identity != "" && b.identity != "default" {
 		return nil, fmt.Errorf("workflow-manager doesn't support non-default identity %q for GS bucket %q", b.identity, b.bucketName)
 	}
 	client, err := storage.NewClient(ctx)
