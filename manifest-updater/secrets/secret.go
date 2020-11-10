@@ -118,7 +118,11 @@ func (k *Kube) ReconcileBatchSigningKey() (map[string][]*PrioKey, error) {
 			return nil, fmt.Errorf("validating the batch signing key failed: %w", err)
 		}
 
-		results[dataShareProcessor] = keys
+		if keys == nil {
+			k.log.WithField("data share processor", dataShareProcessor).Info("Batch signing key was not expired")
+			continue
+		}
+
 	}
 
 	return results, nil
