@@ -131,6 +131,11 @@ func (r *LocalityReconciler) createJobFromCronJob(cronJob *v1beta1.CronJob) v1.J
 }
 
 func (r *LocalityReconciler) createCronJobTemplate(locality *priov1.Locality) v1beta1.CronJob {
+	var jobTTL int32
+	jobTTL = 5
+
+	trueValue := true
+
 	env := []v12.EnvVar{
 		{Name: "KR_ENVIRONMENT_NAME", Value: locality.Spec.EnvironmentName},
 		{Name: "KR_MANIFEST_BUCKET_LOCATION", Value: locality.Spec.ManifestBucketLocation},
@@ -163,11 +168,13 @@ func (r *LocalityReconciler) createCronJobTemplate(locality *priov1.Locality) v1
 				Spec: v1.JobSpec{
 					Template: v12.PodTemplateSpec{
 						Spec: v12.PodSpec{
-							Containers:         containers,
-							RestartPolicy:      v12.RestartPolicyOnFailure,
-							ServiceAccountName: serviceAccountName,
+							Containers:                   containers,
+							RestartPolicy:                v12.RestartPolicyOnFailure,
+							ServiceAccountName:           serviceAccountName,
+							AutomountServiceAccountToken: &trueValue,
 						},
 					},
+					TTLSecondsAfterFinished: &jobTTL,
 				},
 			},
 		},

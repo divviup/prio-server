@@ -1,11 +1,11 @@
 apiVersion: prio.isrg-prio.org/v1
 kind: Locality
 metadata:
-  name: locality-sample
+  name: narnia-locality
   namespace: narnia
 spec:
-  environmentName: gamlin
-  manifestBucketLocation: prio-amir-d2-peer-manifests
+  environmentName: narnia
+  manifestBucketLocation: prio-amir-d2-manifests
   dataShareProcessors:
     - apple
     - google
