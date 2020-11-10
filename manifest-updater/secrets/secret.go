@@ -122,6 +122,7 @@ func (k *Kube) ReconcileBatchSigningKey() (map[string][]*PrioKey, error) {
 			k.log.WithField("data share processor", dataShareProcessor).Info("Batch signing key was not expired")
 			continue
 		}
+		results[dataShareProcessor] = keys
 
 	}
 

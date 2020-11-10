@@ -41,7 +41,7 @@ func (u *Updater) UpdateDataShareSpecificManifest(keys map[string]BatchSigningPu
 		if err != nil {
 			return fmt.Errorf("manifest file not read properly: %w", err)
 		}
-		if keys != nil {
+		if keys != nil && keys[dsp] != nil {
 			manifest.BatchSigningPublicKeys = keys[dsp]
 		}
 		if certificate != nil {
