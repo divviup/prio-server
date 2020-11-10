@@ -454,6 +454,18 @@ func fmtTime(t time.Time) string {
 	return t.Format("2006/01/02/15/04")
 }
 
+// idForJobName generates a job name-safe string from an aggregationID.
+// Remove characters that aren't valid in DNS names, and also restrict
+// the length so we don't go over the limit of 63 characters.
+func idForJobName(aggregationID string) string {
+	re := regexp.MustCompile("[^A-Za-z0-9-]")
+	idForJobName := re.ReplaceAllLiteralString(aggregationID, "-")
+	if len(idForJobName) > 30 {
+		idForJobName = idForJobName[:30]
+	}
+	return idForJobName
+}
+
 // aggregationInterval calculates the interval we want to run an aggregation for, if any.
 // That is whatever interval is `gracePeriod` earlier than now and aligned on multiples
 // of `aggregationPeriod` (relative to the zero time).
@@ -524,14 +536,7 @@ func launchAggregationJobs(ctx context.Context, batchesByID aggregationMap, inte
 			}
 		}
 
-		// Embed the aggregation ID in the job name, but remove characters that aren't valid in DNS
-		// names, and also restrict the length so we don't go over the limit of 63 characters.
-		re := regexp.MustCompile("[^A-Za-z0-9-]")
-		idForJobName := re.ReplaceAllLiteralString(aggregationID, "-")
-		if len(idForJobName) > 30 {
-			idForJobName = idForJobName[:30]
-		}
-		jobName := fmt.Sprintf("a-%s-%s", idForJobName, strings.ReplaceAll(fmtTime(inter.begin), "/", "-"))
+		jobName := fmt.Sprintf("a-%s-%s", idForJobName(aggregationID), strings.ReplaceAll(fmtTime(inter.begin), "/", "-"))
 
 		log.Printf("starting aggregation job %s (interval %s) with args %s", jobName, inter, args)
 
@@ -641,7 +646,9 @@ func startIntakeJob(
 		return nil
 	}
 
-	jobName := fmt.Sprintf("i-batch-%s", batchPath.ID)
+	jobName := fmt.Sprintf("i-%s-%s",
+		idForJobName(batchPath.aggregationID),
+		strings.ReplaceAll(fmtTime(batchPath.time), "/", "-"))
 
 	args := []string{
 		"intake-batch",
