@@ -33,8 +33,8 @@ resource "random_string" "account_id" {
 # service account above.
 resource "kubernetes_service_account" "manifest_updater" {
   metadata {
-    name        = "manifest-updater"
-    namespace   = var.kubernetes_namespace
+    name      = "manifest-updater"
+    namespace = var.kubernetes_namespace
     annotations = {
       environment                      = var.environment
       "iam.gke.io/gcp-service-account" = google_service_account.manifest_updater.email
@@ -54,7 +54,7 @@ resource "google_service_account_iam_binding" "manifest_updater_workload" {
   provider           = google-beta
   service_account_id = google_service_account.manifest_updater.name
   role               = "roles/iam.workloadIdentityUser"
-  members            = [
+  members = [
     local.manifest_updater_sa
   ]
 }
@@ -70,10 +70,10 @@ resource "kubernetes_role" "manifest_updater_role" {
     api_groups = [
       ""
     ]
-    resources  = [
+    resources = [
       "secrets"
     ]
-    verbs      = [
+    verbs = [
       "create",
       "list",
       "get",
@@ -106,10 +106,10 @@ resource "kubernetes_role_binding" "manifest_updater_rolebinding" {
 resource "google_storage_bucket_iam_member" "manifest_bucket_owner" {
   bucket = var.manifest_bucket
   role   = "roles/storage.legacyBucketWriter"
-  member = "serviceAccount:${google_service_account.manifest_updater.email}" 
+  member = "serviceAccount:${google_service_account.manifest_updater.email}"
   // TODO: potentially tighten the permissions up?
-//  condition {
-//    expression = "resource.name.startsWith(\"projects/_/buckets/${var.manifest_bucket}/objects/${var.kubernetes_namespace}\")"
-//    title      = "access to ${var.kubernetes_namespace} manifests"
-//  }
+  //  condition {
+  //    expression = "resource.name.startsWith(\"projects/_/buckets/${var.manifest_bucket}/objects/${var.kubernetes_namespace}\")"
+  //    title      = "access to ${var.kubernetes_namespace} manifests"
+  //  }
 }
