@@ -90,6 +90,8 @@ func (u *Updater) writeManifest(store *storage.BucketHandle, manifest *DataShare
 	manifestObj := store.Object(fmt.Sprintf("%s-%s-manifest.json", u.locality, dataShareProcessor))
 
 	w := manifestObj.NewWriter(context.Background())
+	w.CacheControl = "no-cache"
+	w.ContentType = "application/json; charset=UTF-8"
 	defer func() {
 		err := w.Close()
 		if err != nil {
