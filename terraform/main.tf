@@ -216,6 +216,19 @@ locals {
   }
 }
 
+# Call the locality_kubernetes module per
+# each locality/namespace
+module "locality_kubernetes" {
+  for_each             = kubernetes_namespace.namespaces
+  source               = "./modules/locality_kubernetes"
+  environment          = var.environment
+  gcp_project          = var.gcp_project
+  manifest_bucket      = module.manifest.bucket
+  kubernetes_namespace = each.value.metadata[0].name
+
+  depends_on = [module.manifest]
+}
+
 module "data_share_processors" {
   for_each                                = local.locality_ingestor_pairs
   source                                  = "./modules/data_share_processor"
