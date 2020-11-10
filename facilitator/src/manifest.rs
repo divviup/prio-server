@@ -96,6 +96,10 @@ pub struct SpecificManifest {
     /// Region and name of the ingestion S3 bucket owned by this data share
     /// processor.
     ingestion_bucket: String,
+    // The ARN of the AWS IAM role that should be assumed by an ingestion server
+    // to write to this data share processor's ingestion bucket, if the ingestor
+    // does not have an AWS account of their own.
+    ingestion_identity: String,
     /// Region and name of the peer validation S3 bucket owned by this data
     /// share processor.
     peer_validation_bucket: String,
@@ -481,6 +485,7 @@ mod tests {
       }}
     }},
     "ingestion-bucket": "us-west-1/ingestion",
+    "ingestion-identity": "arn:aws:iam:something:fake",
     "peer-validation-bucket": "us-west-1/validation"
 }}
     "#,
@@ -510,8 +515,9 @@ mod tests {
             format: 0,
             batch_signing_public_keys: expected_batch_keys,
             packet_encryption_certificates: expected_packet_encryption_certificates,
-            ingestion_bucket: "us-west-1/ingestion".to_string(),
-            peer_validation_bucket: "us-west-1/validation".to_string(),
+            ingestion_bucket: "us-west-1/ingestion".to_owned(),
+            ingestion_identity: "arn:aws:iam:something:fake".to_owned(),
+            peer_validation_bucket: "us-west-1/validation".to_owned(),
         };
         assert_eq!(manifest, expected_manifest);
         let batch_signing_keys = manifest.batch_signing_public_keys().unwrap();
@@ -560,6 +566,7 @@ mod tests {
       }
     },
     "ingestion-bucket": "us-west-1/ingestion",
+    "ingestion-identity": "arn:aws:iam:something:fake",
     "peer-validation-bucket": "us-west-1/validation"
 }
     "#,
@@ -579,6 +586,7 @@ mod tests {
       }
     },
     "ingestion-bucket": "us-west-1/ingestion",
+    "ingestion-identity": "arn:aws:iam:something:fake",
     "peer-validation-bucket": "us-west-1/validation"
 }
     "#,
@@ -598,9 +606,30 @@ mod tests {
       }
     },
     "ingestion-bucket": "us-west-1/ingestion",
+    "ingestion-identity": "arn:aws:iam:something:fake",
     "peer-validation-bucket": "us-west-1/validation"
 }
     "#,
+            // Role ARN with wrong type
+            r#"
+{
+    "format": 0,
+    "packet-encryption-certificates": {
+        "fake-key-1": {
+            "certificate": "who cares"
+        }
+    },
+    "batch-signing-public-keys": {
+        "fake-key-2": {
+        "expiration": "",
+        "public-key": "-----BEGIN PUBLIC KEY-----\nfoo\n-----END PUBLIC KEY-----"
+      }
+    },
+    "ingestion-bucket": "us-west-1/ingestion",
+    "ingestion-identity": 1,
+    "peer-validation-bucket": "us-west-1/validation"
+}
+"#,
         ];
 
         for invalid_manifest in &invalid_manifests {
@@ -628,6 +657,7 @@ mod tests {
       }
     },
     "ingestion-bucket": "us-west-1/ingestion",
+    "ingestion-identity": "arn:aws:iam:something:fake",
     "peer-validation-bucket": "us-west-1/validation"
 }
     "#,
@@ -647,6 +677,7 @@ mod tests {
       }
     },
     "ingestion-bucket": "us-west-1/ingestion",
+    "ingestion-identity": "arn:aws:iam:something:fake",
     "peer-validation-bucket": "us-west-1/validation"
 }
     "#,
@@ -666,6 +697,7 @@ mod tests {
       }
     },
     "ingestion-bucket": "us-west-1/ingestion",
+    "ingestion-identity": "arn:aws:iam:something:fake",
     "peer-validation-bucket": "us-west-1/validation"
 }
     "#,
