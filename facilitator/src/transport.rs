@@ -64,4 +64,6 @@ pub trait Transport {
     /// Returns an std::io::Write instance into which the contents of the value
     /// may be written.
     fn put(&mut self, key: &str) -> Result<Box<dyn TransportWriter>>;
+
+    fn path(&self) -> String;
 }

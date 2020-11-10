@@ -127,6 +127,10 @@ impl<'a, H: Header, P: Packet> BatchReader<'a, H, P> {
         }
     }
 
+    pub fn path(&self) -> String {
+        self.transport.path()
+    }
+
     /// Return the parsed header from this batch, but only if its signature is
     /// valid. The signature is checked by getting the key_identifier value from
     /// the signature message, using that to obtain a public key from the
@@ -220,6 +224,10 @@ impl<'a, H: Header, P: Packet> BatchWriter<'a, H, P> {
             phantom_header: PhantomData,
             phantom_packet: PhantomData,
         }
+    }
+
+    pub fn path(&self) -> String {
+        self.transport.path()
     }
 
     /// Encode the provided header into Avro, sign that representation with the

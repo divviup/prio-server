@@ -182,8 +182,12 @@ impl S3Transport {
 type ClientProvider = Box<dyn Fn(&Region, Option<String>) -> Result<S3Client>>;
 
 impl Transport for S3Transport {
+    fn path(&self) -> String {
+        self.path.to_string()
+    }
+
     fn get(&mut self, key: &str) -> Result<Box<dyn Read>> {
-        info!("get {} as {:?}", self.path, self.iam_role);
+        info!("get {}{} as {:?}", self.path, key, self.iam_role);
         let mut runtime = basic_runtime()?;
         let client = (self.client_provider)(&self.path.region, self.iam_role.clone())?;
         let get_output = runtime
@@ -200,7 +204,7 @@ impl Transport for S3Transport {
     }
 
     fn put(&mut self, key: &str) -> Result<Box<dyn TransportWriter>> {
-        info!("put {} as {:?}", self.path, self.iam_role);
+        info!("put {}{} as {:?}", self.path, key, self.iam_role);
         let writer = MultipartUploadWriter::new(
             self.path.bucket.to_owned(),
             format!("{}{}", &self.path.key, key),

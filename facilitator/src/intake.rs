@@ -4,8 +4,9 @@ use crate::{
     transport::{SignableTransport, VerifiableAndDecryptableTransport},
     BatchSigningKey, Error,
 };
-use anyhow::{anyhow, Context, Result};
+use anyhow::{anyhow, ensure, Context, Result};
 use chrono::NaiveDateTime;
+use log::info;
 use prio::{encrypt::PrivateKey, finite_field::Field, server::Server};
 use ring::signature::UnparsedPublicKey;
 use std::{collections::HashMap, convert::TryFrom, iter::Iterator};
@@ -15,8 +16,8 @@ use uuid::Uuid;
 /// sent by the ingestion server and emitting validation shares to the other
 /// share processor.
 pub struct BatchIntaker<'a> {
-    ingestion_batch: BatchReader<'a, IngestionHeader, IngestionDataSharePacket>,
-    ingestor_public_keys: &'a HashMap<String, UnparsedPublicKey<Vec<u8>>>,
+    intake_batch: BatchReader<'a, IngestionHeader, IngestionDataSharePacket>,
+    intake_public_keys: &'a HashMap<String, UnparsedPublicKey<Vec<u8>>>,
     packet_decryption_keys: &'a Vec<PrivateKey>,
     peer_validation_batch: BatchWriter<'a, ValidationHeader, ValidationPacket>,
     peer_validation_batch_signing_key: &'a BatchSigningKey,
@@ -36,11 +37,11 @@ impl<'a> BatchIntaker<'a> {
         is_first: bool,
     ) -> Result<BatchIntaker<'a>> {
         Ok(BatchIntaker {
-            ingestion_batch: BatchReader::new(
+            intake_batch: BatchReader::new(
                 Batch::new_ingestion(aggregation_name, batch_id, date),
                 &mut *ingestion_transport.transport.transport,
             ),
-            ingestor_public_keys: &ingestion_transport.transport.batch_signing_public_keys,
+            intake_public_keys: &ingestion_transport.transport.batch_signing_public_keys,
             packet_decryption_keys: &ingestion_transport.packet_decryption_keys,
             peer_validation_batch: BatchWriter::new(
                 Batch::new_validation(aggregation_name, batch_id, date, is_first),
@@ -60,13 +61,18 @@ impl<'a> BatchIntaker<'a> {
     /// and packet file, then computes validation shares and sends them to the
     /// peer share processor.
     pub fn generate_validation_share(&mut self) -> Result<()> {
-        let ingestion_header = self.ingestion_batch.header(self.ingestor_public_keys)?;
-        if ingestion_header.bins <= 0 {
-            return Err(anyhow!(
-                "invalid bins/dimension value {}",
-                ingestion_header.bins
-            ));
-        }
+        info!(
+            "processing intake from {} and saving validity to {} and {}",
+            self.intake_batch.path(),
+            self.own_validation_batch.path(),
+            self.peer_validation_batch.path()
+        );
+        let ingestion_header = self.intake_batch.header(self.intake_public_keys)?;
+        ensure!(
+            ingestion_header.bins > 0,
+            "invalid bin count {}",
+            ingestion_header.bins
+        );
 
         // Ideally, we would use the encryption_key_id in the ingestion packet
         // to figure out which private key to use for decryption, but that field
@@ -82,7 +88,7 @@ impl<'a> BatchIntaker<'a> {
         // Read all the ingestion packets, generate a verification message for
         // each, and write them to the validation batch.
         let mut ingestion_packet_reader =
-            self.ingestion_batch.packet_file_reader(&ingestion_header)?;
+            self.intake_batch.packet_file_reader(&ingestion_header)?;
 
         let packet_file_digest = self.peer_validation_batch.multi_packet_file_writer(
             vec![&mut self.own_validation_batch],

@@ -8,7 +8,7 @@ use chrono::{prelude::Utc, DateTime, Duration};
 use log::info;
 use serde::Deserialize;
 use std::{
-    io,
+    fmt, io,
     io::{Read, Write},
 };
 
@@ -17,7 +17,6 @@ const DEFAULT_OAUTH_TOKEN_URL: &str =
     "http://metadata.google.internal:80/computeMetadata/v1/instance/service-accounts/default/token";
 
 /// A wrapper around an Oauth token and its expiration date.
-#[derive(Debug)]
 struct OauthToken {
     token: String,
     expiration: DateTime<Utc>,
@@ -33,7 +32,7 @@ impl OauthToken {
 /// Represents the response from a GET request to the GKE metadata service's
 /// service account token endpoint. Structure is derived from empirical
 /// observation of the JSON scraped from inside a GKE job.
-#[derive(Debug, Deserialize, PartialEq)]
+#[derive(Deserialize, PartialEq)]
 struct MetadataServiceTokenResponse {
     access_token: String,
     expires_in: i64,
@@ -43,7 +42,7 @@ struct MetadataServiceTokenResponse {
 /// Represents the response from a POST request to the GCP IAM service's
 /// generateAccessToken endpoint.
 /// https://cloud.google.com/iam/docs/reference/credentials/rest/v1/projects.serviceAccounts/generateAccessToken
-#[derive(Debug, Deserialize, PartialEq)]
+#[derive(Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 struct GenerateAccessTokenResponse {
     access_token: String,
@@ -53,30 +52,44 @@ struct GenerateAccessTokenResponse {
 /// OauthTokenProvider manages a default service account Oauth token (i.e. the
 /// one for a GCP service account mapped to a Kubernetes service account) and an
 /// Oauth token used to impersonate another service account.
-#[derive(Debug)]
 struct OauthTokenProvider {
     /// Holds the service account email to impersonate, if one was provided to
     /// OauthTokenProvider::new.
-    service_account_to_impersonate: Option<String>,
+    account_to_impersonate: Option<String>,
     /// This field is None after instantiation and is Some after the first
     /// successful request for a token for the default service account, though
     /// the contained token may be expired.
-    default_service_account_oauth_token: Option<OauthToken>,
+    default_account_token: Option<OauthToken>,
     /// This field is None after instantiation and is Some after the first
     /// successful request for a token for the impersonated service account,
     /// though the contained token may be expired. This will always be None if
-    /// service_account_to_impersonate is None.
-    impersonated_service_account_oauth_token: Option<OauthToken>,
+    /// account_to_impersonate is None.
+    impersonated_account_token: Option<OauthToken>,
 }
 
+impl fmt::Debug for OauthTokenProvider {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("OauthTokenProvider")
+            .field("account_to_impersonate", &self.account_to_impersonate)
+            .field(
+                "default_account_token",
+                &self.default_account_token.as_ref().map(|_| "redacted"),
+            )
+            .field(
+                "impersonated_account_token",
+                &self.default_account_token.as_ref().map(|_| "redacted"),
+            )
+            .finish()
+    }
+}
 impl OauthTokenProvider {
     /// Creates a token provider which can impersonate the specified service
     /// account.
-    fn new(service_account_to_impersonate: Option<String>) -> OauthTokenProvider {
+    fn new(account_to_impersonate: Option<String>) -> OauthTokenProvider {
         OauthTokenProvider {
-            service_account_to_impersonate,
-            default_service_account_oauth_token: None,
-            impersonated_service_account_oauth_token: None,
+            account_to_impersonate: account_to_impersonate,
+            default_account_token: None,
+            impersonated_account_token: None,
         }
     }
 
@@ -87,9 +100,9 @@ impl OauthTokenProvider {
     /// impersonation is taking place, provides the default service account
     /// Oauth token.
     fn ensure_storage_access_oauth_token(&mut self) -> Result<String> {
-        match self.service_account_to_impersonate {
+        match self.account_to_impersonate {
             Some(_) => self.ensure_impersonated_service_account_oauth_token(),
-            None => self.ensure_default_service_account_oauth_token(),
+            None => self.ensure_default_account_token(),
         }
     }
 
@@ -97,8 +110,8 @@ impl OauthTokenProvider {
     /// is valid. Otherwise obtains and returns a new one.
     /// The returned value is an owned reference because the token owned by this
     /// struct could change while the caller is still holding the returned token
-    fn ensure_default_service_account_oauth_token(&mut self) -> Result<String> {
-        if let Some(token) = &self.default_service_account_oauth_token {
+    fn ensure_default_account_token(&mut self) -> Result<String> {
+        if let Some(token) = &self.default_account_token {
             if !token.expired() {
                 return Ok(token.token.clone());
             }
@@ -125,7 +138,7 @@ impl OauthTokenProvider {
             return Err(anyhow!("unexpected token type {}", response.token_type));
         }
 
-        self.default_service_account_oauth_token = Some(OauthToken {
+        self.default_account_token = Some(OauthToken {
             token: response.access_token.clone(),
             expiration: Utc::now() + Duration::seconds(response.expires_in),
         });
@@ -136,25 +149,22 @@ impl OauthTokenProvider {
     /// Returns the current OAuth token for the impersonated service account, if
     /// it is valid. Otherwise obtains and returns a new one.
     fn ensure_impersonated_service_account_oauth_token(&mut self) -> Result<String> {
-        if self.service_account_to_impersonate.is_none() {
+        if self.account_to_impersonate.is_none() {
             return Err(anyhow!("no service account to impersonate was provided"));
         }
 
-        if let Some(token) = &self.impersonated_service_account_oauth_token {
+        if let Some(token) = &self.impersonated_account_token {
             if !token.expired() {
                 return Ok(token.token.clone());
             }
         }
 
-        let service_account_to_impersonate = self.service_account_to_impersonate.clone().unwrap();
+        let service_account_to_impersonate = self.account_to_impersonate.clone().unwrap();
         // API reference:
         // https://cloud.google.com/iam/docs/reference/credentials/rest/v1/projects.serviceAccounts/generateAccessToken
         let request_url = format!("https://iamcredentials.googleapis.com/v1/projects/-/serviceAccounts/{}:generateAccessToken",
             service_account_to_impersonate);
-        let auth = format!(
-            "Bearer {}",
-            self.ensure_default_service_account_oauth_token()?
-        );
+        let auth = format!("Bearer {}", self.ensure_default_account_token()?);
         let http_response = ureq::post(&request_url)
             .set("Authorization", &auth)
             .set("Content-Type", "application/json")
@@ -181,7 +191,7 @@ impl OauthTokenProvider {
         let response = http_response
             .into_json_deserialize::<GenerateAccessTokenResponse>()
             .context("failed to deserialize response from IAM API")?;
-        self.impersonated_service_account_oauth_token = Some(OauthToken {
+        self.impersonated_account_token = Some(OauthToken {
             token: response.access_token.clone(),
             expiration: response.expire_time,
         });
@@ -215,8 +225,15 @@ impl GCSTransport {
 }
 
 impl Transport for GCSTransport {
+    fn path(&self) -> String {
+        self.path.to_string()
+    }
+
     fn get(&mut self, key: &str) -> Result<Box<dyn Read>> {
-        info!("get {} as {:?}", self.path, self.oauth_token_provider);
+        info!(
+            "get {}{} as {:?}",
+            self.path, key, self.oauth_token_provider
+        );
         // Per API reference, the object key must be URL encoded.
         // API reference: https://cloud.google.com/storage/docs/json_api/v1/objects/get
         let encoded_key = urlencoding::encode(&[&self.path.key, key].concat());
@@ -252,7 +269,10 @@ impl Transport for GCSTransport {
     }
 
     fn put(&mut self, key: &str) -> Result<Box<dyn TransportWriter>> {
-        info!("get {} as {:?}", self.path, self.oauth_token_provider);
+        info!(
+            "put {}{} as {:?}",
+            self.path, key, self.oauth_token_provider
+        );
         // The Oauth token will only be used once, during the call to
         // StreamingTransferWriter::new, so we don't have to worry about it
         // expiring during the lifetime of that object, and so obtain a token
