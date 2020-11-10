@@ -11,7 +11,7 @@ import (
 
 const (
 	batchSigningKeyExpirationDuration = 90 * 24 * time.Hour
-
+	// TODO: This needs to change to something like 70 days in prod
 	batchSigningKeyMaxAge = 20 * time.Second
 	expirationKeyMap      = "expiration"
 )
