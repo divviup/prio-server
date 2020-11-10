@@ -67,6 +67,24 @@ variable "is_first" {
   description = "Whether the data share processors created by this environment are \"first\" or \"PHA servers\""
 }
 
+variable "aggregation_period" {
+  type        = string
+  default     = "3h"
+  description = <<DESCRIPTION
+Aggregation period used by workflow manager. The value should be a string
+parseable by Go's time.ParseDuration.
+DESCRIPTION
+}
+
+variable "aggregation_grace_period" {
+  type        = string
+  default     = "1h"
+  description = <<DESCRIPTION
+Aggregation grace period used by workflow manager. The value should be a string
+parseable by Go's time.ParseDuration.
+DESCRIPTION
+}
+
 terraform {
   backend "gcs" {}
 
@@ -218,6 +236,8 @@ module "data_share_processors" {
   own_manifest_base_url                   = module.manifest.base_url
   test_peer_environment                   = var.test_peer_environment
   is_first                                = var.is_first
+  aggregation_period                      = var.aggregation_period
+  aggregation_grace_period                = var.aggregation_grace_period
 
   depends_on = [module.gke]
 }
