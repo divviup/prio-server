@@ -3,7 +3,7 @@ use crate::{
     transport::{Transport, TransportWriter},
     Error,
 };
-use anyhow::{Context, Result};
+use anyhow::{anyhow, Context, Result};
 use derivative::Derivative;
 use hyper_rustls::HttpsConnector;
 use log::debug;
@@ -39,13 +39,20 @@ use tokio::{
 // See terraform/modules/gke/gke.tf and terraform/modules/kuberenetes/kubernetes.tf
 const METADATA_SERVICE_TOKEN_URL: &str = "http://metadata.google.internal:80/computeMetadata/v1/instance/service-accounts/default/identity";
 
-// When running in GCP, we are provided the AWS account ID that owns our buckets
-// via environment variable.
-const AWS_ACCOUNT_ID_ENVIRONMENT_VARIABLE: &str = "AWS_ACCOUNT_ID";
-
 /// Constructs a basic runtime suitable for use in our single threaded context
 fn basic_runtime() -> Result<Runtime> {
     Ok(Builder::new().basic_scheduler().enable_all().build()?)
+}
+
+fn audience(iam_role: &str) -> Result<String> {
+    let components: Vec<&str> = iam_role.split(":").collect();
+    if components[0] != "arn" {
+        return Err(anyhow!("IAM role didn't start with 'arn'"));
+    } else if components.len() != 6 {
+        return Err(anyhow!("Invalid ARN"));
+    }
+    let aws_account_id = components[4];
+    Ok(format!("sts.amazonaws.com/{}", aws_account_id))
 }
 
 /// Implementation of Transport that reads and writes objects from Amazon S3.
@@ -90,23 +97,16 @@ impl S3Transport {
                     // fetching tokens, allowing Rusoto to automatically get new
                     // credentials if they expire (which they do every hour).
                     let oidc_token_variable = Variable::dynamic(|| {
-                        let aws_account_id = env::var(AWS_ACCOUNT_ID_ENVIRONMENT_VARIABLE)
-                            .map_err(|e| {
-                                CredentialsError::new(format!(
-                                    "could not read {} from environment: {}",
-                                    AWS_ACCOUNT_ID_ENVIRONMENT_VARIABLE, e
-                                ))
-                            })?;
+                        let audience = audience(iam_role).map_err(|e| -{
+                            CredentialsError::new(format!("error parsing role {}: {}", iam_role, e))
+                        });
                         // We use ureq for this request because it is designed
                         // to use purely synchronous Rust. Ironically, we are in
                         // the context of an async runtime when this callback is
                         // invoked, but because the closure is not declared
                         // async, we cannot use .await to work with Futures.
                         let response = ureq::get(METADATA_SERVICE_TOKEN_URL)
-                            .query(
-                                "audience",
-                                format!("sts.amazonaws.com/{}", aws_account_id).as_ref(),
-                            )
+                            .query("audience", &audience(iam_role)?)
                             .set("Metadata-Flavor", "Google")
                             // By default, ureq will wait forever to connect or
                             // read.
