@@ -210,6 +210,7 @@ locals {
       packet_decryption_key_kubernetes_secret = kubernetes_secret.ingestion_packet_decryption_keys[pair[0]].metadata[0].name
       ingestor_aws_role_arn                   = lookup(jsondecode(data.http.ingestor_global_manifests[pair[1]].body).server-identity, "aws-iam-entity", "")
       ingestor_gcp_service_account_id         = lookup(jsondecode(data.http.ingestor_global_manifests[pair[1]].body).server-identity, "google-service-account", "")
+      ingestor_gcp_service_account_email      = lookup(jsondecode(data.http.ingestor_global_manifests[pair[1]].body).server-identity, "gcp-service-account-email", "")
       ingestor_manifest_base_url              = var.ingestors[pair[1]]
     }
   }
@@ -227,6 +228,7 @@ module "data_share_processors" {
   certificate_domain                      = "${var.environment}.certificates.${var.manifest_domain}"
   ingestor_aws_role_arn                   = each.value.ingestor_aws_role_arn
   ingestor_gcp_service_account_id         = each.value.ingestor_gcp_service_account_id
+  ingestor_gcp_service_account_email      = each.value.ingestor_gcp_service_account_email
   ingestor_manifest_base_url              = each.value.ingestor_manifest_base_url
   packet_decryption_key_kubernetes_secret = each.value.packet_decryption_key_kubernetes_secret
   peer_share_processor_aws_account_id     = jsondecode(data.http.peer_share_processor_global_manifest.body).server-identity.aws-account-id
