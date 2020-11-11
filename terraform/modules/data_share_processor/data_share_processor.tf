@@ -42,6 +42,10 @@ variable "ingestor_gcp_service_account_id" {
   type = string
 }
 
+variable "ingestor_gcp_service_account_email" {
+  type = string
+}
+
 variable "peer_share_processor_aws_account_id" {
   type = string
 }
@@ -187,6 +191,10 @@ POLICY
 # AWS that their service account assumes. Note the "count" parameter in the
 # block, which seems to be the Terraform convention to conditionally create
 # resources (c.f. lots of StackOverflow questions and GitHub issues).
+# We have two statements in this policy, one granting access to the account by
+# numeric ID, and the other by account email. This is a workaround for behavior
+# observed by our Google colleagues, where auth tokens they get from the IAM API
+# sometimes have one or the other value in azp.
 resource "aws_iam_role" "ingestor_bucket_writer_role" {
   count              = var.ingestor_gcp_service_account_id != "" ? 1 : 0
   name               = "${local.resource_prefix}-bucket-writer"
@@ -203,6 +211,18 @@ resource "aws_iam_role" "ingestor_bucket_writer_role" {
       "Condition": {
         "StringEquals": {
           "accounts.google.com:sub": "${var.ingestor_gcp_service_account_id}"
+        }
+      }
+    },
+    {
+      "Effect": "Allow",
+      "Principal": {
+        "Federated": "accounts.google.com"
+      },
+      "Action": "sts:AssumeRoleWithWebIdentity",
+      "Condition": {
+        "StringEquals": {
+          "accounts.google.com:aud": "${var.ingestor_gcp_service_account_email}"
         }
       }
     }

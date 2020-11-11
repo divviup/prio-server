@@ -174,6 +174,10 @@ struct IngestionServerIdentity {
     /// ingestion buckets. While this field's value is a number, facilitator
     /// treats it as an opaque string.
     google_service_account: Option<String>,
+    /// The email address of the GCP service account that this ingestion server
+    /// uses to authenticate via OIDC identity federation to access ingestion
+    /// buckets.
+    gcp_service_account_email: Option<String>,
 }
 
 /// Represents an ingestion server's global manifest.
@@ -697,7 +701,8 @@ mod tests {
 {
     "format": 0,
     "server-identity": {
-        "google-service-account": "112310747466759665351"
+        "google-service-account": "112310747466759665351",
+        "gcp-service-account-email": "foo@bar.com"
     },
     "batch-signing-public-keys": {
         "key-identifier-2": {
@@ -731,6 +736,10 @@ mod tests {
         assert_eq!(
             manifest.server_identity.google_service_account,
             Some("112310747466759665351".to_owned())
+        );
+        assert_eq!(
+            manifest.server_identity.gcp_service_account_email,
+            Some("foo@bar.com".to_owned())
         );
         let batch_signing_public_keys = manifest.batch_signing_public_keys().unwrap();
         batch_signing_public_keys.get("key-identifier-2").unwrap();
