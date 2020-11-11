@@ -208,6 +208,8 @@ func main() {
 		log.Fatalf("failed to parse specific manifests: %v", err)
 	}
 
+	certificatesByNamespace := map[string]PacketEncryptionCertificate{}
+
 	for dataShareProcessorName, manifestWrapper := range terraformOutput.SpecificManifests.Value {
 		newBatchSigningPublicKeys := map[string]BatchSigningPublicKey{}
 		for name, batchSigningPublicKey := range manifestWrapper.SpecificManifest.BatchSigningPublicKeys {
@@ -250,6 +252,14 @@ func main() {
 				newCertificates[name] = packetEncryptionCertificate
 				continue
 			}
+
+			// Packet encryption keys are shared among the data share processors
+			// in a namespace, so avoid creating and certifying the key twice
+			if certificate, ok := certificatesByNamespace[manifestWrapper.KubernetesNamespace]; ok {
+				newCertificates[name] = certificate
+				continue
+			}
+
 			log.Printf("generating and certifying P256 key %s", name)
 			keyMarshaler := marshalX962UncompressedPrivateKey
 			if terraformOutput.UseTestPHADecryptionKey.Value {
@@ -270,7 +280,10 @@ func main() {
 				log.Fatalf("%s", err)
 			}
 
-			newCertificates[name] = PacketEncryptionCertificate{Certificate: certificate}
+			packetEncryptionCertificate := PacketEncryptionCertificate{Certificate: certificate}
+
+			certificatesByNamespace[manifestWrapper.KubernetesNamespace] = packetEncryptionCertificate
+			newCertificates[name] = packetEncryptionCertificate
 		}
 
 		manifestWrapper.SpecificManifest.PacketEncryptionCertificates = newCertificates
