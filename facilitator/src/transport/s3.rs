@@ -20,7 +20,6 @@ use rusoto_s3::{
 use rusoto_sts::WebIdentityProvider;
 use std::{
     boxed::Box,
-    env,
     io::{Read, Write},
     mem,
     pin::Pin,
@@ -96,17 +95,15 @@ impl S3Transport {
                     // This dynamic variable lets us provide a callback for
                     // fetching tokens, allowing Rusoto to automatically get new
                     // credentials if they expire (which they do every hour).
-                    let oidc_token_variable = Variable::dynamic(|| {
-                        let audience = audience(iam_role).map_err(|e| -{
-                            CredentialsError::new(format!("error parsing role {}: {}", iam_role, e))
-                        });
+                    let audience = audience(&iam_role)?;
+                    let oidc_token_variable = Variable::dynamic(move || {
                         // We use ureq for this request because it is designed
                         // to use purely synchronous Rust. Ironically, we are in
                         // the context of an async runtime when this callback is
                         // invoked, but because the closure is not declared
                         // async, we cannot use .await to work with Futures.
                         let response = ureq::get(METADATA_SERVICE_TOKEN_URL)
-                            .query("audience", &audience(iam_role)?)
+                            .query("audience", &audience)
                             .set("Metadata-Flavor", "Google")
                             // By default, ureq will wait forever to connect or
                             // read.

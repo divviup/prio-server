@@ -210,7 +210,6 @@ resource "kubernetes_config_map" "intake_batch_job_config_map" {
     # PACKET_DECRYPTION_KEYS is a Kubernetes secret
     # BATCH_SIGNING_PRIVATE_KEY is a Kubernetes secret
     IS_FIRST                             = var.is_first ? "true" : "false"
-    AWS_ACCOUNT_ID                       = data.aws_caller_identity.current.account_id
     BATCH_SIGNING_PRIVATE_KEY_IDENTIFIER = kubernetes_secret.batch_signing_key.metadata[0].name
     INGESTOR_IDENTITY                    = var.ingestion_bucket_role
     INGESTOR_INPUT                       = "s3://${var.ingestion_bucket}"
@@ -236,7 +235,6 @@ resource "kubernetes_config_map" "aggregate_job_config_map" {
     # PACKET_DECRYPTION_KEYS is a Kubernetes secret
     # BATCH_SIGNING_PRIVATE_KEY is a Kubernetes secret
     IS_FIRST                             = var.is_first ? "true" : "false"
-    AWS_ACCOUNT_ID                       = data.aws_caller_identity.current.account_id
     BATCH_SIGNING_PRIVATE_KEY_IDENTIFIER = kubernetes_secret.batch_signing_key.metadata[0].name
     INGESTOR_INPUT                       = "s3://${var.ingestion_bucket}"
     INGESTOR_IDENTITY                    = var.ingestion_bucket_role
@@ -371,10 +369,6 @@ resource "kubernetes_cron_job" "sample_maker" {
               env {
                 name  = "RUST_BACKTRACE"
                 value = "1"
-              }
-              env {
-                name  = "AWS_ACCOUNT_ID"
-                value = data.aws_caller_identity.current.account_id
               }
               # We use the packet decryption key that was generated in this
               # deploy to exercise that key provisioning flow.
