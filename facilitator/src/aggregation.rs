@@ -23,6 +23,7 @@ pub struct BatchAggregator<'a> {
     ingestion_transport: &'a mut VerifiableAndDecryptableTransport,
     aggregation_batch: BatchWriter<'a, SumPart, InvalidPacket>,
     share_processor_signing_key: &'a BatchSigningKey,
+    total_individual_clients: i64,
 }
 
 impl<'a> BatchAggregator<'a> {
@@ -57,6 +58,7 @@ impl<'a> BatchAggregator<'a> {
                 &mut *aggregation_transport.transport,
             ),
             share_processor_signing_key: &aggregation_transport.batch_signing_key,
+            total_individual_clients: 0,
         })
     }
 
@@ -115,8 +117,6 @@ impl<'a> BatchAggregator<'a> {
             .map(|f| u32::from(*f) as i64)
             .collect();
 
-        let total_individual_clients = accumulator_server.total_shares().len() as i64;
-
         let sum_signature = self.aggregation_batch.put_header(
             &SumPart {
                 batch_uuids: batch_ids.iter().map(|pair| pair.0).collect(),
@@ -130,7 +130,7 @@ impl<'a> BatchAggregator<'a> {
                 aggregation_start_time: self.aggregation_start.timestamp_millis(),
                 aggregation_end_time: self.aggregation_end.timestamp_millis(),
                 packet_file_digest: invalid_packets_digest.as_ref().to_vec(),
-                total_individual_clients,
+                total_individual_clients: self.total_individual_clients,
             },
             &self.share_processor_signing_key.key,
         )?;
@@ -282,6 +282,7 @@ impl<'a> BatchAggregator<'a> {
                         if !valid {
                             invalid_uuids.push(peer_validation_packet.uuid);
                         }
+                        self.total_individual_clients += 1;
                         did_aggregate_shares = true;
                         break;
                     }
