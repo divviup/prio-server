@@ -29,6 +29,10 @@ impl LocalFileTransport {
 }
 
 impl Transport for LocalFileTransport {
+    fn path(&self) -> String {
+        self.directory.to_string_lossy().to_string()
+    }
+
     fn get(&mut self, key: &str) -> Result<Box<dyn Read>> {
         let path = self.directory.join(LocalFileTransport::relative_path(key));
         let f =

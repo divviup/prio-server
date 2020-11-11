@@ -99,6 +99,14 @@ variable "is_first" {
   type = bool
 }
 
+variable "aggregation_period" {
+  type = string
+}
+
+variable "aggregation_grace_period" {
+  type = string
+}
+
 data "aws_caller_identity" "current" {}
 
 # Workload identity[1] lets us map GCP service accounts to Kubernetes service
@@ -278,6 +286,8 @@ resource "kubernetes_cron_job" "workflow_manager" {
               name  = "workflow-manager"
               image = "${var.container_registry}/${var.workflow_manager_image}:${var.workflow_manager_version}"
               args = [
+                "--aggregation-period", var.aggregation_period,
+                "--grace-period", var.aggregation_grace_period,
                 "--is-first=${var.is_first ? "true" : "false"}",
                 "--k8s-namespace", var.kubernetes_namespace,
                 "--k8s-service-account", kubernetes_service_account.workflow_manager.metadata[0].name,

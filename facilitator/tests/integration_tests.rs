@@ -52,7 +52,7 @@ fn end_to_end() {
         &PrivateKey::from_base64(DEFAULT_FACILITATOR_ECIES_PRIVATE_KEY).unwrap(),
         &default_ingestor_private_key(),
         10,
-        10,
+        16,
         0.11,
         100,
         100,
@@ -69,7 +69,7 @@ fn end_to_end() {
         &PrivateKey::from_base64(DEFAULT_FACILITATOR_ECIES_PRIVATE_KEY).unwrap(),
         &default_ingestor_private_key(),
         10,
-        10,
+        14,
         0.11,
         100,
         100,
@@ -260,6 +260,7 @@ fn end_to_end() {
             &mut *pha_aggregation_transport.transport,
         );
     let pha_sum_part = pha_aggregation_batch_reader.header(&pha_pub_keys).unwrap();
+    assert_eq!(pha_sum_part.total_individual_clients, 30);
     let pha_sum_fields = pha_sum_part.sum().unwrap();
 
     let pha_invalid_packet_reader = pha_aggregation_batch_reader.packet_file_reader(&pha_sum_part);
@@ -285,6 +286,7 @@ fn end_to_end() {
     let facilitator_sum_part = facilitator_aggregation_batch_reader
         .header(&facilitator_pub_keys)
         .unwrap();
+    assert_eq!(facilitator_sum_part.total_individual_clients, 30);
     let facilitator_sum_fields = facilitator_sum_part.sum().unwrap();
 
     let facilitator_invalid_packet_reader =
@@ -309,14 +311,5 @@ fn end_to_end() {
         "facilitator sum part total individual clients does not match the pha sum part total individual clients\n\
         \tfacilitator clients: {}\n\tpha clients: {}",
         facilitator_sum_part.total_individual_clients, pha_sum_part.total_individual_clients
-    );
-
-    assert_eq!(
-        reconstructed.len() as i64,
-        facilitator_sum_part.total_individual_clients,
-        "Total individual clients does not match the length of sum\n\
-        \ttotal individual clients: {}\n\tlength of sum: {}",
-        facilitator_sum_part.total_individual_clients,
-        reconstructed.len()
     );
 }

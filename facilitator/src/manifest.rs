@@ -96,6 +96,10 @@ pub struct SpecificManifest {
     /// Region and name of the ingestion S3 bucket owned by this data share
     /// processor.
     ingestion_bucket: String,
+    // The ARN of the AWS IAM role that should be assumed by an ingestion server
+    // to write to this data share processor's ingestion bucket, if the ingestor
+    // does not have an AWS account of their own.
+    ingestion_identity: String,
     /// Region and name of the peer validation S3 bucket owned by this data
     /// share processor.
     peer_validation_bucket: String,
@@ -171,8 +175,13 @@ struct IngestionServerIdentity {
     aws_iam_entity: Option<String>,
     /// The numeric identifier of the GCP service account that this ingestion
     /// server uses to authenticate via OIDC identity federation to access
-    /// ingestion buckets.
-    google_service_account: Option<u64>,
+    /// ingestion buckets. While this field's value is a number, facilitator
+    /// treats it as an opaque string.
+    google_service_account: Option<String>,
+    /// The email address of the GCP service account that this ingestion server
+    /// uses to authenticate via OIDC identity federation to access ingestion
+    /// buckets.
+    gcp_service_account_email: Option<String>,
 }
 
 /// Represents an ingestion server's global manifest.
@@ -480,6 +489,7 @@ mod tests {
       }}
     }},
     "ingestion-bucket": "us-west-1/ingestion",
+    "ingestion-identity": "arn:aws:iam:something:fake",
     "peer-validation-bucket": "us-west-1/validation"
 }}
     "#,
@@ -509,8 +519,9 @@ mod tests {
             format: 0,
             batch_signing_public_keys: expected_batch_keys,
             packet_encryption_certificates: expected_packet_encryption_certificates,
-            ingestion_bucket: "us-west-1/ingestion".to_string(),
-            peer_validation_bucket: "us-west-1/validation".to_string(),
+            ingestion_bucket: "us-west-1/ingestion".to_owned(),
+            ingestion_identity: "arn:aws:iam:something:fake".to_owned(),
+            peer_validation_bucket: "us-west-1/validation".to_owned(),
         };
         assert_eq!(manifest, expected_manifest);
         let batch_signing_keys = manifest.batch_signing_public_keys().unwrap();
@@ -559,6 +570,7 @@ mod tests {
       }
     },
     "ingestion-bucket": "us-west-1/ingestion",
+    "ingestion-identity": "arn:aws:iam:something:fake",
     "peer-validation-bucket": "us-west-1/validation"
 }
     "#,
@@ -578,6 +590,7 @@ mod tests {
       }
     },
     "ingestion-bucket": "us-west-1/ingestion",
+    "ingestion-identity": "arn:aws:iam:something:fake",
     "peer-validation-bucket": "us-west-1/validation"
 }
     "#,
@@ -597,9 +610,30 @@ mod tests {
       }
     },
     "ingestion-bucket": "us-west-1/ingestion",
+    "ingestion-identity": "arn:aws:iam:something:fake",
     "peer-validation-bucket": "us-west-1/validation"
 }
     "#,
+            // Role ARN with wrong type
+            r#"
+{
+    "format": 0,
+    "packet-encryption-certificates": {
+        "fake-key-1": {
+            "certificate": "who cares"
+        }
+    },
+    "batch-signing-public-keys": {
+        "fake-key-2": {
+        "expiration": "",
+        "public-key": "-----BEGIN PUBLIC KEY-----\nfoo\n-----END PUBLIC KEY-----"
+      }
+    },
+    "ingestion-bucket": "us-west-1/ingestion",
+    "ingestion-identity": 1,
+    "peer-validation-bucket": "us-west-1/validation"
+}
+"#,
         ];
 
         for invalid_manifest in &invalid_manifests {
@@ -627,6 +661,7 @@ mod tests {
       }
     },
     "ingestion-bucket": "us-west-1/ingestion",
+    "ingestion-identity": "arn:aws:iam:something:fake",
     "peer-validation-bucket": "us-west-1/validation"
 }
     "#,
@@ -646,6 +681,7 @@ mod tests {
       }
     },
     "ingestion-bucket": "us-west-1/ingestion",
+    "ingestion-identity": "arn:aws:iam:something:fake",
     "peer-validation-bucket": "us-west-1/validation"
 }
     "#,
@@ -665,6 +701,7 @@ mod tests {
       }
     },
     "ingestion-bucket": "us-west-1/ingestion",
+    "ingestion-identity": "arn:aws:iam:something:fake",
     "peer-validation-bucket": "us-west-1/validation"
 }
     "#,
@@ -696,7 +733,8 @@ mod tests {
 {
     "format": 0,
     "server-identity": {
-        "google-service-account": 123456789012345
+        "google-service-account": "112310747466759665351",
+        "gcp-service-account-email": "foo@bar.com"
     },
     "batch-signing-public-keys": {
         "key-identifier-2": {
@@ -729,7 +767,11 @@ mod tests {
         assert_eq!(manifest.server_identity.aws_iam_entity, None);
         assert_eq!(
             manifest.server_identity.google_service_account,
-            Some(123456789012345)
+            Some("112310747466759665351".to_owned())
+        );
+        assert_eq!(
+            manifest.server_identity.gcp_service_account_email,
+            Some("foo@bar.com".to_owned())
         );
         let batch_signing_public_keys = manifest.batch_signing_public_keys().unwrap();
         batch_signing_public_keys.get("key-identifier-2").unwrap();

@@ -20,6 +20,7 @@ import (
 	"time"
 
 	"github.com/aws/aws-sdk-go/aws"
+	"github.com/aws/aws-sdk-go/aws/arn"
 	"github.com/aws/aws-sdk-go/aws/credentials"
 	"github.com/aws/aws-sdk-go/aws/credentials/stscreds"
 	aws_session "github.com/aws/aws-sdk-go/aws/session"
@@ -316,6 +317,21 @@ func (b *bucket) listFiles(ctx context.Context) ([]string, error) {
 	}
 }
 
+func webIDP(sess *aws_session.Session, identity string) (*credentials.Credentials, error) {
+	parsed, err := arn.Parse(identity)
+	if err != nil {
+		return nil, err
+	}
+	audience := fmt.Sprintf("sts.amazonaws.com/%s", parsed.AccountID)
+
+	stsSTS := sts.New(sess)
+	roleSessionName := ""
+	roleProvider := stscreds.NewWebIdentityRoleProviderWithToken(
+		stsSTS, identity, roleSessionName, tokenFetcher{audience})
+
+	return credentials.NewCredentials(roleProvider), nil
+}
+
 func (b *bucket) listFilesS3(ctx context.Context) ([]string, error) {
 	parts := strings.SplitN(b.bucketName, "/", 2)
 	if len(parts) != 2 {
@@ -328,26 +344,19 @@ func (b *bucket) listFilesS3(ctx context.Context) ([]string, error) {
 		return nil, fmt.Errorf("making AWS session: %w", err)
 	}
 
-	arnComponents := strings.Split(b.identity, ":")
-	if arnComponents[0] != "arn" {
-		return nil, fmt.Errorf("invalid AWS identity %q. Must start with \"arn:\"", b.identity)
+	var creds *credentials.Credentials
+	if b.identity != "" {
+		creds, err = webIDP(sess, b.identity)
+		if err != nil {
+			return nil, err
+		}
+	} else {
+		creds = credentials.NewEnvCredentials()
 	}
-	if len(arnComponents) != 6 {
-		return nil, fmt.Errorf("invalid ARN: %q", b.identity)
-	}
-	audience := fmt.Sprintf("sts.amazonaws.com/%s", arnComponents[4])
-
-	stsSTS := sts.New(sess)
-	roleSessionName := ""
-	roleProvider := stscreds.NewWebIdentityRoleProviderWithToken(
-		stsSTS, b.identity, roleSessionName, tokenFetcher{audience})
-
-	credentials := credentials.NewCredentials(roleProvider)
-	log.Printf("listing files in s3://%s as %s", bucket, b.identity)
-
+	log.Printf("listing files in s3://%s as %q", bucket, b.identity)
 	config := aws.NewConfig().
 		WithRegion(region).
-		WithCredentials(credentials)
+		WithCredentials(creds)
 	svc := s3.New(sess, config)
 	var output []string
 	var nextContinuationToken string = ""
