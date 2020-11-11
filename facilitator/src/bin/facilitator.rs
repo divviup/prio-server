@@ -83,7 +83,8 @@ const SHARED_HELP: &str = "Storage arguments: Any flag ending in -input or -outp
      using an OIDC auth token obtained from the GKE metadata service. \
      Appropriate mappings need to be in place from Facilitator's k8s \
      service account to its GCP service account to the IAM role. If \
-     the identity flag is empty, use credentials from ~/.aws.
+     the identity flag is omitted or is the empty string, use credentials from \
+     ~/.aws.
 
      For GS buckets: An identity flag may contain a GCP service account \
      (identified by an email address). Requests to Google Storage (gs://) \
@@ -92,7 +93,9 @@ const SHARED_HELP: &str = "Storage arguments: Any flag ending in -input or -outp
      https://cloud.google.com/kubernetes-engine/docs/how-to/workload-identity. \
      If an identity flag is set, facilitator will use its default service account \
      to impersonate a different account, which should have permissions to write \
-     to or read from the named bucket. \
+     to or read from the named bucket. If an identity flag is omitted or is \
+     the empty string, the default service account exposed by the GKE metadata \
+     service is used. \
      \
      Keys: All keys are P-256. Public keys are base64-encoded DER SPKI. Private \
      keys are in the base64 encoded format expected by libprio-rs, or base64-encoded \
@@ -213,6 +216,7 @@ impl<'a, 'b> AppArgumentAdder for App<'a, 'b> {
                 .env(name_env)
                 .value_name("PATH")
                 .validator(path_validator)
+                .required(true)
                 .help("Storage path (gs://, s3:// or local dir name)"),
         )
         .arg(
@@ -1001,6 +1005,15 @@ fn intake_transport_from_args(matches: &ArgMatches) -> Result<VerifiableAndDecry
 }
 
 fn transport_for_path(path: StoragePath, identity: Identity) -> Result<Box<dyn Transport>> {
+    // We use the value "" to indicate that either ambient AWS credentials (for
+    // S3) or the default service account Oauth token (for GCS) should be used
+    // so that Terraform can explicitly indicate that the default identity
+    // should be used.
+    let identity = if let Some("") = identity {
+        None
+    } else {
+        identity
+    };
     match path {
         StoragePath::S3Path(path) => Ok(Box::new(S3Transport::new(path, identity))),
         StoragePath::GCSPath(path) => Ok(Box::new(GCSTransport::new(path, identity))),
