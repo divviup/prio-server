@@ -2,9 +2,9 @@ name: facilitator-ci-build
 
 on:
   push:
-    branches: [ main ]
+    branches: [ main, release/** ]
   pull_request:
-    branches: [ main ]
+    branches: [ main, release/** ]
   workflow_dispatch:
 
 env:
@@ -30,6 +30,43 @@ jobs:
       run: cargo build --verbose
     - name: Run tests
       run: cargo test --verbose
+
+  coverage-rust:
+    defaults:
+      run:
+        working-directory: facilitator
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v2
+      - name: Install lcov
+        run: sudo apt install lcov -y
+      - name: Install rust
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: nightly # We have to use nightly for the coverage reports to be generated https://github.com/actions-rs/grcov#usage
+          override: true
+          default: true
+      - name: Install grcov
+        run: cargo install grcov
+      - name: Test
+        run: cargo test --all-features --no-fail-fast
+        env:
+          CARGO_INCREMENTAL: '0'
+          RUSTFLAGS: '-Zprofile -Ccodegen-units=1 -Cinline-threshold=0 -Clink-dead-code -Coverflow-checks=off -Cpanic=abort -Zpanic_abort_tests'
+          RUSTDOCFLAGS: '-Zprofile -Ccodegen-units=1 -Cinline-threshold=0 -Clink-dead-code -Coverflow-checks=off -Cpanic=abort -Zpanic_abort_tests'
+      - name: Get code coverage
+        run: grcov ./target/debug -s . --llvm --branch --guess-directory-when-missing --ignore-not-existing -t lcov -o coverage.txt
+      - name: Clean lcov file
+        run: lcov --extract coverage.txt -o coverage.txt 'src/*'
+      - name: Upload test coverage
+        if: success()
+        uses: codecov/codecov-action@v1
+        with:
+          fail_ci_if_error: false
+          file: ./facilitator/coverage.txt
+          flags: facilitator_tests
+          name: facilitator tests
 
   terraform:
     defaults:

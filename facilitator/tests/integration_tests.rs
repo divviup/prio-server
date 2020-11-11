@@ -27,6 +27,7 @@ fn end_to_end() {
     let facilitator_tempdir = tempfile::TempDir::new().unwrap();
     let facilitator_copy_tempdir = tempfile::TempDir::new().unwrap();
 
+    let instance_name = "fake-instance";
     let aggregation_name = "fake-aggregation-1".to_owned();
     let date = NaiveDateTime::from_timestamp(2234567890, 654321);
     let start_date = NaiveDateTime::from_timestamp(1234567890, 654321);
@@ -212,6 +213,7 @@ fn end_to_end() {
         batch_signing_key: default_pha_signing_private_key(),
     };
     BatchAggregator::new(
+        instance_name,
         &aggregation_name,
         &start_date,
         &end_date,
@@ -232,6 +234,7 @@ fn end_to_end() {
         batch_signing_key: default_facilitator_signing_private_key(),
     };
     BatchAggregator::new(
+        instance_name,
         &aggregation_name,
         &start_date,
         &end_date,
@@ -247,7 +250,13 @@ fn end_to_end() {
 
     let mut pha_aggregation_batch_reader: BatchReader<'_, SumPart, IngestionDataSharePacket> =
         BatchReader::new(
-            Batch::new_sum(&aggregation_name, &start_date, &end_date, true),
+            Batch::new_sum(
+                instance_name,
+                &aggregation_name,
+                &start_date,
+                &end_date,
+                true,
+            ),
             &mut *pha_aggregation_transport.transport,
         );
     let pha_sum_part = pha_aggregation_batch_reader.header(&pha_pub_keys).unwrap();
@@ -264,7 +273,13 @@ fn end_to_end() {
         SumPart,
         IngestionDataSharePacket,
     > = BatchReader::new(
-        Batch::new_sum(&aggregation_name, &start_date, &end_date, false),
+        Batch::new_sum(
+            instance_name,
+            &aggregation_name,
+            &start_date,
+            &end_date,
+            false,
+        ),
         &mut *facilitator_aggregation_transport.transport,
     );
     let facilitator_sum_part = facilitator_aggregation_batch_reader

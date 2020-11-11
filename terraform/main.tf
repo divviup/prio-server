@@ -24,7 +24,7 @@ variable "machine_type" {
   default = "e2.small"
 }
 
-variable "peer_share_processor_names" {
+variable "localities" {
   type = list(string)
 }
 
@@ -48,6 +48,23 @@ variable "peer_share_processor_manifest_base_url" {
 
 variable "portal_server_manifest_base_url" {
   type = string
+}
+
+variable "test_peer_environment" {
+  type        = map(string)
+  default     = {}
+  description = <<DESCRIPTION
+Describes a pair of data share processor environments set up to test against
+each other. One environment, named in "env_with_ingestor", hosts a fake
+ingestion server. The other, named in "env_without_ingestor", does not. This
+variable should not be specified in production deployments.
+DESCRIPTION
+}
+
+variable "is_first" {
+  type        = bool
+  default     = false
+  description = "Whether the data share processors created by this environment are \"first\" or \"PHA servers\""
 }
 
 terraform {
@@ -128,14 +145,14 @@ data "http" "peer_share_processor_global_manifest" {
   url = "https://${var.peer_share_processor_manifest_base_url}/global-manifest.json"
 }
 
-# While we create a distinct data share processor for each (ingestor, peer data
-# share processor) pair, we only create one packet decryption key for each peer
-# data share processor, and use it for all ingestors. Since the secret must be
-# in a namespace and accessible from both data share processors, that means both
-# data share processors must be in a single Kubernetes namespace, which we
-# create here and pass into the data share processor module.
+# While we create a distinct data share processor for each (ingestor, locality)
+# pair, we only create one packet decryption key for each locality, and use it
+# for all ingestors. Since the secret must be in a namespace and accessible
+# from all of our data share processors, that means all data share processors
+# associated with a given ingestor must be in a single Kubernetes namespace,
+# which we create here and pass into the data share processor module.
 resource "kubernetes_namespace" "namespaces" {
-  for_each = toset(var.peer_share_processor_names)
+  for_each = toset(var.localities)
   metadata {
     name = each.key
     annotations = {
@@ -145,7 +162,7 @@ resource "kubernetes_namespace" "namespaces" {
 }
 
 resource "kubernetes_secret" "ingestion_packet_decryption_keys" {
-  for_each = toset(var.peer_share_processor_names)
+  for_each = toset(var.localities)
   metadata {
     name      = "${var.environment}-${each.key}-ingestion-packet-decryption-key"
     namespace = kubernetes_namespace.namespaces[each.key].metadata[0].name
@@ -164,12 +181,13 @@ resource "kubernetes_secret" "ingestion_packet_decryption_keys" {
   }
 }
 
-# Now, we take the set product of peer share processor names x ingestor names to
+# Now, we take the set product of localities x ingestor names to
 # get the config values for all the data share processors we need to create.
 locals {
-  peer_ingestor_pairs = {
-    for pair in setproduct(toset(var.peer_share_processor_names), keys(var.ingestors)) :
+  locality_ingestor_pairs = {
+    for pair in setproduct(toset(var.localities), keys(var.ingestors)) :
     "${pair[0]}-${pair[1]}" => {
+      ingestor                                = pair[1]
       kubernetes_namespace                    = kubernetes_namespace.namespaces[pair[0]].metadata[0].name
       packet_decryption_key_kubernetes_secret = kubernetes_secret.ingestion_packet_decryption_keys[pair[0]].metadata[0].name
       ingestor_aws_role_arn                   = lookup(jsondecode(data.http.ingestor_global_manifests[pair[1]].body).server-identity, "aws-iam-entity", "")
@@ -180,10 +198,11 @@ locals {
 }
 
 module "data_share_processors" {
-  for_each                                = local.peer_ingestor_pairs
+  for_each                                = local.locality_ingestor_pairs
   source                                  = "./modules/data_share_processor"
   environment                             = var.environment
   data_share_processor_name               = each.key
+  ingestor                                = each.value.ingestor
   gcp_region                              = var.gcp_region
   gcp_project                             = var.gcp_project
   kubernetes_namespace                    = each.value.kubernetes_namespace
@@ -197,6 +216,8 @@ module "data_share_processors" {
   sum_part_bucket_service_account_email   = google_service_account.sum_part_bucket_writer.email
   portal_server_manifest_base_url         = var.portal_server_manifest_base_url
   own_manifest_base_url                   = module.manifest.base_url
+  test_peer_environment                   = var.test_peer_environment
+  is_first                                = var.is_first
 
   depends_on = [module.gke]
 }
@@ -220,6 +241,16 @@ resource "google_service_account_iam_binding" "data_share_processors_to_sum_part
   members            = [for v in module.data_share_processors : v.service_account_email]
 }
 
+module "fake_server_resources" {
+  count                        = lookup(var.test_peer_environment, "env_with_ingestor", "") == "" ? 0 : 1
+  source                       = "./modules/fake_server_resources"
+  manifest_bucket              = module.manifest.bucket
+  gcp_region                   = var.gcp_region
+  environment                  = var.environment
+  sum_part_bucket_writer_email = google_service_account.sum_part_bucket_writer.email
+  ingestors                    = var.ingestors
+}
+
 output "manifest_bucket" {
   value = module.manifest.bucket
 }
@@ -235,4 +266,8 @@ output "specific_manifests" {
     specific-manifest    = v.specific_manifest
     }
   }
+}
+
+output "use_test_pha_decryption_key" {
+  value = lookup(var.test_peer_environment, "env_without_ingestor", "") == var.environment
 }

@@ -6,19 +6,18 @@ use ring::signature::{
     EcdsaKeyPair, KeyPair, UnparsedPublicKey, ECDSA_P256_SHA256_ASN1,
     ECDSA_P256_SHA256_ASN1_SIGNING,
 };
-use std::{collections::HashMap, str::FromStr};
+use std::{collections::HashMap, fs::File, str::FromStr};
 use uuid::Uuid;
 
 use facilitator::{
     aggregation::BatchAggregator,
-    config::{Identity, StoragePath},
+    config::{Identity, ManifestKind, StoragePath},
     intake::BatchIntaker,
-    manifest::{IngestionServerGlobalManifest, PortalServerGlobalManifest, SpecificManifest},
-    sample::generate_ingestion_sample,
-    test_utils::{
-        DEFAULT_FACILITATOR_ECIES_PRIVATE_KEY, DEFAULT_FACILITATOR_SIGNING_PRIVATE_KEY,
-        DEFAULT_PHA_ECIES_PRIVATE_KEY,
+    manifest::{
+        DataShareProcessorGlobalManifest, IngestionServerGlobalManifest,
+        PortalServerGlobalManifest, SpecificManifest,
     },
+    sample::generate_ingestion_sample,
     transport::{
         GCSTransport, LocalFileTransport, S3Transport, SignableTransport, Transport,
         VerifiableAndDecryptableTransport, VerifiableTransport,
@@ -39,7 +38,11 @@ fn date_validator(s: String) -> Result<(), String> {
 }
 
 fn b64_validator(s: String) -> Result<(), String> {
-    base64::decode(s).map(|_| ()).map_err(|e| e.to_string())
+    if s == "not-a-real-key" {
+        return Err("'not-a-real-key'. Run deploy-tool to generate secrets".to_string());
+    }
+    base64::decode(s).map_err(|e| format!("decoding base64: {}", e))?;
+    Ok(())
 }
 
 fn uuid_validator(s: String) -> Result<(), String> {
@@ -55,6 +58,8 @@ fn path_validator(s: String) -> Result<(), String> {
 // Trait applied to clap::App to extend its builder pattern with some helpers
 // specific to our use case.
 trait AppArgumentAdder {
+    fn add_is_first_argument(self: Self) -> Self;
+
     fn add_instance_name_argument(self: Self) -> Self;
 
     fn add_manifest_base_url_argument(self: Self, entity: Entity) -> Self;
@@ -146,13 +151,28 @@ fn upper_snake_case(s: &str) -> String {
 }
 
 impl<'a, 'b> AppArgumentAdder for App<'a, 'b> {
+    fn add_is_first_argument(self: App<'a, 'b>) -> App<'a, 'b> {
+        self.arg(
+            Arg::with_name("is-first")
+                .env("IS_FIRST")
+                .long("is-first")
+                .value_name("BOOL")
+                .possible_value("true")
+                .possible_value("false")
+                .required(true)
+                .help(
+                    "Whether this is the \"first\" server receiving a share, \
+                    i.e., the PHA.",
+                ),
+        )
+    }
     fn add_instance_name_argument(self: App<'a, 'b>) -> App<'a, 'b> {
         self.arg(
             Arg::with_name("instance-name")
                 .long("instance-name")
                 .env("INSTANCE_NAME")
                 .value_name("NAME")
-                .default_value("fake-pha-fake-ingestor")
+                .required(true)
                 .help("Name of this data share processor")
                 .long_help(
                     "Name of this data share processor instance, to be used to \
@@ -193,7 +213,6 @@ impl<'a, 'b> AppArgumentAdder for App<'a, 'b> {
                 .env(name_env)
                 .value_name("PATH")
                 .validator(path_validator)
-                .default_value(".")
                 .help("Storage path (gs://, s3:// or local dir name)"),
         )
         .arg(
@@ -217,8 +236,6 @@ impl<'a, 'b> AppArgumentAdder for App<'a, 'b> {
                     "Batch signing public key for the {}",
                     entity.str()
                 )))
-                .default_value(DEFAULT_FACILITATOR_SIGNING_PRIVATE_KEY)
-                .hide_default_value(true)
                 .validator(b64_validator),
         )
         .arg(
@@ -228,8 +245,7 @@ impl<'a, 'b> AppArgumentAdder for App<'a, 'b> {
                 .help(leak_string(format!(
                     "Identifier for the {}'s batch keypair",
                     entity.str()
-                )))
-                .default_value("default-batch-signing-key-id"),
+                ))),
         )
     }
 
@@ -243,11 +259,9 @@ impl<'a, 'b> AppArgumentAdder for App<'a, 'b> {
                 .long_help(
                     "Base64 encoded PKCS#8 document containing P-256 \
                     batch signing private key to be used by this server when \
-                    sending messages to other servers. If not specified, a \
-                    fixed private key is used.",
+                    sending messages to other servers.",
                 )
-                .default_value(DEFAULT_FACILITATOR_SIGNING_PRIVATE_KEY)
-                .hide_default_value(true)
+                .required(true)
                 .validator(b64_validator),
         )
         .arg(
@@ -262,8 +276,7 @@ impl<'a, 'b> AppArgumentAdder for App<'a, 'b> {
                     or specific manifest. Used to construct \
                     PrioBatchSignature messages.",
                 )
-                .default_value("default-batch-signing-key-id")
-                .hide_default_value(true),
+                .required(true),
         )
     }
 
@@ -282,16 +295,14 @@ impl<'a, 'b> AppArgumentAdder for App<'a, 'b> {
                 .min_values(1)
                 .use_delimiter(true)
                 .validator(b64_validator)
-                .default_value(DEFAULT_FACILITATOR_ECIES_PRIVATE_KEY)
-                .hide_default_value(true),
+                .required(true),
         )
     }
 }
 
 fn main() -> Result<(), anyhow::Error> {
     use log::info;
-    use simple_logger::SimpleLogger;
-    SimpleLogger::new().init().unwrap();
+    env_logger::init();
 
     info!(
         "{} {} {}",
@@ -323,7 +334,7 @@ fn main() -> Result<(), anyhow::Error> {
                     Arg::with_name("aggregation-id")
                         .long("aggregation-id")
                         .value_name("ID")
-                        .default_value("fake-aggregation")
+                        .required(true)
                         .help("Name of the aggregation"),
                 )
                 .arg(
@@ -352,7 +363,7 @@ fn main() -> Result<(), anyhow::Error> {
                         .long("dimension")
                         .short("d")
                         .value_name("INT")
-                        .default_value("123")
+                        .required(true)
                         .validator(num_validator::<i32>)
                         .help(
                             "Length in bits of the data packets to generate \
@@ -365,7 +376,7 @@ fn main() -> Result<(), anyhow::Error> {
                         .long("packet-count")
                         .short("p")
                         .value_name("INT")
-                        .default_value("10")
+                        .required(true)
                         .validator(num_validator::<usize>)
                         .help("Number of data packets to generate"),
                 )
@@ -378,13 +389,7 @@ fn main() -> Result<(), anyhow::Error> {
                             "Base64 encoded ECIES private key for the PHA \
                             server",
                         )
-                        .long_help(
-                            "Base64 encoded private key for the PHA \
-                            server. If not specified, a fixed private key will \
-                            be used.",
-                        )
-                        .default_value(DEFAULT_PHA_ECIES_PRIVATE_KEY)
-                        .hide_default_value(true)
+                        .required(true)
                         .validator(b64_validator),
                 )
                 .arg(
@@ -396,13 +401,7 @@ fn main() -> Result<(), anyhow::Error> {
                             "Base64 encoded ECIES private key for the \
                             facilitator server",
                         )
-                        .long_help(
-                            "Base64 encoded ECIES private key for the \
-                            facilitator server. If not specified, a fixed \
-                            private key will be used.",
-                        )
-                        .default_value(DEFAULT_FACILITATOR_ECIES_PRIVATE_KEY)
-                        .hide_default_value(true)
+                        .required(true)
                         .validator(b64_validator),
                 )
                 .add_batch_signing_key_arguments()
@@ -414,7 +413,7 @@ fn main() -> Result<(), anyhow::Error> {
                             "Differential privacy parameter for local \
                             randomization before aggregation",
                         )
-                        .default_value("0.23")
+                        .required(true)
                         .validator(num_validator::<f64>),
                 )
                 .arg(
@@ -422,7 +421,7 @@ fn main() -> Result<(), anyhow::Error> {
                         .long("batch-start-time")
                         .value_name("MILLIS")
                         .help("Start of timespan covered by the batch, in milliseconds since epoch")
-                        .default_value("1000000000")
+                        .required(true)
                         .validator(num_validator::<i64>),
                 )
                 .arg(
@@ -430,7 +429,7 @@ fn main() -> Result<(), anyhow::Error> {
                         .long("batch-end-time")
                         .value_name("MILLIS")
                         .help("End of timespan covered by the batch, in milliseconds since epoch")
-                        .default_value("1000000100")
+                        .required(true)
                         .validator(num_validator::<i64>),
                 ),
         )
@@ -438,21 +437,20 @@ fn main() -> Result<(), anyhow::Error> {
             SubCommand::with_name("intake-batch")
                 .about(format!("Validate an input share (from an ingestor's bucket) and emit a validation share.\n\n{}", SHARED_HELP).as_str())
                 .add_instance_name_argument()
+                .add_is_first_argument()
                 .arg(
                     Arg::with_name("aggregation-id")
                         .long("aggregation-id")
                         .value_name("ID")
-                        .default_value("fake-aggregation")
+                        .required(true)
                         .help("Name of the aggregation"),
                 )
                 .arg(
                     Arg::with_name("batch-id")
                         .long("batch-id")
                         .value_name("UUID")
-                        .help(
-                            "UUID of the batch. If omitted, a UUID is \
-                            randomly generated.",
-                        )
+                        .help("UUID of the batch.")
+                        .required(true)
                         .validator(uuid_validator),
                 )
                 .arg(
@@ -460,16 +458,9 @@ fn main() -> Result<(), anyhow::Error> {
                         .long("date")
                         .value_name("DATE")
                         .help("Date for the batch in YYYY/mm/dd/HH/MM format")
-                        .long_help(
-                            "Date for the batch in YYYY/mm/dd/HH/MM format. If \
-                            omitted, the current date is used.",
-                        )
-                        .validator(date_validator),
+                        .validator(date_validator)
+                        .required(true),
                 )
-                .arg(Arg::with_name("is-first").long("is-first").help(
-                    "Whether this is the \"first\" server receiving a share, \
-                    i.e., the PHA.",
-                ))
                 .add_packet_decryption_key_argument()
                 .add_batch_public_key_arguments(Entity::Ingestor)
                 .add_batch_signing_key_arguments()
@@ -483,11 +474,12 @@ fn main() -> Result<(), anyhow::Error> {
             SubCommand::with_name("aggregate")
                 .about(format!("Verify peer validation share and emit sum part.\n\n{}", SHARED_HELP).as_str())
                 .add_instance_name_argument()
+                .add_is_first_argument()
                 .arg(
                     Arg::with_name("aggregation-id")
                         .long("aggregation-id")
                         .value_name("ID")
-                        .default_value("fake-aggregation")
+                        .required(true)
                         .help("Name of the aggregation"),
                 )
                 .arg(
@@ -526,10 +518,7 @@ fn main() -> Result<(), anyhow::Error> {
                         .long("aggregation-start")
                         .value_name("DATE")
                         .help("Beginning of the timespan covered by the aggregation.")
-                        .long_help(
-                            "Beginning of the timespan covered by the \
-                            aggregation. If omitted, the current time is used.",
-                        )
+                        .required(true)
                         .validator(date_validator),
                 )
                 .arg(
@@ -537,10 +526,7 @@ fn main() -> Result<(), anyhow::Error> {
                         .long("aggregation-end")
                         .value_name("DATE")
                         .help("End of the timespan covered by the aggregation.")
-                        .long_help(
-                            "End of the timespan covered by the aggregation \
-                            If omitted, the current time is used.",
-                        )
+                        .required(true)
                         .validator(date_validator),
                 )
                 .add_manifest_base_url_argument(Entity::Ingestor)
@@ -555,9 +541,50 @@ fn main() -> Result<(), anyhow::Error> {
                 .add_storage_arguments(Entity::Portal, InOut::Output)
                 .add_packet_decryption_key_argument()
                 .add_batch_signing_key_arguments()
-                .arg(Arg::with_name("is-first").long("is-first").help(
-                    "Whether this is the \"first\" server receiving a share, i.e., the PHA.",
-                )),
+        )
+        .subcommand(
+            SubCommand::with_name("lint-manifest")
+            .about("Validate and print out global or specific manifests")
+            .arg(
+                Arg::with_name("manifest-base-url")
+                    .long("manifest-base-url")
+                    .value_name("URL")
+                    .help("base URL relative to which manifests may be fetched")
+                    .long_help(
+                        "base URL relative to which manifests may be fetched \
+                        over HTTPS. Should be in the form \"https://foo.com\"."
+                    )
+                    .required_unless("manifest-path")
+            )
+            .arg(
+                Arg::with_name("manifest-path")
+                    .long("manifest-path")
+                    .value_name("PATH")
+                    .help("path to local manifest file to lint")
+                    .required_unless("manifest-base-url")
+            )
+            .arg(
+                Arg::with_name("manifest-kind")
+                    .long("manifest-kind")
+                    .value_name("KIND")
+                    .help("kind of manifest to locate and parse")
+                    .possible_value(leak_string(ManifestKind::IngestorGlobal.to_string()))
+                    .possible_value(leak_string(ManifestKind::DataShareProcessorGlobal.to_string()))
+                    .possible_value(leak_string(ManifestKind::DataShareProcessorSpecific.to_string()))
+                    .possible_value(leak_string(ManifestKind::PortalServerGlobal.to_string()))
+                    .required(true)
+                )
+            .arg(
+                Arg::with_name("instance")
+                    .long("instance")
+                    .value_name("LOCALITY-TECH_GIANT")
+                    .help("the instance name whose manifest is to be fetched")
+                    .long_help(
+                        leak_string(format!("the instance name whose manifest is to be fetched, \
+                        e.g., \"mi-google\". Required if manifest-kind={}.",
+                        ManifestKind::DataShareProcessorSpecific))
+                    )
+            )
         )
         .get_matches();
 
@@ -567,260 +594,326 @@ fn main() -> Result<(), anyhow::Error> {
         // The configuration of the Args above should guarantee that the
         // various parameters are present and valid, so it is safe to use
         // unwrap() here.
-        ("generate-ingestion-sample", Some(sub_matches)) => {
-            let peer_output_path =
-                StoragePath::from_str(sub_matches.value_of("peer-output").unwrap())?;
-            let peer_identity = sub_matches.value_of("peer-identity");
-            let mut peer_transport = transport_for_path(peer_output_path, peer_identity)?;
-
-            let own_output_path =
-                StoragePath::from_str(sub_matches.value_of("own-output").unwrap())?;
-            let own_identity = sub_matches.value_of("own-identity");
-            let mut own_transport = transport_for_path(own_output_path, own_identity)?;
-            let ingestor_batch_signing_key = batch_signing_key_from_arg(sub_matches)?;
-
-            generate_ingestion_sample(
-                &mut *peer_transport,
-                &mut *own_transport,
-                &sub_matches
-                    .value_of("batch-id")
-                    .map_or_else(Uuid::new_v4, |v| Uuid::parse_str(v).unwrap()),
-                &sub_matches.value_of("aggregation-id").unwrap(),
-                &sub_matches.value_of("date").map_or_else(
-                    || Utc::now().naive_utc(),
-                    |v| NaiveDateTime::parse_from_str(&v, DATE_FORMAT).unwrap(),
-                ),
-                &PrivateKey::from_base64(sub_matches.value_of("pha-ecies-private-key").unwrap())
-                    .unwrap(),
-                &PrivateKey::from_base64(
-                    sub_matches
-                        .value_of("facilitator-ecies-private-key")
-                        .unwrap(),
-                )
-                .unwrap(),
-                &ingestor_batch_signing_key,
-                sub_matches
-                    .value_of("dimension")
-                    .unwrap()
-                    .parse::<i32>()
-                    .unwrap(),
-                sub_matches
-                    .value_of("packet-count")
-                    .unwrap()
-                    .parse::<usize>()
-                    .unwrap(),
-                sub_matches
-                    .value_of("epsilon")
-                    .unwrap()
-                    .parse::<f64>()
-                    .unwrap(),
-                sub_matches
-                    .value_of("batch-start-time")
-                    .unwrap()
-                    .parse::<i64>()
-                    .unwrap(),
-                sub_matches
-                    .value_of("batch-end-time")
-                    .unwrap()
-                    .parse::<i64>()
-                    .unwrap(),
-            )?;
-            Ok(())
-        }
-        ("intake-batch", Some(sub_matches)) => {
-            let mut intake_transport = intake_transport_from_args(sub_matches)?;
-
-            // We need the bucket to which we will write validations for the
-            // peer data share processor, which can either be fetched from the
-            // peer manifest or provided directly via command line argument. We
-            // check the manifest argument first because peer-output will always
-            // have at least the default value ".".
-            let peer_validation_bucket =
-                if let Some(base_url) = sub_matches.value_of("peer-manifest-base-url") {
-                    SpecificManifest::from_https(
-                        base_url,
-                        sub_matches.value_of("instance-name").unwrap(),
-                    )?
-                    .validation_bucket()
-                } else if let Some(path) = sub_matches.value_of("peer-output") {
-                    StoragePath::from_str(path)
-                } else {
-                    Err(anyhow!("peer-output or peer-manifest-base-url required."))
-                }?;
-
-            let peer_identity = sub_matches.value_of("peer-identity");
-            let mut peer_validation_transport = SignableTransport {
-                transport: transport_for_path(peer_validation_bucket, peer_identity)?,
-                batch_signing_key: batch_signing_key_from_arg(sub_matches)?,
-            };
-
-            // We created the bucket to which we write copies of our validation
-            // shares, so it is simply provided by argument.
-            let own_validation_bucket =
-                StoragePath::from_str(sub_matches.value_of("own-output").unwrap())?;
-            let own_identity = sub_matches.value_of("own-identity");
-            let mut own_validation_transport = SignableTransport {
-                transport: transport_for_path(own_validation_bucket, own_identity)?,
-                batch_signing_key: batch_signing_key_from_arg(sub_matches)?,
-            };
-
-            let mut batch_intaker = BatchIntaker::new(
-                &sub_matches.value_of("aggregation-id").unwrap(),
-                &sub_matches
-                    .value_of("batch-id")
-                    .map_or_else(Uuid::new_v4, |v| Uuid::parse_str(v).unwrap()),
-                &sub_matches.value_of("date").map_or_else(
-                    || Utc::now().naive_utc(),
-                    |v| NaiveDateTime::parse_from_str(&v, DATE_FORMAT).unwrap(),
-                ),
-                &mut intake_transport,
-                &mut peer_validation_transport,
-                &mut own_validation_transport,
-                sub_matches.is_present("is-first"),
-            )?;
-            batch_intaker.generate_validation_share()?;
-            Ok(())
-        }
-        ("aggregate", Some(sub_matches)) => {
-            let is_first = sub_matches.is_present("is-first");
-            let instance_name = sub_matches.value_of("instance-name").unwrap();
-
-            let mut intake_transport = intake_transport_from_args(sub_matches)?;
-
-            // We created the bucket to which we wrote copies of our validation
-            // shares, so it is simply provided by argument.
-            let own_validation_bucket =
-                StoragePath::from_str(matches.value_of("own-output").unwrap())?;
-            let own_identity = sub_matches.value_of("own-identity");
-            let own_validation_transport = transport_for_path(own_validation_bucket, own_identity)?;
-
-            // To read our own validation shares, we require our own public keys
-            // which we discover in our own specific manifest.
-            let own_public_key_map = match (
-                sub_matches.value_of("batch-signing-private-key"),
-                sub_matches.value_of("batch-signing-private-key-identifier"),
-                sub_matches.value_of("own-manifest-base-url"),
-            ) {
-                (Some(private_key), Some(private_key_identifier), _) => {
-                    public_key_map_from_arg(private_key, private_key_identifier)
-                }
-                (_, _, Some(manifest_base_url)) => {
-                    SpecificManifest::from_https(manifest_base_url, instance_name)?
-                        .batch_signing_public_keys()?
-                }
-                _ => {
-                    return Err(anyhow!(
-                        "batch-signing-private-key and \
-                        batch-signing-private-key-identifier are required if \
-                        own-manifest-base-url is not provided."
-                    ))
-                }
-            };
-
-            // We created the bucket that peers wrote validations into, and so
-            // it is simply provided via argument.
-            let peer_validation_bucket =
-                StoragePath::from_str(sub_matches.value_of("peer-input").unwrap())?;
-            let peer_identity = sub_matches.value_of("peer-identity");
-
-            let peer_validation_transport =
-                transport_for_path(peer_validation_bucket, peer_identity)?;
-
-            // We need the public keys the peer data share processor used to
-            // sign messages, which we can obtain by argument or by discovering
-            // their specific manifest.
-            let peer_share_processor_pub_key_map = match (
-                sub_matches.value_of("peer-public-key"),
-                sub_matches.value_of("peer-public-key-identifier"),
-                sub_matches.value_of("peer-manifest-base-url"),
-            ) {
-                (Some(public_key), Some(public_key_identifier), _) => {
-                    public_key_map_from_arg(public_key, public_key_identifier)
-                }
-                (_, _, Some(manifest_base_url)) => {
-                    SpecificManifest::from_https(manifest_base_url, instance_name)?
-                        .batch_signing_public_keys()?
-                }
-                _ => {
-                    return Err(anyhow!(
-                        "peer-public-key and peer-public-key-identifier are \
-                        required if peer-manifest-base-url is not provided."
-                    ))
-                }
-            };
-
-            // We need the portal server owned bucket to which to write sum part
-            // messages aka aggregations. We can discover it from the portal
-            // server global manifest, or we can get that from an argument. We
-            // check for the manifest first since portal-output will always have
-            // the default value ".".
-            let portal_bucket = match (
-                sub_matches.value_of("portal-manifest-base-url"),
-                sub_matches.value_of("portal-output"),
-            ) {
-                (Some(manifest_base_url), _) => {
-                    PortalServerGlobalManifest::from_https(manifest_base_url)?
-                        .sum_part_bucket(is_first)
-                }
-                (_, Some(path)) => StoragePath::from_str(path),
-                _ => Err(anyhow!(
-                    "portal-output or portal-manifest-base-url required"
-                )),
-            }?;
-            let portal_identity = sub_matches.value_of("portal-identity");
-            let aggregation_transport = transport_for_path(portal_bucket, portal_identity)?;
-
-            // Get the key we will use to sign sum part messages sent to the
-            // portal server.
-            let batch_signing_key = batch_signing_key_from_arg(sub_matches)?;
-
-            let batch_ids: Vec<Uuid> = sub_matches
-                .values_of("batch-id")
-                .context("no batch-id")?
-                .map(|v| Uuid::parse_str(v).unwrap())
-                .collect();
-            let batch_dates: Vec<NaiveDateTime> = sub_matches
-                .values_of("batch-time")
-                .context("no batch-time")?
-                .map(|s| NaiveDateTime::parse_from_str(&s, DATE_FORMAT).unwrap())
-                .collect();
-            if batch_ids.len() != batch_dates.len() {
-                return Err(anyhow!(
-                    "must provide same number of batch-id and batch-date values"
-                ));
-            }
-
-            let batch_info: Vec<_> = batch_ids.into_iter().zip(batch_dates).collect();
-            BatchAggregator::new(
-                &sub_matches.value_of("aggregation-id").unwrap(),
-                &sub_matches.value_of("aggregation-start").map_or_else(
-                    || Utc::now().naive_utc(),
-                    |v| NaiveDateTime::parse_from_str(&v, DATE_FORMAT).unwrap(),
-                ),
-                &sub_matches.value_of("aggregation-end").map_or_else(
-                    || Utc::now().naive_utc(),
-                    |v| NaiveDateTime::parse_from_str(&v, DATE_FORMAT).unwrap(),
-                ),
-                is_first,
-                &mut intake_transport,
-                &mut VerifiableTransport {
-                    transport: own_validation_transport,
-                    batch_signing_public_keys: own_public_key_map,
-                },
-                &mut VerifiableTransport {
-                    transport: peer_validation_transport,
-                    batch_signing_public_keys: peer_share_processor_pub_key_map,
-                },
-                &mut SignableTransport {
-                    transport: aggregation_transport,
-                    batch_signing_key,
-                },
-            )?
-            .generate_sum_part(&batch_info)?;
-            Ok(())
-        }
+        ("generate-ingestion-sample", Some(sub_matches)) => generate_sample(sub_matches),
+        ("intake-batch", Some(sub_matches)) => intake_batch(sub_matches),
+        ("aggregate", Some(sub_matches)) => aggregate(sub_matches),
+        ("lint-manifest", Some(sub_matches)) => lint_manifest(sub_matches),
         (_, _) => Ok(()),
     }
+}
+
+fn generate_sample(sub_matches: &ArgMatches) -> Result<(), anyhow::Error> {
+    let peer_output_path = StoragePath::from_str(sub_matches.value_of("peer-output").unwrap())?;
+    let peer_identity = sub_matches.value_of("peer-identity");
+    let mut peer_transport = transport_for_path(peer_output_path, peer_identity)?;
+
+    let own_output_path = StoragePath::from_str(sub_matches.value_of("own-output").unwrap())?;
+    let own_identity = sub_matches.value_of("own-identity");
+    let mut own_transport = transport_for_path(own_output_path, own_identity)?;
+    let ingestor_batch_signing_key = batch_signing_key_from_arg(sub_matches)?;
+
+    generate_ingestion_sample(
+        &mut *peer_transport,
+        &mut *own_transport,
+        &sub_matches
+            .value_of("batch-id")
+            .map_or_else(Uuid::new_v4, |v| Uuid::parse_str(v).unwrap()),
+        &sub_matches.value_of("aggregation-id").unwrap(),
+        &sub_matches.value_of("date").map_or_else(
+            || Utc::now().naive_utc(),
+            |v| NaiveDateTime::parse_from_str(&v, DATE_FORMAT).unwrap(),
+        ),
+        &PrivateKey::from_base64(sub_matches.value_of("pha-ecies-private-key").unwrap()).unwrap(),
+        &PrivateKey::from_base64(
+            sub_matches
+                .value_of("facilitator-ecies-private-key")
+                .unwrap(),
+        )
+        .unwrap(),
+        &ingestor_batch_signing_key,
+        sub_matches
+            .value_of("dimension")
+            .unwrap()
+            .parse::<i32>()
+            .unwrap(),
+        sub_matches
+            .value_of("packet-count")
+            .unwrap()
+            .parse::<usize>()
+            .unwrap(),
+        sub_matches
+            .value_of("epsilon")
+            .unwrap()
+            .parse::<f64>()
+            .unwrap(),
+        sub_matches
+            .value_of("batch-start-time")
+            .unwrap()
+            .parse::<i64>()
+            .unwrap(),
+        sub_matches
+            .value_of("batch-end-time")
+            .unwrap()
+            .parse::<i64>()
+            .unwrap(),
+    )?;
+    Ok(())
+}
+
+fn intake_batch(sub_matches: &ArgMatches) -> Result<(), anyhow::Error> {
+    let mut intake_transport = intake_transport_from_args(sub_matches)?;
+
+    // We need the bucket to which we will write validations for the
+    // peer data share processor, which can either be fetched from the
+    // peer manifest or provided directly via command line argument.
+    let peer_validation_bucket =
+        if let Some(base_url) = sub_matches.value_of("peer-manifest-base-url") {
+            SpecificManifest::from_https(base_url, sub_matches.value_of("instance-name").unwrap())?
+                .validation_bucket()
+        } else if let Some(path) = sub_matches.value_of("peer-output") {
+            StoragePath::from_str(path)
+        } else {
+            Err(anyhow!("peer-output or peer-manifest-base-url required."))
+        }?;
+
+    let peer_identity = sub_matches.value_of("peer-identity");
+    let mut peer_validation_transport = SignableTransport {
+        transport: transport_for_path(peer_validation_bucket, peer_identity)?,
+        batch_signing_key: batch_signing_key_from_arg(sub_matches)?,
+    };
+
+    // We created the bucket to which we write copies of our validation
+    // shares, so it is simply provided by argument.
+    let own_validation_bucket = StoragePath::from_str(sub_matches.value_of("own-output").unwrap())?;
+    let own_identity = sub_matches.value_of("own-identity");
+    let mut own_validation_transport = SignableTransport {
+        transport: transport_for_path(own_validation_bucket, own_identity)?,
+        batch_signing_key: batch_signing_key_from_arg(sub_matches)?,
+    };
+
+    let mut batch_intaker = BatchIntaker::new(
+        &sub_matches.value_of("aggregation-id").unwrap(),
+        &Uuid::parse_str(sub_matches.value_of("batch-id").unwrap()).unwrap(),
+        &NaiveDateTime::parse_from_str(&sub_matches.value_of("date").unwrap(), DATE_FORMAT)
+            .unwrap(),
+        &mut intake_transport,
+        &mut peer_validation_transport,
+        &mut own_validation_transport,
+        is_first_from_arg(sub_matches),
+    )?;
+    batch_intaker.generate_validation_share()
+}
+
+fn aggregate(sub_matches: &ArgMatches) -> Result<(), anyhow::Error> {
+    let instance_name = sub_matches.value_of("instance-name").unwrap();
+    let is_first = is_first_from_arg(sub_matches);
+
+    let mut intake_transport = intake_transport_from_args(sub_matches)?;
+
+    // We created the bucket to which we wrote copies of our validation
+    // shares, so it is simply provided by argument.
+    let own_validation_bucket = StoragePath::from_str(sub_matches.value_of("own-input").unwrap())?;
+    let own_identity = sub_matches.value_of("own-identity");
+    let own_validation_transport = transport_for_path(own_validation_bucket, own_identity)?;
+
+    // To read our own validation shares, we require our own public keys
+    // which we discover in our own specific manifest.
+    let own_public_key_map = match (
+        sub_matches.value_of("batch-signing-private-key"),
+        sub_matches.value_of("batch-signing-private-key-identifier"),
+        sub_matches.value_of("own-manifest-base-url"),
+    ) {
+        (Some(private_key), Some(private_key_identifier), _) => {
+            public_key_map_from_arg(private_key, private_key_identifier)
+        }
+        (_, _, Some(manifest_base_url)) => {
+            SpecificManifest::from_https(manifest_base_url, instance_name)?
+                .batch_signing_public_keys()?
+        }
+        _ => {
+            return Err(anyhow!(
+                "batch-signing-private-key and \
+                        batch-signing-private-key-identifier are required if \
+                        own-manifest-base-url is not provided."
+            ))
+        }
+    };
+
+    // We created the bucket that peers wrote validations into, and so
+    // it is simply provided via argument.
+    let peer_validation_bucket =
+        StoragePath::from_str(sub_matches.value_of("peer-input").unwrap())?;
+    let peer_identity = sub_matches.value_of("peer-identity");
+
+    let peer_validation_transport = transport_for_path(peer_validation_bucket, peer_identity)?;
+
+    // We need the public keys the peer data share processor used to
+    // sign messages, which we can obtain by argument or by discovering
+    // their specific manifest.
+    let peer_share_processor_pub_key_map = match (
+        sub_matches.value_of("peer-public-key"),
+        sub_matches.value_of("peer-public-key-identifier"),
+        sub_matches.value_of("peer-manifest-base-url"),
+    ) {
+        (_, _, Some(manifest_base_url)) => {
+            SpecificManifest::from_https(manifest_base_url, instance_name)?
+                .batch_signing_public_keys()?
+        }
+        (Some(public_key), Some(public_key_identifier), _) => {
+            public_key_map_from_arg(public_key, public_key_identifier)
+        }
+        _ => {
+            return Err(anyhow!(
+                "peer-public-key and peer-public-key-identifier are \
+                        required if peer-manifest-base-url is not provided."
+            ))
+        }
+    };
+
+    // We need the portal server owned bucket to which to write sum part
+    // messages aka aggregations. We can discover it from the portal
+    // server global manifest, or we can get that from an argument.
+    let portal_bucket = match (
+        sub_matches.value_of("portal-manifest-base-url"),
+        sub_matches.value_of("portal-output"),
+    ) {
+        (Some(manifest_base_url), _) => {
+            PortalServerGlobalManifest::from_https(manifest_base_url)?.sum_part_bucket(is_first)
+        }
+        (_, Some(path)) => StoragePath::from_str(path),
+        _ => Err(anyhow!(
+            "portal-output or portal-manifest-base-url required"
+        )),
+    }?;
+    let portal_identity = sub_matches.value_of("portal-identity");
+    let aggregation_transport = transport_for_path(portal_bucket, portal_identity)?;
+
+    // Get the key we will use to sign sum part messages sent to the
+    // portal server.
+    let batch_signing_key = batch_signing_key_from_arg(sub_matches)?;
+
+    let batch_ids: Vec<Uuid> = sub_matches
+        .values_of("batch-id")
+        .context("no batch-id")?
+        .map(|v| Uuid::parse_str(v).unwrap())
+        .collect();
+    let batch_dates: Vec<NaiveDateTime> = sub_matches
+        .values_of("batch-time")
+        .context("no batch-time")?
+        .map(|s| NaiveDateTime::parse_from_str(&s, DATE_FORMAT).unwrap())
+        .collect();
+    if batch_ids.len() != batch_dates.len() {
+        return Err(anyhow!(
+            "must provide same number of batch-id and batch-date values"
+        ));
+    }
+
+    let batch_info: Vec<_> = batch_ids.into_iter().zip(batch_dates).collect();
+    BatchAggregator::new(
+        instance_name,
+        &sub_matches.value_of("aggregation-id").unwrap(),
+        &NaiveDateTime::parse_from_str(
+            &sub_matches.value_of("aggregation-start").unwrap(),
+            DATE_FORMAT,
+        )
+        .unwrap(),
+        &NaiveDateTime::parse_from_str(
+            &sub_matches.value_of("aggregation-end").unwrap(),
+            DATE_FORMAT,
+        )
+        .unwrap(),
+        is_first,
+        &mut intake_transport,
+        &mut VerifiableTransport {
+            transport: own_validation_transport,
+            batch_signing_public_keys: own_public_key_map,
+        },
+        &mut VerifiableTransport {
+            transport: peer_validation_transport,
+            batch_signing_public_keys: peer_share_processor_pub_key_map,
+        },
+        &mut SignableTransport {
+            transport: aggregation_transport,
+            batch_signing_key,
+        },
+    )?
+    .generate_sum_part(&batch_info)?;
+    Ok(())
+}
+
+fn lint_manifest(sub_matches: &ArgMatches) -> Result<(), anyhow::Error> {
+    let manifest_base_url = sub_matches.value_of("manifest-base-url");
+    let manifest_file_reader = match sub_matches.value_of("manifest-path") {
+        Some(path) => Some(File::open(path).context("failed to open manifest file")?),
+        None => None,
+    };
+
+    let manifest_kind = ManifestKind::from_str(
+        sub_matches
+            .value_of("manifest-kind")
+            .context("manifest-kind is required")?,
+    )?;
+
+    match manifest_kind {
+        ManifestKind::IngestorGlobal => {
+            let manifest = if let Some(base_url) = manifest_base_url {
+                IngestionServerGlobalManifest::from_https(base_url)?
+            } else if let Some(reader) = manifest_file_reader {
+                IngestionServerGlobalManifest::from_reader(reader)?
+            } else {
+                return Err(anyhow!(
+                    "one of manifest-base-url or manifest-path is required"
+                ));
+            };
+            println!("Valid: {:?}\n{:#?}", manifest.validate(), manifest);
+        }
+        ManifestKind::DataShareProcessorGlobal => {
+            let manifest = if let Some(base_url) = manifest_base_url {
+                DataShareProcessorGlobalManifest::from_https(base_url)?
+            } else if let Some(reader) = manifest_file_reader {
+                DataShareProcessorGlobalManifest::from_reader(reader)?
+            } else {
+                return Err(anyhow!(
+                    "one of manifest-base-url or manifest-path is required"
+                ));
+            };
+            println!("{:#?}", manifest);
+        }
+        ManifestKind::DataShareProcessorSpecific => {
+            let instance = sub_matches
+                .value_of("instance")
+                .context("instance is required when manifest-kind=data-share-processor-specific")?;
+            let manifest = if let Some(base_url) = manifest_base_url {
+                SpecificManifest::from_https(base_url, instance)?
+            } else if let Some(reader) = manifest_file_reader {
+                SpecificManifest::from_reader(reader)?
+            } else {
+                return Err(anyhow!(
+                    "one of manifest-base-url or manifest-path is required"
+                ));
+            };
+            println!("Valid: {:?}\n{:#?}", manifest.validate(), manifest);
+        }
+        ManifestKind::PortalServerGlobal => {
+            let manifest = if let Some(base_url) = manifest_base_url {
+                PortalServerGlobalManifest::from_https(base_url)?
+            } else if let Some(reader) = manifest_file_reader {
+                PortalServerGlobalManifest::from_reader(reader)?
+            } else {
+                return Err(anyhow!(
+                    "one of manifest-base-url or manifest-path is required"
+                ));
+            };
+            println!("Valid: {:?}\n{:#?}", manifest.validate(), manifest);
+        }
+    }
+
+    Ok(())
+}
+
+fn is_first_from_arg(matches: &ArgMatches) -> bool {
+    let is_first = matches.value_of("is-first").unwrap();
+    is_first == "true"
 }
 
 fn public_key_map_from_arg(

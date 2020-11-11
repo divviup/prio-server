@@ -1,3 +1,7 @@
+variable "ingestor" {
+  type = string
+}
+
 variable "data_share_processor_name" {
   type = string
 }
@@ -81,6 +85,18 @@ variable "portal_server_manifest_base_url" {
 
 variable "sum_part_bucket_service_account_email" {
   type = string
+}
+
+variable "is_env_with_ingestor" {
+  type = bool
+}
+
+variable "test_peer_ingestion_bucket" {
+  type = string
+}
+
+variable "is_first" {
+  type = bool
 }
 
 data "aws_caller_identity" "current" {}
@@ -193,6 +209,7 @@ resource "kubernetes_config_map" "intake_batch_job_config_map" {
   data = {
     # PACKET_DECRYPTION_KEYS is a Kubernetes secret
     # BATCH_SIGNING_PRIVATE_KEY is a Kubernetes secret
+    IS_FIRST                             = var.is_first ? "true" : "false"
     AWS_ACCOUNT_ID                       = data.aws_caller_identity.current.account_id
     BATCH_SIGNING_PRIVATE_KEY_IDENTIFIER = kubernetes_secret.batch_signing_key.metadata[0].name
     INGESTOR_IDENTITY                    = var.ingestion_bucket_role
@@ -202,6 +219,8 @@ resource "kubernetes_config_map" "intake_batch_job_config_map" {
     PEER_IDENTITY                        = var.peer_validation_bucket_role
     PEER_MANIFEST_BASE_URL               = "https://${var.peer_manifest_base_url}"
     OWN_OUTPUT                           = "gs://${var.own_validation_bucket}"
+    RUST_LOG                             = "info"
+    RUST_BACKTRACE                       = "1"
   }
 }
 
@@ -216,6 +235,7 @@ resource "kubernetes_config_map" "aggregate_job_config_map" {
   data = {
     # PACKET_DECRYPTION_KEYS is a Kubernetes secret
     # BATCH_SIGNING_PRIVATE_KEY is a Kubernetes secret
+    IS_FIRST                             = var.is_first ? "true" : "false"
     AWS_ACCOUNT_ID                       = data.aws_caller_identity.current.account_id
     BATCH_SIGNING_PRIVATE_KEY_IDENTIFIER = kubernetes_secret.batch_signing_key.metadata[0].name
     INGESTOR_INPUT                       = "s3://${var.ingestion_bucket}"
@@ -229,12 +249,14 @@ resource "kubernetes_config_map" "aggregate_job_config_map" {
     PEER_MANIFEST_BASE_URL               = "https://${var.peer_manifest_base_url}"
     PORTAL_IDENTITY                      = var.sum_part_bucket_service_account_email
     PORTAL_MANIFEST_BASE_URL             = "https://${var.portal_server_manifest_base_url}"
+    RUST_LOG                             = "info"
+    RUST_BACKTRACE                       = "1"
   }
 }
 
 resource "kubernetes_cron_job" "workflow_manager" {
   metadata {
-    name      = "${var.environment}-${var.data_share_processor_name}-workflow-manager"
+    name      = "workflow-manager-${var.ingestor}-${var.environment}"
     namespace = var.kubernetes_namespace
 
     annotations = {
@@ -256,14 +278,19 @@ resource "kubernetes_cron_job" "workflow_manager" {
               name  = "workflow-manager"
               image = "${var.container_registry}/${var.workflow_manager_image}:${var.workflow_manager_version}"
               args = [
+                "--is-first=${var.is_first ? "true" : "false"}",
                 "--k8s-namespace", var.kubernetes_namespace,
                 "--k8s-service-account", kubernetes_service_account.workflow_manager.metadata[0].name,
                 "--ingestor-input", "s3://${var.ingestion_bucket}",
                 "--ingestor-identity", var.ingestion_bucket_role,
+                "--own-validation-input", "gs://${var.own_validation_bucket}",
+                "--peer-validation-input", "s3://${var.peer_validation_bucket}",
+                "--peer-validation-identity", var.ingestion_bucket_role,
                 "--bsk-secret-name", kubernetes_secret.batch_signing_key.metadata[0].name,
                 "--pdks-secret-name", var.packet_decryption_key_kubernetes_secret,
                 "--intake-batch-config-map", kubernetes_config_map.intake_batch_job_config_map.metadata[0].name,
                 "--aggregate-config-map", kubernetes_config_map.aggregate_job_config_map.metadata[0].name,
+                "--facilitator-image", "${var.container_registry}/${var.facilitator_image}:${var.facilitator_version}",
               ]
             }
             # If we use any other restart policy, then when the job is finally
@@ -285,8 +312,12 @@ resource "kubernetes_cron_job" "workflow_manager" {
 }
 
 resource "kubernetes_cron_job" "sample_maker" {
+  # This sample maker acts as an ingestion server in our test setup. It only
+  # gets created in one of the two envs, and writes to both env's ingestion
+  # buckets.
+  count = var.is_env_with_ingestor ? 1 : 0
   metadata {
-    name      = "${var.environment}-${var.data_share_processor_name}-sample-maker"
+    name      = "sample-maker-${var.ingestor}-${var.environment}"
     namespace = var.kubernetes_namespace
 
     annotations = {
@@ -314,22 +345,39 @@ resource "kubernetes_cron_job" "sample_maker" {
                 "generate-ingestion-sample",
                 "--own-output", "s3://${var.ingestion_bucket}",
                 "--own-identity", var.ingestion_bucket_role,
-                "--peer-output", "/tmp/pha-sample", # drop PHA shares for now
+                "--peer-output", "s3://${var.test_peer_ingestion_bucket}",
+                "--peer-identity", var.ingestion_bucket_role,
                 "--aggregation-id", "kittens-seen",
+                # All instances of the sample maker use the same batch signing
+                # key, thus simulating being a single server.
+                "--batch-signing-private-key", "MIGHAgEAMBMGByqGSM49AgEGCCqGSM49AwEHBG0wawIBAQQggoa08rQR90Asvhy5bWIgFBDeGaO8FnVEF3PVpNVmDGChRANCAAQ2mZfm4UC73PkWsYz3Uub6UTIAFQCPGxouP1O1PlmntOpfLYdvyZDCuenAzv1oCfyToolNArNjwo/+harNn1fs",
+                "--batch-signing-private-key-identifier", "sample-maker-signing-key",
+                "--packet-count", "10",
+                # We use a fixed packet encryption key so that we can make sure
+                # to use the same one in the corresponding data share processor
+                # in the other env.
+                "--pha-ecies-private-key", "BIl6j+J6dYttxALdjISDv6ZI4/VWVEhUzaS05LgrsfswmbLOgNt9HUC2E0w+9RqZx3XMkdEHBHfNuCSMpOwofVSq3TfyKwn0NrftKisKKVSaTOt5seJ67P5QL4hxgPWvxw==",
+                # These parameters get recorded in Avro messages but otherwise
+                # do not affect any system behavior, so the values don't matter.
+                "--batch-start-time", "1000000000",
+                "--batch-end-time", "1000000100",
+                "--dimension", "123",
+                "--epsilon", "0.23",
               ]
+              env {
+                name  = "RUST_LOG"
+                value = "1"
+              }
+              env {
+                name  = "RUST_BACKTRACE"
+                value = "1"
+              }
               env {
                 name  = "AWS_ACCOUNT_ID"
                 value = data.aws_caller_identity.current.account_id
               }
-              env {
-                name = "PHA_ECIES_PRIVATE_KEY"
-                value_from {
-                  secret_key_ref {
-                    name = var.packet_decryption_key_kubernetes_secret
-                    key  = "secret_key"
-                  }
-                }
-              }
+              # We use the packet decryption key that was generated in this
+              # deploy to exercise that key provisioning flow.
               env {
                 name = "FACILITATOR_ECIES_PRIVATE_KEY"
                 value_from {

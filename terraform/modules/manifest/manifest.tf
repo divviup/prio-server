@@ -50,10 +50,11 @@ resource "google_storage_bucket_iam_binding" "public_read" {
 
 # Puts this data share processor's global manifest into the bucket.
 resource "google_storage_bucket_object" "global_manifest" {
-  provider     = google-beta
-  name         = "global-manifest.json"
-  bucket       = google_storage_bucket.manifests.name
-  content_type = "application/json"
+  provider      = google-beta
+  name          = "global-manifest.json"
+  bucket        = google_storage_bucket.manifests.name
+  content_type  = "application/json"
+  cache_control = "no-cache"
   content = jsonencode({
     format = 0
     server-identity = {

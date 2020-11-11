@@ -29,9 +29,8 @@ help:
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | awk 'BEGIN {FS = ":.*?## "}; {printf "\033[36m%-30s\033[0m %s\n", $$1, $$2}'
 
 .PHONY: prep
-prep: .terraform/terraform.tfstate
-
-.terraform/terraform.tfstate: ## Prepare a new workspace (environment) if needed, configure the tfstate backend, update any modules, and switch to the workspace
+prep: ## Prepare a new workspace (environment) if needed, configure the tfstate backend, update any modules, and switch to the workspace
+	@rm -rf .terraform/
 	@if [ ! -f "$(VARS)" ]; then \
 		echo "$(BOLD)$(RED)Could not find variables file: $(VARS)$(RESET)"; \
 		exit 1; \
@@ -56,7 +55,7 @@ prep: .terraform/terraform.tfstate
 		-backend-config="bucket=$(STORAGE_BUCKET)"
 
 .PHONY: plan
-plan: .terraform/terraform.tfstate ## Show what terraform thinks it will do
+plan: prep ## Show what terraform thinks it will do
 	@terraform plan \
 		-lock=true \
 		-input=false \
@@ -64,7 +63,7 @@ plan: .terraform/terraform.tfstate ## Show what terraform thinks it will do
 		-var-file="$(VARS)"
 
 .PHONY: plan-target
-plan-target: .terraform/terraform.tfstate ## Shows what a plan looks like for applying a specific resource
+plan-target: prep ## Shows what a plan looks like for applying a specific resource
 	@echo "$(YELLOW)$(BOLD)[INFO]   $(RESET)"; echo "Example to type for the following question: module.gke.google_container_cluster.cluster"
 	@read -p "PLAN target: " DATA && \
 		terraform plan \
@@ -75,7 +74,7 @@ plan-target: .terraform/terraform.tfstate ## Shows what a plan looks like for ap
 			-target=$$DATA
 
 .PHONY: plan-destroy
-plan-destroy: .terraform/terraform.tfstate ## Creates a destruction plan.
+plan-destroy: prep ## Creates a destruction plan.
 	@terraform plan \
 		-input=false \
 		-refresh=true \
@@ -83,11 +82,11 @@ plan-destroy: .terraform/terraform.tfstate ## Creates a destruction plan.
 		-var-file="$(VARS)"
 
 .PHONY: output
-output: .terraform/terraform.tfstate ## Make Terraform print output variable(s).
+output: prep ## Make Terraform print output variable(s).
 	@terraform output
 
 .PHONY: apply
-apply: .terraform/terraform.tfstate ## Have terraform do the things. This will cost money.
+apply: prep ## Have terraform do the things. This will cost money.
 	@terraform apply \
 		-lock=true \
 		-input=false \
@@ -95,8 +94,28 @@ apply: .terraform/terraform.tfstate ## Have terraform do the things. This will c
 		-var-file="$(VARS)"
 	echo "If that succeeded, run 'terraform output --json | (cd ../deploy-tool/ ; go run main.go )'"
 
+.PHONY: apply-bootstrap
+apply-bootstrap: prep ## Have terraform bring up the minimal resources needed to bootstrap an env and permit peers to begin deploying
+	@terraform apply \
+		-lock=true \
+		-input=false \
+		-refresh=true \
+		-var-file="$(VARS)" \
+		-target=module.manifest \
+		-target=module.fake_server_resources
+
+.PHONY: destroy-bootstrap
+destroy-bootstrap: prep ## Have terraform destroy the resources brought up by apply-bootstrap
+	@terraform destroy \
+		-lock=true \
+		-input=false \
+		-refresh=true \
+		-var-file="$(VARS)" \
+		-target=module.manifest \
+		-target=module.fake_server_resources
+
 .PHONY: apply-target
-apply-target: .terraform/terraform.tfstate ## Have terraform do the things for a specific resource. This will cost money.
+apply-target: prep ## Have terraform do the things for a specific resource. This will cost money.
 	@echo "$(YELLOW)$(BOLD)[INFO]   $(RESET)"; echo "Example to type for the following question: module.gke.google_container_cluster.cluster"
 	@read -p "APPLY target: " DATA && \
 		terraform apply \
@@ -107,7 +126,7 @@ apply-target: .terraform/terraform.tfstate ## Have terraform do the things for a
 			-target=$$DATA
 
 .PHONY: destroy
-destroy: .terraform/terraform.tfstate ## Destroy the things
+destroy: prep ## Destroy the things
 	@terraform destroy \
 		-lock=true \
 		-input=false \
@@ -115,7 +134,7 @@ destroy: .terraform/terraform.tfstate ## Destroy the things
 		-var-file="$(VARS)"
 
 .PHONY: destroy-target
-destroy-target: .terraform/terraform.tfstate ## Destroy a specific resource. Caution though, this destroys chained resources.
+destroy-target: prep ## Destroy a specific resource. Caution though, this destroys chained resources.
 	@echo "$(YELLOW)$(BOLD)[INFO] Specifically destroy a piece of Terraform data.$(RESET)"; echo "Example to type for the following question: module.gke.google_container_cluster.cluster"
 	@read -p "Destroy target: " DATA && \
 		terraform destroy \

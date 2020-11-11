@@ -114,3 +114,30 @@ pub struct BatchSigningKey {
     /// specific manifest.
     pub identifier: String,
 }
+
+#[cfg(test)]
+mod tests {
+    use crate::DigestWriter;
+    use std::io::Write;
+
+    #[test]
+    fn digest_writer_test() {
+        let mut writer = DigestWriter::new();
+        let written = writer
+            .write("I expect to be written into sha256".to_string().as_bytes())
+            .unwrap();
+
+        assert_eq!(written, 34);
+
+        let digest = writer.finish();
+        let sha = digest.as_ref();
+
+        let hexed_sha = format!("{:02x?}", sha);
+        let hexed_sha = hexed_sha.replace(|ch| !char::is_alphanumeric(ch), "");
+
+        assert_eq!(
+            hexed_sha,
+            "b1b64ca32c118bfd5d1f40fdb25314468f82c0e9427f4f107ddfa89ce357a3ec".to_string()
+        )
+    }
+}

@@ -18,6 +18,8 @@ use std::{
 };
 use uuid::Uuid;
 
+pub const AGGREGATION_DATE_FORMAT: &str = "%Y%m%d%H%M";
+
 /// Manages the paths to the different files in a batch
 pub struct Batch {
     header_path: String,
@@ -48,16 +50,18 @@ impl Batch {
 
     // Creates a batch representing a sum part batch
     pub fn new_sum(
+        instance_name: &str,
         aggregation_name: &str,
         aggregation_start: &NaiveDateTime,
         aggregation_end: &NaiveDateTime,
         is_first: bool,
     ) -> Batch {
         let batch_path = format!(
-            "{}/{}-{}",
+            "{}/{}/{}-{}",
+            instance_name,
             aggregation_name,
-            aggregation_start.format(DATE_FORMAT),
-            aggregation_end.format(DATE_FORMAT)
+            aggregation_start.format(AGGREGATION_DATE_FORMAT),
+            aggregation_end.format(AGGREGATION_DATE_FORMAT)
         );
         let filename = format!("sum_{}", if is_first { 0 } else { 1 });
 
@@ -607,6 +611,7 @@ mod tests {
         let mut read_transport = LocalFileTransport::new(tempdir.path().to_path_buf());
         let mut verify_transport = LocalFileTransport::new(tempdir.path().to_path_buf());
 
+        let instance_name = "fake-instance";
         let aggregation_name = "fake-aggregation";
         let batch_id = Uuid::new_v4();
         let start = NaiveDateTime::from_timestamp(1234567890, 654321);
@@ -614,19 +619,20 @@ mod tests {
 
         let mut batch_writer: BatchWriter<'_, IngestionHeader, IngestionDataSharePacket> =
             BatchWriter::new(
-                Batch::new_sum(&aggregation_name, &start, &end, is_first),
+                Batch::new_sum(&instance_name, &aggregation_name, &start, &end, is_first),
                 &mut write_transport,
             );
         let mut batch_reader: BatchReader<'_, IngestionHeader, IngestionDataSharePacket> =
             BatchReader::new(
-                Batch::new_sum(&aggregation_name, &start, &end, is_first),
+                Batch::new_sum(instance_name, &aggregation_name, &start, &end, is_first),
                 &mut read_transport,
             );
         let batch_path = format!(
-            "{}/{}-{}",
+            "{}/{}/{}-{}",
+            instance_name,
             aggregation_name,
-            start.format(DATE_FORMAT),
-            end.format(DATE_FORMAT)
+            start.format(AGGREGATION_DATE_FORMAT),
+            end.format(AGGREGATION_DATE_FORMAT)
         );
         let first_filenames = &[
             "sum_0".to_owned(),

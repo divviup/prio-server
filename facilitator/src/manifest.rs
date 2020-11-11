@@ -36,6 +36,53 @@ struct PacketEncryptionCertificate {
     certificate: String,
 }
 
+/// Represents a global manifest advertised by a data share processor. See the
+/// design document for the full specification.
+/// https://docs.google.com/document/d/1MdfM3QT63ISU70l63bwzTrxr93Z7Tv7EDjLfammzo6Q/edit#heading=h.3j8dgxqo5h68
+#[derive(Debug, Deserialize, PartialEq)]
+#[serde(rename_all = "kebab-case")]
+pub struct DataShareProcessorGlobalManifest {
+    /// Format version of the manifest. Versions besides the currently supported
+    /// one are rejected.
+    format: u32,
+    /// Identity used by the data share processor instances to access peer
+    /// cloud resources
+    server_identity: DataShareProcessorServerIdentity,
+}
+
+/// Represents the server-identity map inside a data share processor global
+/// manifest.
+#[derive(Debug, Deserialize, PartialEq)]
+#[serde(rename_all = "kebab-case")]
+pub struct DataShareProcessorServerIdentity {
+    /// The numeric account ID of the AWS account this data share processor will
+    /// use to access peer cloud resources.
+    aws_account_id: u64,
+    /// The email address of the GCP service account this data share processor
+    /// will use to access peer cloud resources.
+    gcp_service_account_email: String,
+}
+
+impl DataShareProcessorGlobalManifest {
+    /// Loads the global manifest relative to the provided base path and returns
+    /// it. Returns an error if the manifest could not be loaded or parsed.
+    pub fn from_https(base_path: &str) -> Result<DataShareProcessorGlobalManifest> {
+        let manifest_url = format!("{}/global-manifest.json", base_path);
+        DataShareProcessorGlobalManifest::from_reader(fetch_manifest(&manifest_url)?.into_reader())
+    }
+
+    /// Loads the manifest from the provided std::io::Read. Returns an error if
+    /// the manifest could not be read or parsed.
+    pub fn from_reader<R: Read>(reader: R) -> Result<DataShareProcessorGlobalManifest> {
+        let manifest: DataShareProcessorGlobalManifest =
+            from_reader(reader).context("failed to decode JSON global manifest")?;
+        if manifest.format != 0 {
+            return Err(anyhow!("unsupported manifest format {}", manifest.format));
+        }
+        Ok(manifest)
+    }
+}
+
 /// Represents a specific manifest, used to exchange configuration parameters
 /// with peer data share processors. See the design document for the full
 /// specification.
@@ -59,64 +106,6 @@ pub struct SpecificManifest {
     packet_encryption_certificates: HashMap<String, PacketEncryptionCertificate>,
 }
 
-/// Obtains a manifest file from the provided URL
-fn fetch_manifest(manifest_url: &str) -> Result<Response> {
-    if !manifest_url.starts_with("https://") {
-        return Err(anyhow!("Manifest must be fetched over HTTPS"));
-    }
-    let response = ureq::get(manifest_url)
-        // By default, ureq will wait forever to connect or
-        // read.
-        .timeout_connect(10_000) // ten seconds
-        .timeout_read(10_000) // ten seconds
-        .call();
-    if response.error() {
-        return Err(anyhow!("failed to fetch manifest: {:?}", response));
-    }
-    Ok(response)
-}
-
-/// Attempts to parse the provided string as a PEM encoded PKIX
-/// SubjectPublicKeyInfo structure containing an ECDSA P256 public key, and
-/// returns an UnparsedPublicKey containing that key on success.
-fn public_key_from_pem(pem_key: &str) -> Result<UnparsedPublicKey<Vec<u8>>> {
-    // No Rust crate that we have found gives us an easy way to parse PKIX
-    // SubjectPublicKeyInfo structures to get at the public key which can
-    // then be used in ring::signature. Since we know the keys we deal with
-    // should always be ECDSA P256, we can instead check that the binary
-    // blob inside the PEM has the expected prefix for this kind of key in
-    // this kind of encoding, as suggested in this GitHub issue on ring:
-    // https://github.com/briansmith/ring/issues/881
-    let pem = pem::parse(&pem_key).context("failed to parse key as PEM")?;
-    if pem.tag != "PUBLIC KEY" {
-        return Err(anyhow!(
-            "key for identifier {} is not a PEM encoded public key"
-        ));
-    }
-
-    // An ECDSA P256 public key in this encoding will always be 26 bytes of
-    // prefix + 65 bytes of key = 91 bytes total. e.g.,
-    // https://lapo.it/asn1js/#MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgD______________________________________________________________________________________w
-    if pem.contents.len() != 91 {
-        return Err(anyhow!(
-            "PEM contents are wrong size for ASN.1 encoded ECDSA P256 SubjectPublicKeyInfo"
-        ));
-    }
-
-    let (prefix, key) = pem.contents.split_at(ECDSA_P256_SPKI_PREFIX.len());
-
-    if prefix != ECDSA_P256_SPKI_PREFIX {
-        return Err(anyhow!(
-            "PEM contents are not ASN.1 encoded ECDSA P256 SubjectPublicKeyInfo"
-        ));
-    }
-
-    Ok(UnparsedPublicKey::new(
-        &ECDSA_P256_SHA256_ASN1,
-        Vec::from(key),
-    ))
-}
-
 impl SpecificManifest {
     /// Load the specific manifest for the specified peer relative to the
     /// provided base path. Returns an error if the manifest could not be
@@ -126,7 +115,9 @@ impl SpecificManifest {
         SpecificManifest::from_reader(fetch_manifest(&manifest_url)?.into_reader())
     }
 
-    fn from_reader<R: Read>(reader: R) -> Result<SpecificManifest> {
+    /// Loads the manifest from the provided std::io::Read. Returns an error if
+    /// the manifest could not be read or parsed.
+    pub fn from_reader<R: Read>(reader: R) -> Result<SpecificManifest> {
         let manifest: SpecificManifest =
             from_reader(reader).context("failed to decode JSON specific manifest")?;
         if manifest.format != 0 {
@@ -155,6 +146,18 @@ impl SpecificManifest {
     pub fn validation_bucket(&self) -> Result<StoragePath> {
         // For the time being, the path is assumed to be an S3 bucket.
         StoragePath::from_str(&format!("s3://{}", &self.peer_validation_bucket))
+    }
+
+    /// Returns true if all the members of the parsed manifest are valid, false
+    /// otherwise.
+    pub fn validate(&self) -> Result<()> {
+        self.batch_signing_public_keys()
+            .context("bad manifest: public keys")?;
+        self.validation_bucket()
+            .context("bad manifest: valiation bucket")?;
+        StoragePath::from_str(&format!("s3://{}", &self.ingestion_bucket))
+            .context("bad manifest: ingestion bucket")?;
+        Ok(())
     }
 }
 
@@ -196,7 +199,9 @@ impl IngestionServerGlobalManifest {
         IngestionServerGlobalManifest::from_reader(fetch_manifest(&manifest_url)?.into_reader())
     }
 
-    fn from_reader<R: Read>(reader: R) -> Result<IngestionServerGlobalManifest> {
+    /// Loads the manifest from the provided std::io::Read. Returns an error if
+    /// the manifest could not be read or parsed.
+    pub fn from_reader<R: Read>(reader: R) -> Result<IngestionServerGlobalManifest> {
         let manifest: IngestionServerGlobalManifest =
             from_reader(reader).context("failed to decode JSON global manifest")?;
         if manifest.format != 0 {
@@ -218,6 +223,14 @@ impl IngestionServerGlobalManifest {
             );
         }
         Ok(keys)
+    }
+
+    /// Returns true if all the members of the parsed manifest are valid, false
+    /// otherwise.
+    pub fn validate(&self) -> Result<()> {
+        self.batch_signing_public_keys()
+            .context("bad manifest: public keys")?;
+        Ok(())
     }
 }
 
@@ -242,7 +255,9 @@ impl PortalServerGlobalManifest {
         PortalServerGlobalManifest::from_reader(fetch_manifest(&manifest_url)?.into_reader())
     }
 
-    fn from_reader<R: Read>(reader: R) -> Result<PortalServerGlobalManifest> {
+    /// Loads the manifest from the provided std::io::Read. Returns an error if
+    /// the manifest could not be read or parsed.
+    pub fn from_reader<R: Read>(reader: R) -> Result<PortalServerGlobalManifest> {
         let manifest: PortalServerGlobalManifest =
             from_reader(reader).context("failed to decode JSON global manifest")?;
         if manifest.format != 0 {
@@ -264,6 +279,77 @@ impl PortalServerGlobalManifest {
             }
         ))
     }
+
+    /// Returns true if all the members of the parsed manifest are valid, false
+    /// otherwise.
+    pub fn validate(&self) -> Result<()> {
+        self.sum_part_bucket(true)
+            .context("bad manifest: pha sum part bucket")?;
+        self.sum_part_bucket(false)
+            .context("bad manifest: facilitator sum part bucket")?;
+        Ok(())
+    }
+}
+
+/// Obtains a manifest file from the provided URL
+fn fetch_manifest(manifest_url: &str) -> Result<Response> {
+    if !manifest_url.starts_with("https://") {
+        return Err(anyhow!("Manifest must be fetched over HTTPS"));
+    }
+    let response = ureq::get(manifest_url)
+        // By default, ureq will wait forever to connect or
+        // read.
+        .timeout_connect(10_000) // ten seconds
+        .timeout_read(10_000) // ten seconds
+        .call();
+    if response.error() {
+        return Err(anyhow!("failed to fetch manifest: {:?}", response));
+    }
+    Ok(response)
+}
+
+/// Attempts to parse the provided string as a PEM encoded PKIX
+/// SubjectPublicKeyInfo structure containing an ECDSA P256 public key, and
+/// returns an UnparsedPublicKey containing that key on success.
+fn public_key_from_pem(pem_key: &str) -> Result<UnparsedPublicKey<Vec<u8>>> {
+    // No Rust crate that we have found gives us an easy way to parse PKIX
+    // SubjectPublicKeyInfo structures to get at the public key which can
+    // then be used in ring::signature. Since we know the keys we deal with
+    // should always be ECDSA P256, we can instead check that the binary
+    // blob inside the PEM has the expected prefix for this kind of key in
+    // this kind of encoding, as suggested in this GitHub issue on ring:
+    // https://github.com/briansmith/ring/issues/881
+    if pem_key == "" {
+        return Err(anyhow!("empty PEM input"));
+    }
+    let pem = pem::parse(&pem_key).context(format!("failed to parse key as PEM: {}", pem_key))?;
+    if pem.tag != "PUBLIC KEY" {
+        return Err(anyhow!(
+            "key for identifier {} is not a PEM encoded public key"
+        ));
+    }
+
+    // An ECDSA P256 public key in this encoding will always be 26 bytes of
+    // prefix + 65 bytes of key = 91 bytes total. e.g.,
+    // https://lapo.it/asn1js/#MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgD______________________________________________________________________________________w
+    if pem.contents.len() != 91 {
+        return Err(anyhow!(
+            "PEM contents are wrong size for ASN.1 encoded ECDSA P256 SubjectPublicKeyInfo"
+        ));
+    }
+
+    let (prefix, key) = pem.contents.split_at(ECDSA_P256_SPKI_PREFIX.len());
+
+    if prefix != ECDSA_P256_SPKI_PREFIX {
+        return Err(anyhow!(
+            "PEM contents are not ASN.1 encoded ECDSA P256 SubjectPublicKeyInfo"
+        ));
+    }
+
+    Ok(UnparsedPublicKey::new(
+        &ECDSA_P256_SHA256_ASN1,
+        Vec::from(key),
+    ))
 }
 
 #[cfg(test)]
@@ -276,6 +362,105 @@ mod tests {
     use ring::rand::SystemRandom;
     use rusoto_core::Region;
     use std::io::Cursor;
+
+    #[test]
+    fn load_data_share_processor_global_manifest() {
+        let reader = Cursor::new(
+            r#"
+{
+    "format": 0,
+    "server-identity": {
+        "aws-account-id": 12345678901234567,
+        "gcp-service-account-email": "service-account@project-name.iam.gserviceaccount.com"
+    }
+}
+            "#,
+        );
+        let manifest = DataShareProcessorGlobalManifest::from_reader(reader).unwrap();
+        assert_eq!(manifest.format, 0);
+        assert_eq!(
+            manifest.server_identity,
+            DataShareProcessorServerIdentity {
+                aws_account_id: 12345678901234567,
+                gcp_service_account_email: "service-account@project-name.iam.gserviceaccount.com"
+                    .to_owned(),
+            }
+        );
+    }
+
+    #[test]
+    fn invalid_data_share_processor_global_manifests() {
+        let invalid_manifests = vec![
+            // no format key
+            r#"
+{
+    "server-identity": {
+        "aws-account-id": 12345678901234567,
+        "gcp-service-account-email": "service-account@project-name.iam.gserviceaccount.com"
+    }
+}
+        "#,
+            // wrong format version
+            r#"
+ {
+    "format": 2,
+    "server-identity": {
+        "aws-account-id": 12345678901234567,
+        "gcp-service-account-email": "service-account@project-name.iam.gserviceaccount.com"
+    }
+}
+        "#,
+            // no server identity
+            r#"
+ {
+    "format": 0
+}
+        "#,
+            // missing aws account
+            r#"
+ {
+    "format": 0,
+    "server-identity": {
+        "gcp-service-account-email": "service-account@project-name.iam.gserviceaccount.com"
+    }
+}
+        "#,
+            // non numeric aws account
+            r#"
+ {
+    "format": 0,
+    "server-identity": {
+        "aws-account-id": "not-a-number",
+        "gcp-service-account-email": "service-account@project-name.iam.gserviceaccount.com"
+    }
+}
+        "#,
+            // missing GCP email
+            r#"
+ {
+    "format": 0,
+    "server-identity": {
+        "aws-account-id": 12345678901234567
+    }
+}
+        "#,
+            // non-string GCP email
+            r#"
+ {
+    "format": 0,
+    "server-identity": {
+        "aws-account-id": 12345678901234567,
+        "gcp-service-account-email": 14
+    }
+}
+        "#,
+        ];
+
+        for invalid_manifest in &invalid_manifests {
+            let reader = Cursor::new(invalid_manifest);
+            DataShareProcessorGlobalManifest::from_reader(reader).unwrap_err();
+        }
+    }
 
     #[test]
     fn load_specific_manifest() {

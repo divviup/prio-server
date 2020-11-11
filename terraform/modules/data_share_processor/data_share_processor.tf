@@ -1,3 +1,7 @@
+variable "ingestor" {
+  type = string
+}
+
 variable "data_share_processor_name" {
   type = string
 }
@@ -58,15 +62,55 @@ variable "portal_server_manifest_base_url" {
   type = string
 }
 
+variable "test_peer_environment" {
+  type        = map(string)
+  default     = {}
+  description = "See main.tf for discussion."
+}
+
+variable "is_first" {
+  type = bool
+}
+
 locals {
-  resource_prefix = "prio-${var.environment}-${var.data_share_processor_name}"
-  ingestion_bucket_writer_role_arn = var.ingestor_gcp_service_account_id != "" ? (
+  resource_prefix         = "prio-${var.environment}-${var.data_share_processor_name}"
+  is_env_with_ingestor    = lookup(var.test_peer_environment, "env_with_ingestor", "") == var.environment
+  is_env_without_ingestor = lookup(var.test_peer_environment, "env_without_ingestor", "") == var.environment
+  # There are four cases for who is writing to this data share processor's
+  # ingestion bucket, listed in the order we check for them:
+  #
+  # 1 - This is a test environment that creates fake ingestors. The fake
+  #     ingestors assume this data share processor's aws_iam_role.bucket_role,
+  #     so grant that role write permissions on the ingestion bucket.
+  # 2 - This is a test environment that does _not_ create fake ingestors.
+  #     We assume the other test env (our peer) uses the same AWS account ID and
+  #     that it follows the same naming conventions we do, and grant what should
+  #     be the corresponding data share processor's aws_iam_role.bucket_role
+  #     access.
+  # 3 - This is a non-test environment for an ingestor that advertises a GCP
+  #     service account. We will have created
+  #     aws_iam_role.ingestor_bucket_writer_role and grant it write access.
+  # 4 - This is a non-test environment for an ingestor that advertises an AWS
+  #     role. We grant that role write access.
+  ingestion_bucket_writer_role_arn = local.is_env_with_ingestor ? (
+    aws_iam_role.bucket_role.arn
+    ) : local.is_env_without_ingestor ? (
+    "arn:aws:iam::${data.aws_caller_identity.current.account_id}:role/prio-${var.test_peer_environment.env_with_ingestor}-${var.data_share_processor_name}-bucket-role"
+    ) : var.ingestor_gcp_service_account_id != "" ? (
     aws_iam_role.ingestor_bucket_writer_role[0].arn
     ) : (
     var.ingestor_aws_role_arn
   )
   ingestion_bucket_name       = "${local.resource_prefix}-ingestion"
   peer_validation_bucket_name = "${local.resource_prefix}-peer-validation"
+  # If this environment creates fake ingestors, we make an educated guess about
+  # the name of the other test environment's ingestion bucket so our fake
+  # ingestors can write ingestion batches to them. This assumes that the
+  # other test environment follows our naming convention and that they are in
+  # the same AWS region as we are.
+  test_peer_ingestion_bucket = local.is_env_with_ingestor ? (
+    "${aws_s3_bucket.ingestion_bucket.region}/prio-${var.test_peer_environment.env_without_ingestor}-${var.data_share_processor_name}-ingestion"
+  ) : ""
 }
 
 data "aws_caller_identity" "current" {}
@@ -110,6 +154,33 @@ ROLE
   tags = {
     environment = "prio-${var.environment}"
   }
+}
+
+# The bucket_role defined above is created in our AWS account and used to
+# access S3 buckets in a peer's AWS account. Besides _their_ bucket having a
+# policy that grants us access, we need to make sure _our_ role allows use of S3
+# API, hence this policy. Note it is not the same as the role assumption policy
+# defined inline in aws_iam_role.bucket_role.
+# TODO: Make this policy as restrictive as possible:
+# https://github.com/abetterinternet/prio-server/issues/140
+resource "aws_iam_role_policy" "bucket_role_policy" {
+  name = "${local.resource_prefix}-bucket-role-policy"
+  role = aws_iam_role.bucket_role.id
+
+  policy = <<POLICY
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Action": [
+        "s3:*"
+      ],
+      "Effect": "Allow",
+      "Resource": "*"
+    }
+  ]
+}
+POLICY
 }
 
 # If the ingestor authenticates using a GCP service account, this is the role in
@@ -271,7 +342,7 @@ resource "google_storage_bucket" "own_validation_bucket" {
 # bucket
 resource "google_storage_bucket_iam_binding" "own_validation_bucket_admin" {
   bucket = google_storage_bucket.own_validation_bucket.name
-  role   = "roles/storage.legacyBucketWriter"
+  role   = "roles/storage.objectAdmin"
   members = [
     module.kubernetes.service_account_email
   ]
@@ -280,6 +351,7 @@ resource "google_storage_bucket_iam_binding" "own_validation_bucket_admin" {
 module "kubernetes" {
   source                                  = "../../modules/kubernetes/"
   data_share_processor_name               = var.data_share_processor_name
+  ingestor                                = var.ingestor
   gcp_project                             = var.gcp_project
   environment                             = var.environment
   kubernetes_namespace                    = var.kubernetes_namespace
@@ -294,6 +366,9 @@ module "kubernetes" {
   own_manifest_base_url                   = var.own_manifest_base_url
   sum_part_bucket_service_account_email   = var.sum_part_bucket_service_account_email
   portal_server_manifest_base_url         = var.portal_server_manifest_base_url
+  is_env_with_ingestor                    = local.is_env_with_ingestor
+  test_peer_ingestion_bucket              = local.test_peer_ingestion_bucket
+  is_first                                = var.is_first
 }
 
 output "data_share_processor_name" {
