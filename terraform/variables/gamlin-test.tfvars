@@ -11,6 +11,9 @@ managed_dns_zone = {
 }
 ingestors = {
   apple = "exposure-notification.apple.com/manifest"
+  # This is Google, but we aren't allowed to create GCS buckets with "google" in
+  # their name
+  g-enpa = "www.gstatic.com/prio-manifests"
 }
 peer_share_processor_manifest_base_url = "gamlin-test.manifests.isrg-prio.org/pha"
 portal_server_manifest_base_url        = "gamlin-test.manifests.isrg-prio.org/portal-server"
