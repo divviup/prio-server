@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 	log "github.com/sirupsen/logrus"
-	kubeError "k8s.io/apimachinery/pkg/api/errors"
+	corev1 "k8s.io/api/core/v1"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
 	_ "k8s.io/client-go/plugin/pkg/client/auth/gcp"
@@ -22,9 +22,8 @@ type Kube struct {
 }
 
 const (
-	packetDecryptionKeyName = "packet-decryption-key"
-	secretKeyMap            = "secret_key"
-	batchSigningKeyFormat   = "batch-signing-key-%s-"
+	secretKeyMap          = "secret_key"
+	batchSigningKeyFormat = "batch-signing-key-%s-"
 )
 
 func NewKube(namespace string, dataShareProcessors []string) (*Kube, error) {
@@ -49,59 +48,55 @@ func NewKube(namespace string, dataShareProcessors []string) (*Kube, error) {
 	}, nil
 }
 
-func (k *Kube) ReconcilePacketEncryptionKey() (*PrioKey, error) {
-	sApi := k.client.CoreV1().Secrets(k.namespace)
+func (k *Kube) ReconcilePacketEncryptionKey() ([]*PrioKey, error) {
+	secretSelector := "type=packet-decryption-key"
 
-	secret, err := sApi.Get(context.Background(), packetDecryptionKeyName, v1.GetOptions{})
-
+	secrets, err := k.getSortedSecretsWithLabel(secretSelector)
 	if err != nil {
-		if kubeError.IsNotFound(err) {
-			key, err := k.createAndStorePacketEncryptionKey()
-			if err != nil {
-				return nil, fmt.Errorf("creating and storing the packet decryption key failed: %w", err)
-			}
+		return nil, fmt.Errorf("getting the packet encryption keys failed: %w", err)
+	}
 
-			return key, nil
+	// No secret exists, create the first one
+	if len(secrets) == 0 {
+		key, err := k.createAndStorePacketEncryptionKey()
+		if err != nil {
+			return nil, fmt.Errorf("creating and storing the packet decyrption keys failed: %w", err)
 		}
-		return nil, fmt.Errorf("problem getting the secrets: %w", err)
+
+		return []*PrioKey{key}, nil
 	}
 
-	key, err := k.validateAndUpdatePacketEncryptionKey(secret)
+	secret := secrets[0]
+	keys, err := k.validateAndUpdatePacketEncryptionKey(&secret)
 	if err != nil {
-		return nil, fmt.Errorf("creating and storing the packet decryption key failed: %w", err)
+		return nil, fmt.Errorf("creating and storing the packet decryption keys failed: %w", err)
 	}
 
-	return key, nil
+	if len(secrets) >= 4 {
+		err = k.deleteSecrets(secrets[3:])
+
+		if err != nil {
+			return nil, fmt.Errorf("there was an error deleting old secrets. %w", err)
+		}
+	}
+
+	return keys, nil
 }
 
 func (k *Kube) ReconcileBatchSigningKey() (map[string][]*PrioKey, error) {
-	sApi := k.client.CoreV1().Secrets(k.namespace)
 	results := make(map[string][]*PrioKey)
 
 	for _, dataShareProcessor := range k.dataShareProcessors {
-
+		secretSelector := fmt.Sprintf("type=batch-signing-key,dsp=%s", dataShareProcessor)
 		secretName := fmt.Sprintf(batchSigningKeyFormat, dataShareProcessor)
 
-		secretList, err := sApi.List(context.Background(), v1.ListOptions{
-			LabelSelector: fmt.Sprintf("type=batch-signing-key,dsp=%s", dataShareProcessor),
-		})
-
+		secrets, err := k.getSortedSecretsWithLabel(secretSelector)
 		if err != nil {
-			return nil, fmt.Errorf("problem when listing the batch-signing-secretList: %w", err)
+			return nil, fmt.Errorf("getting the batch signing secrets failed: %w", err)
 		}
 
-		// Sorts so the items are newest first
-		sort.Slice(secretList.Items, func(i, j int) bool {
-			item1 := secretList.Items[i]
-			item2 := secretList.Items[j]
-
-			time1 := item1.GetCreationTimestamp().Time
-			time2 := item2.GetCreationTimestamp().Time
-
-			return time1.After(time2)
-		})
-
-		if len(secretList.Items) == 0 {
+		// No secret exists, make the first one.
+		if len(secrets) == 0 {
 			key, err := k.createAndStoreBatchSigningKey(secretName, dataShareProcessor)
 			if err != nil {
 				return nil, fmt.Errorf("creating and storing the batch signing key failed: %w", err)
@@ -112,7 +107,8 @@ func (k *Kube) ReconcileBatchSigningKey() (map[string][]*PrioKey, error) {
 			continue
 		}
 
-		secret := secretList.Items[0]
+		// Last good secret
+		secret := secrets[0]
 		keys, err := k.validateAndUpdateBatchSigningKey(secretName, dataShareProcessor, &secret)
 		if err != nil {
 			return nil, fmt.Errorf("validating the batch signing key failed: %w", err)
@@ -124,7 +120,55 @@ func (k *Kube) ReconcileBatchSigningKey() (map[string][]*PrioKey, error) {
 		}
 		results[dataShareProcessor] = keys
 
+		if len(secrets) >= 4 {
+			err = k.deleteSecrets(secrets[3:])
+
+			if err != nil {
+				return nil, fmt.Errorf("there was an error deleting old secrets. %w", err)
+			}
+		}
 	}
 
 	return results, nil
+}
+
+func (k *Kube) deleteSecrets(secrets []corev1.Secret) error {
+	sApi := k.client.CoreV1().Secrets(k.namespace)
+
+	for _, secret := range secrets {
+		err := sApi.Delete(context.Background(), secret.Name, v1.DeleteOptions{GracePeriodSeconds: nil})
+		if err != nil {
+			return fmt.Errorf("problem with deleting secret %s: %w", secret.Name, err)
+		}
+	}
+
+	return nil
+}
+
+func (k *Kube) getSortedSecretsWithLabel(labelSelector string) ([]corev1.Secret, error) {
+	sApi := k.client.CoreV1().Secrets(k.namespace)
+
+	secrets, err := sApi.List(context.Background(), v1.ListOptions{
+		LabelSelector: labelSelector,
+	})
+
+	if err != nil {
+		return nil, fmt.Errorf("problem when listing secrets with label %s: %w", labelSelector, err)
+	}
+
+	if secrets.Items == nil {
+		return nil, fmt.Errorf("secrets was nil after retrieving them from k8s")
+	}
+
+	sort.Slice(secrets.Items, func(i, j int) bool {
+		item1 := secrets.Items[i]
+		item2 := secrets.Items[j]
+
+		time1 := item1.GetCreationTimestamp().Time
+		time2 := item2.GetCreationTimestamp().Time
+
+		return time1.After(time2)
+	})
+
+	return secrets.Items, nil
 }

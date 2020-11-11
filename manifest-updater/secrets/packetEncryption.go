@@ -10,31 +10,24 @@ import (
 )
 
 const (
-	packetDecryptionKeyMaxAge = 20 * 24 * time.Hour
+	//packetDecryptionKeyMaxAge = 20 * 24 * time.Hour
+	packetDecryptionKeyMaxAge = 20 * time.Second
+	packetDecryptionKeyFormat = "packet-decryption-key-"
 )
 
-func (k *Kube) validateAndUpdatePacketEncryptionKey(secret *corev1.Secret) (*PrioKey, error) {
-	data := secret.Data
-
+func (k *Kube) validateAndUpdatePacketEncryptionKey(secret *corev1.Secret) ([]*PrioKey, error) {
 	creation := secret.GetCreationTimestamp()
 	since := time.Since(creation.Time)
 
 	expired := since > packetDecryptionKeyMaxAge
-
-	_, ok := data[secretKeyMap]
-	if ok && !expired {
+	if !expired {
 		return nil, nil
 	}
+
 	k.log.
-		WithField("Secret existence: ", ok).
+		WithField("KeyType: ", "PacketDecryptionKey").
 		WithField("Expiration: ", expired).
 		Info("Secret value didn't exist, or secret expired, we're going to assume the secret is invalid and make a new one")
-
-	err := k.deletePacketEncryptionSecret(secret)
-
-	if err != nil {
-		return nil, fmt.Errorf("unable to delete existing secret: %w", err)
-	}
 
 	key, err := k.createAndStorePacketEncryptionKey()
 
@@ -43,21 +36,20 @@ func (k *Kube) validateAndUpdatePacketEncryptionKey(secret *corev1.Secret) (*Pri
 		return nil, fmt.Errorf("unable to create secret after deleting: %w", err)
 	}
 
-	return key, nil
-
-}
-
-func (k *Kube) deletePacketEncryptionSecret(secret *corev1.Secret) error {
-	sApi := k.client.CoreV1().Secrets(k.namespace)
-
-	var deletion int64
-	deletion = 0
-
-	if err := sApi.Delete(context.Background(), secret.Name, v1.DeleteOptions{GracePeriodSeconds: &deletion}); err != nil {
-		return fmt.Errorf("unable to delete: %w", err)
+	encodedKey := secret.Data[secretKeyMap]
+	oldKey := make([]byte, base64.StdEncoding.DecodedLen(len(encodedKey)))
+	_, err = base64.StdEncoding.Decode(oldKey, secret.Data[secretKeyMap])
+	if err != nil {
+		return nil, fmt.Errorf("unable to decode old secret key: %w", err)
 	}
 
-	return nil
+	oldPrioKey := PrioKeyFromX962UncompressedKey(oldKey)
+	oldPrioKey.KubeIdentifier = &secret.Name
+
+	return []*PrioKey{
+		key,
+		&oldPrioKey,
+	}, nil
 }
 
 func (k *Kube) createAndStorePacketEncryptionKey() (*PrioKey, error) {
@@ -71,8 +63,11 @@ func (k *Kube) createAndStorePacketEncryptionKey() (*PrioKey, error) {
 
 	secret := corev1.Secret{
 		ObjectMeta: v1.ObjectMeta{
-			Name:      packetDecryptionKeyName,
-			Namespace: k.namespace,
+			GenerateName: packetDecryptionKeyFormat,
+			Namespace:    k.namespace,
+			Labels: map[string]string{
+				"type": "packet-decryption-key",
+			},
 		},
 		Immutable: &immutable,
 

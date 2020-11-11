@@ -26,7 +26,7 @@ func NewUpdater(environmentName string, locality string, manifestBucketLocation 
 	}, nil
 }
 
-func (u *Updater) UpdateDataShareSpecificManifest(keys map[string]BatchSigningPublicKeys, certificate *PacketEncryptionCertificate) error {
+func (u *Updater) UpdateDataShareSpecificManifest(keys map[string]BatchSigningPublicKeys, certificate PacketEncryptionCertificates) error {
 	if keys == nil && certificate == nil {
 		return nil
 	}
@@ -45,7 +45,7 @@ func (u *Updater) UpdateDataShareSpecificManifest(keys map[string]BatchSigningPu
 			manifest.BatchSigningPublicKeys = keys[dsp]
 		}
 		if certificate != nil {
-			manifest.PacketEncryptionCertificates = map[string]PacketEncryptionCertificate{u.constructPacketEncryptionLookupKey(dsp): *certificate}
+			manifest.PacketEncryptionCertificates = certificate
 		}
 
 		err = u.writeManifest(store, manifest, dsp)
@@ -104,14 +104,6 @@ func (u *Updater) writeManifest(store *storage.BucketHandle, manifest *DataShare
 		return fmt.Errorf("encoding manifest json failed: %w", err)
 	}
 	return nil
-}
-
-func (u *Updater) constructBatchSigningLookupKey(dataShareProcessor string) string {
-	return fmt.Sprintf("%s-%s-%s-batch-signing-key", u.environmentName, u.locality, dataShareProcessor)
-}
-
-func (u *Updater) constructPacketEncryptionLookupKey(dataShareProcessor string) string {
-	return fmt.Sprintf("%s-%s-%s-ingestion-packet-decryption-key", u.environmentName, u.locality, dataShareProcessor)
 }
 
 func (u *Updater) getStorageClient() (*storage.BucketHandle, error) {

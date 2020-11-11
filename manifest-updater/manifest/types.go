@@ -21,10 +21,11 @@ type DataShareSpecificManifest struct {
 	// contain the public key corresponding to the private key that the data
 	// share processor which owns the manifest uses to decrypt ingestion share
 	// packets.
-	PacketEncryptionCertificates map[string]PacketEncryptionCertificate `json:"packet-encryption-certificates"`
+	PacketEncryptionCertificates PacketEncryptionCertificates `json:"packet-encryption-certificates"`
 }
 
 type BatchSigningPublicKeys = map[string]BatchSigningPublicKey
+type PacketEncryptionCertificates = map[string]PacketEncryptionCertificate
 
 // BatchSigningPublicKey represents a public key used for batch signing.
 type BatchSigningPublicKey struct {
