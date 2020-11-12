@@ -133,3 +133,16 @@ resource "google_compute_disk" "prom_store" {
   zone    = "${var.gcp_region}-a"
   project = var.gcp_project
 }
+
+resource "kubernetes_ingress" "prom_ingress" {
+  metadata {
+    name = "prom-ingress"
+  }
+
+  spec {
+    backend {
+      service_name = "prometheus"
+      service_port = 9090
+    }
+  }
+}
