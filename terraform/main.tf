@@ -216,6 +216,12 @@ locals {
   }
 }
 
+module "monitoring" {
+  source      = "./modules/monitoring"
+  gcp_project = var.gcp_project
+  gcp_region  = var.gcp_region
+}
+
 module "data_share_processors" {
   for_each                                = local.locality_ingestor_pairs
   source                                  = "./modules/data_share_processor"
