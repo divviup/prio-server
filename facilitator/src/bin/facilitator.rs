@@ -218,7 +218,6 @@ impl<'a, 'b> AppArgumentAdder for App<'a, 'b> {
                 .env(name_env)
                 .value_name("PATH")
                 .validator(path_validator)
-                .required(true)
                 .help("Storage path (gs://, s3:// or local dir name)"),
         )
         .arg(
