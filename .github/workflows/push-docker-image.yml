@@ -20,11 +20,11 @@ jobs:
         username: isrgautomaton
         password: ${{ secrets.ISRG_AUTOMATON_DOCKERHUB_AUTH_TOKEN }}
     - name: build
-      run: docker build -f facilitator/Dockerfile -t letsencrypt/prio-facilitator:{{ steps.get_version.outputs.VERSION }}
+      run: docker build -f facilitator/Dockerfile -t letsencrypt/prio-facilitator:${{ steps.get_version.outputs.VERSION }}
     - name: tag-latest
       run: docker tag letsencrypt/prio-facilitator:${{ steps.get_version.outputs.VERSION }} letsencrypt/prio-facilitator:latest
     - name: push
-      run: docker push letsencrypt/prio-facilitator:${{steps.get_version.outputs.VERSION }}
+      run: docker push letsencrypt/prio-facilitator:${{ steps.get_version.outputs.VERSION }}
     - name: push-latest
       run: docker push letsencrypt/prio-facilitator:latest
 
