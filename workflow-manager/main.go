@@ -343,19 +343,16 @@ func (b *bucket) listFilesS3(ctx context.Context) ([]string, error) {
 		return nil, fmt.Errorf("making AWS session: %w", err)
 	}
 
-	var creds *credentials.Credentials
+	log.Printf("listing files in s3://%s as %q", bucket, b.identity)
+	config := aws.NewConfig().
+		WithRegion(region)
 	if b.identity != "" {
-		creds, err = webIDP(sess, b.identity)
+		creds, err := webIDP(sess, b.identity)
 		if err != nil {
 			return nil, err
 		}
-	} else {
-		creds = credentials.NewEnvCredentials()
+		config = config.WithCredentials(creds)
 	}
-	log.Printf("listing files in s3://%s as %q", bucket, b.identity)
-	config := aws.NewConfig().
-		WithRegion(region).
-		WithCredentials(creds)
 	svc := s3.New(sess, config)
 	var output []string
 	var nextContinuationToken string = ""
