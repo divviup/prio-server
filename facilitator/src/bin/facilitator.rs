@@ -6,7 +6,7 @@ use ring::signature::{
     EcdsaKeyPair, KeyPair, UnparsedPublicKey, ECDSA_P256_SHA256_ASN1,
     ECDSA_P256_SHA256_ASN1_SIGNING,
 };
-use std::{collections::HashMap, fs::File, str::FromStr};
+use std::{collections::HashMap, fs::File, io::Read, str::FromStr};
 use uuid::Uuid;
 
 use facilitator::{
@@ -71,6 +71,8 @@ trait AppArgumentAdder {
     fn add_batch_signing_key_arguments(self: Self) -> Self;
 
     fn add_packet_decryption_key_argument(self: Self) -> Self;
+
+    fn add_gcp_service_account_key_file_argument(self: Self) -> Self;
 }
 
 const SHARED_HELP: &str = "Storage arguments: Any flag ending in -input or -output can take an \
@@ -216,7 +218,6 @@ impl<'a, 'b> AppArgumentAdder for App<'a, 'b> {
                 .env(name_env)
                 .value_name("PATH")
                 .validator(path_validator)
-                .required(true)
                 .help("Storage path (gs://, s3:// or local dir name)"),
         )
         .arg(
@@ -302,6 +303,22 @@ impl<'a, 'b> AppArgumentAdder for App<'a, 'b> {
                 .required(true),
         )
     }
+
+    fn add_gcp_service_account_key_file_argument(self: App<'a, 'b>) -> App<'a, 'b> {
+        self.arg(
+            Arg::with_name("gcp-service-account-key-file")
+                .long("gcp-service-account-key-file")
+                .env("GCP_SERVICE_ACCOUNT_KEY_FILE")
+                .help("Path to key file for GCP service account")
+                .long_help(
+                    "Path to the JSON key file for the GCP service account \
+                    that should be used by for accessing GCS or impersonating \
+                    other GCP service accounts. If omitted, the default \
+                    account found in the GKE metadata service will be used for \
+                    authentication or impersonation.",
+                ),
+        )
+    }
 }
 
 fn main() -> Result<(), anyhow::Error> {
@@ -332,6 +349,7 @@ fn main() -> Result<(), anyhow::Error> {
         .subcommand(
             SubCommand::with_name("generate-ingestion-sample")
                 .about("Generate sample data files")
+                .add_gcp_service_account_key_file_argument()
                 .add_storage_arguments(Entity::Peer, InOut::Output)
                 .add_storage_arguments(Entity::Own, InOut::Output)
                 .arg(
@@ -442,6 +460,7 @@ fn main() -> Result<(), anyhow::Error> {
                 .about(format!("Validate an input share (from an ingestor's bucket) and emit a validation share.\n\n{}", SHARED_HELP).as_str())
                 .add_instance_name_argument()
                 .add_is_first_argument()
+                .add_gcp_service_account_key_file_argument()
                 .arg(
                     Arg::with_name("aggregation-id")
                         .long("aggregation-id")
@@ -479,6 +498,7 @@ fn main() -> Result<(), anyhow::Error> {
                 .about(format!("Verify peer validation share and emit sum part.\n\n{}", SHARED_HELP).as_str())
                 .add_instance_name_argument()
                 .add_is_first_argument()
+                .add_gcp_service_account_key_file_argument()
                 .arg(
                     Arg::with_name("aggregation-id")
                         .long("aggregation-id")
@@ -609,11 +629,11 @@ fn main() -> Result<(), anyhow::Error> {
 fn generate_sample(sub_matches: &ArgMatches) -> Result<(), anyhow::Error> {
     let peer_output_path = StoragePath::from_str(sub_matches.value_of("peer-output").unwrap())?;
     let peer_identity = sub_matches.value_of("peer-identity");
-    let mut peer_transport = transport_for_path(peer_output_path, peer_identity)?;
+    let mut peer_transport = transport_for_path(peer_output_path, peer_identity, sub_matches)?;
 
     let own_output_path = StoragePath::from_str(sub_matches.value_of("own-output").unwrap())?;
     let own_identity = sub_matches.value_of("own-identity");
-    let mut own_transport = transport_for_path(own_output_path, own_identity)?;
+    let mut own_transport = transport_for_path(own_output_path, own_identity, sub_matches)?;
     let ingestor_batch_signing_key = batch_signing_key_from_arg(sub_matches)?;
 
     generate_ingestion_sample(
@@ -682,7 +702,7 @@ fn intake_batch(sub_matches: &ArgMatches) -> Result<(), anyhow::Error> {
 
     let peer_identity = sub_matches.value_of("peer-identity");
     let mut peer_validation_transport = SignableTransport {
-        transport: transport_for_path(peer_validation_bucket, peer_identity)?,
+        transport: transport_for_path(peer_validation_bucket, peer_identity, sub_matches)?,
         batch_signing_key: batch_signing_key_from_arg(sub_matches)?,
     };
 
@@ -691,7 +711,7 @@ fn intake_batch(sub_matches: &ArgMatches) -> Result<(), anyhow::Error> {
     let own_validation_bucket = StoragePath::from_str(sub_matches.value_of("own-output").unwrap())?;
     let own_identity = sub_matches.value_of("own-identity");
     let mut own_validation_transport = SignableTransport {
-        transport: transport_for_path(own_validation_bucket, own_identity)?,
+        transport: transport_for_path(own_validation_bucket, own_identity, sub_matches)?,
         batch_signing_key: batch_signing_key_from_arg(sub_matches)?,
     };
 
@@ -718,7 +738,8 @@ fn aggregate(sub_matches: &ArgMatches) -> Result<(), anyhow::Error> {
     // shares, so it is simply provided by argument.
     let own_validation_bucket = StoragePath::from_str(sub_matches.value_of("own-input").unwrap())?;
     let own_identity = sub_matches.value_of("own-identity");
-    let own_validation_transport = transport_for_path(own_validation_bucket, own_identity)?;
+    let own_validation_transport =
+        transport_for_path(own_validation_bucket, own_identity, sub_matches)?;
 
     // To read our own validation shares, we require our own public keys
     // which we discover in our own specific manifest.
@@ -749,7 +770,8 @@ fn aggregate(sub_matches: &ArgMatches) -> Result<(), anyhow::Error> {
         StoragePath::from_str(sub_matches.value_of("peer-input").unwrap())?;
     let peer_identity = sub_matches.value_of("peer-identity");
 
-    let peer_validation_transport = transport_for_path(peer_validation_bucket, peer_identity)?;
+    let peer_validation_transport =
+        transport_for_path(peer_validation_bucket, peer_identity, sub_matches)?;
 
     // We need the public keys the peer data share processor used to
     // sign messages, which we can obtain by argument or by discovering
@@ -790,7 +812,7 @@ fn aggregate(sub_matches: &ArgMatches) -> Result<(), anyhow::Error> {
         )),
     }?;
     let portal_identity = sub_matches.value_of("portal-identity");
-    let aggregation_transport = transport_for_path(portal_bucket, portal_identity)?;
+    let aggregation_transport = transport_for_path(portal_bucket, portal_identity, sub_matches)?;
 
     // Get the key we will use to sign sum part messages sent to the
     // portal server.
@@ -958,7 +980,7 @@ fn intake_transport_from_args(matches: &ArgMatches) -> Result<VerifiableAndDecry
     let ingestor_bucket = StoragePath::from_str(matches.value_of("ingestor-input").unwrap())?;
     let ingestor_identity = matches.value_of("ingestor-identity");
 
-    let intake_transport = transport_for_path(ingestor_bucket, ingestor_identity)?;
+    let intake_transport = transport_for_path(ingestor_bucket, ingestor_identity, matches)?;
 
     // We also need the public keys the ingestor may have used to sign the
     // the batch, which can be provided either directly via command line or must
@@ -1004,7 +1026,11 @@ fn intake_transport_from_args(matches: &ArgMatches) -> Result<VerifiableAndDecry
     })
 }
 
-fn transport_for_path(path: StoragePath, identity: Identity) -> Result<Box<dyn Transport>> {
+fn transport_for_path(
+    path: StoragePath,
+    identity: Identity,
+    matches: &ArgMatches,
+) -> Result<Box<dyn Transport>> {
     // We use the value "" to indicate that either ambient AWS credentials (for
     // S3) or the default service account Oauth token (for GCS) should be used
     // so that Terraform can explicitly indicate that the default identity
@@ -1014,9 +1040,21 @@ fn transport_for_path(path: StoragePath, identity: Identity) -> Result<Box<dyn T
     } else {
         identity
     };
+
+    let key_file_reader = match matches.value_of("gcp-service-account-key-file") {
+        Some(path) => {
+            Some(Box::new(File::open(path).context("failed to open key file")?) as Box<dyn Read>)
+        }
+        None => None,
+    };
+
     match path {
         StoragePath::S3Path(path) => Ok(Box::new(S3Transport::new(path, identity))),
-        StoragePath::GCSPath(path) => Ok(Box::new(GCSTransport::new(path, identity))),
+        StoragePath::GCSPath(path) => Ok(Box::new(GCSTransport::new(
+            path,
+            identity,
+            key_file_reader,
+        )?)),
         StoragePath::LocalPath(path) => Ok(Box::new(LocalFileTransport::new(path))),
     }
 }

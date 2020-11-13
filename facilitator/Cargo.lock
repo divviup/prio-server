@@ -556,6 +556,7 @@ dependencies = [
  "env_logger",
  "hyper",
  "hyper-rustls 0.21.0",
+ "jsonwebtoken",
  "log",
  "mockito",
  "once_cell",
@@ -935,6 +936,20 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ca059e81d9486668f12d455a4ea6daa600bd408134cd17e3d3fb5a32d1f016f8"
 dependencies = [
  "wasm-bindgen",
+]
+
+[[package]]
+name = "jsonwebtoken"
+version = "7.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "afabcc15e437a6484fc4f12d0fd63068fe457bf93f1c148d3d9649c60b103f32"
+dependencies = [
+ "base64 0.12.3",
+ "pem",
+ "ring",
+ "serde",
+ "serde_json",
+ "simple_asn1",
 ]
 
 [[package]]
@@ -1809,6 +1824,17 @@ checksum = "a3e12110bc539e657a646068aaf5eb5b63af9d0c1f7b29c97113fad80e15f035"
 dependencies = [
  "arc-swap",
  "libc",
+]
+
+[[package]]
+name = "simple_asn1"
+version = "0.4.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "692ca13de57ce0613a363c8c2f1de925adebc81b04c923ac60c5488bb44abe4b"
+dependencies = [
+ "chrono",
+ "num-bigint",
+ "num-traits",
 ]
 
 [[package]]
