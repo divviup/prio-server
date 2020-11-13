@@ -6,6 +6,10 @@ variable "gcp_region" {
   type = string
 }
 
+variable "environment" {
+  type = string
+}
+
 resource "kubernetes_namespace" "monitor" {
   metadata {
     name = "monitor"
@@ -44,11 +48,30 @@ resource "kubernetes_pod" "prometheus" {
     container {
       image = "prom/prometheus:latest"
       name  = "prometheus"
+      args = [
+        "--config.file", "/config/prometheus.yml",
+        "--storage.tsdb.path", "/data"
+      ]
+      volume_mount {
+        name       = "config-volume"
+        mount_path = "/config"
+      }
+      volume_mount {
+        name       = "storage-volume"
+        mount_path = "/data"
+      }
     }
     volume {
       name = "config-volume"
       config_map {
-        name = "prometheus_config"
+        name = kubernetes_config_map.prometheus_config.metadata[0].name
+      }
+    }
+    volume {
+      name = "storage-volume"
+
+      config_map {
+        name = kubernetes_persistent_volume_claim.prometheus_disk_claim.metadata[0].name
       }
     }
   }
@@ -67,7 +90,6 @@ resource "kubernetes_config_map" "prometheus_config" {
 resource "kubernetes_cluster_role" "prometheus_cluster_role" {
   metadata {
     name = "prometheus-role"
-    #namespace = "monitor"
   }
 
   rule {
@@ -108,26 +130,157 @@ resource "kubernetes_cluster_role_binding" "prometheus_binding" {
   }
 }
 
-resource "kubernetes_persistent_volume" "prometheus_storage" {
+resource "kubernetes_persistent_volume_claim" "prometheus_disk_claim" {
   metadata {
-    name = "prometheus-storage"
+    name = "prometheus-disk-claim"
+  }
+  spec {
+    access_modes = ["ReadWriteOnce"]
+    resources {
+      requests = {
+        storage = "20Gi"
+      }
+    }
+    storage_class_name = "standard"
+    volume_name        = kubernetes_persistent_volume.prometheus_volume.metadata.0.name
+  }
+}
+
+resource "kubernetes_persistent_volume" "prometheus_volume" {
+  metadata {
+    name = "prio-${var.environment}-prometheus-storage"
   }
   spec {
     capacity = {
       storage = "20Gi"
     }
+    storage_class_name               = "standard"
     access_modes                     = ["ReadWriteOnce"]
     persistent_volume_reclaim_policy = "Retain"
     persistent_volume_source {
       gce_persistent_disk {
-        pd_name = google_compute_disk.prom_store.name
+        pd_name = google_compute_disk.prometheus_disk.name
       }
     }
   }
 }
 
-resource "google_compute_disk" "prom_store" {
-  name = "prom-store"
+resource "google_compute_disk" "prometheus_disk" {
+  name = "prio-${var.environment}-prometheus-disk"
+  type = "pd-ssd"
+  # Hack: We have a region in the vars, but to create a disk we want a zone. Just append "-a"
+  zone    = "${var.gcp_region}-a"
+  project = var.gcp_project
+}
+
+resource "kubernetes_service" "grafana" {
+  metadata {
+    name      = "grafana"
+    namespace = "monitor"
+  }
+  spec {
+    selector = {
+      app = kubernetes_pod.grafana.metadata.0.labels.app
+    }
+    port {
+      port        = 3000
+      target_port = 3000
+    }
+
+    type = "LoadBalancer"
+  }
+}
+
+resource "kubernetes_pod" "grafana" {
+  metadata {
+    name      = "grafana"
+    namespace = "monitor"
+    labels = {
+      app = "Grafana"
+    }
+  }
+
+  spec {
+    # TODO
+    service_account_name = kubernetes_service_account.prometheus_account.metadata[0].name
+    container {
+      image = "grafana/grafana:latest"
+      name  = "grafana"
+      args = [
+      ]
+      volume_mount {
+        name       = "config-volume"
+        mount_path = "/config"
+      }
+      volume_mount {
+        name       = "storage-volume"
+        mount_path = "/data"
+      }
+    }
+    volume {
+      name = "config-volume"
+      config_map {
+        name = kubernetes_config_map.grafana_config.metadata[0].name
+      }
+    }
+    volume {
+      name = "storage-volume"
+
+      config_map {
+        name = kubernetes_persistent_volume_claim.grafana_disk_claim.metadata[0].name
+      }
+    }
+  }
+}
+
+resource "kubernetes_config_map" "grafana_config" {
+  metadata {
+    name = "grafana-config"
+  }
+
+  data = {
+    "prometheus.yml" = file("${path.module}/grafana.yml")
+  }
+}
+
+
+resource "kubernetes_persistent_volume_claim" "grafana_disk_claim" {
+  metadata {
+    name = "grafana-disk-claim"
+  }
+  spec {
+    access_modes = ["ReadWriteOnce"]
+    resources {
+      requests = {
+        storage = "20Gi"
+      }
+    }
+    storage_class_name = "standard"
+    volume_name        = kubernetes_persistent_volume.grafana_volume.metadata.0.name
+  }
+}
+
+resource "kubernetes_persistent_volume" "grafana_volume" {
+  metadata {
+    name = "prio-${var.environment}-grafana-storage"
+  }
+  spec {
+    capacity = {
+      storage = "20Gi"
+    }
+    storage_class_name               = "standard"
+    access_modes                     = ["ReadWriteOnce"]
+    persistent_volume_reclaim_policy = "Retain"
+    persistent_volume_source {
+      gce_persistent_disk {
+        pd_name = google_compute_disk.grafana_disk.name
+      }
+    }
+  }
+}
+
+resource "google_compute_disk" "grafana_disk" {
+  name = "prio-${var.environment}-grafana-disk"
   type = "pd-ssd"
   # Hack: We have a region in the vars, but to create a disk we want a zone. Just append "-a"
   zone    = "${var.gcp_region}-a"
