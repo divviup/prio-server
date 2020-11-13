@@ -220,6 +220,7 @@ module "monitoring" {
   source      = "./modules/monitoring"
   gcp_project = var.gcp_project
   gcp_region  = var.gcp_region
+  environment = var.environment
 }
 
 module "data_share_processors" {
