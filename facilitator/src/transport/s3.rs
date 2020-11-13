@@ -843,6 +843,7 @@ pub struct ChainProvider {
     instance_metadata_provider: InstanceMetadataProvider,
     container_provider: ContainerProvider,
     profile_provider: Option<ProfileProvider>,
+    webidp_provider: WebIdentityProvider,
 }
 
 impl ChainProvider {
@@ -871,7 +872,7 @@ async fn chain_provider_credentials(
     if let Ok(creds) = provider.instance_metadata_provider.credentials().await {
         return Ok(creds);
     }
-    if let Ok(creds) = WebIdentityProvider::from_k8s_env().credentials().await {
+    if let Ok(creds) = provider.webidp_provider.credentials().await {
         return Ok(creds);
     }
     Err(CredentialsError::new(
@@ -896,6 +897,7 @@ impl ChainProvider {
             profile_provider: ProfileProvider::new().ok(),
             instance_metadata_provider: InstanceMetadataProvider::new(),
             container_provider: ContainerProvider::new(),
+            webidp_provider: WebIdentityProvider::from_k8s_env(),
         }
     }
 
@@ -907,6 +909,7 @@ impl ChainProvider {
             profile_provider: Some(profile_provider),
             instance_metadata_provider: InstanceMetadataProvider::new(),
             container_provider: ContainerProvider::new(),
+            webidp_provider: WebIdentityProvider::from_k8s_env(),
         }
     }
 }
