@@ -1,4 +1,5 @@
 use crate::{
+    hex_dump,
     idl::{BatchSignature, Header, Packet},
     transport::{Transport, TransportWriter},
     DigestWriter, SidecarWriter, DATE_FORMAT,
@@ -155,8 +156,10 @@ impl<'a, H: Header, P: Packet> BatchReader<'a, H, P> {
                 signature.key_identifier,
             ))?
             .verify(&header_buf, &signature.batch_header_signature)
-            .context("invalid signature on header")?;
-
+            .context(format!(
+                "invalid signature on header with key {}",
+                signature.key_identifier,
+            ))?;
         Ok(H::read(Cursor::new(header_buf))?)
     }
 
@@ -187,8 +190,13 @@ impl<'a, H: Header, P: Packet> BatchReader<'a, H, P> {
             .context("failed to load packet file")?;
 
         // ... then verify the digest over it ...
-        if header.packet_file_digest().as_slice() != sidecar_writer.sidecar.finish().as_ref() {
-            return Err(anyhow!("packet file digest does not match header"));
+        let packet_file_digest = sidecar_writer.sidecar.finish();
+        if header.packet_file_digest().as_slice() != packet_file_digest.as_ref() {
+            return Err(anyhow!(
+                "packet file digest in header {} does not match actual packet file digest {}",
+                hex_dump(header.packet_file_digest()),
+                hex_dump(packet_file_digest.as_ref())
+            ));
         }
 
         // pop() should always succeed here because sidecar_writers.writers is
