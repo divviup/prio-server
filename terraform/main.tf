@@ -16,7 +16,7 @@ variable "aws_region" {
 
 variable "aws_profile" {
   type    = string
-  default = "leuseast1"
+  default = "leuswest2"
 }
 
 variable "machine_type" {
