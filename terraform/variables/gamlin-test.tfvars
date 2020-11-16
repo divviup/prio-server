@@ -3,7 +3,8 @@ gcp_region      = "us-west1"
 gcp_project     = "gamlin-test"
 machine_type    = "e2-standard-8"
 localities      = ["ta-ta", "narnia", "gondor", "asgard"]
-aws_region      = "us-west-1"
+aws_region      = "us-east-1"
+aws_profile     = "leuseast1"
 manifest_domain = "isrg-prio.org"
 managed_dns_zone = {
   name        = "manifests"
@@ -15,8 +16,8 @@ ingestors = {
   # their name
   g-enpa = "www.gstatic.com/prio-manifests"
 }
-peer_share_processor_manifest_base_url = "gamlin-test.manifests.isrg-prio.org/pha"
-portal_server_manifest_base_url        = "gamlin-test.manifests.isrg-prio.org/portal-server"
+peer_share_processor_manifest_base_url = "test-en-analytics.cancer.gov"
+portal_server_manifest_base_url        = "manifest.dev.enpa-pha.io"
 is_first                               = false
 aggregation_period                     = "30m"
 aggregation_grace_period               = "30m"
