@@ -143,6 +143,7 @@ var maxAge = flag.String("intake-max-age", "1h", "Max age (in Go duration format
 var k8sServiceAccount = flag.String("k8s-service-account", "", "Kubernetes service account for intake and aggregate jobs")
 var bskSecretName = flag.String("bsk-secret-name", "", "Name of k8s secret for batch signing key")
 var pdksSecretName = flag.String("pdks-secret-name", "", "Name of k8s secret for packet decrypt keys")
+var gcpServiceAccountKeyFileSecretName = flag.String("gcp-service-account-key-file-secret-name", "", "Name of k8s secret for default GCP service account key file")
 var intakeConfigMap = flag.String("intake-batch-config-map", "", "Name of config map for intake jobs")
 var aggregateConfigMap = flag.String("aggregate-config-map", "", "Name of config map for aggregate jobs")
 var ingestorInput = flag.String("ingestor-input", "", "Bucket for input from ingestor (s3:// or gs://) (Required)")
@@ -344,19 +345,16 @@ func (b *bucket) listFilesS3(ctx context.Context) ([]string, error) {
 		return nil, fmt.Errorf("making AWS session: %w", err)
 	}
 
-	var creds *credentials.Credentials
+	log.Printf("listing files in s3://%s as %q", bucket, b.identity)
+	config := aws.NewConfig().
+		WithRegion(region)
 	if b.identity != "" {
-		creds, err = webIDP(sess, b.identity)
+		creds, err := webIDP(sess, b.identity)
 		if err != nil {
 			return nil, err
 		}
-	} else {
-		creds = credentials.NewEnvCredentials()
+		config = config.WithCredentials(creds)
 	}
-	log.Printf("listing files in s3://%s as %q", bucket, b.identity)
-	config := aws.NewConfig().
-		WithRegion(region).
-		WithCredentials(creds)
 	svc := s3.New(sess, config)
 	var output []string
 	var nextContinuationToken string = ""
@@ -509,6 +507,29 @@ func groupByAggregationID(batches []*batchPath) aggregationMap {
 	return output
 }
 
+func secretVolumesAndMounts() ([]corev1.Volume, []corev1.VolumeMount) {
+	volumes := []corev1.Volume{}
+	volumeMounts := []corev1.VolumeMount{}
+	if *gcpServiceAccountKeyFileSecretName != "" {
+		volumes = append(volumes, corev1.Volume{
+			Name: "default-gcp-sa-key-file",
+			VolumeSource: corev1.VolumeSource{
+				Secret: &corev1.SecretVolumeSource{
+					SecretName: *gcpServiceAccountKeyFileSecretName,
+				},
+			},
+		})
+
+		volumeMounts = append(volumeMounts, corev1.VolumeMount{
+			Name:      "default-gcp-sa-key-file",
+			MountPath: "/etc/secrets",
+			ReadOnly:  true,
+		})
+	}
+
+	return volumes, volumeMounts
+}
+
 func launchAggregationJobs(ctx context.Context, batchesByID aggregationMap, inter interval) error {
 	if len(batchesByID) == 0 {
 		log.Printf("no batches to aggregate")
@@ -550,6 +571,7 @@ func launchAggregationJobs(ctx context.Context, batchesByID aggregationMap, inte
 		log.Printf("starting aggregation job %s (interval %s) with args %s", jobName, inter, args)
 
 		var one int32 = 1
+		volumes, volumeMounts := secretVolumesAndMounts()
 		job := &batchv1.Job{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:      jobName,
@@ -561,12 +583,14 @@ func launchAggregationJobs(ctx context.Context, batchesByID aggregationMap, inte
 					Spec: corev1.PodSpec{
 						ServiceAccountName: *k8sServiceAccount,
 						RestartPolicy:      "Never",
+						Volumes:            volumes,
 						Containers: []corev1.Container{
 							{
 								Args:            args,
 								Name:            "facile-container",
 								Image:           *facilitatorImage,
 								ImagePullPolicy: "Always",
+								VolumeMounts:    volumeMounts,
 								EnvFrom: []corev1.EnvFromSource{
 									{
 										ConfigMapRef: &corev1.ConfigMapEnvSource{
@@ -666,6 +690,9 @@ func startIntakeJob(
 		"--date", batchPath.dateString(),
 	}
 	log.Printf("starting job for batch %s with args %s", batchPath, args)
+
+	volumes, volumeMounts := secretVolumesAndMounts()
+
 	var one int32 = 1
 	job := &batchv1.Job{
 		ObjectMeta: metav1.ObjectMeta{
@@ -678,12 +705,14 @@ func startIntakeJob(
 				Spec: corev1.PodSpec{
 					ServiceAccountName: *k8sServiceAccount,
 					RestartPolicy:      "Never",
+					Volumes:            volumes,
 					Containers: []corev1.Container{
 						{
 							Args:            args,
 							Name:            "facile-container",
 							Image:           *facilitatorImage,
 							ImagePullPolicy: "Always",
+							VolumeMounts:    volumeMounts,
 							Resources: corev1.ResourceRequirements{
 								Requests: corev1.ResourceList{
 									corev1.ResourceMemory: resource.MustParse("500Mi"),
