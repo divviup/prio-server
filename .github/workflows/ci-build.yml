@@ -121,8 +121,8 @@ jobs:
       run: |
         wget https://github.com/kubernetes-sigs/kubebuilder/releases/download/v2.3.1/kubebuilder_2.3.1_linux_amd64.tar.gz
         tar -zxvf kubebuilder*.tar.gz
-        mkdir -p /usr/local
-        mv kubebuilder_2.3.1_linux_amd64 /usr/local/kubebuilder
+        sudo mkdir -p /usr/local
+        sudo mv kubebuilder_2.3.1_linux_amd64 /usr/local/kubebuilder
     - name: Test
       run: make test
     - name: Upload test coverage
