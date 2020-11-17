@@ -26,7 +26,7 @@ func NewUpdater(environmentName string, locality string, manifestBucketLocation 
 	}, nil
 }
 
-func (u *Updater) UpdateDataShareSpecificManifest(keys map[string]BatchSigningPublicKeys, certificate PacketEncryptionCertificates) error {
+func (u *Updater) UpdateDataShareSpecificManifest(keys map[string]BatchSigningPublicKeys, certificate PacketEncryptionKeyCSRs) error {
 	if keys == nil && certificate == nil {
 		return nil
 	}
@@ -45,7 +45,7 @@ func (u *Updater) UpdateDataShareSpecificManifest(keys map[string]BatchSigningPu
 			manifest.BatchSigningPublicKeys = keys[dsp]
 		}
 		if certificate != nil {
-			manifest.PacketEncryptionCertificates = certificate
+			manifest.PacketEncryptionKeyCSRs = certificate
 		}
 
 		err = u.writeManifest(store, manifest, dsp)

@@ -33,7 +33,7 @@ var runCmd = &cobra.Command{
 			},
 		).Info("Starting the updater...")
 
-		var packetEncryptionCertificate manifest.PacketEncryptionCertificates
+		var packetEncryptionCertificate manifest.PacketEncryptionKeyCSRs
 		var dspSigningKeys map[string]manifest.BatchSigningPublicKeys
 
 		kube, _ := secrets.NewKube(locality, dsps)
@@ -43,7 +43,7 @@ var runCmd = &cobra.Command{
 			log.Fatal(err)
 		}
 		if packetEncryptionKeys != nil {
-			packetEncryptionCertificate = make(manifest.PacketEncryptionCertificates)
+			packetEncryptionCertificate = make(manifest.PacketEncryptionKeyCSRs)
 
 			for _, key := range packetEncryptionKeys {
 				cert, err := key.CreatePemEncodedCertificateRequest(rand.Reader, new(x509.CertificateRequest))
