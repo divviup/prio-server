@@ -387,21 +387,12 @@ resource "google_storage_bucket_object" "global_manifest" {
   content_type  = "application/json"
   cache_control = "no-cache"
   content = jsonencode({
-    format                 = 0
-    ingestion-bucket       = "${aws_s3_bucket.ingestion_bucket.region}/${aws_s3_bucket.ingestion_bucket.bucket}",
-    ingestion-identity     = local.ingestion_bucket_writer_role_arn
-    peer-validation-bucket = "${aws_s3_bucket.peer_validation_bucket.region}/${aws_s3_bucket.peer_validation_bucket.bucket}",
-    batch-signing-public-keys = {
-      (module.kubernetes.batch_signing_key) = {
-        public-key = ""
-        expiration = ""
-      }
-    }
-    packet-encryption-certificates = {
-      (var.packet_decryption_key_kubernetes_secret) = {
-        certificate = ""
-      }
-    }
+    format                     = 1
+    ingestion-bucket           = "${aws_s3_bucket.ingestion_bucket.region}/${aws_s3_bucket.ingestion_bucket.bucket}",
+    ingestion-identity         = local.ingestion_bucket_writer_role_arn
+    peer-validation-bucket     = "${aws_s3_bucket.peer_validation_bucket.region}/${aws_s3_bucket.peer_validation_bucket.bucket}",
+    batch-signing-public-keys  = {}
+    packet-encryption-key-csrs = {}
   })
 }
 
