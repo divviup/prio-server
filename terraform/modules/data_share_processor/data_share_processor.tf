@@ -18,6 +18,10 @@ variable "gcp_region" {
   type = string
 }
 
+variable "manifest_bucket" {
+  type = string
+}
+
 variable "kubernetes_namespace" {
   type = string
 }
@@ -374,6 +378,31 @@ resource "google_storage_bucket_iam_binding" "own_validation_bucket_admin" {
   members = [
     module.kubernetes.service_account_email
   ]
+}
+
+resource "google_storage_bucket_object" "global_manifest" {
+  provider      = google-beta
+  name          = "${var.data_share_processor_name}-manifest.json"
+  bucket        = var.manifest_bucket
+  content_type  = "application/json"
+  cache_control = "no-cache"
+  content = jsonencode({
+    format                 = 0
+    ingestion-bucket       = "${aws_s3_bucket.ingestion_bucket.region}/${aws_s3_bucket.ingestion_bucket.bucket}",
+    ingestion-identity     = local.ingestion_bucket_writer_role_arn
+    peer-validation-bucket = "${aws_s3_bucket.peer_validation_bucket.region}/${aws_s3_bucket.peer_validation_bucket.bucket}",
+    batch-signing-public-keys = {
+      (module.kubernetes.batch_signing_key) = {
+        public-key = ""
+        expiration = ""
+      }
+    }
+    packet-encryption-certificates = {
+      (var.packet_decryption_key_kubernetes_secret) = {
+        certificate = ""
+      }
+    }
+  })
 }
 
 module "kubernetes" {

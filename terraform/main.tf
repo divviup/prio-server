@@ -237,6 +237,7 @@ module "data_share_processors" {
   ingestor                                = each.value.ingestor
   gcp_region                              = var.gcp_region
   gcp_project                             = var.gcp_project
+  manifest_bucket                         = module.manifest.bucket
   kubernetes_namespace                    = each.value.kubernetes_namespace
   certificate_domain                      = "${var.environment}.certificates.${var.manifest_domain}"
   ingestor_aws_role_arn                   = each.value.ingestor_aws_role_arn

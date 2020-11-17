@@ -107,9 +107,4 @@ resource "google_storage_bucket_iam_member" "manifest_bucket_owner" {
   bucket = var.manifest_bucket
   role   = "roles/storage.legacyBucketWriter"
   member = "serviceAccount:${google_service_account.manifest_updater.email}"
-  // TODO: potentially tighten the permissions up?
-  //  condition {
-  //    expression = "resource.name.startsWith(\"projects/_/buckets/${var.manifest_bucket}/objects/${var.kubernetes_namespace}\")"
-  //    title      = "access to ${var.kubernetes_namespace} manifests"
-  //  }
 }
