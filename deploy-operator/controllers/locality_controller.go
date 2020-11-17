@@ -17,6 +17,7 @@ package controllers
 import (
 	"context"
 	"fmt"
+	"k8s.io/apimachinery/pkg/api/equality"
 	"strings"
 
 	"github.com/go-logr/logr"
@@ -88,7 +89,7 @@ func (r *LocalityReconciler) Reconcile(req ctrl.Request) (ctrl.Result, error) {
 			return ret, err
 		}
 	case 1:
-		ret, err = r.validateCurrentJob(&cronJobs.Items[0])
+		ret, err = r.validateCurrentJob(&cronJobs.Items[0], &locality)
 		if err != nil {
 			return ret, err
 		}
@@ -181,7 +182,19 @@ func (r *LocalityReconciler) createCronJobTemplate(locality *priov1.Locality) v1
 	}
 }
 
-func (r *LocalityReconciler) validateCurrentJob(job *v1beta1.CronJob) (ctrl.Result, error) {
+func (r *LocalityReconciler) validateCurrentJob(existingCronJob *v1beta1.CronJob, locality *priov1.Locality) (ctrl.Result, error) {
+	expectedCronJob := r.createCronJobTemplate(locality)
+	if equality.Semantic.DeepDerivative(expectedCronJob.Spec, existingCronJob.Spec) {
+		return ctrl.Result{}, nil
+	}
+
+	existingCronJob.Spec = expectedCronJob.Spec
+
+	err := r.Client.Update(r.ctx, existingCronJob)
+	if err != nil {
+		return ctrl.Result{Requeue: true}, err
+	}
+
 	return ctrl.Result{}, nil
 }
 

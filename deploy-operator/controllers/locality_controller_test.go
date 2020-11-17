@@ -35,28 +35,32 @@ var _ = Describe("Locality controller", func() {
 		interval = time.Millisecond * 200
 	)
 
-	Context("When pushing a new locality", func() {
-		It("Should schedule a valid cronjob and job", func() {
+	getLocality := func() *v1.Locality {
+		return &v1.Locality{
+			TypeMeta: metav1.TypeMeta{
+				APIVersion: "prio.isrg-prio.org/v1",
+				Kind:       "Locality",
+			},
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      LocalityName,
+				Namespace: LocalityNamespace,
+			},
+
+			Spec: v1.LocalitySpec{
+				EnvironmentName:        EnvironmentName,
+				ManifestBucketLocation: ManifestBucketLocation,
+				DataShareProcessors:    getDataShareProcessors(),
+				Schedule:               Schedule,
+			},
+		}
+	}
+
+	Context("When pushing and updating a new locality", func() {
+		It("Should validate lifecycle of CRDs", func() {
 			By("Creating a Locality")
 			ctx := context.Background()
 
-			locality := &v1.Locality{
-				TypeMeta: metav1.TypeMeta{
-					APIVersion: "prio.isrg-prio.org/v1",
-					Kind:       "Locality",
-				},
-				ObjectMeta: metav1.ObjectMeta{
-					Name:      LocalityName,
-					Namespace: LocalityNamespace,
-				},
-
-				Spec: v1.LocalitySpec{
-					EnvironmentName:        EnvironmentName,
-					ManifestBucketLocation: ManifestBucketLocation,
-					DataShareProcessors:    getDataShareProcessors(),
-					Schedule:               Schedule,
-				},
-			}
+			locality := getLocality()
 			Expect(k8sClient.Create(ctx, locality)).Should(Succeed())
 
 			createdLocality := &v1.Locality{}
@@ -76,7 +80,7 @@ var _ = Describe("Locality controller", func() {
 			// Validate that it created it properly
 			Expect(createdLocality.Spec).Should(Equal(locality.Spec))
 
-			By("Checking to see if a CronJob has also been made")
+			By("Checking to see if a CronJob has been made")
 
 			createdCronJob := &v1beta1.CronJob{}
 			cronJobLookupKey := client.ObjectKey{
@@ -111,6 +115,29 @@ var _ = Describe("Locality controller", func() {
 			}, timeout, interval).Should(BeTrue())
 
 			Expect(createdJob.Spec.Template.Spec.Containers[0].Image).Should(Equal(keyRotatorImage))
+
+			By("Updating the CRD")
+			createdLocality.Spec.ManifestBucketLocation = "Some other manifest bucket location"
+			Expect(k8sClient.Update(ctx, createdLocality)).Should(Succeed())
+
+			By("Then verifying the CronJob has been updated as well")
+
+			Eventually(func() bool {
+				err := k8sClient.Get(ctx, cronJobLookupKey, createdCronJob)
+
+				if err != nil {
+					return false
+				}
+				for _, envVar := range createdCronJob.Spec.JobTemplate.Spec.Template.Spec.Containers[0].Env {
+					if envVar.Value == createdLocality.Spec.ManifestBucketLocation {
+						return true
+					}
+				}
+				return false
+			}, timeout, interval).Should(BeTrue())
+
 		})
+
 	})
+
 })
