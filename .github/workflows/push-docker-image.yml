@@ -54,3 +54,53 @@ jobs:
       run: docker push letsencrypt/prio-workflow-manager:${{ steps.get_version.outputs.VERSION }}
     - name: push-latest
       run: docker push letsencrypt/prio-workflow-manager:latest
+
+  push-deploy-operator:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v2
+    - name: Get the version
+      id: get_version
+      run: echo ::set-output name=VERSION::${GITHUB_REF/refs\/tags\//}
+    - name: Set up Docker build
+      uses: docker/setup-buildx-action@v1
+    - name: Login to DockerHub
+      uses: docker/login-action@v1
+      with:
+        username: isrgautomaton
+        password: ${{ secrets.ISRG_AUTOMATON_DOCKERHUB_AUTH_TOKEN }}
+    - name: build
+      run: ./deploy-operator/build.sh
+    - name: tag
+      run: docker tag letsencrypt/prio-deploy-operator letsencrypt/prio-deploy-operator:${{ steps.get_version.outputs.VERSION }}
+    - name: tag-latest
+      run: docker tag letsencrypt/prio-deploy-operator letsencrypt/prio-deploy-operator:latest
+    - name: push
+      run: docker push letsencrypt/prio-deploy-operator:${{ steps.get_version.outputs.VERSION }}
+    - name: push-latest
+      run: docker push letsencrypt/prio-deploy-operator:latest
+
+  push-manifest-updater:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v2
+    - name: Get the version
+      id: get_version
+      run: echo ::set-output name=VERSION::${GITHUB_REF/refs\/tags\//}
+    - name: Set up Docker build
+      uses: docker/setup-buildx-action@v1
+    - name: Login to DockerHub
+      uses: docker/login-action@v1
+      with:
+        username: isrgautomaton
+        password: ${{ secrets.ISRG_AUTOMATON_DOCKERHUB_AUTH_TOKEN }}
+    - name: build
+      run: ./manifest-updater/build.sh
+    - name: tag
+      run: docker tag letsencrypt/prio-manifest-updater letsencrypt/prio-manifest-updater:${{ steps.get_version.outputs.VERSION }}
+    - name: tag-latest
+      run: docker tag letsencrypt/prio-manifest-updater letsencrypt/prio-manifest-updater:latest
+    - name: push
+      run: docker push letsencrypt/prio-manifest-updater:${{ steps.get_version.outputs.VERSION }}
+    - name: push-latest
+      run: docker push letsencrypt/prio-manifest-updater:latest
