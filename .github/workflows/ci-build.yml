@@ -110,7 +110,7 @@ jobs:
     runs-on: ubuntu-latest
     defaults:
       run:
-        working-directory: "deploy-operator/controllers"
+        working-directory: deploy-operator
     steps:
     - uses: actions/checkout@v2
     - name: Setup go
@@ -118,13 +118,13 @@ jobs:
       with:
         go-version: 1.15
     - name: Test
-      run: go test -race --coverprofile=coverage.coverprofile --covermode=atomic ./...
+      run: make test
     - name: Upload test coverage
       if: success()
       uses: codecov/codecov-action@v1
       with:
         fail_ci_if_error: false
-        file: "deploy-operator/controllers/coverage.coverprofile"
+        file: "deploy-operator/cover.out"
         flags: deploy_operator_tests
         name: deploy-operator tests
 
