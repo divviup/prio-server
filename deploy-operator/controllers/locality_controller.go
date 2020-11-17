@@ -187,6 +187,10 @@ func (r *LocalityReconciler) validateCurrentJob(existingCronJob *v1beta1.CronJob
 	if equality.Semantic.DeepDerivative(expectedCronJob.Spec, existingCronJob.Spec) {
 		return ctrl.Result{}, nil
 	}
+	r.Log.
+		WithValues("Existing Job", existingCronJob.Spec).
+		WithValues("New Job", expectedCronJob.Spec).
+		Info("The CronJob definition has changed - we're going to update the existing job")
 
 	existingCronJob.Spec = expectedCronJob.Spec
 
