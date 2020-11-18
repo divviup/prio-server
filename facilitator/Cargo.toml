@@ -33,7 +33,7 @@ structopt = "0.3"
 tempfile = "3.1.0"
 thiserror = "1.0"
 tokio = { version = "0.2", features = ["rt-core", "io-util"] }
-ureq = { version = "1.5.1", features = ["json"] }
+ureq = { version = "1.5.2", features = ["json"] }
 urlencoding = "1.1.1"
 uuid = { version = "0.8", features = ["serde", "v4"] }
 
