@@ -5,6 +5,7 @@ use std::io::Write;
 pub mod aggregation;
 pub mod batch;
 pub mod config;
+pub mod http;
 pub mod idl;
 pub mod intake;
 pub mod manifest;

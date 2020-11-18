@@ -6,7 +6,7 @@ use ring::signature::{
     EcdsaKeyPair, KeyPair, UnparsedPublicKey, ECDSA_P256_SHA256_ASN1,
     ECDSA_P256_SHA256_ASN1_SIGNING,
 };
-use std::{collections::HashMap, fs::File, io::Read, str::FromStr};
+use std::{collections::HashMap, fs, fs::File, io::Read, str::FromStr};
 use uuid::Uuid;
 
 use facilitator::{
@@ -869,8 +869,8 @@ fn aggregate(sub_matches: &ArgMatches) -> Result<(), anyhow::Error> {
 
 fn lint_manifest(sub_matches: &ArgMatches) -> Result<(), anyhow::Error> {
     let manifest_base_url = sub_matches.value_of("manifest-base-url");
-    let manifest_file_reader = match sub_matches.value_of("manifest-path") {
-        Some(path) => Some(File::open(path).context("failed to open manifest file")?),
+    let manifest_body: Option<String> = match sub_matches.value_of("manifest-path") {
+        Some(f) => Some(fs::read_to_string(f)?),
         None => None,
     };
 
@@ -884,8 +884,8 @@ fn lint_manifest(sub_matches: &ArgMatches) -> Result<(), anyhow::Error> {
         ManifestKind::IngestorGlobal => {
             let manifest = if let Some(base_url) = manifest_base_url {
                 IngestionServerGlobalManifest::from_https(base_url)?
-            } else if let Some(reader) = manifest_file_reader {
-                IngestionServerGlobalManifest::from_reader(reader)?
+            } else if let Some(body) = manifest_body {
+                IngestionServerGlobalManifest::from_slice(body.as_bytes())?
             } else {
                 return Err(anyhow!(
                     "one of manifest-base-url or manifest-path is required"
@@ -896,8 +896,8 @@ fn lint_manifest(sub_matches: &ArgMatches) -> Result<(), anyhow::Error> {
         ManifestKind::DataShareProcessorGlobal => {
             let manifest = if let Some(base_url) = manifest_base_url {
                 DataShareProcessorGlobalManifest::from_https(base_url)?
-            } else if let Some(reader) = manifest_file_reader {
-                DataShareProcessorGlobalManifest::from_reader(reader)?
+            } else if let Some(body) = manifest_body {
+                DataShareProcessorGlobalManifest::from_slice(body.as_bytes())?
             } else {
                 return Err(anyhow!(
                     "one of manifest-base-url or manifest-path is required"
@@ -911,8 +911,8 @@ fn lint_manifest(sub_matches: &ArgMatches) -> Result<(), anyhow::Error> {
                 .context("instance is required when manifest-kind=data-share-processor-specific")?;
             let manifest = if let Some(base_url) = manifest_base_url {
                 SpecificManifest::from_https(base_url, instance)?
-            } else if let Some(reader) = manifest_file_reader {
-                SpecificManifest::from_reader(reader)?
+            } else if let Some(body) = manifest_body {
+                SpecificManifest::from_slice(body.as_bytes())?
             } else {
                 return Err(anyhow!(
                     "one of manifest-base-url or manifest-path is required"
@@ -923,8 +923,8 @@ fn lint_manifest(sub_matches: &ArgMatches) -> Result<(), anyhow::Error> {
         ManifestKind::PortalServerGlobal => {
             let manifest = if let Some(base_url) = manifest_base_url {
                 PortalServerGlobalManifest::from_https(base_url)?
-            } else if let Some(reader) = manifest_file_reader {
-                PortalServerGlobalManifest::from_reader(reader)?
+            } else if let Some(body) = manifest_body {
+                PortalServerGlobalManifest::from_slice(body.as_bytes())?
             } else {
                 return Err(anyhow!(
                     "one of manifest-base-url or manifest-path is required"

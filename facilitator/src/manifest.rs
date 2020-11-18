@@ -1,10 +1,10 @@
 use crate::config::StoragePath;
+use crate::http;
 use anyhow::{anyhow, Context, Result};
 use ring::signature::{UnparsedPublicKey, ECDSA_P256_SHA256_ASN1};
 use serde::Deserialize;
-use serde_json::from_reader;
-use std::{collections::HashMap, io::Read, str::FromStr};
-use ureq::Response;
+
+use std::{collections::HashMap, str::FromStr};
 
 // See discussion in SpecificManifest::batch_signing_public_key
 const ECDSA_P256_SPKI_PREFIX: &[u8] = &[
@@ -66,16 +66,16 @@ pub struct DataShareProcessorServerIdentity {
 impl DataShareProcessorGlobalManifest {
     /// Loads the global manifest relative to the provided base path and returns
     /// it. Returns an error if the manifest could not be loaded or parsed.
-    pub fn from_https(base_path: &str) -> Result<DataShareProcessorGlobalManifest> {
+    pub fn from_https(base_path: &str) -> Result<Self> {
         let manifest_url = format!("{}/global-manifest.json", base_path);
-        DataShareProcessorGlobalManifest::from_reader(fetch_manifest(&manifest_url)?.into_reader())
+        DataShareProcessorGlobalManifest::from_slice(fetch_manifest(&manifest_url)?.as_bytes())
     }
 
-    /// Loads the manifest from the provided std::io::Read. Returns an error if
-    /// the manifest could not be read or parsed.
-    pub fn from_reader<R: Read>(reader: R) -> Result<DataShareProcessorGlobalManifest> {
-        let manifest: DataShareProcessorGlobalManifest =
-            from_reader(reader).context("failed to decode JSON global manifest")?;
+    /// Loads the manifest from the provided String. Returns an error if
+    /// the manifest could not be parsed.
+    pub fn from_slice(json: &[u8]) -> Result<Self> {
+        let manifest: Self =
+            serde_json::from_slice(json).context("failed to decode JSON global manifest")?;
         if manifest.format != 0 {
             return Err(anyhow!("unsupported manifest format {}", manifest.format));
         }
@@ -114,16 +114,16 @@ impl SpecificManifest {
     /// Load the specific manifest for the specified peer relative to the
     /// provided base path. Returns an error if the manifest could not be
     /// downloaded or parsed.
-    pub fn from_https(base_path: &str, peer_name: &str) -> Result<SpecificManifest> {
+    pub fn from_https(base_path: &str, peer_name: &str) -> Result<Self> {
         let manifest_url = format!("{}/{}-manifest.json", base_path, peer_name);
-        SpecificManifest::from_reader(fetch_manifest(&manifest_url)?.into_reader())
+        SpecificManifest::from_slice(fetch_manifest(&manifest_url)?.as_bytes())
     }
 
-    /// Loads the manifest from the provided std::io::Read. Returns an error if
-    /// the manifest could not be read or parsed.
-    pub fn from_reader<R: Read>(reader: R) -> Result<SpecificManifest> {
-        let manifest: SpecificManifest =
-            from_reader(reader).context("failed to decode JSON specific manifest")?;
+    /// Loads the manifest from the provided String. Returns an error if
+    /// the manifest could not be parsed.
+    pub fn from_slice(json: &[u8]) -> Result<Self> {
+        let manifest: Self =
+            serde_json::from_slice(json).context("failed to decode JSON global manifest")?;
         if manifest.format != 0 {
             return Err(anyhow!("unsupported manifest format {}", manifest.format));
         }
@@ -203,16 +203,16 @@ pub struct IngestionServerGlobalManifest {
 impl IngestionServerGlobalManifest {
     /// Loads the global manifest relative to the provided base path and returns
     /// it. Returns an error if the manifest could not be loaded or parsed.
-    pub fn from_https(base_path: &str) -> Result<IngestionServerGlobalManifest> {
+    pub fn from_https(base_path: &str) -> Result<Self> {
         let manifest_url = format!("{}/global-manifest.json", base_path);
-        IngestionServerGlobalManifest::from_reader(fetch_manifest(&manifest_url)?.into_reader())
+        IngestionServerGlobalManifest::from_slice(fetch_manifest(&manifest_url)?.as_bytes())
     }
 
-    /// Loads the manifest from the provided std::io::Read. Returns an error if
-    /// the manifest could not be read or parsed.
-    pub fn from_reader<R: Read>(reader: R) -> Result<IngestionServerGlobalManifest> {
-        let manifest: IngestionServerGlobalManifest =
-            from_reader(reader).context("failed to decode JSON global manifest")?;
+    /// Loads the manifest from the provided String. Returns an error if
+    /// the manifest could not be parsed.
+    pub fn from_slice(json: &[u8]) -> Result<Self> {
+        let manifest: Self =
+            serde_json::from_slice(json).context("failed to decode JSON global manifest")?;
         if manifest.format != 0 {
             return Err(anyhow!("unsupported manifest format {}", manifest.format));
         }
@@ -259,16 +259,16 @@ pub struct PortalServerGlobalManifest {
 }
 
 impl PortalServerGlobalManifest {
-    pub fn from_https(base_path: &str) -> Result<PortalServerGlobalManifest> {
+    pub fn from_https(base_path: &str) -> Result<Self> {
         let manifest_url = format!("{}/global-manifest.json", base_path);
-        PortalServerGlobalManifest::from_reader(fetch_manifest(&manifest_url)?.into_reader())
+        PortalServerGlobalManifest::from_slice(fetch_manifest(&manifest_url)?.as_bytes())
     }
 
-    /// Loads the manifest from the provided std::io::Read. Returns an error if
-    /// the manifest could not be read or parsed.
-    pub fn from_reader<R: Read>(reader: R) -> Result<PortalServerGlobalManifest> {
+    /// Loads the manifest from the provided String. Returns an error if
+    /// the manifest could not be parsed.
+    pub fn from_slice(json: &[u8]) -> Result<Self> {
         let manifest: PortalServerGlobalManifest =
-            from_reader(reader).context("failed to decode JSON global manifest")?;
+            serde_json::from_slice(json).context("failed to decode JSON global manifest")?;
         if manifest.format != 0 {
             return Err(anyhow!("unsupported manifest format {}", manifest.format));
         }
@@ -301,20 +301,11 @@ impl PortalServerGlobalManifest {
 }
 
 /// Obtains a manifest file from the provided URL
-fn fetch_manifest(manifest_url: &str) -> Result<Response> {
+fn fetch_manifest(manifest_url: &str) -> Result<String> {
     if !manifest_url.starts_with("https://") {
         return Err(anyhow!("Manifest must be fetched over HTTPS"));
     }
-    let response = ureq::get(manifest_url)
-        // By default, ureq will wait forever to connect or
-        // read.
-        .timeout_connect(10_000) // ten seconds
-        .timeout_read(10_000) // ten seconds
-        .call();
-    if response.error() {
-        return Err(anyhow!("failed to fetch manifest: {:?}", response));
-    }
-    Ok(response)
+    http::get_url(manifest_url)
 }
 
 /// Attempts to parse the provided string as a PEM encoded PKIX
@@ -370,12 +361,10 @@ mod tests {
     };
     use ring::rand::SystemRandom;
     use rusoto_core::Region;
-    use std::io::Cursor;
 
     #[test]
     fn load_data_share_processor_global_manifest() {
-        let reader = Cursor::new(
-            r#"
+        let json = br#"
 {
     "format": 0,
     "server-identity": {
@@ -383,9 +372,8 @@ mod tests {
         "gcp-service-account-email": "service-account@project-name.iam.gserviceaccount.com"
     }
 }
-            "#,
-        );
-        let manifest = DataShareProcessorGlobalManifest::from_reader(reader).unwrap();
+            "#;
+        let manifest = DataShareProcessorGlobalManifest::from_slice(json).unwrap();
         assert_eq!(manifest.format, 0);
         assert_eq!(
             manifest.server_identity,
@@ -399,7 +387,7 @@ mod tests {
 
     #[test]
     fn invalid_data_share_processor_global_manifests() {
-        let invalid_manifests = vec![
+        let invalid_manifests: Vec<&str> = vec![
             // no format key
             r#"
 {
@@ -466,14 +454,13 @@ mod tests {
         ];
 
         for invalid_manifest in &invalid_manifests {
-            let reader = Cursor::new(invalid_manifest);
-            DataShareProcessorGlobalManifest::from_reader(reader).unwrap_err();
+            DataShareProcessorGlobalManifest::from_slice(invalid_manifest.as_bytes()).unwrap_err();
         }
     }
 
     #[test]
     fn load_specific_manifest() {
-        let reader = Cursor::new(format!(
+        let json = format!(
             r#"
 {{
     "format": 0,
@@ -494,8 +481,8 @@ mod tests {
 }}
     "#,
             DEFAULT_INGESTOR_SUBJECT_PUBLIC_KEY_INFO
-        ));
-        let manifest = SpecificManifest::from_reader(reader).unwrap();
+        );
+        let manifest = SpecificManifest::from_slice(json.as_bytes()).unwrap();
 
         let mut expected_batch_keys = HashMap::new();
         expected_batch_keys.insert(
@@ -637,8 +624,7 @@ mod tests {
         ];
 
         for invalid_manifest in &invalid_manifests {
-            let reader = Cursor::new(invalid_manifest);
-            SpecificManifest::from_reader(reader).unwrap_err();
+            SpecificManifest::from_slice(invalid_manifest.as_bytes()).unwrap_err();
         }
     }
 
@@ -707,8 +693,7 @@ mod tests {
     "#,
         ];
         for invalid_manifest in &manifests_with_invalid_public_keys {
-            let reader = Cursor::new(invalid_manifest);
-            let manifest = SpecificManifest::from_reader(reader).unwrap();
+            let manifest = SpecificManifest::from_slice(invalid_manifest.as_bytes()).unwrap();
             assert!(manifest.batch_signing_public_keys().is_err());
         }
     }
@@ -750,7 +735,7 @@ mod tests {
             "#;
 
         let manifest =
-            IngestionServerGlobalManifest::from_reader(Cursor::new(manifest_with_aws_identity))
+            IngestionServerGlobalManifest::from_slice(manifest_with_aws_identity.as_bytes())
                 .unwrap();
         assert_eq!(
             manifest.server_identity.aws_iam_entity,
@@ -762,7 +747,7 @@ mod tests {
         assert!(batch_signing_public_keys.get("nosuchkey").is_none());
 
         let manifest =
-            IngestionServerGlobalManifest::from_reader(Cursor::new(manifest_with_gcp_identity))
+            IngestionServerGlobalManifest::from_slice(manifest_with_gcp_identity.as_bytes())
                 .unwrap();
         assert_eq!(manifest.server_identity.aws_iam_entity, None);
         assert_eq!(
@@ -830,8 +815,7 @@ mod tests {
         ];
 
         for invalid_manifest in &invalid_manifests {
-            let reader = Cursor::new(invalid_manifest);
-            IngestionServerGlobalManifest::from_reader(reader).unwrap_err();
+            IngestionServerGlobalManifest::from_slice(invalid_manifest.as_bytes()).unwrap_err();
         }
     }
 
@@ -845,7 +829,7 @@ mod tests {
 }
             "#;
 
-        let manifest = PortalServerGlobalManifest::from_reader(Cursor::new(manifest)).unwrap();
+        let manifest = PortalServerGlobalManifest::from_slice(manifest.as_bytes()).unwrap();
         if let StoragePath::GCSPath(path) = manifest.sum_part_bucket(false).unwrap() {
             assert_eq!(
                 path,
@@ -908,8 +892,7 @@ mod tests {
         ];
 
         for invalid_manifest in &invalid_manifests {
-            let reader = Cursor::new(invalid_manifest);
-            PortalServerGlobalManifest::from_reader(reader).unwrap_err();
+            PortalServerGlobalManifest::from_slice(invalid_manifest.as_bytes()).unwrap_err();
         }
     }
 }
