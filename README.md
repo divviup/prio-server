@@ -12,11 +12,7 @@ This GitHub project implements the "facilitator" box in the diagram.
 
 ## Releases
 
-We use a GitHub Action to build Docker images and push them to [DockerHub](https://hub.docker.com/repository/docker/letsencrypt/prio-facilitator). To cut a release and push:
-
-- Bump the version number in `facilitator/Cargo.toml` and merge that change to `main`.
-- Tag that commit on main, either in `git` or in [GitHub's releases UI](https://github.com/abetterinternet/prio-server/releases/new).
-- Publish a release in [GitHub's releases UI](https://github.com/abetterinternet/prio-server/releases/new).
+We use a GitHub Action to build Docker images and push them to [DockerHub](https://hub.docker.com/repository/docker/letsencrypt/prio-facilitator). To cut a release and push, publish a release in [GitHub's releases UI](https://github.com/abetterinternet/prio-server/releases/new). Docker images will be automatically generated and pushed to DockerHub.
 
 ## Impersonating cloud service accounts
 
