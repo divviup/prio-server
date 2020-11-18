@@ -1,4 +1,4 @@
-use anyhow::{anyhow, Result};
+use anyhow::{anyhow, Context, Result};
 
 pub(crate) fn get_url(url: &str) -> Result<String> {
     let resp = ureq::get(url)
@@ -17,6 +17,6 @@ pub(crate) fn get_url(url: &str) -> Result<String> {
         Err(anyhow!("fetching {}: status {}", url, resp.status()))
     } else {
         resp.into_string()
-            .map_err(|e| anyhow!("reading body of {}: {}", url, e))
+            .context(format!("reading body of {}", url))
     }
 }
