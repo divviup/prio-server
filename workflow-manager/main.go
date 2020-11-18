@@ -541,7 +541,7 @@ func launchAggregationJob(ctx context.Context, readyBatches []*batchPath, inter 
 		aggregationID = batchPath.aggregationID
 	}
 
-	jobName := fmt.Sprintf("a-%s", strings.ReplaceAll(fmtTime(inter.begin), "/", "-"))
+	jobName := fmt.Sprintf("a-%s", strings.ToLower(strings.ReplaceAll(fmtTime(inter.begin), "/", "-")))
 
 	log.Printf("starting aggregation job %s (interval %s) with args %s", jobName, inter, args)
 
@@ -653,7 +653,7 @@ func startIntakeJob(
 		return nil
 	}
 
-	jobName := fmt.Sprintf("i-batch-%s", batchPath.ID)
+	jobName := fmt.Sprintf("i-batch-%s", strings.ToLower(batchPath.ID))
 
 	args := []string{
 		"intake-batch",
