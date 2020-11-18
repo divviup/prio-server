@@ -325,21 +325,15 @@ fn main() -> Result<(), anyhow::Error> {
     use log::info;
     env_logger::init();
 
+    let args: Vec<String> = std::env::args().collect();
     info!(
-        "{} {} {}",
-        env!("VERGEN_SEMVER"),
-        env!("VERGEN_SHA_SHORT"),
-        env!("VERGEN_BUILD_TIMESTAMP")
+        "starting {} version {}. Args: [{}]",
+        "",
+        option_env!("BUILD_INFO").unwrap_or("(BUILD_INFO unavailable)"),
+        args[1..].join(" "),
     );
     let matches = App::new("facilitator")
         .about("Prio data share processor")
-        // Environment variables are injected via build.rs
-        .version(&*format!(
-            "{} {} {}",
-            env!("VERGEN_SEMVER"),
-            env!("VERGEN_SHA_SHORT"),
-            env!("VERGEN_BUILD_TIMESTAMP"),
-        ))
         .arg(
             Arg::with_name("verbose")
                 .long("verbose")

@@ -68,17 +68,8 @@ mod config {
     }
 }
 
-const APP_VERSION: &str = concat!(
-    env!("VERGEN_SEMVER"),
-    " ",
-    env!("VERGEN_SHA_SHORT"),
-    " ",
-    env!("VERGEN_BUILD_TIMESTAMP")
-);
-
 /// Prio share processor workflow manager
 #[derive(Debug, StructOpt)]
-#[structopt(version = APP_VERSION)]
 pub struct WorkflowArgs {
     /// Enable verbose output to stderr
     #[structopt(short, long)]

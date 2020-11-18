@@ -3,7 +3,6 @@ name = "facilitator"
 version = "0.1.0"
 authors = ["Internet Security Research Group"]
 edition = "2018"
-build = "build.rs"
 
 [dependencies]
 async-trait = "0.1"
@@ -36,9 +35,6 @@ tokio = { version = "0.2", features = ["rt-core", "io-util"] }
 ureq = { version = "1.5.2", features = ["json"] }
 urlencoding = "1.1.1"
 uuid = { version = "0.8", features = ["serde", "v4"] }
-
-[build-dependencies]
-vergen = "3"
 
 [dev-dependencies]
 assert_matches = "1.4.0"
