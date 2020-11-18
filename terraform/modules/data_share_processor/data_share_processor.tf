@@ -113,8 +113,8 @@ locals {
     ) : (
     var.ingestor_aws_role_arn
   )
-  ingestion_bucket_name       = "${local.resource_prefix}-ingestion"
-  peer_validation_bucket_name = "${local.resource_prefix}-peer-validation"
+  ingestion_bucket_name       = "${local.resource_prefix}-ingestion-a"
+  peer_validation_bucket_name = "${local.resource_prefix}-peer-validation-a"
   # If this environment creates fake ingestors, we make an educated guess about
   # the name of the other test environment's ingestion bucket so our fake
   # ingestors can write ingestion batches to them. This assumes that the
