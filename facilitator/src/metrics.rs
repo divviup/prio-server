@@ -58,7 +58,7 @@ pub struct IntakeMetricsCollector {
 }
 
 impl IntakeMetricsCollector {
-    pub fn new() -> Result<IntakeMetricsCollector> {
+    pub fn new() -> Result<Self> {
         let intake_tasks_started: IntCounter = register_int_counter!(
             "facilitator_intake_tasks_started",
             "Number of intake-batch tasks that started (on the facilitator side)"
@@ -72,7 +72,7 @@ impl IntakeMetricsCollector {
         )
         .context("failed to register metrics counter for finished intakes")?;
 
-        Ok(IntakeMetricsCollector {
+        Ok(Self {
             intake_tasks_started,
             intake_tasks_finished,
         })
@@ -83,12 +83,12 @@ impl IntakeMetricsCollector {
 pub struct AggregateMetricsCollector {
     pub aggregate_tasks_started: IntCounter,
     pub aggregate_tasks_finished: IntCounterVec,
-    pub invalid_own_validation_batches: IntCounterVec,
-    pub invalid_peer_validation_batches: IntCounterVec,
+    pub own_validation_batches_reader_metrics: BatchReaderMetricsCollector,
+    pub peer_validation_batches_reader_metrics: BatchReaderMetricsCollector,
 }
 
 impl AggregateMetricsCollector {
-    pub fn new() -> Result<AggregateMetricsCollector> {
+    pub fn new() -> Result<Self> {
         let aggregate_tasks_started: IntCounter = register_int_counter!(
             "facilitator_aggregate_tasks_started",
             "Number of aggregate tasks that started (on the facilitator side)"
@@ -102,25 +102,34 @@ impl AggregateMetricsCollector {
         )
         .context("failed to register metrics counter for finished aggregations")?;
 
-        let invalid_own_validation_batches = register_int_counter_vec!(
-            "facilitator_invalid_own_validation_batches",
-            "Number of invalid own validation batches encountered during aggregation",
+        Ok(Self {
+            aggregate_tasks_started,
+            aggregate_tasks_finished,
+            own_validation_batches_reader_metrics: BatchReaderMetricsCollector::new("own")?,
+            peer_validation_batches_reader_metrics: BatchReaderMetricsCollector::new("peer")?,
+        })
+    }
+}
+
+#[derive(Debug)]
+pub struct BatchReaderMetricsCollector {
+    pub invalid_validation_batches: IntCounterVec,
+}
+
+impl BatchReaderMetricsCollector {
+    pub fn new(ownership: &str) -> Result<Self> {
+        let invalid_validation_batches = register_int_counter_vec!(
+            format!("facilitator_invalid_{}_validation_batches", ownership),
+            format!(
+                "Number of invalid {} validation batches encountered during aggregation",
+                ownership
+            ),
             &["reason"]
         )
         .context("failed to register metrics counter for invalid own validation batches")?;
 
-        let invalid_peer_validation_batches = register_int_counter_vec!(
-            "facilitator_invalid_peer_validation_batches",
-            "Number of invalid peer validation batches encountered during aggregation",
-            &["reason"]
-        )
-        .context("failed to register metrics counter for invalid peer validation batches")?;
-
-        Ok(AggregateMetricsCollector {
-            aggregate_tasks_started,
-            aggregate_tasks_finished,
-            invalid_own_validation_batches,
-            invalid_peer_validation_batches,
+        Ok(Self {
+            invalid_validation_batches,
         })
     }
 }

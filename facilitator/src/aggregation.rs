@@ -23,6 +23,7 @@ use uuid::Uuid;
 pub struct BatchAggregator<'a> {
     trace_id: &'a str,
     is_first: bool,
+    permit_malformed_batch: bool,
     aggregation_name: &'a str,
     aggregation_start: &'a NaiveDateTime,
     aggregation_end: &'a NaiveDateTime,
@@ -44,6 +45,7 @@ impl<'a> BatchAggregator<'a> {
         aggregation_start: &'a NaiveDateTime,
         aggregation_end: &'a NaiveDateTime,
         is_first: bool,
+        permit_malformed_batch: bool,
         ingestion_transport: &'a mut VerifiableAndDecryptableTransport,
         own_validation_transport: &'a mut VerifiableTransport,
         peer_validation_transport: &'a mut VerifiableTransport,
@@ -52,6 +54,7 @@ impl<'a> BatchAggregator<'a> {
         Ok(BatchAggregator {
             trace_id,
             is_first,
+            permit_malformed_batch,
             aggregation_name,
             aggregation_start,
             aggregation_end,
@@ -182,6 +185,7 @@ impl<'a> BatchAggregator<'a> {
             BatchReader::new(
                 Batch::new_ingestion(self.aggregation_name, batch_id, batch_date),
                 &mut *self.ingestion_transport.transport.transport,
+                self.permit_malformed_batch,
             );
         let ingestion_header = ingestion_batch
             .header(&self.ingestion_transport.transport.batch_signing_public_keys)?;
@@ -202,47 +206,33 @@ impl<'a> BatchAggregator<'a> {
             BatchReader::new(
                 Batch::new_ingestion(self.aggregation_name, batch_id, batch_date),
                 &mut *self.ingestion_transport.transport.transport,
+                self.permit_malformed_batch,
             );
         let mut own_validation_batch: BatchReader<'_, ValidationHeader, ValidationPacket> =
             BatchReader::new(
                 Batch::new_validation(self.aggregation_name, batch_id, batch_date, self.is_first),
                 &mut *self.own_validation_transport.transport,
+                self.permit_malformed_batch,
             );
         let mut peer_validation_batch: BatchReader<'_, ValidationHeader, ValidationPacket> =
             BatchReader::new(
                 Batch::new_validation(self.aggregation_name, batch_id, batch_date, !self.is_first),
                 &mut *self.peer_validation_transport.transport,
+                self.permit_malformed_batch,
             );
 
-        let peer_validation_header = match peer_validation_batch
-            .header(&self.peer_validation_transport.batch_signing_public_keys)
-        {
-            Ok(header) => header,
-            Err(error) => {
-                if let Some(collector) = self.metrics_collector {
-                    collector
-                        .invalid_peer_validation_batches
-                        .with_label_values(&["header"])
-                        .inc();
-                }
-                return Err(error);
-            }
-        };
+        if let Some(collector) = self.metrics_collector {
+            own_validation_batch
+                .set_metrics_collector(&collector.own_validation_batches_reader_metrics);
+            peer_validation_batch
+                .set_metrics_collector(&collector.peer_validation_batches_reader_metrics);
+        }
 
-        let own_validation_header = match own_validation_batch
-            .header(&self.own_validation_transport.batch_signing_public_keys)
-        {
-            Ok(header) => header,
-            Err(error) => {
-                if let Some(collector) = self.metrics_collector {
-                    collector
-                        .invalid_own_validation_batches
-                        .with_label_values(&["header"])
-                        .inc();
-                }
-                return Err(error);
-            }
-        };
+        let peer_validation_header = peer_validation_batch
+            .header(&self.peer_validation_transport.batch_signing_public_keys)?;
+
+        let own_validation_header = own_validation_batch
+            .header(&self.own_validation_transport.batch_signing_public_keys)?;
 
         let ingestion_header = ingestion_batch
             .header(&self.ingestion_transport.transport.batch_signing_public_keys)?;
@@ -275,34 +265,12 @@ impl<'a> BatchAggregator<'a> {
         // have the corresponding validation packets and the proofs are good, we
         // accumulate. Otherwise we drop the packet and move on.
         let mut peer_validation_packet_file_reader =
-            match peer_validation_batch.packet_file_reader(&peer_validation_header) {
-                Ok(reader) => reader,
-                Err(error) => {
-                    if let Some(collector) = self.metrics_collector {
-                        collector
-                            .invalid_peer_validation_batches
-                            .with_label_values(&["packet_file"])
-                            .inc();
-                    }
-                    return Err(error);
-                }
-            };
+            peer_validation_batch.packet_file_reader(&peer_validation_header)?;
         let peer_validation_packets: HashMap<Uuid, ValidationPacket> =
             validation_packet_map(&mut peer_validation_packet_file_reader)?;
 
         let mut own_validation_packet_file_reader =
-            match own_validation_batch.packet_file_reader(&own_validation_header) {
-                Ok(reader) => reader,
-                Err(error) => {
-                    if let Some(collector) = self.metrics_collector {
-                        collector
-                            .invalid_own_validation_batches
-                            .with_label_values(&["packet_file"])
-                            .inc();
-                    }
-                    return Err(error);
-                }
-            };
+            own_validation_batch.packet_file_reader(&own_validation_header)?;
 
         let own_validation_packets: HashMap<Uuid, ValidationPacket> =
             validation_packet_map(&mut own_validation_packet_file_reader)?;
