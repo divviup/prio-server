@@ -132,17 +132,21 @@ resource "kubernetes_cluster_role_binding" "prometheus_binding" {
 
 resource "kubernetes_persistent_volume_claim" "prometheus_disk_claim" {
   metadata {
-    name = "prometheus-disk-claim"
+    name      = "prometheus-disk-claim"
+    namespace = "monitor"
   }
   spec {
     access_modes = ["ReadWriteOnce"]
     resources {
       requests = {
-        storage = "20Gi"
+        storage = "5Gi"
       }
     }
-    storage_class_name = "standard"
+    storage_class_name = "gce"
     volume_name        = kubernetes_persistent_volume.prometheus_volume.metadata.0.name
+  }
+  timeouts {
+    create = "30s"
   }
 }
 
@@ -154,7 +158,7 @@ resource "kubernetes_persistent_volume" "prometheus_volume" {
     capacity = {
       storage = "20Gi"
     }
-    storage_class_name               = "standard"
+    storage_class_name               = "gce"
     access_modes                     = ["ReadWriteOnce"]
     persistent_volume_reclaim_policy = "Retain"
     persistent_volume_source {
