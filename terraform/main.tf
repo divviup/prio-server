@@ -116,6 +116,24 @@ provider "google-beta" {
   project = var.gcp_project
 }
 
+# Activate some services which the deployment will require. Note that while this
+# can save you from having to go to the GCP console and manually activate them,
+# often a new deploy will still fail due to a race condition between the service
+# being activated and terraform trying to use it. This could probably be greatly
+# ameliorated by adding manual dependencies between the service activation and
+# the resources, but the maintenance cost of that exceeds the benefit. For now,
+# simply retrying the apply after a minute should let it continue.
+
+resource "google_project_service" "compute" {
+  provider = google-beta
+  service  = "compute.googleapis.com"
+}
+
+resource "google_project_service" "container" {
+  provider = google-beta
+  service  = "container.googleapis.com"
+}
+
 provider "aws" {
   # aws_s3_bucket resources will be created in the region specified in this
   # provider.
@@ -146,6 +164,8 @@ module "gke" {
   gcp_region      = var.gcp_region
   gcp_project     = var.gcp_project
   machine_type    = var.machine_type
+  network         = google_compute_network.network.self_link
+  base_subnet     = local.cluster_subnet_block
 }
 
 # For each peer data share processor, we will receive ingestion batches from two

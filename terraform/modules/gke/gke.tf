@@ -19,6 +19,10 @@ variable "machine_type" {
 }
 
 resource "google_container_cluster" "cluster" {
+  # The google-beta provider is needed for some features we're using below, such
+  # as VPC-native clusters.
+  provider = google-beta
+
   name = "${var.resource_prefix}-cluster"
   # Specifying a region and not a zone here gives us a regional cluster, meaning
   # we get cluster masters across multiple zones.
@@ -34,26 +38,34 @@ resource "google_container_cluster" "cluster" {
   }
 
   # We opt into a VPC native cluster because they have several benefits (see
-  # https://cloud.google.com/kubernetes-engine/docs/how-to/alias-ips). Enabling
-  # this networking_mode requires an ip_allocation_policy block and the
-  # google-beta provider.
-  provider        = google-beta
+  # https://cloud.google.com/kubernetes-engine/docs/how-to/alias-ips).
   networking_mode = "VPC_NATIVE"
+  network         = var.network
+  subnetwork      = google_compute_subnetwork.subnet.self_link
   ip_allocation_policy {
-    # We set these to blank values to let Terraform and Google choose
-    # appropriate subnets for us. As we learn more and become more opinionated
-    # about our network topology we can configure this explicitly.
-    # https://www.terraform.io/docs/providers/google/r/container_cluster.html#ip_allocation_policy
-    cluster_ipv4_cidr_block  = ""
-    services_ipv4_cidr_block = ""
+    cluster_ipv4_cidr_block  = module.subnets.network_cidr_blocks["kubernetes_cluster"]
+    services_ipv4_cidr_block = module.subnets.network_cidr_blocks["kubernetes_services"]
   }
+  private_cluster_config {
+    # Cluster nodes will only have private IP addresses and don't have a direct
+    # route to the Internet.
+    enable_private_nodes = true
+    # Still give the control plane a public endpoint, which we need for
+    # deployment and troubleshooting.
+    enable_private_endpoint = false
+    # Block to use for the control plane master endpoints. The control plane
+    # resides on its own VPC, and this range will be peered with ours to
+    # communicate with it.
+    master_ipv4_cidr_block = module.subnets.network_cidr_blocks["kubernetes_control_plane"]
+  }
+
   # Enables workload identity, which enables containers to authenticate as GCP
   # service accounts which may then be used to authenticate to AWS S3.
   # https://cloud.google.com/kubernetes-engine/docs/how-to/workload-identity
   workload_identity_config {
     identity_namespace = "${var.gcp_project}.svc.id.goog"
   }
-  # This enables KMS encryption of the constents of the Kubernetes cluster etcd
+  # This enables KMS encryption of the contents of the Kubernetes cluster etcd
   # instance which among other things, stores Kubernetes secrets, like the keys
   # used by data share processors to sign batches or decrypt ingestion shares.
   # https://cloud.google.com/kubernetes-engine/docs/how-to/encrypting-secrets
