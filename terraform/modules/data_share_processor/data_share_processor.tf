@@ -380,7 +380,7 @@ resource "google_storage_bucket_iam_binding" "own_validation_bucket_admin" {
   ]
 }
 
-resource "google_storage_bucket_object" "global_manifest" {
+resource "google_storage_bucket_object" "specific_manifest" {
   provider      = google-beta
   name          = "${var.data_share_processor_name}-manifest.json"
   bucket        = var.manifest_bucket
