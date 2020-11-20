@@ -1,6 +1,6 @@
 
 # Image URL to use all building/pushing image targets
-IMG ?= us.gcr.io/prio-bringup-290620/deploy-operator:latest
+IMG ?= letsencrypt/prio-deploy-operator:latest
 # Produce CRDs that work back to Kubernetes 1.11 (no version conversion)
 CRD_OPTIONS ?= "crd:trivialVersions=true"
 
@@ -13,17 +13,9 @@ endif
 
 all: manager
 
-# Run tests
-test: generate fmt vet manifests
-	go test ./...  -race -coverprofile cover.out
-
 # Build manager binary
-manager: generate fmt vet
+manager: generate
 	go build -o bin/manager main.go
-
-# Run against the configured Kubernetes cluster in ~/.kube/config
-run: generate fmt vet manifests
-	go run ./main.go
 
 # Install CRDs into a cluster
 install: manifests
@@ -41,14 +33,6 @@ deploy: manifests
 # Generate manifests e.g. CRD, RBAC etc.
 manifests: controller-gen
 	$(CONTROLLER_GEN) $(CRD_OPTIONS) rbac:roleName=manager-role webhook paths="./..." output:crd:artifacts:config=config/crd/bases
-
-# Run go fmt against code
-fmt:
-	go fmt ./...
-
-# Run go vet against code
-vet:
-	go vet ./...
 
 # Generate code
 generate: controller-gen

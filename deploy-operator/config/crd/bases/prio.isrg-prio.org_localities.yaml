@@ -36,24 +36,24 @@ spec:
         spec:
           description: LocalitySpec defines the desired state of Locality
           properties:
-            dataShareProcessors:
-              description: DataShareProcessors is the list of data share processors
-              items:
-                type: string
-              type: array
             environmentName:
               description: EnvironmentName is the name of the environment for prio
               type: string
+            ingestors:
+              description: Ingestors is the list of ingestors
+              items:
+                type: string
+              type: array
             manifestBucketLocation:
-              description: ManifestBucketLocation is the location that the manifest
-                buckets are stored
+              description: ManifestBucketLocation is the location of the manifest
+                buckets
               type: string
             schedule:
               description: Schedule is the cron job schedule as defined by https://en.wikipedia.org/wiki/Cron
               type: string
           required:
-          - dataShareProcessors
           - environmentName
+          - ingestors
           - manifestBucketLocation
           - schedule
           type: object

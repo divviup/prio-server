@@ -44,7 +44,7 @@ type LocalityReconciler struct {
 const (
 	jobNameField       = ".metadata.name"
 	jobName            = "key-rotator"
-	keyRotatorImage    = "us.gcr.io/prio-bringup-290620/manifest-updater:latest"
+	keyRotatorImage    = "letsencrypt/prio-manifest-updater:latest"
 	serviceAccountName = "manifest-updater"
 )
 
