@@ -1,4 +1,6 @@
 FROM rust:1.46-alpine as builder
+ARG BUILD_INFO=unspecified
+LABEL build_info="${BUILD_INFO}"
 
 RUN apk add libc-dev && apk update
 # Attempt to install a nonexistent package. This triggers
@@ -33,8 +35,5 @@ RUN cargo build --manifest-path ./facilitator/Cargo.toml
 RUN strip facilitator/target/debug/facilitator
 
 # Build a minimal container containing only the binary, the one .so it needs, and root certs.
-FROM scratch
-COPY --from=builder /lib/ld-musl-x86_64.so.1 /lib/ld-musl-x86_64.so.1
-COPY --from=builder /usr/src/prio-server/facilitator/target/debug/facilitator /facilitator
-COPY --from=builder /etc/ssl/cert.pem /etc/ssl/cert.pem
+RUN cp /usr/src/prio-server/facilitator/target/debug/facilitator /facilitator
 ENTRYPOINT ["/facilitator"]

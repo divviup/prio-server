@@ -288,6 +288,7 @@ resource "kubernetes_cron_job" "workflow_manager" {
               args = [
                 "--aggregation-period", var.aggregation_period,
                 "--grace-period", var.aggregation_grace_period,
+                "--intake-max-age", "24h",
                 "--is-first=${var.is_first ? "true" : "false"}",
                 "--k8s-namespace", var.kubernetes_namespace,
                 "--k8s-service-account", kubernetes_service_account.workflow_manager.metadata[0].name,

@@ -5,6 +5,7 @@ use std::io::Write;
 pub mod aggregation;
 pub mod batch;
 pub mod config;
+pub mod http;
 pub mod idl;
 pub mod intake;
 pub mod manifest;
@@ -113,6 +114,15 @@ pub struct BatchSigningKey {
     /// must correspond to a batch-signing-key in the data share processor's
     /// specific manifest.
     pub identifier: String,
+}
+
+/// Pretty print a byte array as a hex string.
+fn hex_dump(bytes: &[u8]) -> String {
+    bytes
+        .iter()
+        .map(|b| format!("{:02x}", b))
+        .collect::<Vec<_>>()
+        .concat()
 }
 
 #[cfg(test)]

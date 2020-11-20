@@ -3,9 +3,9 @@ name = "facilitator"
 version = "0.1.0"
 authors = ["Internet Security Research Group"]
 edition = "2018"
-build = "build.rs"
 
 [dependencies]
+async-trait = "0.1"
 anyhow = "1.0"
 avro-rs = { version = "0.11.0", features = ["snappy"] }
 base64 = "0.12.3"
@@ -14,6 +14,7 @@ clap = "2.33.3"
 derivative = "2.1.1"
 hyper = "0.13.8"
 hyper-rustls = "0.21.0"
+jsonwebtoken = "7"
 log = "0.4.11"
 once_cell = "1.4"
 pem = "0.8"
@@ -31,12 +32,9 @@ structopt = "0.3"
 tempfile = "3.1.0"
 thiserror = "1.0"
 tokio = { version = "0.2", features = ["rt-core", "io-util"] }
-ureq = { version = "1.5.1", features = ["json"] }
+ureq = { version = "1.5.2", features = ["json"] }
 urlencoding = "1.1.1"
 uuid = { version = "0.8", features = ["serde", "v4"] }
-
-[build-dependencies]
-vergen = "3"
 
 [dev-dependencies]
 assert_matches = "1.4.0"

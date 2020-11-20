@@ -22,11 +22,13 @@ jobs:
     - name: update-version
       run: sed -i "s/^version =.*/version = \"${{ steps.get_version.outputs.VERSION }}\"/" facilitator/Cargo.toml
     - name: build
-      run: docker build -f facilitator/Dockerfile -t letsencrypt/prio-facilitator:{{ steps.get_version.outputs.VERSION }}
+      run: ./facilitator/build.sh
+    - name: tag
+      run: docker tag letsencrypt/prio-facilitator letsencrypt/prio-facilitator:${{ steps.get_version.outputs.VERSION }}
     - name: tag-latest
-      run: docker tag letsencrypt/prio-facilitator:${{ steps.get_version.outputs.VERSION }} letsencrypt/prio-facilitator:latest
+      run: docker tag letsencrypt/prio-facilitator letsencrypt/prio-facilitator:latest
     - name: push
-      run: docker push letsencrypt/prio-facilitator:${{steps.get_version.outputs.VERSION }}
+      run: docker push letsencrypt/prio-facilitator:${{ steps.get_version.outputs.VERSION }}
     - name: push-latest
       run: docker push letsencrypt/prio-facilitator:latest
 
