@@ -591,6 +591,16 @@ func launchAggregationJobs(ctx context.Context, batchesByID aggregationMap, inte
 								Image:           *facilitatorImage,
 								ImagePullPolicy: "Always",
 								VolumeMounts:    volumeMounts,
+								Resources: corev1.ResourceRequirements{
+									Requests: corev1.ResourceList{
+										corev1.ResourceMemory: resource.MustParse("500Mi"),
+										corev1.ResourceCPU:    resource.MustParse("0.5"),
+									},
+									Limits: corev1.ResourceList{
+										corev1.ResourceMemory: resource.MustParse("550Mi"),
+										corev1.ResourceCPU:    resource.MustParse("0.7"),
+									},
+								},
 								EnvFrom: []corev1.EnvFromSource{
 									{
 										ConfigMapRef: &corev1.ConfigMapEnvSource{
