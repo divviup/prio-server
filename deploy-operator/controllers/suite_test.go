@@ -16,8 +16,9 @@ package controllers
 
 import (
 	"path/filepath"
-	ctrl "sigs.k8s.io/controller-runtime"
 	"testing"
+
+	ctrl "sigs.k8s.io/controller-runtime"
 
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"

@@ -4,9 +4,10 @@ import (
 	"context"
 	"encoding/base64"
 	"fmt"
+	"time"
+
 	corev1 "k8s.io/api/core/v1"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"time"
 )
 
 const (
@@ -15,7 +16,7 @@ const (
 	expirationKeyMap                  = "expiration"
 )
 
-func (k *Kube) validateAndUpdateBatchSigningKey(keyName, dsp string, secret *corev1.Secret) ([]*PrioKey, error) {
+func (k *Kube) validateAndUpdateBatchSigningKey(keyName, ingestor string, secret *corev1.Secret) ([]*PrioKey, error) {
 	creation := secret.GetCreationTimestamp()
 	since := time.Since(creation.Time)
 
@@ -30,7 +31,7 @@ func (k *Kube) validateAndUpdateBatchSigningKey(keyName, dsp string, secret *cor
 		WithField("Expiration: ", expired).
 		Info("Secret is close to expiration or has expired, we're going to require it to be expired")
 
-	key, err := k.createAndStoreBatchSigningKey(keyName, dsp)
+	key, err := k.createAndStoreBatchSigningKey(keyName, ingestor)
 
 	if err != nil {
 		return nil, fmt.Errorf("unable to create secret: %w", err)
@@ -55,7 +56,7 @@ func (k *Kube) validateAndUpdateBatchSigningKey(keyName, dsp string, secret *cor
 	}, nil
 }
 
-func (k *Kube) createAndStoreBatchSigningKey(name, dsp string) (*PrioKey, error) {
+func (k *Kube) createAndStoreBatchSigningKey(name, ingestor string) (*PrioKey, error) {
 	key, err := NewPrioKey()
 
 	if err != nil {
@@ -75,8 +76,8 @@ func (k *Kube) createAndStoreBatchSigningKey(name, dsp string) (*PrioKey, error)
 			GenerateName: name,
 			Namespace:    k.namespace,
 			Labels: map[string]string{
-				"type": "batch-signing-key",
-				"dsp":  dsp,
+				"type":     "batch-signing-key",
+				"ingestor": ingestor,
 			},
 		},
 		Immutable: &immutable,

@@ -23,11 +23,11 @@ type LocalitySpec struct {
 	// EnvironmentName is the name of the environment for prio
 	EnvironmentName string `json:"environmentName"`
 
-	// ManifestBucketLocation is the location that the manifest buckets are stored
+	// ManifestBucketLocation is the location of the manifest buckets
 	ManifestBucketLocation string `json:"manifestBucketLocation"`
 
-	// DataShareProcessors is the list of data share processors
-	DataShareProcessors []string `json:"dataShareProcessors"`
+	// Ingestors is the list of ingestors
+	Ingestors []string `json:"ingestors"`
 
 	// Schedule is the cron job schedule as defined by https://en.wikipedia.org/wiki/Cron
 	Schedule string `json:"schedule"`

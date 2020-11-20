@@ -13,16 +13,16 @@ type Updater struct {
 	environmentName        string
 	locality               string
 	manifestBucketLocation string
-	dataShareProcessors    []string
+	ingestors              []string
 }
 
-func NewUpdater(environmentName string, locality string, manifestBucketLocation string, dataShareProcessors []string) (*Updater, error) {
+func NewUpdater(environmentName string, locality string, manifestBucketLocation string, ingestors []string) (*Updater, error) {
 	return &Updater{
 		log:                    log.WithField("source", "manifest updater"),
 		environmentName:        environmentName,
 		locality:               locality,
 		manifestBucketLocation: manifestBucketLocation,
-		dataShareProcessors:    dataShareProcessors,
+		ingestors:              ingestors,
 	}, nil
 }
 
@@ -36,19 +36,19 @@ func (u *Updater) UpdateDataShareSpecificManifest(keys map[string]BatchSigningPu
 		return fmt.Errorf("getting storage client failed: %w", err)
 	}
 
-	for _, dsp := range u.dataShareProcessors {
-		manifest, err := u.readExistingManifest(store, dsp)
+	for _, ingestor := range u.ingestors {
+		manifest, err := u.readExistingManifest(store, ingestor)
 		if err != nil {
 			return fmt.Errorf("manifest file not read properly: %w", err)
 		}
-		if keys != nil && keys[dsp] != nil {
-			manifest.BatchSigningPublicKeys = keys[dsp]
+		if keys != nil && keys[ingestor] != nil {
+			manifest.BatchSigningPublicKeys = keys[ingestor]
 		}
 		if certificate != nil {
 			manifest.PacketEncryptionKeyCSRs = certificate
 		}
 
-		err = u.writeManifest(store, manifest, dsp)
+		err = u.writeManifest(store, manifest, ingestor)
 		if err != nil {
 			return fmt.Errorf("manifest file not written properly: %w", err)
 		}
@@ -57,9 +57,9 @@ func (u *Updater) UpdateDataShareSpecificManifest(keys map[string]BatchSigningPu
 	return nil
 }
 
-func (u *Updater) readExistingManifest(store *storage.BucketHandle, dataShareProcessor string) (*DataShareSpecificManifest, error) {
-	u.log.WithField("data share processor", dataShareProcessor).Infoln("reading the manifest file")
-	manifestObj := store.Object(fmt.Sprintf("%s-%s-manifest.json", u.locality, dataShareProcessor))
+func (u *Updater) readExistingManifest(store *storage.BucketHandle, ingestor string) (*DataShareSpecificManifest, error) {
+	u.log.WithField("ingestor", ingestor).Infoln("reading the manifest file")
+	manifestObj := store.Object(fmt.Sprintf("%s-%s-manifest.json", u.locality, ingestor))
 	r, err := manifestObj.NewReader(context.Background())
 	if err != nil {
 		return nil, fmt.Errorf("reading from the manifest failed: %w", err)
@@ -81,13 +81,13 @@ func (u *Updater) readExistingManifest(store *storage.BucketHandle, dataSharePro
 	return manifest, nil
 }
 
-func (u *Updater) writeManifest(store *storage.BucketHandle, manifest *DataShareSpecificManifest, dataShareProcessor string) error {
+func (u *Updater) writeManifest(store *storage.BucketHandle, manifest *DataShareSpecificManifest, ingestor string) error {
 	u.log.
-		WithField("data share processor", dataShareProcessor).
+		WithField("ingestor", ingestor).
 		WithField("manifest", manifest).
 		Infoln("writing the manifest file")
 
-	manifestObj := store.Object(fmt.Sprintf("%s-%s-manifest.json", u.locality, dataShareProcessor))
+	manifestObj := store.Object(fmt.Sprintf("%s-%s-manifest.json", u.locality, ingestor))
 
 	w := manifestObj.NewWriter(context.Background())
 	w.CacheControl = "no-cache"

@@ -3,6 +3,8 @@ package controllers
 import (
 	"context"
 	"fmt"
+	"time"
+
 	v1 "github.com/abetterinternet/prio-server/deploy-operator/api/v1"
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
@@ -10,10 +12,9 @@ import (
 	"k8s.io/api/batch/v1beta1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
-	"time"
 )
 
-func getDataShareProcessors() []string {
+func getIngestors() []string {
 	return []string{
 		"google",
 		"apple",
@@ -49,7 +50,7 @@ var _ = Describe("Locality controller", func() {
 			Spec: v1.LocalitySpec{
 				EnvironmentName:        EnvironmentName,
 				ManifestBucketLocation: ManifestBucketLocation,
-				DataShareProcessors:    getDataShareProcessors(),
+				Ingestors:              getIngestors(),
 				Schedule:               Schedule,
 			},
 		}

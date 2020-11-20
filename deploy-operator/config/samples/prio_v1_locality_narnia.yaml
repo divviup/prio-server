@@ -6,7 +6,7 @@ metadata:
 spec:
   environmentName: narnia
   manifestBucketLocation: prio-amir-d2-manifests
-  dataShareProcessors:
+  ingestors:
     - apple
     - google
   schedule: 0 5 * * 0
