@@ -134,7 +134,6 @@ locals {
 resource "null_resource" "crd" {
   triggers = {
     applied_crd  = local.crd
-    force_update = timestamp()
   }
   provisioner "local-exec" {
     command = "echo '${local.crd}\n---\n' >> crds.yml"
