@@ -47,11 +47,11 @@ var runCmd = &cobra.Command{
 			packetEncryptionCertificate = make(manifest.PacketEncryptionKeyCSRs)
 
 			for _, key := range packetEncryptionKeys {
-				cert, err := key.CreatePemEncodedCertificateRequest(rand.Reader, new(x509.CertificateRequest))
+				csr, err := key.CreatePemEncodedCertificateRequest(rand.Reader, new(x509.CertificateRequest))
 				if err != nil {
 					log.Fatal(err)
 				}
-				packetEncryptionCertificate[*key.KubeIdentifier] = manifest.PacketEncryptionCertificate{Certificate: cert}
+				packetEncryptionCertificate[*key.KubeIdentifier] = manifest.PacketEncryptionCertificate{CertificateSigningRequest: csr}
 			}
 		}
 

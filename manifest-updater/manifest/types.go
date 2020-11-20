@@ -39,6 +39,6 @@ type BatchSigningPublicKey struct {
 // PacketEncryptionCertificate represents a certificate containing a public key
 // used for packet encryption.
 type PacketEncryptionCertificate struct {
-	// Certificate is the PEM armored X.509 certificate.
-	Certificate string `json:"certificate"`
+	// CertificateSigningRequest is the PEM armored PKCS#10 CSR
+	CertificateSigningRequest string `json:"certificate-signing-request"`
 }
