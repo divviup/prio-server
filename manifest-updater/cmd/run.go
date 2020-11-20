@@ -4,6 +4,7 @@ import (
 	"crypto/rand"
 	"crypto/x509"
 	"fmt"
+
 	"github.com/abetterinternet/prio-server/manifest-updater/manifest"
 	"github.com/abetterinternet/prio-server/manifest-updater/secrets"
 	log "github.com/sirupsen/logrus"
@@ -22,21 +23,21 @@ var runCmd = &cobra.Command{
 		environmentName := viper.GetString("environment_name")
 		locality := viper.GetString("locality")
 		manifestBucket := viper.GetString("manifest_bucket_location")
-		dsps := viper.GetStringSlice("data_share_processors")
+		ingestors := viper.GetStringSlice("ingestors")
 
 		log.WithFields(
 			map[string]interface{}{
-				"environment name":      environmentName,
-				"locality":              locality,
-				"manifest bucket":       manifestBucket,
-				"data share processors": dsps,
+				"environment name": environmentName,
+				"locality":         locality,
+				"manifest bucket":  manifestBucket,
+				"ingestors":        ingestors,
 			},
 		).Info("Starting the updater...")
 
 		var packetEncryptionCertificate manifest.PacketEncryptionKeyCSRs
-		var dspSigningKeys map[string]manifest.BatchSigningPublicKeys
+		var ingestorSigningKeys map[string]manifest.BatchSigningPublicKeys
 
-		kube, _ := secrets.NewKube(locality, dsps)
+		kube, _ := secrets.NewKube(locality, ingestors)
 
 		packetEncryptionKeys, err := kube.ReconcilePacketEncryptionKey()
 		if err != nil {
@@ -59,14 +60,14 @@ var runCmd = &cobra.Command{
 			log.Fatal(err)
 		}
 		if batchSigningKeys != nil {
-			dspSigningKeys, err = prioKeysToBatchSigningManifests(batchSigningKeys)
+			ingestorSigningKeys, err = prioKeysToBatchSigningManifests(batchSigningKeys)
 			if err != nil {
 				log.Fatal(err)
 			}
 		}
 
-		updater, _ := manifest.NewUpdater(environmentName, locality, manifestBucket, dsps)
-		err = updater.UpdateDataShareSpecificManifest(dspSigningKeys, packetEncryptionCertificate)
+		updater, _ := manifest.NewUpdater(environmentName, locality, manifestBucket, ingestors)
+		err = updater.UpdateDataShareSpecificManifest(ingestorSigningKeys, packetEncryptionCertificate)
 
 		if err != nil {
 			log.Fatal(err)
@@ -77,9 +78,9 @@ var runCmd = &cobra.Command{
 
 func prioKeysToBatchSigningManifests(keys map[string][]*secrets.PrioKey) (map[string]manifest.BatchSigningPublicKeys, error) {
 	results := make(map[string]manifest.BatchSigningPublicKeys)
-	for dataShareProcessor, prioKeys := range keys {
+	for ingestor, prioKeys := range keys {
 		publicKeys := make(manifest.BatchSigningPublicKeys)
-		results[dataShareProcessor] = publicKeys
+		results[ingestor] = publicKeys
 
 		for _, key := range prioKeys {
 			publicKey, err := key.GetPemEncodedPublicKey()

@@ -1,10 +1,11 @@
 package cmd
 
 import (
+	"os"
+
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
-	"os"
 )
 
 var rootCmd = &cobra.Command{
@@ -54,20 +55,7 @@ func init() {
 	rootCmd.PersistentFlags().String("environment_name", "", "Name of the environment")
 	rootCmd.PersistentFlags().String("locality", "", "Name of locality")
 	rootCmd.PersistentFlags().String("manifest_bucket_location", "", "Manifest bucket location")
-	rootCmd.PersistentFlags().StringSlice("data_share_processors", []string{}, "List of datashare processors")
-
-	//if err := rootCmd.MarkPersistentFlagRequired("environment_name"); err != nil {
-	//	log.Fatalf("environment_name missing")
-	//}
-	//if err := rootCmd.MarkPersistentFlagRequired("locality"); err != nil {
-	//	log.Fatalf("locality missing")
-	//}
-	//if err := rootCmd.MarkPersistentFlagRequired("manifest_bucket_location"); err != nil {
-	//	log.Fatalf("manifest_bucket_location missing")
-	//}
-	//if err := rootCmd.MarkPersistentFlagRequired("data_share_processors"); err != nil {
-	//	log.Fatalf("data_share_processors missing")
-	//}
+	rootCmd.PersistentFlags().StringSlice("ingestors", []string{}, "List of ingestors")
 
 	_ = viper.BindPFlag("log", rootCmd.PersistentFlags().Lookup("log"))
 	_ = viper.BindPFlag("colors", rootCmd.PersistentFlags().Lookup("colors"))

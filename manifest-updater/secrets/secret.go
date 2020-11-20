@@ -16,10 +16,10 @@ import (
 )
 
 type Kube struct {
-	log                 *log.Entry
-	client              *kubernetes.Clientset
-	namespace           string
-	dataShareProcessors []string
+	log       *log.Entry
+	client    *kubernetes.Clientset
+	namespace string
+	ingestors []string
 }
 
 const (
@@ -30,7 +30,7 @@ const (
 	maxSecrets = 4
 )
 
-func NewKube(namespace string, dataShareProcessors []string) (*Kube, error) {
+func NewKube(namespace string, ingestors []string) (*Kube, error) {
 	config, err := rest.InClusterConfig()
 	if err != nil {
 		config, err = clientcmd.BuildConfigFromFlags("", os.Getenv("KUBECONFIG"))
@@ -45,10 +45,10 @@ func NewKube(namespace string, dataShareProcessors []string) (*Kube, error) {
 	}
 
 	return &Kube{
-		log:                 log.WithField("source", "kube secret").WithField("namespace", namespace),
-		client:              client,
-		namespace:           namespace,
-		dataShareProcessors: dataShareProcessors,
+		log:       log.WithField("source", "kube secret").WithField("namespace", namespace),
+		client:    client,
+		namespace: namespace,
+		ingestors: ingestors,
 	}, nil
 }
 
@@ -90,9 +90,9 @@ func (k *Kube) ReconcilePacketEncryptionKey() ([]*PrioKey, error) {
 func (k *Kube) ReconcileBatchSigningKey() (map[string][]*PrioKey, error) {
 	results := make(map[string][]*PrioKey)
 
-	for _, dataShareProcessor := range k.dataShareProcessors {
-		secretSelector := fmt.Sprintf("type=batch-signing-key,dsp=%s", dataShareProcessor)
-		secretName := fmt.Sprintf(batchSigningKeyFormat, dataShareProcessor)
+	for _, ingestor := range k.ingestors {
+		secretSelector := fmt.Sprintf("type=batch-signing-key,ingestor=%s", ingestor)
+		secretName := fmt.Sprintf(batchSigningKeyFormat, ingestor)
 
 		secrets, err := k.getSortedSecretsWithLabel(secretSelector)
 		if err != nil {
@@ -101,11 +101,11 @@ func (k *Kube) ReconcileBatchSigningKey() (map[string][]*PrioKey, error) {
 
 		// No secret exists, make the first one.
 		if len(secrets) == 0 {
-			key, err := k.createAndStoreBatchSigningKey(secretName, dataShareProcessor)
+			key, err := k.createAndStoreBatchSigningKey(secretName, ingestor)
 			if err != nil {
 				return nil, fmt.Errorf("creating and storing the batch signing key failed: %w", err)
 			}
-			results[dataShareProcessor] = []*PrioKey{
+			results[ingestor] = []*PrioKey{
 				key,
 			}
 			continue
@@ -113,16 +113,16 @@ func (k *Kube) ReconcileBatchSigningKey() (map[string][]*PrioKey, error) {
 
 		// Last good secret
 		secret := secrets[0]
-		keys, err := k.validateAndUpdateBatchSigningKey(secretName, dataShareProcessor, &secret)
+		keys, err := k.validateAndUpdateBatchSigningKey(secretName, ingestor, &secret)
 		if err != nil {
 			return nil, fmt.Errorf("validating the batch signing key failed: %w", err)
 		}
 
 		if keys == nil {
-			k.log.WithField("data share processor", dataShareProcessor).Info("Batch signing key was not expired")
+			k.log.WithField("ingestor", ingestor).Info("Batch signing key was not expired")
 			continue
 		}
-		results[dataShareProcessor] = keys
+		results[ingestor] = keys
 
 		if len(secrets) >= maxSecrets {
 			err = k.deleteSecrets(secrets[3:])
