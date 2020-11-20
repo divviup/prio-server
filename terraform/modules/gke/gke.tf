@@ -61,6 +61,10 @@ resource "google_container_cluster" "cluster" {
     state    = "ENCRYPTED"
     key_name = google_kms_crypto_key.etcd_encryption_key.id
   }
+
+  # Enables boot integrity checking and monitoring for nodes in the cluster.
+  # More configuration values are defined in node pools below.
+  enable_shielded_nodes = true
 }
 
 resource "google_container_node_pool" "worker_nodes" {
@@ -86,6 +90,11 @@ resource "google_container_node_pool" "worker_nodes" {
     # https://cloud.google.com/kubernetes-engine/docs/how-to/workload-identity
     workload_metadata_config {
       node_metadata = "GKE_METADATA_SERVER"
+    }
+
+    shielded_instance_config {
+      enable_secure_boot          = true
+      enable_integrity_monitoring = true
     }
   }
 }
