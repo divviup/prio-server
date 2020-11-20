@@ -79,7 +79,7 @@ resource "google_container_node_pool" "worker_nodes" {
   }
   node_config {
     disk_size_gb = "25"
-    image_type   = "COS"
+    image_type   = "COS_CONTAINERD"
     machine_type = var.machine_type
     oauth_scopes = [
       "storage-ro",
