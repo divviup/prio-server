@@ -149,6 +149,8 @@ func (k *Kube) deleteSecrets(secrets []corev1.Secret) error {
 	return nil
 }
 
+// getSortedSecretWithLabel gets a list of secrets, that were sorted by the secret's creation date
+// the label refers to Kubernetes' LabelSelector
 func (k *Kube) getSortedSecretsWithLabel(labelSelector string) ([]corev1.Secret, error) {
 	sApi := k.client.CoreV1().Secrets(k.namespace)
 
