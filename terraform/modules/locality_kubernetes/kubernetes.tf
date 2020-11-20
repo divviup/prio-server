@@ -117,23 +117,23 @@ resource "google_storage_bucket_iam_member" "manifest_bucket_owner" {
 locals {
   crd = yamlencode({
     "apiVersion" : "prio.isrg-prio.org/v1",
-    "kind"       : "Locality",
+    "kind" : "Locality",
     "metadata" : {
-      "name"      : "${var.kubernetes_namespace}-locality",
+      "name" : "${var.kubernetes_namespace}-locality",
       "namespace" : var.kubernetes_namespace
     },
     "spec" : {
-      "environmentName"        : var.kubernetes_namespace,
+      "environmentName" : var.kubernetes_namespace,
       "manifestBucketLocation" : var.manifest_bucket,
-      "dataShareProcessors"    : var.ingestors
-      "schedule"               : "0 5 * * 0"
+      "dataShareProcessors" : var.ingestors
+      "schedule" : "0 5 * * 0"
     }
   })
 }
 
 resource "null_resource" "crd" {
   triggers = {
-    applied_crd = local.crd
+    applied_crd  = local.crd
     force_update = timestamp()
   }
   provisioner "local-exec" {
