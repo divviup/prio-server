@@ -10,8 +10,7 @@ import (
 )
 
 const (
-	//packetDecryptionKeyMaxAge = 20 * 24 * time.Hour
-	packetDecryptionKeyMaxAge = 20 * time.Second
+	packetDecryptionKeyMaxAge = 70 * 24 * time.Hour
 	packetDecryptionKeyFormat = "packet-decryption-key-"
 )
 
