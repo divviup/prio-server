@@ -28,6 +28,11 @@ resource "google_container_cluster" "cluster" {
   # https://www.terraform.io/docs/providers/google/r/container_cluster.html#remove_default_node_pool
   remove_default_node_pool = true
   initial_node_count       = 1
+
+  release_channel {
+    channel = "REGULAR"
+  }
+
   # We opt into a VPC native cluster because they have several benefits (see
   # https://cloud.google.com/kubernetes-engine/docs/how-to/alias-ips). Enabling
   # this networking_mode requires an ip_allocation_policy block and the
