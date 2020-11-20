@@ -470,6 +470,7 @@ func idForJobName(aggregationID string) string {
 	if len(idForJobName) > 30 {
 		idForJobName = idForJobName[:30]
 	}
+	idForJobName = strings.ToLower(idForJobName)
 	return idForJobName
 }
 
