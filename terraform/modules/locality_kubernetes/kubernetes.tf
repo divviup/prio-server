@@ -125,7 +125,7 @@ locals {
     "spec" : {
       "environmentName" : var.kubernetes_namespace,
       "manifestBucketLocation" : var.manifest_bucket,
-      "dataShareProcessors" : var.ingestors
+      "ingestors" : var.ingestors
       "schedule" : "0 5 * * 0"
     }
   })
