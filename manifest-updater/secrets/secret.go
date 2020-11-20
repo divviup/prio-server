@@ -3,6 +3,9 @@ package secrets
 import (
 	"context"
 	"fmt"
+	"os"
+	"sort"
+
 	log "github.com/sirupsen/logrus"
 	corev1 "k8s.io/api/core/v1"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -10,8 +13,6 @@ import (
 	_ "k8s.io/client-go/plugin/pkg/client/auth/gcp"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
-	"os"
-	"sort"
 )
 
 type Kube struct {
@@ -24,6 +25,9 @@ type Kube struct {
 const (
 	secretKeyMap          = "secret_key"
 	batchSigningKeyFormat = "batch-signing-key-%s-"
+	// We're pretty confident if we keep the last 4 secrets around we
+	// should be able to decrypt old-enough data
+	maxSecrets = 4
 )
 
 func NewKube(namespace string, dataShareProcessors []string) (*Kube, error) {
@@ -72,7 +76,7 @@ func (k *Kube) ReconcilePacketEncryptionKey() ([]*PrioKey, error) {
 		return nil, fmt.Errorf("creating and storing the packet decryption keys failed: %w", err)
 	}
 
-	if len(secrets) >= 4 {
+	if len(secrets) >= maxSecrets {
 		err = k.deleteSecrets(secrets[3:])
 
 		if err != nil {
@@ -120,7 +124,7 @@ func (k *Kube) ReconcileBatchSigningKey() (map[string][]*PrioKey, error) {
 		}
 		results[dataShareProcessor] = keys
 
-		if len(secrets) >= 4 {
+		if len(secrets) >= maxSecrets {
 			err = k.deleteSecrets(secrets[3:])
 
 			if err != nil {
