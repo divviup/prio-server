@@ -225,8 +225,8 @@ module "locality_kubernetes" {
   gcp_project          = var.gcp_project
   manifest_bucket      = module.manifest.bucket
   kubernetes_namespace = each.value.metadata[0].name
-
-  depends_on = [module.manifest]
+  ingestors            = keys(var.ingestors)
+  depends_on           = [module.manifest]
 }
 
 module "data_share_processors" {

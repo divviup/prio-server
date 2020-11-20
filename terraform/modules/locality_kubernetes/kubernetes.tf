@@ -14,6 +14,10 @@ variable "manifest_bucket" {
   type = string
 }
 
+variable "ingestors" {
+  type = list(string)
+}
+
 # We need to make a google service account for the manifest updater
 resource "google_service_account" "manifest_updater" {
   provider = google-beta
@@ -107,4 +111,32 @@ resource "google_storage_bucket_iam_member" "manifest_bucket_owner" {
   bucket = var.manifest_bucket
   role   = "roles/storage.legacyBucketWriter"
   member = "serviceAccount:${google_service_account.manifest_updater.email}"
+}
+
+
+locals {
+  crd = yamlencode({
+    "apiVersion" : "prio.isrg-prio.org/v1",
+    "kind"       : "Locality",
+    "metadata" : {
+      "name"      : "${var.kubernetes_namespace}-locality",
+      "namespace" : var.kubernetes_namespace
+    },
+    "spec" : {
+      "environmentName"        : var.kubernetes_namespace,
+      "manifestBucketLocation" : var.manifest_bucket,
+      "dataShareProcessors"    : var.ingestors
+      "schedule"               : "0 5 * * 0"
+    }
+  })
+}
+
+resource "null_resource" "crd" {
+  triggers = {
+    applied_crd = local.crd
+    force_update = timestamp()
+  }
+  provisioner "local-exec" {
+    command = "echo '${local.crd}\n---\n' >> crds.yml"
+  }
 }
