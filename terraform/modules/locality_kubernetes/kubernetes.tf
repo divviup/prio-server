@@ -133,7 +133,7 @@ locals {
 
 resource "null_resource" "crd" {
   triggers = {
-    applied_crd  = local.crd
+    applied_crd = local.crd
   }
   provisioner "local-exec" {
     command = "echo '${local.crd}\n---\n' >> crds.yml"
