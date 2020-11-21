@@ -61,6 +61,11 @@ resource "kubernetes_pod" "prometheus" {
         mount_path = "/data"
       }
     }
+    security_context {
+      fs_group        = 2000
+      run_as_user     = 1000
+      run_as_non_root = true
+    }
     volume {
       name = "config-volume"
       config_map {
@@ -70,8 +75,8 @@ resource "kubernetes_pod" "prometheus" {
     volume {
       name = "storage-volume"
 
-      config_map {
-        name = kubernetes_persistent_volume_claim.prometheus_disk_claim.metadata[0].name
+      persistent_volume_claim {
+        claim_name = kubernetes_persistent_volume_claim.prometheus_disk_claim.metadata[0].name
       }
     }
   }
@@ -79,7 +84,8 @@ resource "kubernetes_pod" "prometheus" {
 
 resource "kubernetes_config_map" "prometheus_config" {
   metadata {
-    name = "prometheus-config"
+    name      = "prometheus-config"
+    namespace = "monitor"
   }
 
   data = {
@@ -145,9 +151,6 @@ resource "kubernetes_persistent_volume_claim" "prometheus_disk_claim" {
     storage_class_name = "gce"
     volume_name        = kubernetes_persistent_volume.prometheus_volume.metadata.0.name
   }
-  timeouts {
-    create = "30s"
-  }
 }
 
 resource "kubernetes_persistent_volume" "prometheus_volume" {
@@ -205,7 +208,6 @@ resource "kubernetes_pod" "grafana" {
   }
 
   spec {
-    # TODO
     service_account_name = kubernetes_service_account.prometheus_account.metadata[0].name
     container {
       image = "grafana/grafana:latest"
@@ -243,7 +245,7 @@ resource "kubernetes_config_map" "grafana_config" {
   }
 
   data = {
-    "prometheus.yml" = file("${path.module}/grafana.yml")
+    "grafana.yml" = file("${path.module}/grafana.yml")
   }
 }
 
@@ -259,7 +261,7 @@ resource "kubernetes_persistent_volume_claim" "grafana_disk_claim" {
         storage = "20Gi"
       }
     }
-    storage_class_name = "standard"
+    storage_class_name = "gce"
     volume_name        = kubernetes_persistent_volume.grafana_volume.metadata.0.name
   }
 }
@@ -272,7 +274,7 @@ resource "kubernetes_persistent_volume" "grafana_volume" {
     capacity = {
       storage = "20Gi"
     }
-    storage_class_name               = "standard"
+    storage_class_name               = "gce"
     access_modes                     = ["ReadWriteOnce"]
     persistent_volume_reclaim_policy = "Retain"
     persistent_volume_source {
