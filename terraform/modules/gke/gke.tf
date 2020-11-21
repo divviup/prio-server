@@ -28,6 +28,11 @@ resource "google_container_cluster" "cluster" {
   # https://www.terraform.io/docs/providers/google/r/container_cluster.html#remove_default_node_pool
   remove_default_node_pool = true
   initial_node_count       = 1
+
+  release_channel {
+    channel = "REGULAR"
+  }
+
   # We opt into a VPC native cluster because they have several benefits (see
   # https://cloud.google.com/kubernetes-engine/docs/how-to/alias-ips). Enabling
   # this networking_mode requires an ip_allocation_policy block and the
@@ -56,6 +61,10 @@ resource "google_container_cluster" "cluster" {
     state    = "ENCRYPTED"
     key_name = google_kms_crypto_key.etcd_encryption_key.id
   }
+
+  # Enables boot integrity checking and monitoring for nodes in the cluster.
+  # More configuration values are defined in node pools below.
+  enable_shielded_nodes = true
 }
 
 resource "google_container_node_pool" "worker_nodes" {
@@ -70,7 +79,7 @@ resource "google_container_node_pool" "worker_nodes" {
   }
   node_config {
     disk_size_gb = "25"
-    image_type   = "COS"
+    image_type   = "COS_CONTAINERD"
     machine_type = var.machine_type
     oauth_scopes = [
       "storage-ro",
@@ -81,6 +90,11 @@ resource "google_container_node_pool" "worker_nodes" {
     # https://cloud.google.com/kubernetes-engine/docs/how-to/workload-identity
     workload_metadata_config {
       node_metadata = "GKE_METADATA_SERVER"
+    }
+
+    shielded_instance_config {
+      enable_secure_boot          = true
+      enable_integrity_monitoring = true
     }
   }
 }
