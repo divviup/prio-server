@@ -22,7 +22,7 @@ variable "workflow_manager_image" {
 
 variable "workflow_manager_version" {
   type    = string
-  default = "latest"
+  default = "0.4.8"
 }
 
 variable "facilitator_image" {
@@ -32,7 +32,7 @@ variable "facilitator_image" {
 
 variable "facilitator_version" {
   type    = string
-  default = "latest"
+  default = "0.4.8"
 }
 
 variable "gcp_project" {
