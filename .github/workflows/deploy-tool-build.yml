@@ -47,3 +47,4 @@ jobs:
       with:
         version: v1.31
         working-directory: deploy-tool
+        args: --timeout 5m
