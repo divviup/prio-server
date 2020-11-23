@@ -17,8 +17,10 @@ package controllers
 import (
 	"context"
 	"fmt"
-	"k8s.io/apimachinery/pkg/api/equality"
+	"strconv"
 	"strings"
+
+	"k8s.io/apimachinery/pkg/api/equality"
 
 	"github.com/go-logr/logr"
 	v1 "k8s.io/api/batch/v1"
@@ -42,9 +44,10 @@ type LocalityReconciler struct {
 }
 
 const (
-	jobNameField       = ".metadata.name"
-	jobName            = "manifest-updater"
-	keyRotatorImage    = "letsencrypt/prio-manifest-updater:latest"
+	jobNameField    = ".metadata.name"
+	jobName         = "manifest-updater"
+	keyRotatorImage = "letsencrypt/prio-manifest-updater:latest"
+	// keyRotatorImage    = "us.gcr.io/prio-bringup-290620/manifest-updater:latest"
 	serviceAccountName = "manifest-updater"
 )
 
@@ -67,7 +70,7 @@ func (r *LocalityReconciler) Reconcile(req ctrl.Request) (ctrl.Result, error) {
 	}
 
 	ret, err := r.validate(&locality)
-	// Assume the error has been logged and the correct return has been selected
+	// Assume the error has been logged, and the correct return has been selected
 	if err != nil {
 		return ret, err
 	}
@@ -146,6 +149,10 @@ func (r *LocalityReconciler) createCronJobTemplate(locality *priov1.Locality) v1
 				FieldPath: "metadata.namespace",
 			},
 		}},
+		{Name: "KR_BATCH_SIGNING_KEY_EXPIRATION", Value: toString(locality.Spec.BatchSigningKeySpec.KeyValidity)},
+		{Name: "KR_BATCH_SIGNING_KEY_ROTATION", Value: toString(locality.Spec.BatchSigningKeySpec.KeyRotationInterval)},
+		{Name: "KR_PACKET_ENCRYPTION_KEY_EXPIRATION", Value: toString(locality.Spec.PacketEncryptionKeySpec.KeyValidity)},
+		{Name: "KR_PACKET_ENCRYPTION_KEY_ROTATION", Value: toString(locality.Spec.PacketEncryptionKeySpec.KeyRotationInterval)},
 	}
 
 	containers := []v12.Container{{
@@ -180,6 +187,10 @@ func (r *LocalityReconciler) createCronJobTemplate(locality *priov1.Locality) v1
 			},
 		},
 	}
+}
+
+func toString(val int32) string {
+	return strconv.FormatInt(int64(val), 10)
 }
 
 func (r *LocalityReconciler) validateCurrentJob(existingCronJob *v1beta1.CronJob, locality *priov1.Locality) (ctrl.Result, error) {

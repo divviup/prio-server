@@ -18,6 +18,22 @@ variable "ingestors" {
   type = list(string)
 }
 
+variable "batch_signing_key_expiration" {
+  type = number
+}
+
+variable "batch_signing_key_rotation" {
+  type = number
+}
+
+variable "packet_encryption_key_expiration" {
+  type = number
+}
+
+variable "packet_encryption_rotation" {
+  type = number
+}
+
 module "account_mapping" {
   source                  = "../account_mapping"
   google_account_name     = "${var.environment}-${var.kubernetes_namespace}-manifest-updater"
@@ -89,8 +105,16 @@ locals {
     "spec" : {
       "environmentName" : var.kubernetes_namespace,
       "manifestBucketLocation" : var.manifest_bucket,
-      "ingestors" : var.ingestors
-      "schedule" : "0 5 * * 0"
+      "ingestors" : var.ingestors,
+      "schedule" : "0 5 * * 0",
+      "batchSigningKeySpec" : {
+        "keyValidity" : var.batch_signing_key_expiration
+        "keyRotationInterval" : var.batch_signing_key_rotation
+      },
+      "packetEncryptionKeySpec" : {
+        "keyValidity" : var.packet_encryption_key_expiration
+        "keyRotationInterval" : var.packet_encryption_rotation
+      }
     }
   })
 }

@@ -5,8 +5,14 @@ metadata:
   namespace: narnia
 spec:
   environmentName: narnia
-  manifestBucketLocation: prio-amir-d2-manifests
+  manifestBucketLocation: prio-amir-d3-manifests
   ingestors:
-    - apple
-    - google
+    - ing1
+    - ing2
   schedule: 0 5 * * 0
+  batchSigningKeySpec:
+    keyValidity: 90
+    keyRotationInterval: 70
+  packetEncryptionKeySpec:
+    keyValidity: 90
+    keyRotationInterval: 70

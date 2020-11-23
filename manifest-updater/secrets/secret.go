@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"sort"
+	"time"
 
 	log "github.com/sirupsen/logrus"
 	corev1 "k8s.io/api/core/v1"
@@ -20,6 +21,14 @@ type Kube struct {
 	client    *kubernetes.Clientset
 	namespace string
 	ingestors []string
+
+	batchSigningKeySpec     *KeySpec
+	packetEncryptionKeySpec *KeySpec
+}
+
+type KeySpec struct {
+	expirationPeriod time.Duration
+	rotationPeriod   time.Duration
 }
 
 const (
@@ -30,7 +39,14 @@ const (
 	maxSecrets = 4
 )
 
-func NewKube(namespace string, ingestors []string) (*Kube, error) {
+func NewKeySpec(expirationDays, rotationDays time.Duration) KeySpec {
+	return KeySpec{
+		expirationPeriod: expirationDays * 24 * time.Hour,
+		rotationPeriod:   rotationDays * 24 * time.Hour,
+	}
+}
+
+func NewKube(namespace string, ingestors []string, batchSigningKeySpec, packetEncryptionKeySpec KeySpec) (*Kube, error) {
 	config, err := rest.InClusterConfig()
 	if err != nil {
 		config, err = clientcmd.BuildConfigFromFlags("", os.Getenv("KUBECONFIG"))
@@ -45,10 +61,12 @@ func NewKube(namespace string, ingestors []string) (*Kube, error) {
 	}
 
 	return &Kube{
-		log:       log.WithField("source", "kube secret").WithField("namespace", namespace),
-		client:    client,
-		namespace: namespace,
-		ingestors: ingestors,
+		log:                     log.WithField("source", "kube secret").WithField("namespace", namespace),
+		client:                  client,
+		namespace:               namespace,
+		ingestors:               ingestors,
+		batchSigningKeySpec:     &batchSigningKeySpec,
+		packetEncryptionKeySpec: &packetEncryptionKeySpec,
 	}, nil
 }
 

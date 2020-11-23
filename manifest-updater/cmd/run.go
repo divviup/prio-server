@@ -4,6 +4,7 @@ import (
 	"crypto/rand"
 	"crypto/x509"
 	"fmt"
+	"time"
 
 	"github.com/abetterinternet/prio-server/manifest-updater/manifest"
 	"github.com/abetterinternet/prio-server/manifest-updater/secrets"
@@ -25,19 +26,32 @@ var runCmd = &cobra.Command{
 		manifestBucket := viper.GetString("manifest_bucket_location")
 		ingestors := viper.GetStringSlice("ingestors")
 
+		batchSigningExpiration := viper.GetInt32("batch_signing_key_expiration")
+		batchSigningRotation := viper.GetInt32("batch_signing_key_rotation")
+
+		packetEncryptionExpiration := viper.GetInt32("packet_encryption_key_expiration")
+		packetEncryptionRotation := viper.GetInt32("packet_encryption_key_rotation")
+
 		log.WithFields(
 			map[string]interface{}{
-				"environment name": environmentName,
-				"locality":         locality,
-				"manifest bucket":  manifestBucket,
-				"ingestors":        ingestors,
+				"environment name":                  environmentName,
+				"locality":                          locality,
+				"manifest bucket":                   manifestBucket,
+				"ingestors":                         ingestors,
+				"batch signing expiration days":     batchSigningExpiration,
+				"batch signing rotation days":       batchSigningRotation,
+				"packet encryption expiration days": packetEncryptionExpiration,
+				"packet encryption rotation days":   packetEncryptionRotation,
 			},
 		).Info("Starting the updater...")
 
 		var packetEncryptionCertificate manifest.PacketEncryptionKeyCSRs
 		var ingestorSigningKeys map[string]manifest.BatchSigningPublicKeys
 
-		kube, _ := secrets.NewKube(locality, ingestors)
+		kube, _ := secrets.NewKube(locality, ingestors,
+			secrets.NewKeySpec(time.Duration(batchSigningExpiration), time.Duration(batchSigningRotation)),
+			secrets.NewKeySpec(time.Duration(packetEncryptionExpiration), time.Duration(packetEncryptionRotation)),
+		)
 
 		packetEncryptionKeys, err := kube.ReconcilePacketEncryptionKey()
 		if err != nil {

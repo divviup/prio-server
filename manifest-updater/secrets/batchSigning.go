@@ -11,25 +11,23 @@ import (
 )
 
 const (
-	batchSigningKeyExpirationDuration = 90 * 24 * time.Hour
-	batchSigningKeyMaxAge             = 70 * 24 * time.Hour
-	expirationKeyMap                  = "expiration"
+	expirationKeyMap = "expiration"
 )
 
 func (k *Kube) validateAndUpdateBatchSigningKey(keyName, ingestor string, secret *corev1.Secret) ([]*PrioKey, error) {
 	creation := secret.GetCreationTimestamp()
 	since := time.Since(creation.Time)
 
-	expired := since > batchSigningKeyMaxAge
+	shouldRotate := since > k.batchSigningKeySpec.rotationPeriod
 
-	if !expired {
+	if !shouldRotate {
 		return nil, nil
 	}
 
 	k.log.
 		WithField("KeyType", "BatchSigningKey").
-		WithField("Expiration: ", expired).
-		Info("Secret is close to expiration or has expired, we're going to require it to be expired")
+		WithField("Should Rotate: ", shouldRotate).
+		Info("Secret is close to expiration, we're going to require it to be rotated")
 
 	key, err := k.createAndStoreBatchSigningKey(keyName, ingestor)
 
@@ -67,7 +65,7 @@ func (k *Kube) createAndStoreBatchSigningKey(name, ingestor string) (*PrioKey, e
 
 	expiration := time.
 		Now().
-		Add(batchSigningKeyExpirationDuration).
+		Add(k.batchSigningKeySpec.expirationPeriod).
 		UTC().
 		Format(time.RFC3339)
 

@@ -36,6 +36,20 @@ spec:
         spec:
           description: LocalitySpec defines the desired state of Locality
           properties:
+            batchSigningKeySpec:
+              description: BatchSigningKeySpec is the specification for the rotation
+                and expiration of the BatchSigningKey
+              properties:
+                keyRotationInterval:
+                  format: int32
+                  type: integer
+                keyValidity:
+                  format: int32
+                  type: integer
+              required:
+              - keyRotationInterval
+              - keyValidity
+              type: object
             environmentName:
               description: EnvironmentName is the name of the environment for prio
               type: string
@@ -48,13 +62,29 @@ spec:
               description: ManifestBucketLocation is the location of the manifest
                 buckets
               type: string
+            packetEncryptionKeySpec:
+              description: PacketEncryptionKeySpec is the specification for the rotation
+                and expiration of the PacketEncryptionKey
+              properties:
+                keyRotationInterval:
+                  format: int32
+                  type: integer
+                keyValidity:
+                  format: int32
+                  type: integer
+              required:
+              - keyRotationInterval
+              - keyValidity
+              type: object
             schedule:
               description: Schedule is the cron job schedule as defined by https://en.wikipedia.org/wiki/Cron
               type: string
           required:
+          - batchSigningKeySpec
           - environmentName
           - ingestors
           - manifestBucketLocation
+          - packetEncryptionKeySpec
           - schedule
           type: object
         status:

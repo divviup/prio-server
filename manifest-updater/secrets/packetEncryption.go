@@ -10,7 +10,6 @@ import (
 )
 
 const (
-	packetDecryptionKeyMaxAge = 70 * 24 * time.Hour
 	packetDecryptionKeyFormat = "packet-decryption-key-"
 )
 
@@ -18,15 +17,15 @@ func (k *Kube) validateAndUpdatePacketEncryptionKey(secret *corev1.Secret) ([]*P
 	creation := secret.GetCreationTimestamp()
 	since := time.Since(creation.Time)
 
-	expired := since > packetDecryptionKeyMaxAge
-	if !expired {
+	shouldRotate := since > k.packetEncryptionKeySpec.rotationPeriod
+	if !shouldRotate {
 		return nil, nil
 	}
 
 	k.log.
 		WithField("KeyType: ", "PacketDecryptionKey").
-		WithField("Expiration: ", expired).
-		Info("Secret value didn't exist, or secret expired, we're going to assume the secret is invalid and make a new one")
+		WithField("Should Rotate: ", shouldRotate).
+		Info("Secret value didn't exist, or secret should rotate was true. we're going to assume the secret is invalid and make a new one")
 
 	key, err := k.createAndStorePacketEncryptionKey()
 

@@ -57,6 +57,12 @@ func init() {
 	rootCmd.PersistentFlags().String("manifest_bucket_location", "", "Manifest bucket location")
 	rootCmd.PersistentFlags().StringSlice("ingestors", []string{}, "List of ingestors")
 
+	rootCmd.PersistentFlags().Int32("batch_signing_key_expiration", 90, "Expiration period in days for the batch signing key")
+	rootCmd.PersistentFlags().Int32("batch_signing_key_rotation", 70, "Rotation interval in days for the batch signing key")
+
+	rootCmd.PersistentFlags().Int32("packet_encryption_key_expiration", 395, "Expiration period in days for the packet encryption key")
+	rootCmd.PersistentFlags().Int32("packet_encryption_key_rotation", 320, "Rotation interval in days for the packet encryption key")
+
 	_ = viper.BindPFlag("log", rootCmd.PersistentFlags().Lookup("log"))
 	_ = viper.BindPFlag("colors", rootCmd.PersistentFlags().Lookup("colors"))
 }

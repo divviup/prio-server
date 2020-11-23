@@ -31,6 +31,18 @@ type LocalitySpec struct {
 
 	// Schedule is the cron job schedule as defined by https://en.wikipedia.org/wiki/Cron
 	Schedule string `json:"schedule"`
+
+	// BatchSigningKeySpec is the specification for the rotation and expiration of the BatchSigningKey
+	BatchSigningKeySpec LocalityKeySpec `json:"batchSigningKeySpec"`
+
+	// PacketEncryptionKeySpec is the specification for the rotation and expiration of the PacketEncryptionKey
+	PacketEncryptionKeySpec LocalityKeySpec `json:"packetEncryptionKeySpec"`
+}
+
+// LocalityKeySpec defines the desired state of a key for a Locality
+type LocalityKeySpec struct {
+	KeyValidity         int32 `json:"keyValidity"`
+	KeyRotationInterval int32 `json:"keyRotationInterval"`
 }
 
 // LocalityStatus defines the observed state of Locality
