@@ -47,7 +47,6 @@ const (
 	jobNameField    = ".metadata.name"
 	jobName         = "manifest-updater"
 	keyRotatorImage = "letsencrypt/prio-manifest-updater:latest"
-	// keyRotatorImage    = "us.gcr.io/prio-bringup-290620/manifest-updater:latest"
 	serviceAccountName = "manifest-updater"
 )
 

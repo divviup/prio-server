@@ -255,8 +255,6 @@ module "locality_kubernetes" {
   batch_signing_key_rotation       = var.batch_signing_key_rotation
   packet_encryption_key_expiration = var.packet_encryption_key_expiration
   packet_encryption_rotation       = var.packet_encryption_rotation
-
-  depends_on = [module.manifest]
 }
 
 module "data_share_processors" {
