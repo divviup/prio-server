@@ -11,12 +11,6 @@ else
 GOBIN=$(shell go env GOBIN)
 endif
 
-all: manager
-
-# Build manager binary
-manager: generate
-	go build -o bin/manager main.go
-
 # Install CRDs into a cluster
 install: manifests
 	kustomize build config/crd | kubectl apply -f -
