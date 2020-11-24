@@ -16,3 +16,17 @@ These commands use the kubernetes configuration in `~/.kube/config` to do the de
 ## Releasing new container images
 
 GitHub Actions is responsible for creating new DockerHub images for the controller. 
+
+## Overview of the files
+- `api/v1` defines the CRD.
+    * zz_generated.deepcopy.go is automatically generated. (`make generate`)
+- `config/`
+    * `crd/bases/prio*` is generated from the `api/v1` directory. (`make manifests`)
+    * The other files are not generated, but will be used for the final deploy and install of the controller to kubernetes. However if we do add new API types, or new controllers, some of these files will change.
+- `controller` contains the go code that handles the operation of the controllers
+- `hack` is used for code generation
+
+For more information refer to [Kubebuilder][0], and the [Kubebuilder Book][1]
+
+[0]: https://github.com/kubernetes-sigs/kubebuilder
+[1]: https://book.kubebuilder.io/
