@@ -293,3 +293,19 @@ output "specific_manifests" {
 output "use_test_pha_decryption_key" {
   value = lookup(var.test_peer_environment, "env_without_ingestor", "") == var.environment
 }
+
+resource "helm_release" "prometheus" {
+  name  = "prometheus"
+  chart = "stable/prometheus"
+
+  set {
+    name = "server.ingress.enabled"
+    value = "true"
+  }
+
+  # Values available for overriding are listed in https://github.com/prometheus-community/helm-charts/blob/main/charts/prometheus/values.yaml
+  set {
+    name = "server.ingress.hosts[0]"
+    value = "prometheus.prio.crud.net"
+  }
+}

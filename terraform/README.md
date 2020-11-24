@@ -8,12 +8,19 @@ You will need these tools:
 - [gcloud](https://cloud.google.com/sdk/docs/install): For interacting with Google Cloud Platform.
 - [kubectl](https://kubernetes.io/docs/tasks/tools/install-kubectl/): To manage the Kubernetes clusters, jobs, pods, etc.
 - [aws-cli](https://aws.amazon.com/cli/): For interacting with Amazon Web Services through Terraform.
+- [helm](https://helm.sh/): To install packaged software on Kubernetes.
 
 We configure the [GCP Terraform provider](https://www.terraform.io/docs/providers/google/index.html) to use the credentials file managed by `gcloud`. To ensure you have well-formed credentials available, do `gcloud auth application-default login` and walk through the authentication flow.
 
 We use the [AWS Terraform provider](https://registry.terraform.io/providers/hashicorp/aws/latest/docs) to use the credentials file managed by aws-cli (`aws`). To ensure you have well-formed credentials available, do `aws iam get-user` and make sure it displays your user information. If it doesn't, use `aws configure` to setup your user. You will need to create an [Access Key](https://console.aws.amazon.com/iam/home#/security_credentials) to configure aws.
 
 We currently use the profile `leuswest2` in terraform (this value is defined in `main.tf`). In order for terraform to recognize your credentials, you will need to configure it with `aws configure --profile leuswest2`.
+
+Once you have helm installed, add the "stable" repository:
+
+```
+helm repo add stable https://charts.helm.sh/stable
+```
 
 We use a [Terraform remote backend](https://www.terraform.io/docs/backends/index.html) to manage the state of the deployment, and the state file resides in a [Google Cloud Storage](https://cloud.google.com/storage/docs) bucket. `terraform/Makefile` is set up to manage the remote state, including creating buckets as needed. To use the `Makefile` targets, set the `ENV` environment variable to something that matches one of the `tfvars` files in `terraform/variables`. For instance, `ENV=demo-gcp make plan` will  source Terraform state from the remote state for `demo-gcp`. Try `ENV=<anything> make help` to get a list of targets.
 

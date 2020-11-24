@@ -28,6 +28,9 @@ import (
 	"github.com/aws/aws-sdk-go/service/sts"
 
 	"cloud.google.com/go/storage"
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/promauto"
+	"github.com/prometheus/client_golang/prometheus/push"
 	"google.golang.org/api/iterator"
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -156,9 +159,26 @@ var facilitatorImage = flag.String("facilitator-image", "", "Name (optionally in
 var aggregationPeriod = flag.String("aggregation-period", "3h", "How much time each aggregation covers")
 var gracePeriod = flag.String("grace-period", "1h", "Wait this amount of time after the end of an aggregation timeslice to run the aggregation")
 
+var (
+	intakesStarted = promauto.NewCounter(prometheus.CounterOpts{
+		Name: "intake_jobs_started",
+		Help: "The number of intake-batch jobs successfully started",
+	})
+	aggregationsStarted = promauto.NewCounter(prometheus.CounterOpts{
+		Name: "aggregation_jobs_started",
+		Help: "The number of aggregate jobs successfully started",
+	})
+)
+
+// This uses Kubernetes' DNS-based service discovery. Service name is prometheus-pushgateway
+// in the default namespace. Port 9091 for pushgateway is a well-known default.
+const pushGateway = "prometheus-pushgateway.default:9091"
+
 func main() {
 	log.Printf("starting %s version %s. Args: %s", os.Args[0], BuildInfo, os.Args[1:])
 	flag.Parse()
+
+	push.New(pushGateway, "workflow-manager").Gatherer(prometheus.DefaultGatherer).Push()
 
 	ownValidationBucket, err := newBucket(*ownValidationInput, *ownValidationIdentity)
 	if err != nil {
@@ -250,6 +270,8 @@ func main() {
 
 	if err := launchAggregationJobs(context.Background(), aggregationMap, interval); err != nil {
 		log.Fatal(err)
+	} else {
+		aggregationsStarted.Inc()
 	}
 
 	log.Print("done")
@@ -663,6 +685,7 @@ func launchIntake(ctx context.Context, readyBatches []*batchPath, ageLimit time.
 		if err := startIntakeJob(ctx, clientset, batch, ageLimit); err != nil {
 			return fmt.Errorf("starting job for batch %s: %w", batch, err)
 		}
+		intakesStarted.Inc()
 	}
 	return nil
 }

@@ -65,3 +65,21 @@ In this flow, your privileged AWS user assumes a role. You will need the ARN of 
 For `source_profile`, substitute a profile that permits you to authenticate as yourself, probably a `user` in the AWS account. Then you can issue `aws` commands to assume the named role:
 
     aws s3 ls s3://<BUCKET NAME> --profile=assume-role
+
+### Prometheus metrics
+
+We use Prometheus to gather metrics. There's one Prometheus instance per Kubernetes cluster. In most setups, Prometheus scrapes metrics from running services. However, our services run as batch jobs, so they can't reliably be scraped while running. Fortunately, Prometheus has a component we can use called `pushgateway`. Our batch jobs push metrics to `pushgateway` (one per cluster), and Prometheus scrapes them from there. 
+
+Prometheus has a minimal web interface for basic queries and graphing. It's not exposed by default, but if you'd like to expose it, run:
+
+```
+kubectl edit service prometheus-server
+```
+
+And change `spec.type` from ClusterIP to `LoadBalancer`. Wait a little while, and run:
+
+```
+kubectl describe service prometheus-server
+```
+
+to find the LoadBalancer Ingress. You can visit that IP address to reach your Prometheus instance. The plan is to eventually put Grafana in front of Prometheus. Grafana offers a full-featured dashboard interface, and offers authentication via OAuth.
