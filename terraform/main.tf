@@ -343,15 +343,6 @@ output "gke_kubeconfig" {
   value = "Run this command to update your kubectl config: gcloud container clusters get-credentials ${module.gke.cluster_name} --region ${var.gcp_region} --project ${var.gcp_project}"
 }
 
-output "specific_manifests" {
-  value = { for v in module.data_share_processors : v.data_share_processor_name => {
-    kubernetes-namespace = v.kubernetes_namespace
-    certificate-fqdn     = v.certificate_fqdn
-    specific-manifest    = v.specific_manifest
-    }
-  }
-}
-
 output "use_test_pha_decryption_key" {
   value = lookup(var.test_peer_environment, "env_without_ingestor", "") == var.environment
 }

@@ -39,7 +39,7 @@ fn date_validator(s: String) -> Result<(), String> {
 
 fn b64_validator(s: String) -> Result<(), String> {
     if s == "not-a-real-key" {
-        return Err("'not-a-real-key'. Run deploy-tool to generate secrets".to_string());
+        return Err("'not-a-real-key'. Check the deploy-operator for valid secrets".to_string());
     }
     base64::decode(s).map_err(|e| format!("decoding base64: {}", e))?;
     Ok(())
