@@ -19,4 +19,8 @@ test_peer_environment = {
   env_with_ingestor    = "demo-gcp"
   env_without_ingestor = "demo-gcp-peer"
 }
-is_first = false
+batch_signing_key_expiration     = 90
+batch_signing_key_rotation       = 70
+packet_encryption_key_expiration = 90
+packet_encryption_key_rotation   = 70
+is_first                         = false

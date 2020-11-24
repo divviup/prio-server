@@ -85,6 +85,30 @@ parseable by Go's time.ParseDuration.
 DESCRIPTION
 }
 
+variable "batch_signing_key_expiration" {
+  type        = number
+  default     = 390
+  description = "This value is used to generate batch signing keys with the specified expiration"
+}
+
+variable "batch_signing_key_rotation" {
+  type        = number
+  default     = 300
+  description = "This value is used to specify the rotation interval of the batch signing key"
+}
+
+variable "packet_encryption_key_expiration" {
+  type        = number
+  default     = 90
+  description = "This value is used to generate packet encryption keys with the specified expiration"
+}
+
+variable "packet_encryption_rotation" {
+  type        = number
+  default     = 50
+  description = "This value is used to specify the rotation interval of the packet encryption key"
+}
+
 terraform {
   backend "gcs" {}
 
@@ -236,6 +260,23 @@ locals {
   }
 }
 
+# Call the locality_kubernetes module per
+# each locality/namespace
+module "locality_kubernetes" {
+  for_each             = kubernetes_namespace.namespaces
+  source               = "./modules/locality_kubernetes"
+  environment          = var.environment
+  gcp_project          = var.gcp_project
+  manifest_bucket      = module.manifest.bucket
+  kubernetes_namespace = each.value.metadata[0].name
+  ingestors            = keys(var.ingestors)
+
+  batch_signing_key_expiration     = var.batch_signing_key_expiration
+  batch_signing_key_rotation       = var.batch_signing_key_rotation
+  packet_encryption_key_expiration = var.packet_encryption_key_expiration
+  packet_encryption_rotation       = var.packet_encryption_rotation
+}
+
 module "data_share_processors" {
   for_each                                = local.locality_ingestor_pairs
   source                                  = "./modules/data_share_processor"
@@ -244,6 +285,7 @@ module "data_share_processors" {
   ingestor                                = each.value.ingestor
   gcp_region                              = var.gcp_region
   gcp_project                             = var.gcp_project
+  manifest_bucket                         = module.manifest.bucket
   kubernetes_namespace                    = each.value.kubernetes_namespace
   certificate_domain                      = "${var.environment}.certificates.${var.manifest_domain}"
   ingestor_aws_role_arn                   = each.value.ingestor_aws_role_arn

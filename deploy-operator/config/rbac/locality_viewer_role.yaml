@@ -1,0 +1,20 @@
+# permissions for end users to view localities.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: locality-viewer-role
+rules:
+- apiGroups:
+  - prio.isrg-prio.org
+  resources:
+  - localities
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
+  - prio.isrg-prio.org
+  resources:
+  - localities/status
+  verbs:
+  - get

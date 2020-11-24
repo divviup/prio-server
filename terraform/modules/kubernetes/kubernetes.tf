@@ -119,65 +119,23 @@ data "aws_caller_identity" "current" {}
 # [1] https://cloud.google.com/kubernetes-engine/docs/how-to/workload-identity
 # [2] https://kubernetes.io/docs/tasks/configure-pod-container/configure-service-account/#service-account-token-volume-projection
 
-# For each data share processor, we first create a GCP service account.
-resource "google_service_account" "workflow_manager" {
-  provider = google-beta
-  # The Account ID must be unique across the whole GCP project, and not just the
-  # namespace. It must also be fewer than 30 characters, so we can't concatenate
-  # environment and PHA name to get something unique. Instead, we generate a
-  # random string.
-  account_id   = "prio-${random_string.account_id.result}"
-  display_name = "prio-${var.environment}-${var.data_share_processor_name}-workflow-manager"
-}
-
-resource "random_string" "account_id" {
-  length  = 16
-  upper   = false
-  number  = false
-  special = false
-}
-
-# This is the Kubernetes-level service account which we associate with the GCP
-# service account above.
-resource "kubernetes_service_account" "workflow_manager" {
-  metadata {
-    name      = "${var.data_share_processor_name}-workflow-manager"
-    namespace = var.kubernetes_namespace
-    annotations = {
-      environment = var.environment
-      # This annotation is necessary for the Kubernetes-GCP service account
-      # mapping. See step 6 in
-      # https://cloud.google.com/kubernetes-engine/docs/how-to/workload-identity#authenticating_to
-      "iam.gke.io/gcp-service-account" = google_service_account.workflow_manager.email
-    }
-  }
-}
-
-# This carefully constructed string lets us refer to the Kubernetes service
-# account in GCP-level policies, below. See step 5 in
-# https://cloud.google.com/kubernetes-engine/docs/how-to/workload-identity#authenticating_to
-locals {
-  service_account = "serviceAccount:${var.gcp_project}.svc.id.goog[${var.kubernetes_namespace}/${kubernetes_service_account.workflow_manager.metadata[0].name}]"
-}
-
-# Allows the Kubernetes service account to impersonate the GCP service account.
-resource "google_service_account_iam_binding" "workflow_manager_workload" {
-  provider           = google-beta
-  service_account_id = google_service_account.workflow_manager.name
-  role               = "roles/iam.workloadIdentityUser"
-  members = [
-    local.service_account
-  ]
+module "account_mapping" {
+  source                  = "../account_mapping"
+  google_account_name     = "${var.environment}-${var.data_share_processor_name}-workflow-manager"
+  kubernetes_account_name = "${var.data_share_processor_name}-workflow-manager"
+  kubernetes_namespace    = var.kubernetes_namespace
+  environment             = var.environment
+  gcp_project             = var.gcp_project
 }
 
 # Allows the Kubernetes service account to request auth tokens for the GCP
 # service account.
 resource "google_service_account_iam_binding" "workflow_manager_token" {
   provider           = google-beta
-  service_account_id = google_service_account.workflow_manager.name
+  service_account_id = module.account_mapping.google_service_account_name
   role               = "roles/iam.serviceAccountTokenCreator"
   members = [
-    local.service_account
+    module.account_mapping.service_account
   ]
 }
 
@@ -302,7 +260,7 @@ resource "kubernetes_cron_job" "workflow_manager" {
                 "--intake-max-age", "24h",
                 "--is-first=${var.is_first ? "true" : "false"}",
                 "--k8s-namespace", var.kubernetes_namespace,
-                "--k8s-service-account", kubernetes_service_account.workflow_manager.metadata[0].name,
+                "--k8s-service-account", module.account_mapping.kubernetes_account_name,
                 "--ingestor-input", "s3://${var.ingestion_bucket}",
                 "--ingestor-identity", var.ingestion_bucket_role,
                 "--own-validation-input", "gs://${var.own_validation_bucket}",
@@ -324,7 +282,7 @@ resource "kubernetes_cron_job" "workflow_manager" {
             # https://kubernetes.io/docs/concepts/workloads/controllers/job/#handling-pod-and-container-failures
             # https://github.com/kubernetes/kubernetes/issues/74848
             restart_policy                  = "Never"
-            service_account_name            = kubernetes_service_account.workflow_manager.metadata[0].name
+            service_account_name            = module.account_mapping.kubernetes_account_name
             automount_service_account_token = true
           }
         }
@@ -358,7 +316,7 @@ resource "kubernetes_cron_job" "sample_maker" {
           metadata {}
           spec {
             restart_policy                  = "Never"
-            service_account_name            = kubernetes_service_account.workflow_manager.metadata[0].name
+            service_account_name            = module.account_mapping.kubernetes_account_name
             automount_service_account_token = true
             container {
               name  = "sample-maker"
@@ -448,17 +406,17 @@ resource "kubernetes_role_binding" "workflow_manager_rolebinding" {
 
   subject {
     kind      = "ServiceAccount"
-    name      = kubernetes_service_account.workflow_manager.metadata[0].name
+    name      = module.account_mapping.kubernetes_account_name
     namespace = var.kubernetes_namespace
   }
 }
 
 output "service_account_unique_id" {
-  value = google_service_account.workflow_manager.unique_id
+  value = module.account_mapping.google_service_account_unique_id
 }
 
 output "service_account_email" {
-  value = "serviceAccount:${google_service_account.workflow_manager.email}"
+  value = "serviceAccount:${module.account_mapping.google_service_account_email}"
 }
 
 output "batch_signing_key" {
