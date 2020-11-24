@@ -314,8 +314,7 @@ module "data_share_processors" {
   is_first                                       = var.is_first
   aggregation_period                             = var.aggregation_period
   aggregation_grace_period                       = var.aggregation_grace_period
-
-  depends_on = [module.gke]
+  kms_keyring                                    = module.gke.kms_keyring
 }
 
 # The portal owns two sum part buckets (one for each data share processor) and
