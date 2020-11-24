@@ -14,15 +14,15 @@ variable "ingestion_bucket_reader" {
   type = string
 }
 
-variable "local_peer_validation_bucket_name" {
+variable "peer_validation_bucket_name" {
   type = string
 }
 
-variable "local_peer_validation_bucket_writer" {
+variable "peer_validation_bucket_writer" {
   type = string
 }
 
-variable "local_peer_validation_bucket_reader" {
+variable "peer_validation_bucket_reader" {
   type = string
 }
 
@@ -78,8 +78,8 @@ POLICY
 
 # The peer validation bucket for this data share processor, configured to permit
 # the peer share processor to write to it.
-resource "aws_s3_bucket" "local_peer_validation_bucket" {
-  bucket = var.local_peer_validation_bucket_name
+resource "aws_s3_bucket" "peer_validation_bucket" {
+  bucket = var.peer_validation_bucket_name
   # Force deletion of bucket contents on bucket destroy.
   force_destroy = true
   policy        = <<POLICY
@@ -89,7 +89,7 @@ resource "aws_s3_bucket" "local_peer_validation_bucket" {
     {
       "Effect": "Allow",
       "Principal": {
-        "AWS": "${var.local_peer_validation_bucket_writer}"
+        "AWS": "${var.peer_validation_bucket_writer}"
       },
       "Action": [
         "s3:AbortMultipartUpload",
@@ -98,22 +98,22 @@ resource "aws_s3_bucket" "local_peer_validation_bucket" {
         "s3:ListBucketMultipartUploads"
       ],
       "Resource": [
-        "arn:aws:s3:::${var.local_peer_validation_bucket_name}/*",
-        "arn:aws:s3:::${var.local_peer_validation_bucket_name}"
+        "arn:aws:s3:::${var.peer_validation_bucket_name}/*",
+        "arn:aws:s3:::${var.peer_validation_bucket_name}"
       ]
     },
     {
       "Effect": "Allow",
       "Principal": {
-        "AWS": "${var.local_peer_validation_bucket_reader}"
+        "AWS": "${var.peer_validation_bucket_reader}"
       },
       "Action": [
         "s3:GetObject",
         "s3:ListBucket"
       ],
       "Resource": [
-        "arn:aws:s3:::${var.local_peer_validation_bucket_name}/*",
-        "arn:aws:s3:::${var.local_peer_validation_bucket_name}"
+        "arn:aws:s3:::${var.peer_validation_bucket_name}/*",
+        "arn:aws:s3:::${var.peer_validation_bucket_name}"
       ]
     }
   ]

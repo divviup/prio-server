@@ -123,11 +123,11 @@ locals {
       remote_validation_bucket_writer = aws_iam_role.bucket_role.arn
       # We permit the peer's GCP service account to write their validations to
       # our bucket
-      local_peer_validation_bucket_writer = var.peer_share_processor_gcp_service_account_email
-      local_peer_validation_bucket_reader = module.kubernetes.service_account_email
+      peer_validation_bucket_writer = var.peer_share_processor_gcp_service_account_email
+      peer_validation_bucket_reader = module.kubernetes.service_account_email
       # The identity that GKE jobs should assume or impersonate to access the
       # local peer validation bucket
-      local_peer_validation_identity = ""
+      peer_validation_identity = ""
     }
     ) : local.is_env_without_ingestor ? (
     {
@@ -143,13 +143,13 @@ locals {
       remote_validation_bucket_writer = var.remote_bucket_writer_gcp_service_account_email
       # We permit entities in the peer's AWS account to write their validations
       # to our bucket
-      local_peer_validation_bucket_writer = var.peer_share_processor_aws_account_id
+      peer_validation_bucket_writer = var.peer_share_processor_aws_account_id
       # We assume this AWS role to read the bucket to which peers wrote their
       # validations
-      local_peer_validation_bucket_reader = aws_iam_role.bucket_role.arn
+      peer_validation_bucket_reader = aws_iam_role.bucket_role.arn
       # The identity that GKE jobs should assume or impersonate to access the
       # local peer validation bucket
-      local_peer_validation_identity = aws_iam_role.bucket_role.arn
+      peer_validation_identity = aws_iam_role.bucket_role.arn
     }
     ) : (
     {
@@ -168,10 +168,10 @@ locals {
       # our bucket
       local_peer_validation_bucket_writer = var.peer_share_processor_gcp_service_account_email
       # No special auth is needed to read from the validation bucket in GCS
-      local_peer_validation_bucket_reader = module.kubernetes.service_account_email
+      peer_validation_bucket_reader = module.kubernetes.service_account_email
       # The identity that GKE jobs should assume or impersonate to access the
       # local peer validation bucket
-      local_peer_validation_identity = ""
+      peer_validation_identity = ""
     }
   )
   ingestion_bucket_name = "${local.resource_prefix}-ingestion"
@@ -180,11 +180,11 @@ locals {
     ) : (
     "gs://${local.ingestion_bucket_name}"
   )
-  local_peer_validation_bucket_name = "${local.resource_prefix}-peer-validation"
-  local_peer_validation_bucket_url = var.use_aws ? (
-    "s3://${var.aws_region}/${local.local_peer_validation_bucket_name}"
+  peer_validation_bucket_name = "${local.resource_prefix}-peer-validation"
+  peer_validation_bucket_url = var.use_aws ? (
+    "s3://${var.aws_region}/${local.peer_validation_bucket_name}"
     ) : (
-    "gs://${local.local_peer_validation_bucket_name}"
+    "gs://${local.peer_validation_bucket_name}"
   )
   # If this environment creates fake ingestors, we make an educated guess about
   # the name of the other test environment's ingestion bucket so our fake
@@ -270,28 +270,28 @@ POLICY
 # can exercise the parameter exchange and authentication flows.
 # https://github.com/abetterinternet/prio-server/issues/68
 module "cloud_storage_aws" {
-  count                               = var.use_aws ? 1 : 0
-  source                              = "../../modules/cloud_storage_aws"
-  environment                         = var.environment
-  ingestion_bucket_name               = local.ingestion_bucket_name
-  ingestion_bucket_writer             = local.bucket_access_identities.ingestion_bucket_writer
-  ingestion_bucket_reader             = local.bucket_access_identities.ingestion_bucket_reader
-  local_peer_validation_bucket_name   = local.local_peer_validation_bucket_name
-  local_peer_validation_bucket_writer = local.bucket_access_identities.local_peer_validation_bucket_writer
-  local_peer_validation_bucket_reader = local.bucket_access_identities.local_peer_validation_bucket_reader
+  count                         = var.use_aws ? 1 : 0
+  source                        = "../../modules/cloud_storage_aws"
+  environment                   = var.environment
+  ingestion_bucket_name         = local.ingestion_bucket_name
+  ingestion_bucket_writer       = local.bucket_access_identities.ingestion_bucket_writer
+  ingestion_bucket_reader       = local.bucket_access_identities.ingestion_bucket_reader
+  peer_validation_bucket_name   = local.peer_validation_bucket_name
+  peer_validation_bucket_writer = local.bucket_access_identities.peer_validation_bucket_writer
+  peer_validation_bucket_reader = local.bucket_access_identities.peer_validation_bucket_reader
 }
 
 # In real ISRG deployments, all of our storage is in GCS
 module "cloud_storage_gcp" {
-  count                               = var.use_aws ? 0 : 1
-  source                              = "../../modules/cloud_storage_gcp"
-  gcp_region                          = var.gcp_region
-  ingestion_bucket_name               = local.ingestion_bucket_name
-  ingestion_bucket_writer             = local.bucket_access_identities.ingestion_bucket_writer
-  ingestion_bucket_reader             = local.bucket_access_identities.ingestion_bucket_reader
-  local_peer_validation_bucket_name   = local.local_peer_validation_bucket_name
-  local_peer_validation_bucket_writer = local.bucket_access_identities.local_peer_validation_bucket_writer
-  local_peer_validation_bucket_reader = local.bucket_access_identities.local_peer_validation_bucket_reader
+  count                         = var.use_aws ? 0 : 1
+  source                        = "../../modules/cloud_storage_gcp"
+  gcp_region                    = var.gcp_region
+  ingestion_bucket_name         = local.ingestion_bucket_name
+  ingestion_bucket_writer       = local.bucket_access_identities.ingestion_bucket_writer
+  ingestion_bucket_reader       = local.bucket_access_identities.ingestion_bucket_reader
+  peer_validation_bucket_name   = local.peer_validation_bucket_name
+  peer_validation_bucket_writer = local.bucket_access_identities.peer_validation_bucket_writer
+  peer_validation_bucket_reader = local.bucket_access_identities.peer_validation_bucket_reader
 }
 
 # Besides the validation bucket owned by the peer data share processor, we write
@@ -326,7 +326,7 @@ resource "google_storage_bucket_object" "specific_manifest" {
   content = jsonencode({
     format                     = 1
     ingestion-bucket           = local.ingestion_bucket_url
-    peer-validation-bucket     = local.local_peer_validation_bucket_url
+    peer-validation-bucket     = local.peer_validation_bucket_url
     batch-signing-public-keys  = {}
     packet-encryption-key-csrs = {}
   })
@@ -345,8 +345,8 @@ module "kubernetes" {
   packet_decryption_key_kubernetes_secret = var.packet_decryption_key_kubernetes_secret
   peer_manifest_base_url                  = var.peer_share_processor_manifest_base_url
   remote_peer_validation_bucket_identity  = local.bucket_access_identities.remote_validation_bucket_writer
-  local_peer_validation_bucket            = local.local_peer_validation_bucket_url
-  local_peer_validation_bucket_identity   = local.bucket_access_identities.local_peer_validation_identity
+  peer_validation_bucket                  = local.peer_validation_bucket_url
+  peer_validation_bucket_identity         = local.bucket_access_identities.peer_validation_identity
   own_validation_bucket                   = "gs://${google_storage_bucket.own_validation_bucket.name}"
   own_manifest_base_url                   = var.own_manifest_base_url
   sum_part_bucket_service_account_email   = var.remote_bucket_writer_gcp_service_account_email
@@ -378,7 +378,7 @@ output "specific_manifest" {
   value = {
     format                 = 1
     ingestion-bucket       = local.ingestion_bucket_url,
-    peer-validation-bucket = local.local_peer_validation_bucket_url,
+    peer-validation-bucket = local.peer_validation_bucket_url,
     batch-signing-public-keys = {
       (module.kubernetes.batch_signing_key) = {
         public-key = ""

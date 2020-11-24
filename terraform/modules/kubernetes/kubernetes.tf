@@ -51,11 +51,11 @@ variable "ingestor_manifest_base_url" {
   type = string
 }
 
-variable "local_peer_validation_bucket" {
+variable "peer_validation_bucket" {
   type = string
 }
 
-variable "local_peer_validation_bucket_identity" {
+variable "peer_validation_bucket_identity" {
   type = string
 }
 
@@ -214,8 +214,8 @@ resource "kubernetes_config_map" "aggregate_job_config_map" {
     INSTANCE_NAME                        = var.data_share_processor_name
     OWN_INPUT                            = var.own_validation_bucket
     OWN_MANIFEST_BASE_URL                = var.own_manifest_base_url
-    PEER_INPUT                           = var.local_peer_validation_bucket
-    PEER_IDENTITY                        = var.local_peer_validation_bucket_identity
+    PEER_INPUT                           = var.peer_validation_bucket
+    PEER_IDENTITY                        = var.peer_validation_bucket_identity
     PEER_MANIFEST_BASE_URL               = "https://${var.peer_manifest_base_url}"
     PORTAL_IDENTITY                      = var.sum_part_bucket_service_account_email
     PORTAL_MANIFEST_BASE_URL             = "https://${var.portal_server_manifest_base_url}"
@@ -268,8 +268,8 @@ resource "kubernetes_cron_job" "workflow_manager" {
                 "--ingestor-input", var.ingestion_bucket,
                 "--ingestor-identity", var.ingestion_bucket_identity,
                 "--own-validation-input", var.own_validation_bucket,
-                "--peer-validation-input", var.local_peer_validation_bucket,
-                "--peer-validation-identity", var.local_peer_validation_bucket_identity,
+                "--peer-validation-input", var.peer_validation_bucket,
+                "--peer-validation-identity", var.peer_validation_bucket_identity,
                 "--bsk-secret-name", kubernetes_secret.batch_signing_key.metadata[0].name,
                 "--pdks-secret-name", var.packet_decryption_key_kubernetes_secret,
                 "--intake-batch-config-map", kubernetes_config_map.intake_batch_job_config_map.metadata[0].name,
