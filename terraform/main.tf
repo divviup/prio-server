@@ -11,7 +11,8 @@ variable "gcp_project" {
 }
 
 variable "use_aws" {
-  type = bool
+  type    = bool
+  default = false
 }
 
 variable "aws_region" {
