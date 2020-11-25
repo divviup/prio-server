@@ -92,6 +92,10 @@ variable "aggregation_grace_period" {
   type = string
 }
 
+variable "kms_keyring" {
+  type = string
+}
+
 locals {
   resource_prefix         = "prio-${var.environment}-${var.data_share_processor_name}"
   is_env_with_ingestor    = lookup(var.test_peer_environment, "env_with_ingestor", "") == var.environment
@@ -194,6 +198,7 @@ locals {
   test_peer_ingestion_bucket = local.is_env_with_ingestor ? (
     "s3://${var.aws_region}/prio-${var.test_peer_environment.env_without_ingestor}-${var.data_share_processor_name}-ingestion"
   ) : ""
+  own_validation_bucket_name = "${local.resource_prefix}-own-validation"
 }
 
 data "aws_caller_identity" "current" {}
@@ -264,6 +269,33 @@ resource "aws_iam_role_policy" "bucket_role_policy" {
 POLICY
 }
 
+# KMS key used to encrypt GCS bucket contents at rest. We create one per data
+# share processor, enabling us to cryptographically destroy one instance's
+# storage without disrupting any others.
+resource "google_kms_crypto_key" "bucket_encryption" {
+  provider = google-beta
+  name     = "${local.resource_prefix}-bucket-encryption-key"
+  key_ring = var.kms_keyring
+  purpose  = "ENCRYPT_DECRYPT"
+  # Rotate database encryption key every 90 days. This won't re-encrypt existing
+  # content, but new data will be encrypted under the new key.
+  rotation_period = "7776000s"
+}
+
+# Permit the GCS service account to use the KMS key
+# https://registry.terraform.io/providers/hashicorp/google/latest/docs/data-sources/storage_project_service_account
+data "google_storage_project_service_account" "gcs_account" {
+  provider = google-beta
+}
+
+resource "google_kms_crypto_key_iam_binding" "bucket_encryption_key" {
+  crypto_key_id = google_kms_crypto_key.bucket_encryption.id
+  role          = "roles/cloudkms.cryptoKeyEncrypterDecrypter"
+  members = [
+    "serviceAccount:${data.google_storage_project_service_account.gcs_account.email_address}"
+  ]
+}
+
 # For test purposes, we support creating the ingestion and peer validation
 # buckets in AWS S3, even though all ISRG storage is in Google Cloud Storage. We
 # only create the ingestion bucket and peer validation bucket there, so that we
@@ -286,35 +318,28 @@ module "cloud_storage_gcp" {
   count                         = var.use_aws ? 0 : 1
   source                        = "../../modules/cloud_storage_gcp"
   gcp_region                    = var.gcp_region
+  kms_key                       = google_kms_crypto_key.bucket_encryption.id
   ingestion_bucket_name         = local.ingestion_bucket_name
   ingestion_bucket_writer       = local.bucket_access_identities.ingestion_bucket_writer
   ingestion_bucket_reader       = local.bucket_access_identities.ingestion_bucket_reader
   peer_validation_bucket_name   = local.peer_validation_bucket_name
   peer_validation_bucket_writer = local.bucket_access_identities.peer_validation_bucket_writer
   peer_validation_bucket_reader = local.bucket_access_identities.peer_validation_bucket_reader
+  # Ensure the GCS service account exists and has permission to use the KMS key
+  # before creating buckets.
+  depends_on = [google_kms_crypto_key_iam_binding.bucket_encryption_key]
 }
 
 # Besides the validation bucket owned by the peer data share processor, we write
 # validation batches into a bucket we control so that we can be certain they
 # be available when we perform the aggregation step.
-resource "google_storage_bucket" "own_validation_bucket" {
-  provider = google-beta
-  name     = "${local.resource_prefix}-own-validation"
-  location = var.gcp_region
-  # Force deletion of bucket contents on bucket destroy. Bucket contents would
-  # be re-created by a subsequent deploy so no reason to keep them around.
-  force_destroy               = true
-  uniform_bucket_level_access = true
-}
-
-# Permit the workflow manager and facilitator service account to manage the
-# bucket
-resource "google_storage_bucket_iam_binding" "own_validation_bucket_admin" {
-  bucket = google_storage_bucket.own_validation_bucket.name
-  role   = "roles/storage.objectAdmin"
-  members = [
-    "serviceAccount:${module.kubernetes.service_account_email}"
-  ]
+module "bucket" {
+  source        = "../../modules/cloud_storage_gcp/bucket"
+  name          = "${local.resource_prefix}-own-validation"
+  bucket_reader = module.kubernetes.service_account_email
+  bucket_writer = module.kubernetes.service_account_email
+  kms_key       = google_kms_crypto_key.bucket_encryption.id
+  gcp_region    = var.gcp_region
 }
 
 resource "google_storage_bucket_object" "specific_manifest" {
@@ -347,7 +372,7 @@ module "kubernetes" {
   remote_peer_validation_bucket_identity  = local.bucket_access_identities.remote_validation_bucket_writer
   peer_validation_bucket                  = local.peer_validation_bucket_url
   peer_validation_bucket_identity         = local.bucket_access_identities.peer_validation_identity
-  own_validation_bucket                   = "gs://${google_storage_bucket.own_validation_bucket.name}"
+  own_validation_bucket                   = "gs://${local.own_validation_bucket_name}"
   own_manifest_base_url                   = var.own_manifest_base_url
   sum_part_bucket_service_account_email   = var.remote_bucket_writer_gcp_service_account_email
   portal_server_manifest_base_url         = var.portal_server_manifest_base_url

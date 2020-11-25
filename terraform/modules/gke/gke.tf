@@ -161,3 +161,7 @@ output "cluster_endpoint" {
 output "certificate_authority_data" {
   value = google_container_cluster.cluster.master_auth.0.cluster_ca_certificate
 }
+
+output "kms_keyring" {
+  value = google_kms_key_ring.keyring.id
+}
