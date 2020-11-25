@@ -22,7 +22,6 @@ variable "ingestors" {
 # sum parts, as well as a correctly formed global manifest advertising that
 # bucket's name.
 resource "google_storage_bucket" "sum_part_output" {
-  provider = google-beta
   name     = "prio-${var.environment}-sum-part-output"
   location = var.gcp_region
   # Force deletion of bucket contents on bucket destroy. Bucket contents would
@@ -49,7 +48,6 @@ resource "google_storage_bucket_iam_binding" "write_sum_parts" {
 # resource's name field must match the portal_server_manifest_base_url value in
 # this env's .tfvars!
 resource "google_storage_bucket_object" "portal_server_global_manifest" {
-  provider     = google-beta
   name         = "portal-server/global-manifest.json"
   bucket       = var.manifest_bucket
   content_type = "application/json"
@@ -66,7 +64,6 @@ resource "google_storage_bucket_object" "portal_server_global_manifest" {
 # public keys that match what the sample_maker will use.
 resource "google_storage_bucket_object" "ingestor_global_manifests" {
   for_each     = var.ingestors
-  provider     = google-beta
   name         = "${each.key}/global-manifest.json"
   bucket       = var.manifest_bucket
   content_type = "application/json"
