@@ -54,11 +54,11 @@ resource "google_storage_bucket_object" "portal_server_global_manifest" {
   bucket       = var.manifest_bucket
   content_type = "application/json"
   content = jsonencode({
-    format = 0
+    format = 1
     # We're cheating here by listing the same bucket twice, but the other env
     # will consult a totally different portal server global manifest.
-    facilitator-sum-part-bucket = google_storage_bucket.sum_part_output.name
-    pha-sum-part-bucket         = google_storage_bucket.sum_part_output.name
+    facilitator-sum-part-bucket = "gs://${google_storage_bucket.sum_part_output.name}"
+    pha-sum-part-bucket         = "gs://${google_storage_bucket.sum_part_output.name}"
   })
 }
 
@@ -71,10 +71,12 @@ resource "google_storage_bucket_object" "ingestor_global_manifests" {
   bucket       = var.manifest_bucket
   content_type = "application/json"
   content = jsonencode({
-    format = 0
+    format = 1
     server-identity = {
-      # this value is ignored in our test setup; see data_share_processor.tf
-      aws-iam-entity = "irrelevant in test environment"
+      # these values are ignored in our test setup; see data_share_processor.tf
+      aws-iam-entity            = "irrelevant in test environment"
+      gcp-service-account-id    = "0"
+      gcp-service-account-email = "irrelevant in test environment"
     }
     batch-signing-public-keys = {
       # This key identifier matches the one passed to sample_maker's

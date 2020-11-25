@@ -43,7 +43,7 @@ variable "ingestion_bucket" {
   type = string
 }
 
-variable "ingestion_bucket_role" {
+variable "ingestion_bucket_identity" {
   type = string
 }
 
@@ -55,11 +55,15 @@ variable "peer_validation_bucket" {
   type = string
 }
 
-variable "peer_validation_bucket_role" {
+variable "peer_validation_bucket_identity" {
   type = string
 }
 
 variable "peer_manifest_base_url" {
+  type = string
+}
+
+variable "remote_peer_validation_bucket_identity" {
   type = string
 }
 
@@ -178,13 +182,13 @@ resource "kubernetes_config_map" "intake_batch_job_config_map" {
     IS_FIRST                             = var.is_first ? "true" : "false"
     AWS_ACCOUNT_ID                       = data.aws_caller_identity.current.account_id
     BATCH_SIGNING_PRIVATE_KEY_IDENTIFIER = kubernetes_secret.batch_signing_key.metadata[0].name
-    INGESTOR_IDENTITY                    = var.ingestion_bucket_role
-    INGESTOR_INPUT                       = "s3://${var.ingestion_bucket}"
+    INGESTOR_IDENTITY                    = var.ingestion_bucket_identity
+    INGESTOR_INPUT                       = var.ingestion_bucket
     INGESTOR_MANIFEST_BASE_URL           = "https://${var.ingestor_manifest_base_url}"
     INSTANCE_NAME                        = var.data_share_processor_name
-    PEER_IDENTITY                        = var.peer_validation_bucket_role
+    PEER_IDENTITY                        = var.remote_peer_validation_bucket_identity
     PEER_MANIFEST_BASE_URL               = "https://${var.peer_manifest_base_url}"
-    OWN_OUTPUT                           = "gs://${var.own_validation_bucket}"
+    OWN_OUTPUT                           = var.own_validation_bucket
     RUST_LOG                             = "info"
     RUST_BACKTRACE                       = "1"
   }
@@ -204,14 +208,14 @@ resource "kubernetes_config_map" "aggregate_job_config_map" {
     IS_FIRST                             = var.is_first ? "true" : "false"
     AWS_ACCOUNT_ID                       = data.aws_caller_identity.current.account_id
     BATCH_SIGNING_PRIVATE_KEY_IDENTIFIER = kubernetes_secret.batch_signing_key.metadata[0].name
-    INGESTOR_INPUT                       = "s3://${var.ingestion_bucket}"
-    INGESTOR_IDENTITY                    = var.ingestion_bucket_role
+    INGESTOR_INPUT                       = var.ingestion_bucket
+    INGESTOR_IDENTITY                    = var.ingestion_bucket_identity
     INGESTOR_MANIFEST_BASE_URL           = "https://${var.ingestor_manifest_base_url}"
     INSTANCE_NAME                        = var.data_share_processor_name
-    OWN_INPUT                            = "gs://${var.own_validation_bucket}"
+    OWN_INPUT                            = var.own_validation_bucket
     OWN_MANIFEST_BASE_URL                = var.own_manifest_base_url
-    PEER_INPUT                           = "s3://${var.peer_validation_bucket}"
-    PEER_IDENTITY                        = var.peer_validation_bucket_role
+    PEER_INPUT                           = var.peer_validation_bucket
+    PEER_IDENTITY                        = var.peer_validation_bucket_identity
     PEER_MANIFEST_BASE_URL               = "https://${var.peer_manifest_base_url}"
     PORTAL_IDENTITY                      = var.sum_part_bucket_service_account_email
     PORTAL_MANIFEST_BASE_URL             = "https://${var.portal_server_manifest_base_url}"
@@ -261,11 +265,11 @@ resource "kubernetes_cron_job" "workflow_manager" {
                 "--is-first=${var.is_first ? "true" : "false"}",
                 "--k8s-namespace", var.kubernetes_namespace,
                 "--k8s-service-account", module.account_mapping.kubernetes_account_name,
-                "--ingestor-input", "s3://${var.ingestion_bucket}",
-                "--ingestor-identity", var.ingestion_bucket_role,
-                "--own-validation-input", "gs://${var.own_validation_bucket}",
-                "--peer-validation-input", "s3://${var.peer_validation_bucket}",
-                "--peer-validation-identity", var.ingestion_bucket_role,
+                "--ingestor-input", var.ingestion_bucket,
+                "--ingestor-identity", var.ingestion_bucket_identity,
+                "--own-validation-input", var.own_validation_bucket,
+                "--peer-validation-input", var.peer_validation_bucket,
+                "--peer-validation-identity", var.peer_validation_bucket_identity,
                 "--bsk-secret-name", kubernetes_secret.batch_signing_key.metadata[0].name,
                 "--pdks-secret-name", var.packet_decryption_key_kubernetes_secret,
                 "--intake-batch-config-map", kubernetes_config_map.intake_batch_job_config_map.metadata[0].name,
@@ -323,10 +327,9 @@ resource "kubernetes_cron_job" "sample_maker" {
               image = "${var.container_registry}/${var.facilitator_image}:${var.facilitator_version}"
               args = [
                 "generate-ingestion-sample",
-                "--own-output", "s3://${var.ingestion_bucket}",
-                "--own-identity", var.ingestion_bucket_role,
-                "--peer-output", "s3://${var.test_peer_ingestion_bucket}",
-                "--peer-identity", var.ingestion_bucket_role,
+                "--own-output", var.ingestion_bucket,
+                "--peer-output", var.test_peer_ingestion_bucket,
+                "--peer-identity", var.remote_peer_validation_bucket_identity,
                 "--aggregation-id", "kittens-seen",
                 # All instances of the sample maker use the same batch signing
                 # key, thus simulating being a single server.
@@ -416,7 +419,7 @@ output "service_account_unique_id" {
 }
 
 output "service_account_email" {
-  value = "serviceAccount:${module.account_mapping.google_service_account_email}"
+  value = module.account_mapping.google_service_account_email
 }
 
 output "batch_signing_key" {

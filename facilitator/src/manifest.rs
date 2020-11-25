@@ -93,15 +93,16 @@ pub struct SpecificManifest {
     /// Format version of the manifest. Versions besides the currently supported
     /// one are rejected.
     format: u32,
-    /// Region and name of the ingestion S3 bucket owned by this data share
-    /// processor.
+    /// URL of the ingestion bucket owned by this data share processor, which
+    /// may be in the form "s3://{region}/{name}" or "gs://{name}".
     ingestion_bucket: String,
-    // The ARN of the AWS IAM role that should be assumed by an ingestion server
-    // to write to this data share processor's ingestion bucket, if the ingestor
-    // does not have an AWS account of their own.
-    ingestion_identity: String,
-    /// Region and name of the peer validation S3 bucket owned by this data
-    /// share processor.
+    /// The ARN of the AWS IAM role that should be assumed by an ingestion
+    /// server to write to this data share processor's ingestion bucket, if the
+    /// ingestor does not have an AWS account of their own. This will not be
+    /// present if the data share processor's ingestion bucket is not in AWS S3.
+    ingestion_identity: Option<String>,
+    /// URL of the validation bucket owned by this data share processor, which
+    /// may be in the form "s3://{region}/{name}" or "gs://{name}".
     peer_validation_bucket: String,
     /// Keys used by this data share processor to sign batches.
     batch_signing_public_keys: HashMap<String, BatchSigningPublicKey>,
@@ -124,7 +125,7 @@ impl SpecificManifest {
     pub fn from_slice(json: &[u8]) -> Result<Self> {
         let manifest: Self =
             serde_json::from_slice(json).context("failed to decode JSON global manifest")?;
-        if manifest.format != 0 {
+        if manifest.format != 1 {
             return Err(anyhow!("unsupported manifest format {}", manifest.format));
         }
         Ok(manifest)
@@ -149,7 +150,7 @@ impl SpecificManifest {
     /// bucket.
     pub fn validation_bucket(&self) -> Result<StoragePath> {
         // For the time being, the path is assumed to be an S3 bucket.
-        StoragePath::from_str(&format!("s3://{}", &self.peer_validation_bucket))
+        StoragePath::from_str(&self.peer_validation_bucket)
     }
 
     /// Returns true if all the members of the parsed manifest are valid, false
@@ -159,8 +160,7 @@ impl SpecificManifest {
             .context("bad manifest: public keys")?;
         self.validation_bucket()
             .context("bad manifest: valiation bucket")?;
-        StoragePath::from_str(&format!("s3://{}", &self.ingestion_bucket))
-            .context("bad manifest: ingestion bucket")?;
+        StoragePath::from_str(&self.ingestion_bucket).context("bad manifest: ingestion bucket")?;
         Ok(())
     }
 }
@@ -177,11 +177,10 @@ struct IngestionServerIdentity {
     /// server uses to authenticate via OIDC identity federation to access
     /// ingestion buckets. While this field's value is a number, facilitator
     /// treats it as an opaque string.
-    google_service_account: Option<String>,
+    gcp_service_account_id: Option<String>,
     /// The email address of the GCP service account that this ingestion server
-    /// uses to authenticate via OIDC identity federation to access ingestion
-    /// buckets.
-    gcp_service_account_email: Option<String>,
+    /// uses to authenticate to GCS to access ingestion buckets.
+    gcp_service_account_email: String,
 }
 
 /// Represents an ingestion server's global manifest.
@@ -213,7 +212,7 @@ impl IngestionServerGlobalManifest {
     pub fn from_slice(json: &[u8]) -> Result<Self> {
         let manifest: Self =
             serde_json::from_slice(json).context("failed to decode JSON global manifest")?;
-        if manifest.format != 0 {
+        if manifest.format != 1 {
             return Err(anyhow!("unsupported manifest format {}", manifest.format));
         }
         Ok(manifest)
@@ -250,11 +249,11 @@ pub struct PortalServerGlobalManifest {
     /// Format version of the manifest. Versions besides the currently supported
     /// one are rejected.
     format: u32,
-    /// Name of the GCS bucket to which facilitator servers should write their
-    /// sum part batches for aggregation by the portal server.
+    /// URL of the bucket to which facilitator servers should write sum parts,
+    /// which may be in the form "s3://{region}/{name}" or "gs://{name}".
     facilitator_sum_part_bucket: String,
-    /// Name of the GCS bucket to which PHA servers should write their sum part
-    /// batches for aggregation by the portal server.
+    /// URL of the bucket to which PHA servers should write sum parts, which may
+    /// be in the form "s3://{region}/{name}" or "gs://{name}".
     pha_sum_part_bucket: String,
 }
 
@@ -269,7 +268,7 @@ impl PortalServerGlobalManifest {
     pub fn from_slice(json: &[u8]) -> Result<Self> {
         let manifest: PortalServerGlobalManifest =
             serde_json::from_slice(json).context("failed to decode JSON global manifest")?;
-        if manifest.format != 0 {
+        if manifest.format != 1 {
             return Err(anyhow!("unsupported manifest format {}", manifest.format));
         }
         Ok(manifest)
@@ -279,14 +278,11 @@ impl PortalServerGlobalManifest {
     /// if is_pha is true, or the facilitator bucket otherwise.
     pub fn sum_part_bucket(&self, is_pha: bool) -> Result<StoragePath> {
         // For now, the path is assumed to be a GCS bucket.
-        StoragePath::from_str(&format!(
-            "gs://{}",
-            if is_pha {
-                &self.pha_sum_part_bucket
-            } else {
-                &self.facilitator_sum_part_bucket
-            }
-        ))
+        StoragePath::from_str(if is_pha {
+            &self.pha_sum_part_bucket
+        } else {
+            &self.facilitator_sum_part_bucket
+        })
     }
 
     /// Returns true if all the members of the parsed manifest are valid, false
@@ -463,7 +459,7 @@ mod tests {
         let json = format!(
             r#"
 {{
-    "format": 0,
+    "format": 1,
     "packet-encryption-certificates": {{
         "fake-key-1": {{
             "certificate": "who cares"
@@ -475,9 +471,9 @@ mod tests {
         "public-key": "-----BEGIN PUBLIC KEY-----\n{}\n-----END PUBLIC KEY-----\n"
       }}
     }},
-    "ingestion-bucket": "us-west-1/ingestion",
+    "ingestion-bucket": "s3://us-west-1/ingestion",
     "ingestion-identity": "arn:aws:iam:something:fake",
-    "peer-validation-bucket": "us-west-1/validation"
+    "peer-validation-bucket": "gs://validation/path/fragment"
 }}
     "#,
             DEFAULT_INGESTOR_SUBJECT_PUBLIC_KEY_INFO
@@ -503,12 +499,12 @@ mod tests {
             },
         );
         let expected_manifest = SpecificManifest {
-            format: 0,
+            format: 1,
             batch_signing_public_keys: expected_batch_keys,
             packet_encryption_certificates: expected_packet_encryption_certificates,
-            ingestion_bucket: "us-west-1/ingestion".to_owned(),
-            ingestion_identity: "arn:aws:iam:something:fake".to_owned(),
-            peer_validation_bucket: "us-west-1/validation".to_owned(),
+            ingestion_bucket: "s3://us-west-1/ingestion".to_string(),
+            ingestion_identity: Some("arn:aws:iam:something:fake".to_owned()),
+            peer_validation_bucket: "gs://validation/path/fragment".to_string(),
         };
         assert_eq!(manifest, expected_manifest);
         let batch_signing_keys = manifest.batch_signing_public_keys().unwrap();
@@ -523,18 +519,19 @@ mod tests {
             .verify(content, signature.as_ref())
             .unwrap();
 
-        if let StoragePath::S3Path(path) = manifest.validation_bucket().unwrap() {
+        if let StoragePath::GCSPath(path) = manifest.validation_bucket().unwrap() {
             assert_eq!(
                 path,
-                S3Path {
-                    region: Region::UsWest1,
+                GCSPath {
                     bucket: "validation".to_owned(),
-                    key: "".to_owned(),
+                    key: "path/fragment".to_owned(),
                 }
             );
         } else {
             assert!(false, "unexpected storage path type");
         }
+
+        manifest.validate().unwrap();
     }
 
     #[test]
@@ -556,15 +553,15 @@ mod tests {
         "public-key": "-----BEGIN PUBLIC KEY-----\nfoo\n-----END PUBLIC KEY-----"
       }
     },
-    "ingestion-bucket": "us-west-1/ingestion",
+    "ingestion-bucket": "s3://us-west-1/ingestion",
     "ingestion-identity": "arn:aws:iam:something:fake",
-    "peer-validation-bucket": "us-west-1/validation"
+    "peer-validation-bucket": "gs://validation"
 }
     "#,
             // Format key with wrong value
             r#"
 {
-    "format": 1,
+    "format": 0,
     "packet-encryption-certificates": {
         "fake-key-1": {
             "certificate": "who cares"
@@ -576,9 +573,9 @@ mod tests {
         "public-key": "-----BEGIN PUBLIC KEY-----\nfoo\n-----END PUBLIC KEY-----"
       }
     },
-    "ingestion-bucket": "us-west-1/ingestion",
+    "ingestion-bucket": "s3://us-west-1/ingestion",
     "ingestion-identity": "arn:aws:iam:something:fake",
-    "peer-validation-bucket": "us-west-1/validation"
+    "peer-validation-bucket": "gs://validation"
 }
     "#,
             // Format key with wrong type
@@ -596,9 +593,9 @@ mod tests {
         "public-key": "-----BEGIN PUBLIC KEY-----\nfoo\n-----END PUBLIC KEY-----"
       }
     },
-    "ingestion-bucket": "us-west-1/ingestion",
+    "ingestion-bucket": "gs://ingestion",
     "ingestion-identity": "arn:aws:iam:something:fake",
-    "peer-validation-bucket": "us-west-1/validation"
+    "peer-validation-bucket": "s3://us-west-1/validation"
 }
     "#,
             // Role ARN with wrong type
@@ -634,7 +631,7 @@ mod tests {
             // Wrong PEM block
             r#"
 {
-    "format": 0,
+    "format": 1,
     "packet-encryption-certificates": {
         "fake-key-1": {
             "certificate": "who cares"
@@ -646,15 +643,15 @@ mod tests {
         "public-key": "-----BEGIN EC PUBLIC KEY-----\nMFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEIKh3MccE1cdSF4pnEb+U0MmGYfkoQzOl2aiaJ6D9ZudqDdGiyA9YSUq3yia56nYJh5mk+HlzTX+AufoNR2bfrg==\n-----END EC PUBLIC KEY-----"
       }
     },
-    "ingestion-bucket": "us-west-1/ingestion",
+    "ingestion-bucket": "gs://ingestion",
     "ingestion-identity": "arn:aws:iam:something:fake",
-    "peer-validation-bucket": "us-west-1/validation"
+    "peer-validation-bucket": "s3://us-west-1/validation"
 }
     "#,
             // PEM contents not an ASN.1 SPKI
             r#"
 {
-    "format": 0,
+    "format": 1,
     "packet-encryption-certificates": {
         "fake-key-1": {
             "certificate": "who cares"
@@ -666,15 +663,15 @@ mod tests {
         "public-key": "-----BEGIN PUBLIC KEY-----\nBIl6j+J6dYttxALdjISDv6ZI4/VWVEhUzaS05LgrsfswmbLOgNt9HUC2E0w+9RqZx3XMkdEHBHfNuCSMpOwofVSq3TfyKwn0NrftKisKKVSaTOt5seJ67P5QL4hxgPWvxw==\n-----END PUBLIC KEY-----"
       }
     },
-    "ingestion-bucket": "us-west-1/ingestion",
+    "ingestion-bucket": "gs://ingestion",
     "ingestion-identity": "arn:aws:iam:something:fake",
-    "peer-validation-bucket": "us-west-1/validation"
+    "peer-validation-bucket": "s3://us-west-1/validation"
 }
     "#,
             // PEM contents too short
             r#"
 {
-    "format": 0,
+    "format": 1,
     "packet-encryption-certificates": {
         "fake-key-1": {
             "certificate": "who cares"
@@ -686,9 +683,9 @@ mod tests {
         "public-key": "-----BEGIN PUBLIC KEY-----\ndG9vIHNob3J0Cg==\n-----END PUBLIC KEY-----\n"
       }
     },
-    "ingestion-bucket": "us-west-1/ingestion",
+    "ingestion-bucket": "gs://ingestion",
     "ingestion-identity": "arn:aws:iam:something:fake",
-    "peer-validation-bucket": "us-west-1/validation"
+    "peer-validation-bucket": "s3://us-west-1/validation"
 }
     "#,
         ];
@@ -702,9 +699,11 @@ mod tests {
     fn load_ingestor_global_manifest() {
         let manifest_with_aws_identity = r#"
 {
-    "format": 0,
+    "format": 1,
     "server-identity": {
-        "aws-iam-entity": "arn:aws:iam::338276578713:role/ingestor-1-role"
+        "aws-iam-entity": "arn:aws:iam::338276578713:role/ingestor-1-role",
+        "gcp-service-account-id": "12345678901234567890",
+        "gcp-service-account-email": "foo@bar.com"
     },
     "batch-signing-public-keys": {
         "key-identifier-1": {
@@ -716,9 +715,9 @@ mod tests {
             "#;
         let manifest_with_gcp_identity = r#"
 {
-    "format": 0,
+    "format": 1,
     "server-identity": {
-        "google-service-account": "112310747466759665351",
+        "gcp-service-account-id": "112310747466759665351",
         "gcp-service-account-email": "foo@bar.com"
     },
     "batch-signing-public-keys": {
@@ -741,7 +740,14 @@ mod tests {
             manifest.server_identity.aws_iam_entity,
             Some("arn:aws:iam::338276578713:role/ingestor-1-role".to_owned())
         );
-        assert_eq!(manifest.server_identity.google_service_account, None);
+        assert_eq!(
+            manifest.server_identity.gcp_service_account_id,
+            Some("12345678901234567890".to_owned())
+        );
+        assert_eq!(
+            manifest.server_identity.gcp_service_account_email,
+            "foo@bar.com".to_owned()
+        );
         let batch_signing_public_keys = manifest.batch_signing_public_keys().unwrap();
         batch_signing_public_keys.get("key-identifier-1").unwrap();
         assert!(batch_signing_public_keys.get("nosuchkey").is_none());
@@ -751,12 +757,12 @@ mod tests {
                 .unwrap();
         assert_eq!(manifest.server_identity.aws_iam_entity, None);
         assert_eq!(
-            manifest.server_identity.google_service_account,
-            Some("112310747466759665351".to_owned())
+            manifest.server_identity.gcp_service_account_email,
+            "foo@bar.com".to_owned()
         );
         assert_eq!(
-            manifest.server_identity.gcp_service_account_email,
-            Some("foo@bar.com".to_owned())
+            manifest.server_identity.gcp_service_account_id,
+            Some("112310747466759665351".to_owned())
         );
         let batch_signing_public_keys = manifest.batch_signing_public_keys().unwrap();
         batch_signing_public_keys.get("key-identifier-2").unwrap();
@@ -773,6 +779,7 @@ mod tests {
 {
     "server-identity": {
         "aws-iam-entity": "arn:aws:iam::338276578713:role/ingestor-1-role"
+        "gcp-service-account-email": "foo@bar.com"
     },
     "batch-signing-public-keys": {
         "key-identifier-1": {
@@ -785,9 +792,10 @@ mod tests {
             // Format key with wrong value
             r#"
 {
-    "format": 1,
+    "format": 2,
     "server-identity": {
         "aws-iam-entity": "arn:aws:iam::338276578713:role/ingestor-1-role"
+        "gcp-service-account-email": "foo@bar.com"
     },
     "batch-signing-public-keys": {
         "key-identifier-1": {
@@ -803,6 +811,7 @@ mod tests {
     "format": "zero",
     "server-identity": {
         "aws-iam-entity": "arn:aws:iam::338276578713:role/ingestor-1-role"
+        "gcp-service-account-email": "foo@bar.com"
     },
     "batch-signing-public-keys": {
         "key-identifier-1": {
@@ -823,9 +832,9 @@ mod tests {
     fn load_portal_global_manifest() {
         let manifest = r#"
 {
-    "format": 0,
-    "facilitator-sum-part-bucket": "facilitator-bucket",
-    "pha-sum-part-bucket": "pha-bucket"
+    "format": 1,
+    "facilitator-sum-part-bucket": "gs://facilitator-bucket",
+    "pha-sum-part-bucket": "s3://us-west-1/pha-bucket"
 }
             "#;
 
@@ -841,10 +850,11 @@ mod tests {
         } else {
             assert!(false, "unexpected storage path type");
         }
-        if let StoragePath::GCSPath(path) = manifest.sum_part_bucket(true).unwrap() {
+        if let StoragePath::S3Path(path) = manifest.sum_part_bucket(true).unwrap() {
             assert_eq!(
                 path,
-                GCSPath {
+                S3Path {
+                    region: Region::UsWest1,
                     bucket: "pha-bucket".to_owned(),
                     key: "".to_owned(),
                 }
@@ -862,31 +872,31 @@ mod tests {
             // No format key
             r#"
 {
-    "facilitator-sum-part-bucket": "facilitator-bucket",
-    "pha-sum-part-bucket": "pha-bucket"
+    "facilitator-sum-part-bucket": "gs://facilitator-bucket",
+    "pha-sum-part-bucket": "gs://pha-bucket"
 }
     "#,
             // Format key with wrong value
             r#"
 {
-    "format": 1,
-    "facilitator-sum-part-bucket": "facilitator-bucket",
-    "pha-sum-part-bucket": "pha-bucket"
+    "format": 0,
+    "facilitator-sum-part-bucket": "gs://facilitator-bucket",
+    "pha-sum-part-bucket": "gs://pha-bucket"
 }
     "#,
             // Format key with wrong type
             r#"
 {
     "format": "zero",
-    "facilitator-sum-part-bucket": "facilitator-bucket",
-    "pha-sum-part-bucket": "pha-bucket"
+    "facilitator-sum-part-bucket": "gs://facilitator-bucket",
+    "pha-sum-part-bucket": "gs://pha-bucket"
 }
     "#,
             // Missing field
             r#"
 {
     "format": 0,
-    "facilitator-sum-part-bucket": "facilitator-bucket",
+    "facilitator-sum-part-bucket": "gs://facilitator-bucket",
 }
     "#,
         ];
