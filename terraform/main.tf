@@ -366,3 +366,8 @@ output "specific_manifests" {
 output "use_test_pha_decryption_key" {
   value = lookup(var.test_peer_environment, "env_without_ingestor", "") == var.environment
 }
+
+resource "helm_release" "prometheus" {
+  name  = "prometheus"
+  chart = "stable/prometheus"
+}
