@@ -118,6 +118,41 @@ terraform {
   backend "gcs" {}
 
   required_version = ">= 0.13.3"
+
+  required_providers {
+    aws = {
+      source  = "hashicorp/aws"
+      version = "~> 3.16.0"
+    }
+    google = {
+      source  = "hashicorp/google"
+      version = "~> 3.49.0"
+    }
+    google-beta = {
+      source  = "hashicorp/google-beta"
+      version = "~> 3.49.0"
+    }
+    helm = {
+      source  = "hashicorp/helm"
+      version = "~> 1.3.2"
+    }
+    http = {
+      source  = "hashicorp/http"
+      version = "~> 2.0.0"
+    }
+    kubernetes = {
+      source  = "hashicorp/kubernetes"
+      version = "~> 1.13.3"
+    }
+    null = {
+      source  = "hashicorp/null"
+      version = "~> 3.0.0"
+    }
+    random = {
+      source  = "hashicorp/random"
+      version = "~> 3.0.0"
+    }
+  }
 }
 
 data "terraform_remote_state" "state" {
