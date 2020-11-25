@@ -368,7 +368,17 @@ output "use_test_pha_decryption_key" {
   value = lookup(var.test_peer_environment, "env_without_ingestor", "") == var.environment
 }
 
+provider "helm" {
+  kubernetes {
+    host                   = module.gke.cluster_endpoint
+    cluster_ca_certificate = base64decode(module.gke.certificate_authority_data)
+    token                  = data.google_client_config.current.access_token
+    load_config_file       = false
+  }
+}
+
 resource "helm_release" "prometheus" {
-  name  = "prometheus"
-  chart = "stable/prometheus"
+  name       = "prometheus"
+  chart      = "prometheus"
+  repository = "https://charts.helm.sh/stable"
 }
