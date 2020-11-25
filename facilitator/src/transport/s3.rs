@@ -278,11 +278,15 @@ impl MultipartUploadWriter {
     ) -> Result<MultipartUploadWriter> {
         let mut runtime = basic_runtime()?;
 
+        // We use the "bucket-owner-full-control" canned ACL to ensure that
+        // objects we send to peers will be owned by them.
+        // https://docs.aws.amazon.com/AmazonS3/latest/dev/about-object-ownership.html
         let create_output = runtime
             .block_on(
                 client.create_multipart_upload(CreateMultipartUploadRequest {
                     bucket: bucket.to_string(),
                     key: key.to_string(),
+                    acl: Some("bucket-owner-full-control".to_owned()),
                     ..Default::default()
                 }),
             )
