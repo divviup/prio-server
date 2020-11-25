@@ -342,21 +342,6 @@ module "bucket" {
   gcp_region    = var.gcp_region
 }
 
-resource "google_storage_bucket_object" "specific_manifest" {
-  provider      = google-beta
-  name          = "${var.data_share_processor_name}-manifest.json"
-  bucket        = var.manifest_bucket
-  content_type  = "application/json"
-  cache_control = "no-cache"
-  content = jsonencode({
-    format                     = 1
-    ingestion-bucket           = local.ingestion_bucket_url
-    peer-validation-bucket     = local.peer_validation_bucket_url
-    batch-signing-public-keys  = {}
-    packet-encryption-key-csrs = {}
-  })
-}
-
 module "kubernetes" {
   source                                  = "../../modules/kubernetes/"
   data_share_processor_name               = var.data_share_processor_name
