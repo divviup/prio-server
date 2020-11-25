@@ -12,7 +12,7 @@ variable "environment" {
 
 variable "container_registry" {
   type    = string
-  default = "letsencrypt"
+  default = "us.gcr.io/jsha-prio-bringup/letsencrypt"
 }
 
 variable "workflow_manager_image" {

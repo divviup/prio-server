@@ -1,6 +1,8 @@
 FROM rust:1.46-alpine as builder
+ARG BUILD_INFO=unspecified
+LABEL build_info="${BUILD_INFO}"
 
-RUN apk add libc-dev && apk update
+RUN apk add libc-dev openssl-dev && apk update
 # Attempt to install a nonexistent package. This triggers
 # updating the crates.io index separately from building the
 # dependencies, so if dependencies change we don't have to
