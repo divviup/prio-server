@@ -1,6 +1,4 @@
 FROM rust:1.46-alpine as builder
-ARG BUILD_INFO=unspecified
-LABEL build_info="${BUILD_INFO}"
 
 RUN apk add libc-dev && apk update
 # Attempt to install a nonexistent package. This triggers
@@ -29,6 +27,9 @@ RUN rm -f facilitator/target/*/release/deps/facilitator* facilitator/src/main.rs
 # from the wrong place.
 COPY ./avro-schema ./avro-schema
 COPY ./facilitator ./facilitator
+
+ARG BUILD_INFO=unspecified
+LABEL build_info="${BUILD_INFO}"
 # This cargo build command must match the one above, or the build cache will not be reused.
 RUN cargo build --manifest-path ./facilitator/Cargo.toml
 # We build in debug mode so the build runs quickly, then strip the binary for size.
