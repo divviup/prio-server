@@ -747,9 +747,7 @@ fn intake_batch(sub_matches: &ArgMatches) -> Result<(), anyhow::Error> {
     .unwrap();
     intake_started.inc();
 
-    info!("beginning intake");
     let result = batch_intaker.generate_validation_share();
-    info!("done");
 
     let intake_finished = register_counter_vec!(
         "intake_jobs_finished",
