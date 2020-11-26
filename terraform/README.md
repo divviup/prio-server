@@ -16,7 +16,7 @@ We use the [AWS Terraform provider](https://registry.terraform.io/providers/hash
 
 We currently use the profile `leuswest2` in terraform (this value is defined in `main.tf`). In order for terraform to recognize your credentials, you will need to configure it with `aws configure --profile leuswest2`.
 
-Once you have helm installed, add the "stable" repository:
+`helm` is not required for creating or maintaining a cluster, but it's still useful to have configured. Once you have helm installed, add the "stable" repository:
 
 ```
 helm repo add stable https://charts.helm.sh/stable
