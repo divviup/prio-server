@@ -1,6 +1,7 @@
 use anyhow::{anyhow, Context, Result};
 use chrono::{prelude::Utc, NaiveDateTime};
 use clap::{App, Arg, ArgMatches, SubCommand};
+use log::info;
 use prio::encrypt::PrivateKey;
 use prometheus::{register_counter, register_counter_vec, Counter};
 use ring::signature::{
@@ -723,11 +724,16 @@ fn intake_batch(sub_matches: &ArgMatches) -> Result<(), anyhow::Error> {
         batch_signing_key: batch_signing_key_from_arg(sub_matches)?,
     };
 
+    let batch_id: &str = sub_matches.value_of("batch-id").unwrap();
+    let batch_id: Uuid = Uuid::parse_str(batch_id).unwrap();
+
+    let date: &str = sub_matches.value_of("date").unwrap();
+    let date: NaiveDateTime = NaiveDateTime::parse_from_str(date, DATE_FORMAT).unwrap();
+
     let mut batch_intaker = BatchIntaker::new(
         &sub_matches.value_of("aggregation-id").unwrap(),
-        &Uuid::parse_str(sub_matches.value_of("batch-id").unwrap()).unwrap(),
-        &NaiveDateTime::parse_from_str(&sub_matches.value_of("date").unwrap(), DATE_FORMAT)
-            .unwrap(),
+        &batch_id,
+        &date,
         &mut intake_transport,
         &mut peer_validation_transport,
         &mut own_validation_transport,
@@ -741,7 +747,9 @@ fn intake_batch(sub_matches: &ArgMatches) -> Result<(), anyhow::Error> {
     .unwrap();
     intake_started.inc();
 
+    info!("beginning intake");
     let result = batch_intaker.generate_validation_share();
+    info!("done");
 
     let intake_finished = register_counter_vec!(
         "intake_jobs_finished",
