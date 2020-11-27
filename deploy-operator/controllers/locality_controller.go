@@ -23,9 +23,9 @@ import (
 	"k8s.io/apimachinery/pkg/api/equality"
 
 	"github.com/go-logr/logr"
-	v1 "k8s.io/api/batch/v1"
+	v1batch "k8s.io/api/batch/v1"
 	"k8s.io/api/batch/v1beta1"
-	v12 "k8s.io/api/core/v1"
+	v1core "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -44,9 +44,9 @@ type LocalityReconciler struct {
 }
 
 const (
-	jobNameField    = ".metadata.name"
-	jobName         = "manifest-updater"
-	keyRotatorImage = "letsencrypt/prio-manifest-updater:latest"
+	jobNameField       = ".metadata.name"
+	jobName            = "manifest-updater"
+	keyRotatorImage    = "letsencrypt/prio-manifest-updater:latest"
 	serviceAccountName = "manifest-updater"
 )
 
@@ -120,8 +120,8 @@ func (r *LocalityReconciler) scheduleNewJob(locality *priov1.Locality) (ctrl.Res
 	return ctrl.Result{}, nil
 }
 
-func (r *LocalityReconciler) createJobFromCronJob(cronJob *v1beta1.CronJob) v1.Job {
-	return v1.Job{
+func (r *LocalityReconciler) createJobFromCronJob(cronJob *v1beta1.CronJob) v1batch.Job {
+	return v1batch.Job{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      fmt.Sprintf("init-%s", jobName),
 			Namespace: cronJob.Namespace,
@@ -138,13 +138,14 @@ func (r *LocalityReconciler) createCronJobTemplate(locality *priov1.Locality) v1
 	jobTTL = 5
 
 	trueValue := true
+	falseValue := false
 
-	env := []v12.EnvVar{
+	env := []v1core.EnvVar{
 		{Name: "KR_ENVIRONMENT_NAME", Value: locality.Spec.EnvironmentName},
 		{Name: "KR_MANIFEST_BUCKET_LOCATION", Value: locality.Spec.ManifestBucketLocation},
 		{Name: "KR_INGESTORS", Value: strings.Join(locality.Spec.Ingestors, " ")},
-		{Name: "KR_LOCALITY", ValueFrom: &v12.EnvVarSource{
-			FieldRef: &v12.ObjectFieldSelector{
+		{Name: "KR_LOCALITY", ValueFrom: &v1core.EnvVarSource{
+			FieldRef: &v1core.ObjectFieldSelector{
 				FieldPath: "metadata.namespace",
 			},
 		}},
@@ -152,13 +153,32 @@ func (r *LocalityReconciler) createCronJobTemplate(locality *priov1.Locality) v1
 		{Name: "KR_BATCH_SIGNING_KEY_ROTATION", Value: toString(locality.Spec.BatchSigningKeySpec.KeyRotationInterval)},
 		{Name: "KR_PACKET_ENCRYPTION_KEY_EXPIRATION", Value: toString(locality.Spec.PacketEncryptionKeySpec.KeyValidity)},
 		{Name: "KR_PACKET_ENCRYPTION_KEY_ROTATION", Value: toString(locality.Spec.PacketEncryptionKeySpec.KeyRotationInterval)},
+		{Name: "KR_CONFIG_LOCATION", Value: "/config/manifest-updater/config.json"},
 	}
 
-	containers := []v12.Container{{
+	containers := []v1core.Container{{
 		Name:            jobName,
 		Image:           keyRotatorImage,
 		Env:             env,
-		ImagePullPolicy: v12.PullAlways,
+		ImagePullPolicy: v1core.PullAlways,
+		VolumeMounts: []v1core.VolumeMount{
+			{
+				Name:      "config-volume",
+				MountPath: "/config/manifest-updater",
+			},
+		},
+	}}
+
+	volumes := []v1core.Volume{{
+		Name: "config-volume",
+		VolumeSource: v1core.VolumeSource{
+			ConfigMap: &v1core.ConfigMapVolumeSource{
+				LocalObjectReference: v1core.LocalObjectReference{
+					Name: "manifest-updater-config",
+				},
+				Optional: &falseValue,
+			},
+		},
 	}}
 
 	objectMeta := metav1.ObjectMeta{
@@ -172,11 +192,12 @@ func (r *LocalityReconciler) createCronJobTemplate(locality *priov1.Locality) v1
 			Schedule:          locality.Spec.Schedule,
 			ConcurrencyPolicy: v1beta1.ReplaceConcurrent,
 			JobTemplate: v1beta1.JobTemplateSpec{
-				Spec: v1.JobSpec{
-					Template: v12.PodTemplateSpec{
-						Spec: v12.PodSpec{
+				Spec: v1batch.JobSpec{
+					Template: v1core.PodTemplateSpec{
+						Spec: v1core.PodSpec{
 							Containers:                   containers,
-							RestartPolicy:                v12.RestartPolicyOnFailure,
+							Volumes:                      volumes,
+							RestartPolicy:                v1core.RestartPolicyOnFailure,
 							ServiceAccountName:           serviceAccountName,
 							AutomountServiceAccountToken: &trueValue,
 						},

@@ -15,13 +15,22 @@ const (
 )
 
 func (k *Kube) validateAndUpdateBatchSigningKey(keyName, ingestor string, secret *corev1.Secret) ([]*PrioKey, error) {
+	oldPrioKey, err := NewKeyFromKubernetesSecret(secret)
+	if err != nil {
+		return nil, fmt.Errorf("unable to create PrioKey from kubernetes secret: %v", err)
+	}
+	oldExpiration := string(secret.Data[expirationKeyMap])
+	oldPrioKey.Expiration = &oldExpiration
+
 	creation := secret.GetCreationTimestamp()
 	since := time.Since(creation.Time)
 
 	shouldRotate := since > k.batchSigningKeySpec.rotationPeriod
 
 	if !shouldRotate {
-		return nil, nil
+		return []*PrioKey{
+			oldPrioKey,
+		}, nil
 	}
 
 	k.log.
@@ -35,22 +44,9 @@ func (k *Kube) validateAndUpdateBatchSigningKey(keyName, ingestor string, secret
 		return nil, fmt.Errorf("unable to create secret: %w", err)
 	}
 
-	oldExpiration := string(secret.Data[expirationKeyMap])
-
-	encodedKey := secret.Data[secretKeyMap]
-	oldKey := make([]byte, base64.StdEncoding.DecodedLen(len(encodedKey)))
-	_, err = base64.StdEncoding.Decode(oldKey, secret.Data[secretKeyMap])
-	if err != nil {
-		return nil, fmt.Errorf("unable to decode old secret key: %w", err)
-	}
-
-	oldPrioKey := PrioKeyFromX962UncompressedKey(oldKey)
-	oldPrioKey.KubeIdentifier = &secret.Name
-	oldPrioKey.Expiration = &oldExpiration
-
 	return []*PrioKey{
 		key,
-		&oldPrioKey,
+		oldPrioKey,
 	}, nil
 }
 

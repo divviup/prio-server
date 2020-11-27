@@ -251,7 +251,7 @@ resource "kubernetes_config_map" "manifest_updater_config" {
   }
 
   data = {
-    data = jsonencode({
+    "config.json" = jsonencode({
       ingestion_buckets = {
         for v in module.data_share_processors :
         v.ingestor => v.ingestion_bucket_url

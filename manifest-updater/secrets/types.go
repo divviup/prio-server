@@ -5,10 +5,13 @@ import (
 	"crypto/elliptic"
 	"crypto/rand"
 	"crypto/x509"
+	"encoding/base64"
 	"encoding/pem"
 	"fmt"
 	"io"
 	"math/big"
+
+	corev1 "k8s.io/api/core/v1"
 )
 
 type PrioKey struct {
@@ -26,6 +29,20 @@ func NewPrioKey() (*PrioKey, error) {
 	return &PrioKey{
 		key: key,
 	}, nil
+}
+
+func NewKeyFromKubernetesSecret(secret *corev1.Secret) (*PrioKey, error) {
+	encodedKey := secret.Data[secretKeyMap]
+	key := make([]byte, base64.StdEncoding.DecodedLen(len(encodedKey)))
+	_, err := base64.StdEncoding.Decode(key, secret.Data[secretKeyMap])
+	if err != nil {
+		return nil, fmt.Errorf("unable to decode old secret key: %w", err)
+	}
+
+	prioKey := PrioKeyFromX962UncompressedKey(key)
+	prioKey.KubeIdentifier = &secret.Name
+
+	return &prioKey, nil
 }
 
 func PrioKeyFromX962UncompressedKey(key []byte) PrioKey {

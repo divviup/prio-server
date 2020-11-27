@@ -63,6 +63,8 @@ func init() {
 	rootCmd.PersistentFlags().Int32("packet_encryption_key_expiration", 395, "Expiration period in days for the packet encryption key")
 	rootCmd.PersistentFlags().Int32("packet_encryption_key_rotation", 320, "Rotation interval in days for the packet encryption key")
 
+	rootCmd.PersistentFlags().String("config_location", "", "Path to the configuration file for the manifest-updater")
+
 	_ = viper.BindPFlag("log", rootCmd.PersistentFlags().Lookup("log"))
 	_ = viper.BindPFlag("colors", rootCmd.PersistentFlags().Lookup("colors"))
 }

@@ -1,24 +1,28 @@
 package manifest
 
 import (
-	"cloud.google.com/go/storage"
 	"context"
 	"encoding/json"
 	"fmt"
+
+	"cloud.google.com/go/storage"
+	"github.com/abetterinternet/prio-server/manifest-updater/config"
 	log "github.com/sirupsen/logrus"
 )
 
 type Updater struct {
 	log                    *log.Entry
+	config                 config.Config
 	environmentName        string
 	locality               string
 	manifestBucketLocation string
 	ingestors              []string
 }
 
-func NewUpdater(environmentName string, locality string, manifestBucketLocation string, ingestors []string) (*Updater, error) {
+func NewUpdater(config config.Config, environmentName string, locality string, manifestBucketLocation string, ingestors []string) (*Updater, error) {
 	return &Updater{
 		log:                    log.WithField("source", "manifest updater"),
+		config:                 config,
 		environmentName:        environmentName,
 		locality:               locality,
 		manifestBucketLocation: manifestBucketLocation,
@@ -37,48 +41,21 @@ func (u *Updater) UpdateDataShareSpecificManifest(keys map[string]BatchSigningPu
 	}
 
 	for _, ingestor := range u.ingestors {
-		manifest, err := u.readExistingManifest(store, ingestor)
-		if err != nil {
-			return fmt.Errorf("manifest file not read properly: %w", err)
-		}
-		if keys != nil && keys[ingestor] != nil {
-			manifest.BatchSigningPublicKeys = keys[ingestor]
-		}
-		if certificate != nil {
-			manifest.PacketEncryptionKeyCSRs = certificate
+		manifest := DataShareSpecificManifest{
+			Format:                  1,
+			IngestionBucket:         u.config.IngestionBuckets[ingestor],
+			PeerValidationBucket:    u.config.PeerValidationBuckets[ingestor],
+			BatchSigningPublicKeys:  keys[ingestor],
+			PacketEncryptionKeyCSRs: certificate,
 		}
 
-		err = u.writeManifest(store, manifest, ingestor)
+		err = u.writeManifest(store, &manifest, ingestor)
 		if err != nil {
 			return fmt.Errorf("manifest file not written properly: %w", err)
 		}
 	}
 
 	return nil
-}
-
-func (u *Updater) readExistingManifest(store *storage.BucketHandle, ingestor string) (*DataShareSpecificManifest, error) {
-	u.log.WithField("ingestor", ingestor).Infoln("reading the manifest file")
-	manifestObj := store.Object(fmt.Sprintf("%s-%s-manifest.json", u.locality, ingestor))
-	r, err := manifestObj.NewReader(context.Background())
-	if err != nil {
-		return nil, fmt.Errorf("reading from the manifest failed: %w", err)
-	}
-
-	defer func() {
-		err := r.Close()
-		if err != nil {
-			u.log.Fatal(err)
-		}
-	}()
-
-	manifest := &DataShareSpecificManifest{}
-	err = json.NewDecoder(r).Decode(manifest)
-	if err != nil {
-		return nil, fmt.Errorf("decoding manifest json failed: %w", err)
-	}
-
-	return manifest, nil
 }
 
 func (u *Updater) writeManifest(store *storage.BucketHandle, manifest *DataShareSpecificManifest, ingestor string) error {

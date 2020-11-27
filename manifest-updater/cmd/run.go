@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"time"
 
+	manifestConfig "github.com/abetterinternet/prio-server/manifest-updater/config"
 	"github.com/abetterinternet/prio-server/manifest-updater/manifest"
 	"github.com/abetterinternet/prio-server/manifest-updater/secrets"
 	log "github.com/sirupsen/logrus"
@@ -32,6 +33,8 @@ var runCmd = &cobra.Command{
 		packetEncryptionExpiration := viper.GetInt32("packet_encryption_key_expiration")
 		packetEncryptionRotation := viper.GetInt32("packet_encryption_key_rotation")
 
+		configLocation := viper.GetString("config_location")
+
 		log.WithFields(
 			map[string]interface{}{
 				"environment name":                  environmentName,
@@ -42,8 +45,11 @@ var runCmd = &cobra.Command{
 				"batch signing rotation days":       batchSigningRotation,
 				"packet encryption expiration days": packetEncryptionExpiration,
 				"packet encryption rotation days":   packetEncryptionRotation,
+				"config location":                   configLocation,
 			},
 		).Info("Starting the updater...")
+
+		config, err := manifestConfig.New(configLocation)
 
 		var packetEncryptionCertificate manifest.PacketEncryptionKeyCSRs
 		var ingestorSigningKeys map[string]manifest.BatchSigningPublicKeys
@@ -80,7 +86,7 @@ var runCmd = &cobra.Command{
 			}
 		}
 
-		updater, _ := manifest.NewUpdater(environmentName, locality, manifestBucket, ingestors)
+		updater, _ := manifest.NewUpdater(config, environmentName, locality, manifestBucket, ingestors)
 		err = updater.UpdateDataShareSpecificManifest(ingestorSigningKeys, packetEncryptionCertificate)
 
 		if err != nil {
