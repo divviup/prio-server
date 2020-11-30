@@ -39,7 +39,7 @@ func (p *PrioKey) CreatePemEncodedCertificateRequest(rand io.Reader, template *x
 func GetPrioCSRTemplate(commonName string) *x509.CertificateRequest {
 	csrTemplate := new(x509.CertificateRequest)
 
-	csrTemplate.SignatureAlgorithm = x509.SHA256WithRSA
+	csrTemplate.SignatureAlgorithm = x509.ECDSAWithSHA256
 	csrTemplate.Subject = pkix.Name{
 		CommonName: commonName,
 	}
