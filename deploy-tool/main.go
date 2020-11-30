@@ -16,8 +16,7 @@ import (
 	"os/exec"
 	"time"
 
-	"github.com/abetterinternet/prio-server/deploy-tool/cert"
-	"github.com/abetterinternet/prio-server/deploy-tool/config"
+	"github.com/abetterinternet/prio-server/deploy-tool/key"
 )
 
 // TestPHADecryptionKey is a libprio-rs encoded ECIES private key. It MUST match
@@ -47,9 +46,9 @@ type BatchSigningPublicKey struct {
 
 // PacketEncryptionCertificate represents a certificate containing a public key
 // used for packet encryption.
-type PacketEncryptionCertificate struct {
+type PacketEncryptionKey struct {
 	// Certificate is the PEM armored X.509 certificate.
-	Certificate string `json:"certificate"`
+	CertificateSigningRequest string `json:"certificate-signing-request"`
 }
 
 // SpecificManifest represents the manifest file advertised by a data share
@@ -77,7 +76,7 @@ type SpecificManifest struct {
 	// contain the public key corresponding to the private key that the data
 	// share processor which owns the manifest uses to decrypt ingestion share
 	// packets.
-	PacketEncryptionCertificates map[string]PacketEncryptionCertificate `json:"packet-encryption-certificates"`
+	PacketEncryptionKeys map[string]PacketEncryptionKey `json:"packet-encryption-keys"`
 }
 
 // TerraformOutput represents the JSON output from `terraform apply` or
@@ -197,18 +196,13 @@ func getConfigFilePath() string {
 }
 
 func main() {
-	deployConfig, err := config.Read(getConfigFilePath())
-	if err != nil {
-		log.Fatalf("failed to parse config.toml: %v", err)
-	}
-
 	var terraformOutput TerraformOutput
 
 	if err := json.NewDecoder(os.Stdin).Decode(&terraformOutput); err != nil {
 		log.Fatalf("failed to parse specific manifests: %v", err)
 	}
 
-	certificatesByNamespace := map[string]PacketEncryptionCertificate{}
+	certificatesByNamespace := map[string]PacketEncryptionKey{}
 
 	for dataShareProcessorName, manifestWrapper := range terraformOutput.SpecificManifests.Value {
 		newBatchSigningPublicKeys := map[string]BatchSigningPublicKey{}
@@ -246,9 +240,9 @@ func main() {
 
 		manifestWrapper.SpecificManifest.BatchSigningPublicKeys = newBatchSigningPublicKeys
 
-		newCertificates := map[string]PacketEncryptionCertificate{}
-		for name, packetEncryptionCertificate := range manifestWrapper.SpecificManifest.PacketEncryptionCertificates {
-			if packetEncryptionCertificate.Certificate != "" {
+		newCertificates := map[string]PacketEncryptionKey{}
+		for name, packetEncryptionCertificate := range manifestWrapper.SpecificManifest.PacketEncryptionKeys {
+			if packetEncryptionCertificate.CertificateSigningRequest != "" {
 				newCertificates[name] = packetEncryptionCertificate
 				continue
 			}
@@ -275,18 +269,21 @@ func main() {
 				log.Fatalf("%s", err)
 			}
 
-			certificate, err := cert.IssueCertificate(deployConfig, manifestWrapper.CertificateFQDN, privKey)
+			prioKey := key.NewPrioKey(privKey)
+			csrTemplate := key.GetPrioCSRTemplate(manifestWrapper.CertificateFQDN)
+
+			pemCSR, err := prioKey.CreatePemEncodedCertificateRequest(rand.Reader, csrTemplate)
 			if err != nil {
 				log.Fatalf("%s", err)
 			}
 
-			packetEncryptionCertificate := PacketEncryptionCertificate{Certificate: certificate}
+			packetEncryptionCertificate := PacketEncryptionKey{CertificateSigningRequest: pemCSR}
 
 			certificatesByNamespace[manifestWrapper.KubernetesNamespace] = packetEncryptionCertificate
 			newCertificates[name] = packetEncryptionCertificate
 		}
 
-		manifestWrapper.SpecificManifest.PacketEncryptionCertificates = newCertificates
+		manifestWrapper.SpecificManifest.PacketEncryptionKeys = newCertificates
 
 		// Put the specific manifests into the manifest bucket. Users of this
 		// tool already need to have gsutil and valid Google Cloud credentials
