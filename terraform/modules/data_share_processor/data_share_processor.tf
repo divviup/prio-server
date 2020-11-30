@@ -395,9 +395,9 @@ output "specific_manifest" {
         expiration = ""
       }
     }
-    packet-encryption-certificates = {
+    packet-encryption-keys = {
       (var.packet_decryption_key_kubernetes_secret) = {
-        certificate = ""
+        certificate-signing-request = ""
       }
     }
   }
