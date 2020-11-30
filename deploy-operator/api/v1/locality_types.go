@@ -32,6 +32,9 @@ type LocalitySpec struct {
 	// Schedule is the cron job schedule as defined by https://en.wikipedia.org/wiki/Cron
 	Schedule string `json:"schedule"`
 
+	// FQDN is the FQDN of the locality, used as CN for the PacketDecryption CSRs
+	FQDN string `json:"fqdn"`
+
 	// BatchSigningKeySpec is the specification for the rotation and expiration of the BatchSigningKey
 	BatchSigningKeySpec LocalityKeySpec `json:"batchSigningKeySpec"`
 

@@ -53,6 +53,10 @@ spec:
             environmentName:
               description: EnvironmentName is the name of the environment for prio
               type: string
+            fqdn:
+              description: FQDN is the FQDN of the locality, used as CN for the PacketDecryption
+                CSRs
+              type: string
             ingestors:
               description: Ingestors is the list of ingestors
               items:
@@ -82,6 +86,7 @@ spec:
           required:
           - batchSigningKeySpec
           - environmentName
+          - fqdn
           - ingestors
           - manifestBucketLocation
           - packetEncryptionKeySpec

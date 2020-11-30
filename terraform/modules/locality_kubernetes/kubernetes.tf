@@ -18,6 +18,10 @@ variable "manifest_bucket_base_url" {
   type = string
 }
 
+variable "certificate_domain" {
+  type = string
+}
+
 variable "ingestors" {
   type        = map(string)
   description = "Map of ingestor names to the URL where their global manifest may be found."
@@ -112,6 +116,7 @@ locals {
       "manifestBucketLocation" : var.manifest_bucket,
       "ingestors" : keys(var.ingestors),
       "schedule" : "0 5 * * 0",
+      "fqdn": "${var.kubernetes_namespace}.${var.certificate_domain}",
       "batchSigningKeySpec" : {
         "keyValidity" : var.batch_signing_key_expiration
         "keyRotationInterval" : var.batch_signing_key_rotation

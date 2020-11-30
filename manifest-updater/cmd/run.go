@@ -3,6 +3,7 @@ package cmd
 import (
 	"crypto/rand"
 	"crypto/x509"
+	"crypto/x509/pkix"
 	"fmt"
 	"time"
 
@@ -35,6 +36,8 @@ var runCmd = &cobra.Command{
 
 		configLocation := viper.GetString("config_location")
 
+		fqdn := viper.GetString("fqdn")
+
 		log.WithFields(
 			map[string]interface{}{
 				"environment name":                  environmentName,
@@ -46,6 +49,7 @@ var runCmd = &cobra.Command{
 				"packet encryption expiration days": packetEncryptionExpiration,
 				"packet encryption rotation days":   packetEncryptionRotation,
 				"config location":                   configLocation,
+				"fqdn":                              fqdn,
 			},
 		).Info("Starting the updater...")
 
@@ -67,7 +71,11 @@ var runCmd = &cobra.Command{
 			packetEncryptionCertificate = make(manifest.PacketEncryptionKeyCSRs)
 
 			for _, key := range packetEncryptionKeys {
-				csr, err := key.CreatePemEncodedCertificateRequest(rand.Reader, new(x509.CertificateRequest))
+				csrTemplate := new(x509.CertificateRequest)
+				csrTemplate.Subject = pkix.Name{CommonName: fqdn}
+				csrTemplate.SignatureAlgorithm = x509.ECDSAWithSHA256
+
+				csr, err := key.CreatePemEncodedCertificateRequest(rand.Reader, csrTemplate)
 				if err != nil {
 					log.Fatal(err)
 				}

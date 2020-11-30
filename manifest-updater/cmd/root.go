@@ -64,6 +64,7 @@ func init() {
 	rootCmd.PersistentFlags().Int32("packet_encryption_key_rotation", 320, "Rotation interval in days for the packet encryption key")
 
 	rootCmd.PersistentFlags().String("config_location", "", "Path to the configuration file for the manifest-updater")
+	rootCmd.PersistentFlags().String("fqdn", "", "FQDN of the locality, used as common name for packet decryption CSRs")
 
 	_ = viper.BindPFlag("log", rootCmd.PersistentFlags().Lookup("log"))
 	_ = viper.BindPFlag("colors", rootCmd.PersistentFlags().Lookup("colors"))

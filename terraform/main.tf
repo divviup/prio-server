@@ -299,6 +299,7 @@ module "locality_kubernetes" {
   peer_share_processor_manifest_base_url = var.peer_share_processor_manifest_base_url
   manifest_bucket                        = module.manifest.bucket
   manifest_bucket_base_url               = module.manifest.base_url
+  certificate_domain                     = "${var.environment}.certificates.${var.manifest_domain}"
   kubernetes_namespace                   = each.value.metadata[0].name
   ingestors                              = var.ingestors
 

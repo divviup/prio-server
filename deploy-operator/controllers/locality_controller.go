@@ -154,6 +154,7 @@ func (r *LocalityReconciler) createCronJobTemplate(locality *priov1.Locality) v1
 		{Name: "KR_PACKET_ENCRYPTION_KEY_EXPIRATION", Value: toString(locality.Spec.PacketEncryptionKeySpec.KeyValidity)},
 		{Name: "KR_PACKET_ENCRYPTION_KEY_ROTATION", Value: toString(locality.Spec.PacketEncryptionKeySpec.KeyRotationInterval)},
 		{Name: "KR_CONFIG_LOCATION", Value: "/config/manifest-updater/config.json"},
+		{Name: "KR_FQDN", Value: locality.Spec.FQDN},
 	}
 
 	containers := []v1core.Container{{
