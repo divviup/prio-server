@@ -60,10 +60,6 @@ type SpecificManifest struct {
 	// IngestionBucket is the region+name of the bucket that the data share
 	// processor which owns the manifest reads ingestion batches from.
 	IngestionBucket string `json:"ingestion-bucket"`
-	// IngestionIdentity is the ARN of the AWS IAM role that should be assumed
-	// by an ingestion server to write to this data share processor's ingestion
-	// bucket, if the ingestor does not have an AWS account of their own.
-	IngestionIdentity string `json:"ingestion-identity"`
 	// PeerValidationBucket is the region+name of the bucket that the data share
 	// processor which owns the manifest reads peer validation batches from.
 	PeerValidationBucket string `json:"peer-validation-bucket"`
