@@ -185,16 +185,6 @@ func generateAndDeployKeyPair(namespace, keyName string, keyMarshaler privateKey
 	return p256Key, nil
 }
 
-// getConfigFilePath gets the configuration file path from the DEPLOY_CONFIG_PATH environment variable.
-// this function defaults to ./config.toml if that env variable is empty.
-func getConfigFilePath() string {
-	val, exists := os.LookupEnv("DEPLOY_CONFIG_PATH")
-	if !exists {
-		return "./config.toml"
-	}
-	return val
-}
-
 func main() {
 	var terraformOutput TerraformOutput
 
