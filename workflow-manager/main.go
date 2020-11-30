@@ -483,14 +483,36 @@ func fmtTime(t time.Time) string {
 	return t.Format("2006/01/02/15/04")
 }
 
-// idForJobName generates a job name-safe string from an aggregationID.
+// jobNameForBatchPath generates a name for the Kubernetes job that will intake
+// the provided batch. The name will incorporate the aggregation ID, batch UUID
+// and batch timestamp while being a legal Kubernetes job name.
+func intakeJobNameForBatchPath(path *batchPath) string {
+	// Kubernetes job names must be valid DNS identifiers, which means they are
+	// limited to 63 characters in length and also what characters they may
+	// contain. Intake job names are like:
+	// i-<aggregation name fragment>-<batch UUID fragment>-<batch timestamp>
+	// The batch timestamp is 16 characters, and the 'i' and '-'es take up
+	// another 4, leaving 43. We take the '-'es out of the UUID and use half of
+	// it, hoping that this plus the date will provide enough entropy to avoid
+	// collisions. Half a UUID is 16 characters, leaving 27 for the aggregation
+	// ID fragment.
+	// For example, we might get:
+	// i-com-apple-EN-verylongnameth-0f0f0f0f0f0f0f0f-2006-01-02-15-04
+	return fmt.Sprintf("i-%s-%s-%s",
+		aggregationJobNameFragment(path.aggregationID, 27),
+		strings.ReplaceAll(path.ID, "-", "")[:16],
+		strings.ReplaceAll(fmtTime(path.time), "/", "-"))
+}
+
+// aggregationJobNameFragment generates a job name-safe string from an
+// aggregationID.
 // Remove characters that aren't valid in DNS names, and also restrict
-// the length so we don't go over the limit of 63 characters.
-func idForJobName(aggregationID string) string {
+// the length so we don't go over the specified limit of characters.
+func aggregationJobNameFragment(aggregationID string, maxLength int) string {
 	re := regexp.MustCompile("[^A-Za-z0-9-]")
 	idForJobName := re.ReplaceAllLiteralString(aggregationID, "-")
-	if len(idForJobName) > 30 {
-		idForJobName = idForJobName[:30]
+	if len(idForJobName) > maxLength {
+		idForJobName = idForJobName[:maxLength]
 	}
 	idForJobName = strings.ToLower(idForJobName)
 	return idForJobName
@@ -589,7 +611,7 @@ func launchAggregationJobs(ctx context.Context, batchesByID aggregationMap, inte
 			}
 		}
 
-		jobName := fmt.Sprintf("a-%s-%s", idForJobName(aggregationID), strings.ReplaceAll(fmtTime(inter.begin), "/", "-"))
+		jobName := fmt.Sprintf("a-%s-%s", aggregationJobNameFragment(aggregationID, 30), strings.ReplaceAll(fmtTime(inter.begin), "/", "-"))
 
 		log.Printf("starting aggregation job %s (interval %s) with args %s", jobName, inter, args)
 
@@ -713,10 +735,7 @@ func startIntakeJob(
 		return nil
 	}
 
-	jobName := fmt.Sprintf("i-%s-%s",
-		idForJobName(batchPath.aggregationID),
-		strings.ReplaceAll(fmtTime(batchPath.time), "/", "-"))
-
+	jobName := intakeJobNameForBatchPath(batchPath)
 	args := []string{
 		"intake-batch",
 		"--aggregation-id", batchPath.aggregationID,
