@@ -324,7 +324,6 @@ impl<'a, 'b> AppArgumentAdder for App<'a, 'b> {
 }
 
 fn main() -> Result<(), anyhow::Error> {
-    use log::info;
     env_logger::init();
 
     let args: Vec<String> = std::env::args().collect();
@@ -610,6 +609,7 @@ fn main() -> Result<(), anyhow::Error> {
 
     let _verbose = matches.is_present("verbose");
 
+    info!("running subcommand");
     let result = match matches.subcommand() {
         // The configuration of the Args above should guarantee that the
         // various parameters are present and valid, so it is safe to use
@@ -621,17 +621,21 @@ fn main() -> Result<(), anyhow::Error> {
         (_, _) => Ok(()),
     };
 
+    println!("running push_metrics");
     // Once we've run the subcommand, whether it succeeds or fails, we want to push any metrics
     // we have collected.
-    prometheus::push_metrics(
+    let z = prometheus::push_metrics(
         "intake-batch",
         prometheus::labels! {},
         "prometheus-pushgateway.default:9091",
         prometheus::gather(),
         None,
-    )
-    .map_err(|e| eprintln!("failed to push metrics: {}", e))
-    .ok();
+    );
+    println!("done running push_metrics");
+    match z {
+        Err(e) => eprintln!("failed to push metrics: {}", e),
+        _ => println!("sucess"),
+    };
     result
 }
 
@@ -694,6 +698,7 @@ fn generate_sample(sub_matches: &ArgMatches) -> Result<(), anyhow::Error> {
 }
 
 fn intake_batch(sub_matches: &ArgMatches) -> Result<(), anyhow::Error> {
+    info!("building intake_transport");
     let mut intake_transport = intake_transport_from_args(sub_matches)?;
 
     // We need the bucket to which we will write validations for the
@@ -730,6 +735,7 @@ fn intake_batch(sub_matches: &ArgMatches) -> Result<(), anyhow::Error> {
     let date: &str = sub_matches.value_of("date").unwrap();
     let date: NaiveDateTime = NaiveDateTime::parse_from_str(date, DATE_FORMAT).unwrap();
 
+    info!("building batch_intaker");
     let mut batch_intaker = BatchIntaker::new(
         &sub_matches.value_of("aggregation-id").unwrap(),
         &batch_id,
@@ -740,6 +746,7 @@ fn intake_batch(sub_matches: &ArgMatches) -> Result<(), anyhow::Error> {
         is_first_from_arg(sub_matches),
     )?;
 
+    info!("making counter");
     let intake_started: Counter = register_counter!(
         "intake_jobs_begun",
         "Number of intake-batch jobs that started (on the facilitator side)"
@@ -747,18 +754,22 @@ fn intake_batch(sub_matches: &ArgMatches) -> Result<(), anyhow::Error> {
     .unwrap();
     intake_started.inc();
 
+    info!("generating validation share");
     let result = batch_intaker.generate_validation_share();
 
+    info!("making second counter");
     let intake_finished = register_counter_vec!(
         "intake_jobs_finished",
         "Number of intake-batch jobs that finished (on the facilitator side)",
         &["status"]
     )
     .unwrap();
+    info!("matching result");
     match result {
         Ok(_) => intake_finished.with_label_values(&["success"]).inc(),
         Err(_) => intake_finished.with_label_values(&["error"]).inc(),
     }
+    info!("returning result");
 
     result
 }

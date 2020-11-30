@@ -29,12 +29,15 @@ COPY ./avro-schema ./avro-schema
 COPY ./facilitator ./facilitator
 
 ARG BUILD_INFO=unspecified
-LABEL build_info="${BUILD_INFO}"
+
 # This cargo build command must match the one above, or the build cache will not be reused.
 RUN cargo build --manifest-path ./facilitator/Cargo.toml
 # We build in debug mode so the build runs quickly, then strip the binary for size.
 RUN strip facilitator/target/debug/facilitator
 
+FROM gcr.io/distroless/base
+ARG BUILD_INFO=unspecified
+LABEL build_info="${BUILD_INFO}"
 # Build a minimal container containing only the binary, the one .so it needs, and root certs.
-RUN cp /usr/src/prio-server/facilitator/target/debug/facilitator /facilitator
+COPY --from=builder /usr/src/prio-server/facilitator/target/debug/facilitator /facilitator
 ENTRYPOINT ["/facilitator"]
