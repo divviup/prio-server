@@ -735,25 +735,26 @@ fn aggregate(sub_matches: &ArgMatches) -> Result<(), anyhow::Error> {
     let own_validation_transport =
         transport_for_path(own_validation_bucket, own_identity, sub_matches)?;
 
-    // To read our own validation shares, we require our own public keys
-    // which we discover in our own specific manifest.
+    // To read our own validation shares, we require our own public keys which
+    // we discover in our own specific manifest. If no manifest is provided, use
+    // the public portion of the provided batch signing private key.
     let own_public_key_map = match (
+        sub_matches.value_of("own-manifest-base-url"),
         sub_matches.value_of("batch-signing-private-key"),
         sub_matches.value_of("batch-signing-private-key-identifier"),
-        sub_matches.value_of("own-manifest-base-url"),
     ) {
-        (Some(private_key), Some(private_key_identifier), _) => {
-            public_key_map_from_arg(private_key, private_key_identifier)
-        }
-        (_, _, Some(manifest_base_url)) => {
+        (Some(manifest_base_url), _, _) => {
             SpecificManifest::from_https(manifest_base_url, instance_name)?
                 .batch_signing_public_keys()?
+        }
+        (_, Some(private_key), Some(private_key_identifier)) => {
+            public_key_map_from_arg(private_key, private_key_identifier)
         }
         _ => {
             return Err(anyhow!(
                 "batch-signing-private-key and \
-                        batch-signing-private-key-identifier are required if \
-                        own-manifest-base-url is not provided."
+                batch-signing-private-key-identifier are required if \
+                own-manifest-base-url is not provided."
             ))
         }
     };
