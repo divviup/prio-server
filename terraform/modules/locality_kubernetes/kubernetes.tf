@@ -116,7 +116,7 @@ locals {
       "manifestBucketLocation" : var.manifest_bucket,
       "ingestors" : keys(var.ingestors),
       "schedule" : "0 5 * * 0",
-      "fqdn": "${var.kubernetes_namespace}.${var.certificate_domain}",
+      "fqdn" : "${var.kubernetes_namespace}.${var.certificate_domain}",
       "batchSigningKeySpec" : {
         "keyValidity" : var.batch_signing_key_expiration
         "keyRotationInterval" : var.batch_signing_key_rotation
@@ -234,7 +234,7 @@ module "data_share_processors" {
   is_first                                       = var.is_first
   aggregation_period                             = var.aggregation_period
   aggregation_grace_period                       = var.aggregation_grace_period
-  kms_keyring = var.kms_keyring
+  kms_keyring                                    = var.kms_keyring
 }
 
 # Permit the service accounts for all the data share processors to request Oauth

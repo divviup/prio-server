@@ -314,7 +314,7 @@ module "locality_kubernetes" {
   is_first                                            = var.is_first
   aggregation_period                                  = var.aggregation_period
   aggregation_grace_period                            = var.aggregation_grace_period
-  kms_keyring = module.gke.kms_keyring
+  kms_keyring                                         = module.gke.kms_keyring
 }
 
 module "fake_server_resources" {
