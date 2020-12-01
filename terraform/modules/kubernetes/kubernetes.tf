@@ -111,6 +111,12 @@ variable "aggregation_grace_period" {
   type = string
 }
 
+variable "pushgateway" {
+  type    = string
+  default = ""
+  #default = "prometheus-pushgateway.default:9091"
+}
+
 data "aws_caller_identity" "current" {}
 
 # Workload identity[1] lets us map GCP service accounts to Kubernetes service
@@ -191,6 +197,7 @@ resource "kubernetes_config_map" "intake_batch_job_config_map" {
     OWN_OUTPUT                           = var.own_validation_bucket
     RUST_LOG                             = "info"
     RUST_BACKTRACE                       = "1"
+    PUSHGATEWAY                          = var.pushgateway
   }
 }
 
@@ -221,6 +228,7 @@ resource "kubernetes_config_map" "aggregate_job_config_map" {
     PORTAL_MANIFEST_BASE_URL             = "https://${var.portal_server_manifest_base_url}"
     RUST_LOG                             = "info"
     RUST_BACKTRACE                       = "1"
+    PUSHGATEWAY                          = var.pushgateway
   }
 }
 
@@ -326,6 +334,7 @@ resource "kubernetes_cron_job" "sample_maker" {
               name  = "sample-maker"
               image = "${var.container_registry}/${var.facilitator_image}:${var.facilitator_version}"
               args = [
+                "--pushgateway", var.pushgateway,
                 "generate-ingestion-sample",
                 "--own-output", var.ingestion_bucket,
                 "--peer-output", var.test_peer_ingestion_bucket,
@@ -349,7 +358,7 @@ resource "kubernetes_cron_job" "sample_maker" {
               ]
               env {
                 name  = "RUST_LOG"
-                value = "1"
+                value = "info"
               }
               env {
                 name  = "RUST_BACKTRACE"

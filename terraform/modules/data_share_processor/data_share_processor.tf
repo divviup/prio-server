@@ -96,6 +96,10 @@ variable "kms_keyring" {
   type = string
 }
 
+variable "pushgateway" {
+  type = string
+}
+
 locals {
   resource_prefix         = "prio-${var.environment}-${var.data_share_processor_name}"
   is_env_with_ingestor    = lookup(var.test_peer_environment, "env_with_ingestor", "") == var.environment
@@ -366,6 +370,7 @@ module "kubernetes" {
   is_first                                = var.is_first
   aggregation_period                      = var.aggregation_period
   aggregation_grace_period                = var.aggregation_grace_period
+  pushgateway                             = var.pushgateway
 }
 
 output "data_share_processor_name" {

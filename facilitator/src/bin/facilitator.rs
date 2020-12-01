@@ -1,7 +1,7 @@
 use anyhow::{anyhow, Context, Result};
 use chrono::{prelude::Utc, NaiveDateTime};
 use clap::{App, Arg, ArgMatches, SubCommand};
-use log::info;
+use log::{error, info};
 use prio::encrypt::PrivateKey;
 use prometheus::{register_counter, register_counter_vec, Counter};
 use ring::signature::{
@@ -336,10 +336,10 @@ fn main() -> Result<(), anyhow::Error> {
     let matches = App::new("facilitator")
         .about("Prio data share processor")
         .arg(
-            Arg::with_name("verbose")
-                .long("verbose")
-                .short("v")
-                .help("Enable verbose output to stderr"),
+            Arg::with_name("pushgateway")
+                .long("pushgateway")
+                .env("PUSHGATEWAY")
+                .help("Address of a Prometheus pushgateway to push metrics to, in host:port form"),
         )
         .subcommand(
             SubCommand::with_name("generate-ingestion-sample")
@@ -607,8 +607,6 @@ fn main() -> Result<(), anyhow::Error> {
         )
         .get_matches();
 
-    let _verbose = matches.is_present("verbose");
-
     info!("running subcommand");
     let result = match matches.subcommand() {
         // The configuration of the Args above should guarantee that the
@@ -621,21 +619,25 @@ fn main() -> Result<(), anyhow::Error> {
         (_, _) => Ok(()),
     };
 
-    println!("running push_metrics");
     // Once we've run the subcommand, whether it succeeds or fails, we want to push any metrics
     // we have collected.
-    let z = prometheus::push_metrics(
-        "intake-batch",
-        prometheus::labels! {},
-        "prometheus-pushgateway.default:9091",
-        prometheus::gather(),
-        None,
-    );
-    println!("done running push_metrics");
-    match z {
-        Err(e) => eprintln!("failed to push metrics: {}", e),
-        _ => println!("sucess"),
-    };
+    if let Some(pushgateway) = matches.value_of("pushgateway") {
+        if pushgateway != "" {
+            info!("pushing metrics to {}", pushgateway);
+            let jobname: &str = matches.subcommand().0;
+            prometheus::push_metrics(
+                jobname,
+                prometheus::labels! {},
+                pushgateway,
+                prometheus::gather(),
+                None,
+            )
+            .map(|_| info!("done pushing metrics"))
+            .map_err(|e| error!("error pushing metrics: {}", e))
+            .ok();
+        }
+    }
+
     result
 }
 
