@@ -237,15 +237,6 @@ module "data_share_processors" {
   kms_keyring                                    = var.kms_keyring
 }
 
-# Permit the service accounts for all the data share processors to request Oauth
-# tokens allowing them to impersonate the sum part bucket writer.
-resource "google_service_account_iam_binding" "data_share_processors_to_sum_part_bucket_writer_token_creator" {
-  provider           = google-beta
-  service_account_id = var.google_service_account_sum_part_bucket_writer_name
-  role               = "roles/iam.serviceAccountTokenCreator"
-  members            = [for v in module.data_share_processors : "serviceAccount:${v.service_account_email}"]
-}
-
 resource "kubernetes_config_map" "manifest_updater_config" {
   metadata {
     name      = "manifest-updater-config"

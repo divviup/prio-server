@@ -383,26 +383,6 @@ module "bucket" {
   depends_on = [google_kms_crypto_key_iam_binding.bucket_encryption_key]
 }
 
-resource "google_storage_bucket" "own_validation_bucket" {
-  provider = google-beta
-  name     = "${local.resource_prefix}-own-validation"
-  location = var.gcp_region
-  # Force deletion of bucket contents on bucket destroy. Bucket contents would
-  # be re-created by a subsequent deploy so no reason to keep them around.
-  force_destroy               = true
-  uniform_bucket_level_access = true
-}
-
-# Permit the workflow manager and facilitator service account to manage the
-# bucket
-resource "google_storage_bucket_iam_binding" "own_validation_bucket_admin" {
-  bucket = google_storage_bucket.own_validation_bucket.name
-  role   = "roles/storage.objectAdmin"
-  members = [
-    "serviceAccount:${module.kubernetes.service_account_email}"
-  ]
-}
-
 module "kubernetes" {
   source                    = "../../modules/data_share_processor_kubernetes/"
   data_share_processor_name = var.data_share_processor_name
@@ -418,7 +398,7 @@ module "kubernetes" {
   remote_peer_validation_bucket_identity = local.bucket_access_identities.remote_validation_bucket_writer
   peer_validation_bucket                 = local.peer_validation_bucket_url
   peer_validation_bucket_identity        = local.bucket_access_identities.peer_validation_identity
-  own_validation_bucket                  = "gs://${google_storage_bucket.own_validation_bucket.name}"
+  own_validation_bucket                  = "gs://${module.bucket.name}"
   own_manifest_base_url                  = var.own_manifest_base_url
   sum_part_bucket_service_account_email  = var.remote_bucket_writer_gcp_service_account_email
   portal_server_manifest_base_url        = var.portal_server_manifest_base_url

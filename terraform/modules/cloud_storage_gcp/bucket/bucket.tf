@@ -57,3 +57,7 @@ resource "google_storage_bucket_iam_binding" "bucket_reader" {
     "serviceAccount:${var.bucket_reader}"
   ]
 }
+
+output "name" {
+  value = google_storage_bucket.bucket.name
+}
