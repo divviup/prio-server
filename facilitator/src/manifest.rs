@@ -30,10 +30,11 @@ struct BatchSigningPublicKey {
 }
 
 #[derive(Debug, Deserialize, PartialEq)]
-struct PacketEncryptionCertificate {
-    /// The PEM-armored base64 encoding of the ASN.1 encoding of an X.509
-    /// certificate containing an ECDSA P256 key.
-    certificate: String,
+#[serde(rename_all = "kebab-case")]
+struct PacketEncryptionCertificateSigningRequest {
+    /// The PEM-armored base64 encoding of the ASN.1 encoding of a PKCS#10
+    /// certificate signing request containing an ECDSA P256 key.
+    certificate_signing_request: String,
 }
 
 /// Represents a global manifest advertised by a data share processor. See the
@@ -106,9 +107,10 @@ pub struct SpecificManifest {
     peer_validation_bucket: String,
     /// Keys used by this data share processor to sign batches.
     batch_signing_public_keys: HashMap<String, BatchSigningPublicKey>,
-    /// Certificates containing public keys that should be used to encrypt
-    /// ingestion share packets intended for this data share processor.
-    packet_encryption_certificates: HashMap<String, PacketEncryptionCertificate>,
+    /// Certificate signing requests containing public keys that should be used
+    /// to encrypt ingestion share packets intended for this data share
+    /// processor.
+    packet_encryption_keys: HashMap<String, PacketEncryptionCertificateSigningRequest>,
 }
 
 impl SpecificManifest {
@@ -460,9 +462,9 @@ mod tests {
             r#"
 {{
     "format": 1,
-    "packet-encryption-certificates": {{
+    "packet-encryption-keys": {{
         "fake-key-1": {{
-            "certificate": "who cares"
+            "certificate-signing-request": "who cares"
         }}
     }},
     "batch-signing-public-keys": {{
@@ -491,17 +493,17 @@ mod tests {
                 ),
             },
         );
-        let mut expected_packet_encryption_certificates = HashMap::new();
-        expected_packet_encryption_certificates.insert(
+        let mut expected_packet_encryption_csrs = HashMap::new();
+        expected_packet_encryption_csrs.insert(
             "fake-key-1".to_owned(),
-            PacketEncryptionCertificate {
-                certificate: "who cares".to_owned(),
+            PacketEncryptionCertificateSigningRequest {
+                certificate_signing_request: "who cares".to_owned(),
             },
         );
         let expected_manifest = SpecificManifest {
             format: 1,
             batch_signing_public_keys: expected_batch_keys,
-            packet_encryption_certificates: expected_packet_encryption_certificates,
+            packet_encryption_keys: expected_packet_encryption_csrs,
             ingestion_bucket: "s3://us-west-1/ingestion".to_string(),
             ingestion_identity: Some("arn:aws:iam:something:fake".to_owned()),
             peer_validation_bucket: "gs://validation/path/fragment".to_string(),
@@ -632,9 +634,9 @@ mod tests {
             r#"
 {
     "format": 1,
-    "packet-encryption-certificates": {
+    "packet-encryption-keys": {
         "fake-key-1": {
-            "certificate": "who cares"
+            "certificate-signing-request": "who cares"
         }
     },
     "batch-signing-public-keys": {
@@ -652,9 +654,9 @@ mod tests {
             r#"
 {
     "format": 1,
-    "packet-encryption-certificates": {
+    "packet-encryption-keys": {
         "fake-key-1": {
-            "certificate": "who cares"
+            "certificate-signing-request": "who cares"
         }
     },
     "batch-signing-public-keys": {
@@ -672,9 +674,9 @@ mod tests {
             r#"
 {
     "format": 1,
-    "packet-encryption-certificates": {
+    "packet-encryption-keys": {
         "fake-key-1": {
-            "certificate": "who cares"
+            "certificate-signing-request": "who cares"
         }
     },
     "batch-signing-public-keys": {
