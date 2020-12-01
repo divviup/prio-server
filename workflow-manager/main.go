@@ -420,16 +420,29 @@ func (b *bucket) listFilesGS(ctx context.Context) ([]string, error) {
 	log.Printf("looking for ready batches in gs://%s as (ambient service account)", b.bucketName)
 	var output []string
 	it := bkt.Objects(ctx, query)
+
+	// Use the paginated API to list bucket contents, as otherwise we would only get the first 1,000 objects in the bucket.
+	// As in the S3 case above, we get 100 results at a time to ensure we exercise the pagination case.
+	// https://cloud.google.com/storage/docs/json_api/v1/objects/list
+	p := iterator.NewPager(it, 100, "")
+	var objects []*storage.ObjectAttrs
 	for {
-		attrs, err := it.Next()
-		if err == iterator.Done {
+		// NextPage will append to the objects slice
+		nextPageToken, err := p.NextPage(&objects)
+		if err != nil {
+			return nil, fmt.Errorf("storage.nextPage: %w", err)
+		}
+
+		if nextPageToken == "" {
+			// no more data
 			break
 		}
-		if err != nil {
-			return nil, fmt.Errorf("iterating on inputBucket objects from %q: %w", b.bucketName, err)
-		}
-		output = append(output, attrs.Name)
 	}
+
+	for _, obj := range objects {
+		output = append(output, obj.Name)
+	}
+
 	return output, nil
 }
 
