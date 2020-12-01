@@ -14,8 +14,8 @@ use facilitator::{
     config::{Identity, ManifestKind, StoragePath},
     intake::BatchIntaker,
     manifest::{
-        DataShareProcessorGlobalManifest, IngestionServerGlobalManifest,
-        PortalServerGlobalManifest, SpecificManifest,
+        DataShareProcessorGlobalManifest, IngestionServerManifest, PortalServerGlobalManifest,
+        SpecificManifest,
     },
     sample::generate_ingestion_sample,
     transport::{
@@ -587,6 +587,7 @@ fn main() -> Result<(), anyhow::Error> {
                     .value_name("KIND")
                     .help("kind of manifest to locate and parse")
                     .possible_value(leak_string(ManifestKind::IngestorGlobal.to_string()))
+                    .possible_value(leak_string(ManifestKind::IngestorSpecific.to_string()))
                     .possible_value(leak_string(ManifestKind::DataShareProcessorGlobal.to_string()))
                     .possible_value(leak_string(ManifestKind::DataShareProcessorSpecific.to_string()))
                     .possible_value(leak_string(ManifestKind::PortalServerGlobal.to_string()))
@@ -595,12 +596,13 @@ fn main() -> Result<(), anyhow::Error> {
             .arg(
                 Arg::with_name("instance")
                     .long("instance")
-                    .value_name("LOCALITY-TECH_GIANT")
+                    .value_name("INSTANCE_NAME")
                     .help("the instance name whose manifest is to be fetched")
                     .long_help(
                         leak_string(format!("the instance name whose manifest is to be fetched, \
-                        e.g., \"mi-google\". Required if manifest-kind={}.",
-                        ManifestKind::DataShareProcessorSpecific))
+                        e.g., \"mi-google\" for a data share processor specific manifest or \"mi\" \
+                        for an ingestor specific manifest. Required if manifest-kind={} or {}.",
+                        ManifestKind::DataShareProcessorSpecific, ManifestKind::IngestorSpecific))
                     )
             )
         )
@@ -875,11 +877,18 @@ fn lint_manifest(sub_matches: &ArgMatches) -> Result<(), anyhow::Error> {
     )?;
 
     match manifest_kind {
-        ManifestKind::IngestorGlobal => {
+        ManifestKind::IngestorGlobal | ManifestKind::IngestorSpecific => {
+            if manifest_kind == ManifestKind::IngestorSpecific
+                && sub_matches.value_of("instance").is_none()
+            {
+                return Err(anyhow!(
+                    "instance is required when manifest-kind=ingestor-specific"
+                ));
+            }
             let manifest = if let Some(base_url) = manifest_base_url {
-                IngestionServerGlobalManifest::from_https(base_url)?
+                IngestionServerManifest::from_https(base_url, sub_matches.value_of("instance"))?
             } else if let Some(body) = manifest_body {
-                IngestionServerGlobalManifest::from_slice(body.as_bytes())?
+                IngestionServerManifest::from_slice(body.as_bytes())?
             } else {
                 return Err(anyhow!(
                     "one of manifest-base-url or manifest-path is required"
@@ -987,10 +996,11 @@ fn intake_transport_from_args(matches: &ArgMatches) -> Result<VerifiableAndDecry
         (Some(public_key), Some(public_key_identifier), _) => {
             public_key_map_from_arg(public_key, public_key_identifier)
         }
-        (_, _, Some(manifest_base_url)) => {
-            IngestionServerGlobalManifest::from_https(manifest_base_url)?
-                .batch_signing_public_keys()?
-        }
+        (_, _, Some(manifest_base_url)) => IngestionServerManifest::from_https(
+            manifest_base_url,
+            Some(matches.value_of("instance-name").unwrap()),
+        )?
+        .batch_signing_public_keys()?,
         _ => {
             return Err(anyhow!(
                 "ingestor-public-key and ingestor-public-key-identifier are \
