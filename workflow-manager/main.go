@@ -420,16 +420,27 @@ func (b *bucket) listFilesGS(ctx context.Context) ([]string, error) {
 	log.Printf("looking for ready batches in gs://%s as (ambient service account)", b.bucketName)
 	var output []string
 	it := bkt.Objects(ctx, query)
+
+	// https://cloud.google.com/storage/docs/json_api/v1/objects/list
+	// We can have up to: 1000
+	p := iterator.NewPager(it, 100, "")
+
 	for {
-		attrs, err := it.Next()
-		if err == iterator.Done {
+		var objects []*storage.ObjectAttrs
+		nextPageToken, err := p.NextPage(&objects)
+		if err != nil {
+			return nil, fmt.Errorf("storage.nextPage: %w", err)
+		}
+
+		for _, obj := range objects {
+			output = append(output, obj.Name)
+		}
+
+		if nextPageToken == "" {
 			break
 		}
-		if err != nil {
-			return nil, fmt.Errorf("iterating on inputBucket objects from %q: %w", b.bucketName, err)
-		}
-		output = append(output, attrs.Name)
 	}
+
 	return output, nil
 }
 
