@@ -261,8 +261,24 @@ func main() {
 
 	log.Printf("found %d peer validations", len(peerValidationBatches))
 
-	// TODO: Check that both peer and own have something.
-	var aggregationBatches = peerValidationBatches
+	// Take the intersection of the sets of own validations and peer validations to get the list of
+	// batches we can aggregate.
+	// Go doesn't have sets, so we have to use a map[string]bool. We use the batch ID as the key to
+	// the set, because batchPath is not a valid map key type, and using a *batchPath wouldn't give
+	// us the lookup semantics we want.
+	ownValidationsSet := map[string]bool{}
+	for _, ownValidationBatch := range ownValidationBatches {
+		ownValidationsSet[ownValidationBatch.ID] = true
+	}
+	aggregationBatches := []*batchPath{}
+	for _, peerValidationBatch := range peerValidationBatches {
+		if _, ok := ownValidationsSet[peerValidationBatch.ID]; ok {
+			aggregationBatches = append(aggregationBatches, peerValidationBatch)
+		}
+	}
+
+	log.Printf("aggregation batches: %q", aggregationBatches)
+
 	interval := aggregationInterval(aggregationPeriodParsed, gracePeriodParsed)
 	log.Printf("looking for batches to aggregate in interval %s", interval)
 	aggregationBatches = withinInterval(aggregationBatches, interval)
