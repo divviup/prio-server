@@ -607,7 +607,6 @@ fn main() -> Result<(), anyhow::Error> {
         )
         .get_matches();
 
-    info!("running subcommand");
     let result = match matches.subcommand() {
         // The configuration of the Args above should guarantee that the
         // various parameters are present and valid, so it is safe to use

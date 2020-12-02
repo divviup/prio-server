@@ -113,8 +113,6 @@ variable "aggregation_grace_period" {
 
 variable "pushgateway" {
   type    = string
-  default = ""
-  #default = "prometheus-pushgateway.default:9091"
 }
 
 data "aws_caller_identity" "current" {}
