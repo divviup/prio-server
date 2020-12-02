@@ -118,6 +118,43 @@ terraform {
   backend "gcs" {}
 
   required_version = ">= 0.13.3"
+
+  required_providers {
+    aws = {
+      source  = "hashicorp/aws"
+      version = "~> 3.16.0"
+    }
+    google = {
+      source = "hashicorp/google"
+      # Ensure that this matches the google-beta provider version below.
+      version = "~> 3.49.0"
+    }
+    google-beta = {
+      source = "hashicorp/google-beta"
+      # Ensure that this matches the non-beta google provider version above.
+      version = "~> 3.49.0"
+    }
+    helm = {
+      source  = "hashicorp/helm"
+      version = "~> 1.3.2"
+    }
+    http = {
+      source  = "hashicorp/http"
+      version = "~> 2.0.0"
+    }
+    kubernetes = {
+      source  = "hashicorp/kubernetes"
+      version = "~> 1.13.3"
+    }
+    null = {
+      source  = "hashicorp/null"
+      version = "~> 3.0.0"
+    }
+    random = {
+      source  = "hashicorp/random"
+      version = "~> 3.0.0"
+    }
+  }
 }
 
 data "terraform_remote_state" "state" {
@@ -132,12 +169,7 @@ data "terraform_remote_state" "state" {
 
 data "google_client_config" "current" {}
 
-provider "google-beta" {
-  # We use the google-beta provider so that we can use configuration fields that
-  # aren't in the GA google provider. Google resources must explicitly opt into
-  # this provider with `provider = google-beta` or they will not inherit values
-  # appropriately.
-  # https://www.terraform.io/docs/providers/google/guides/provider_versions.html
+provider "google" {
   # This will use "Application Default Credentials". Run `gcloud auth
   # application-default login` to generate them.
   # https://www.terraform.io/docs/providers/google/guides/provider_reference.html#credentials
@@ -145,21 +177,23 @@ provider "google-beta" {
   project = var.gcp_project
 }
 
+provider "google-beta" {
+  # Duplicate settings from the non-beta provider
+  region  = var.gcp_region
+  project = var.gcp_project
+}
+
 # Activate some services which the deployment will require.
 resource "google_project_service" "compute" {
-  provider = google-beta
-  service  = "compute.googleapis.com"
+  service = "compute.googleapis.com"
 }
 
 resource "google_project_service" "container" {
-  provider = google-beta
-  service  = "container.googleapis.com"
+  service = "container.googleapis.com"
 }
 
 resource "google_project_service" "kms" {
-  provider = google-beta
-  project  = var.gcp_project
-  service  = "cloudkms.googleapis.com"
+  service = "cloudkms.googleapis.com"
 }
 
 provider "aws" {
@@ -323,7 +357,6 @@ module "data_share_processors" {
 # to permit writes from this GCP service account, whose email the portal
 # operator discovers in our global manifest.
 resource "google_service_account" "sum_part_bucket_writer" {
-  provider     = google-beta
   account_id   = "prio-${var.environment}-sum-writer"
   display_name = "prio-${var.environment}-sum-part-bucket-writer"
 }
@@ -331,7 +364,6 @@ resource "google_service_account" "sum_part_bucket_writer" {
 # Permit the service accounts for all the data share processors to request Oauth
 # tokens allowing them to impersonate the sum part bucket writer.
 resource "google_service_account_iam_binding" "data_share_processors_to_sum_part_bucket_writer_token_creator" {
-  provider           = google-beta
   service_account_id = google_service_account.sum_part_bucket_writer.name
   role               = "roles/iam.serviceAccountTokenCreator"
   members            = [for v in module.data_share_processors : "serviceAccount:${v.service_account_email}"]

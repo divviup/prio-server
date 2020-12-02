@@ -273,7 +273,6 @@ POLICY
 # share processor, enabling us to cryptographically destroy one instance's
 # storage without disrupting any others.
 resource "google_kms_crypto_key" "bucket_encryption" {
-  provider = google-beta
   name     = "${local.resource_prefix}-bucket-encryption-key"
   key_ring = var.kms_keyring
   purpose  = "ENCRYPT_DECRYPT"
@@ -284,9 +283,7 @@ resource "google_kms_crypto_key" "bucket_encryption" {
 
 # Permit the GCS service account to use the KMS key
 # https://registry.terraform.io/providers/hashicorp/google/latest/docs/data-sources/storage_project_service_account
-data "google_storage_project_service_account" "gcs_account" {
-  provider = google-beta
-}
+data "google_storage_project_service_account" "gcs_account" {}
 
 resource "google_kms_crypto_key_iam_binding" "bucket_encryption_key" {
   crypto_key_id = google_kms_crypto_key.bucket_encryption.id

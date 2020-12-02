@@ -51,10 +51,9 @@ module "subnets" {
 }
 
 resource "google_compute_subnetwork" "subnet" {
-  provider = google-beta
-  name     = "${var.resource_prefix}-${var.gcp_region}-instances"
-  region   = var.gcp_region
-  network  = var.network
+  name    = "${var.resource_prefix}-${var.gcp_region}-instances"
+  region  = var.gcp_region
+  network = var.network
 
   ip_cidr_range = module.subnets.network_cidr_blocks["vm_instances"]
   # We'll let other resources automatically add the secondary address ranges
@@ -68,17 +67,15 @@ resource "google_compute_subnetwork" "subnet" {
 # We don't actually use any routing/BGP features of the Router, but one is
 # required in order to configure a NAT gateway below.
 resource "google_compute_router" "router" {
-  provider = google-beta
-  name     = "${var.resource_prefix}-${var.gcp_region}-router"
-  network  = var.network
-  region   = var.gcp_region
+  name    = "${var.resource_prefix}-${var.gcp_region}-router"
+  network = var.network
+  region  = var.gcp_region
 }
 
 # This NAT gateway provides internet access to the Kubernetes cluster
 resource "google_compute_router_nat" "nat" {
-  provider = google-beta
-  name     = "${var.resource_prefix}-${var.gcp_region}-nat"
-  router   = google_compute_router.router.name
+  name   = "${var.resource_prefix}-${var.gcp_region}-nat"
+  router = google_compute_router.router.name
 
   # External IPs will be allocated and released as needed by the NAT according
   # to demand for ports. This can be changed and a pool manually managed if we

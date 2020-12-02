@@ -19,8 +19,9 @@ variable "machine_type" {
 }
 
 resource "google_container_cluster" "cluster" {
-  # The google-beta provider is needed for some features we're using below, such
-  # as VPC-native clusters.
+  # The google provider seems to have not been updated to consider VPC-native
+  # clusters as GA, even though they are GA and in fact are now the default for
+  # new clusters created through the GCP UIs.
   provider = google-beta
 
   name = "${var.resource_prefix}-cluster"
@@ -80,7 +81,6 @@ resource "google_container_cluster" "cluster" {
 }
 
 resource "google_container_node_pool" "worker_nodes" {
-  provider           = google-beta
   name               = "${var.resource_prefix}-node-pool"
   location           = var.gcp_region
   cluster            = google_container_cluster.cluster.name
@@ -113,8 +113,7 @@ resource "google_container_node_pool" "worker_nodes" {
 
 # KMS keyring to store etcd encryption key
 resource "google_kms_key_ring" "keyring" {
-  provider = google-beta
-  name     = "${var.resource_prefix}-kms-keyring"
+  name = "${var.resource_prefix}-kms-keyring"
   # Keyrings can also be zonal, but ours must be regional to match the GKE
   # cluster.
   location = var.gcp_region
@@ -123,7 +122,6 @@ resource "google_kms_key_ring" "keyring" {
 # KMS key used by GKE cluster to encrypt contents of cluster etcd, crucially to
 # protect Kubernetes secrets.
 resource "google_kms_crypto_key" "etcd_encryption_key" {
-  provider = google-beta
   name     = "${var.resource_prefix}-etcd-encryption-key"
   key_ring = google_kms_key_ring.keyring.id
   purpose  = "ENCRYPT_DECRYPT"
@@ -134,15 +132,12 @@ resource "google_kms_crypto_key" "etcd_encryption_key" {
 }
 
 # We need the project _number_ to construct the GKE service account, below.
-data "google_project" "project" {
-  provider = google-beta
-}
+data "google_project" "project" {}
 
 # Permit the GKE service account to use the KMS key. We construct the service
 # account name per the specification in:
 # https://cloud.google.com/kubernetes-engine/docs/how-to/encrypting-secrets#grant_permission_to_use_the_key
 resource "google_kms_crypto_key_iam_binding" "etcd-encryption-key-iam-binding" {
-  provider      = google-beta
   crypto_key_id = google_kms_crypto_key.etcd_encryption_key.id
   role          = "roles/cloudkms.cryptoKeyEncrypterDecrypter"
   members = [
