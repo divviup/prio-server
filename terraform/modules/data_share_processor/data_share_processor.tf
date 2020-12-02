@@ -181,20 +181,20 @@ locals {
       # local peer validation bucket
       peer_validation_identity = ""
     }
-
-  ) ingestion_bucket_name = "${local.resource_prefix}-ingestion"
+  )
+  ingestion_bucket_name = "${local.resource_prefix}-ingestion"
   ingestion_bucket_url = var.use_aws ? (
     "s3://${var.aws_region}/${local.ingestion_bucket_name}"
     ) : (
     "gs://${local.ingestion_bucket_name}"
-
-  ) peer_validation_bucket_name = "${local.resource_prefix}-peer-validation"
+  )
+  peer_validation_bucket_name = "${local.resource_prefix}-peer-validation"
   peer_validation_bucket_url = var.use_aws ? (
     "s3://${var.aws_region}/${local.peer_validation_bucket_name}"
     ) : (
     "gs://${local.peer_validation_bucket_name}"
-
-  ) # If this environment creates fake ingestors, we make an educated guess about
+  )
+  # If this environment creates fake ingestors, we make an educated guess about
   # the name of the other test environment's ingestion bucket so our fake
   # ingestors can write ingestion batches to them. This assumes that the
   # other test environment follows our naming convention and that they are in
