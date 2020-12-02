@@ -111,6 +111,12 @@ func (b *batchPath) dateString() string {
 	return strings.Join(b.dateComponents, "/")
 }
 
+// isComplete returns true if all three files in the batch are present (header,
+// signature and packet file), and false otherwise.
+func (b *batchPath) isComplete() bool {
+	return b.metadata && b.avro && b.sig
+}
+
 // basename returns s, with any type suffixes stripped off. The type suffixes are determined by
 // `infix`, which is one of "batch", "validity_0", or "validity_1".
 func basename(s string, infix string) string {
@@ -488,7 +494,14 @@ func readyBatches(files []string, infix string) ([]*batchPath, error) {
 
 	var output []*batchPath
 	for _, v := range batches {
-		output = append(output, v)
+		// A validation or ingestion batch is not ready unless all three files
+		// are present. This isn't true for sum parts, but workflow-manager
+		// doesn't deal with those yet.
+		if v.isComplete() {
+			output = append(output, v)
+		} else {
+			log.Printf("ignoring incomplete batch %s", v)
+		}
 	}
 	sort.Sort(batchPathList(output))
 
