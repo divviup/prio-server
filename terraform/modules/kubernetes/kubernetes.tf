@@ -112,7 +112,7 @@ variable "aggregation_grace_period" {
 }
 
 variable "pushgateway" {
-  type    = string
+  type = string
 }
 
 data "aws_caller_identity" "current" {}
