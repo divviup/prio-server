@@ -2,6 +2,7 @@ package batchpath
 
 import (
 	"fmt"
+	"log"
 	"sort"
 	"strconv"
 	"strings"
@@ -76,6 +77,12 @@ func (b *BatchPath) DateString() string {
 	return strings.Join(b.dateComponents, "/")
 }
 
+// isComplete returns true if all three files in the batch are present (header,
+// signature and packet file), and false otherwise.
+func (b *BatchPath) isComplete() bool {
+	return b.metadata && b.avro && b.sig
+}
+
 func ReadyBatches(files []string, infix string) (List, error) {
 	batches := make(map[string]*BatchPath)
 	for _, name := range files {
@@ -102,7 +109,14 @@ func ReadyBatches(files []string, infix string) (List, error) {
 
 	var output []*BatchPath
 	for _, v := range batches {
-		output = append(output, v)
+		// A validation or ingestion batch is not ready unless all three files
+		// are present. This isn't true for sum parts, but workflow-manager
+		// doesn't deal with those yet.
+		if v.isComplete() {
+			output = append(output, v)
+		} else {
+			log.Printf("ignoring incomplete batch %s", v)
+		}
 	}
 	sort.Sort(List(output))
 
