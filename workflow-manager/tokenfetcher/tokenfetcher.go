@@ -9,15 +9,17 @@ import (
 	"github.com/aws/aws-sdk-go/aws/credentials"
 )
 
-type tokenFetcher struct {
+type TokenFetcher struct {
 	audience string
 }
 
-func NewTokenFetcher(audience string) tokenFetcher {
-	return tokenFetcher{audience}
+// Creates a new TokenFetcher for a specific audience
+func NewTokenFetcher(audience string) TokenFetcher {
+	return TokenFetcher{audience}
 }
 
-func (tf tokenFetcher) FetchToken(credentials.Context) ([]byte, error) {
+// FetchToken implementation for stscreds.TokenFetcher
+func (tf TokenFetcher) FetchToken(credentials.Context) ([]byte, error) {
 	url := fmt.Sprintf("http://metadata.google.internal:80/computeMetadata/v1/instance/service-accounts/default/identity?audience=%s", tf.audience)
 	req, err := http.NewRequest("GET", url, nil)
 	if err != nil {

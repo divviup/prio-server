@@ -11,6 +11,7 @@ import (
 	"github.com/letsencrypt/prio-server/workflow-manager/utils"
 )
 
+// BatchPath represents a relative path to a batch
 type BatchPath struct {
 	AggregationID  string
 	dateComponents []string
@@ -21,20 +22,25 @@ type BatchPath struct {
 	sig            bool
 }
 
+// List is a type alias for a slice of BatchPath pointers
 type List []*BatchPath
 
+// Len returns the size of the slice representing the BatchPaths
 func (bpl List) Len() int {
 	return len(bpl)
 }
 
+// Returns if the ith item in List occurs before the jth item
 func (bpl List) Less(i, j int) bool {
 	return bpl[i].Time.Before(bpl[j].Time)
 }
 
+// Swap swaps the ith element in List with the jth element
 func (bpl List) Swap(i, j int) {
 	bpl[i], bpl[j] = bpl[j], bpl[i]
 }
 
+// New creates a new BatchPath from a batchName
 func New(batchName string) (*BatchPath, error) {
 	// batchName is like "kittens-seen/2020/10/31/20/29/b8a5579a-f984-460a-a42d-2813cbf57771"
 	pathComponents := strings.Split(batchName, "/")
@@ -73,6 +79,7 @@ func (b *BatchPath) path() string {
 	return strings.Join([]string{b.AggregationID, b.DateString(), b.ID}, "/")
 }
 
+// DateString returns the string date representation of BatchPath
 func (b *BatchPath) DateString() string {
 	return strings.Join(b.dateComponents, "/")
 }
@@ -83,6 +90,7 @@ func (b *BatchPath) isComplete() bool {
 	return b.metadata && b.avro && b.sig
 }
 
+// ReadyBatches gets a List from a list of files and infix
 func ReadyBatches(files []string, infix string) (List, error) {
 	batches := make(map[string]*BatchPath)
 	for _, name := range files {

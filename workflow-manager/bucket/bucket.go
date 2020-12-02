@@ -18,32 +18,36 @@ import (
 	"google.golang.org/api/iterator"
 )
 
-type bucket struct {
-	service string // "s3" or "gs"
+// Bucket represents a general bucket of data
+type Bucket struct {
+	// service is either "s3", or "gs"
+	service string
 	// bucketName includes the region for S3
 	bucketName string
 	identity   string
 }
 
-func New(bucketURL, identity string) (*bucket, error) {
+// New creates a new Bucket from a URL and identity
+func New(bucketURL, identity string) (*Bucket, error) {
 	if bucketURL == "" {
-		log.Fatalf("empty bucket URL")
+		log.Fatalf("empty Bucket URL")
 	}
 	if !strings.HasPrefix(bucketURL, "s3://") && !strings.HasPrefix(bucketURL, "gs://") {
-		return nil, fmt.Errorf("invalid bucket %q with identity %q", bucketURL, identity)
+		return nil, fmt.Errorf("invalid Bucket %q with identity %q", bucketURL, identity)
 	}
 	if strings.HasPrefix(bucketURL, "gs://") && identity != "" {
-		return nil, fmt.Errorf("workflow-manager doesn't support alternate identities (%s) for gs:// bucket (%q)",
+		return nil, fmt.Errorf("workflow-manager doesn't support alternate identities (%s) for gs:// Bucket (%q)",
 			identity, bucketURL)
 	}
-	return &bucket{
+	return &Bucket{
 		service:    bucketURL[0:2],
 		bucketName: bucketURL[5:],
 		identity:   identity,
 	}, nil
 }
 
-func (b *bucket) ListFiles(ctx context.Context) ([]string, error) {
+// ListFiles lists the files contained in Bucket
+func (b *Bucket) ListFiles(ctx context.Context) ([]string, error) {
 	switch b.service {
 	case "s3":
 		return b.listFilesS3(ctx)
@@ -69,10 +73,10 @@ func webIDP(sess *aws_session.Session, identity string) (*credentials.Credential
 	return credentials.NewCredentials(roleProvider), nil
 }
 
-func (b *bucket) listFilesS3(ctx context.Context) ([]string, error) {
+func (b *Bucket) listFilesS3(ctx context.Context) ([]string, error) {
 	parts := strings.SplitN(b.bucketName, "/", 2)
 	if len(parts) != 2 {
-		return nil, fmt.Errorf("invalid S3 bucket name %q", b.bucketName)
+		return nil, fmt.Errorf("invalid S3 Bucket name %q", b.bucketName)
 	}
 	region := parts[0]
 	bucket := parts[1]
@@ -93,7 +97,7 @@ func (b *bucket) listFilesS3(ctx context.Context) ([]string, error) {
 	}
 	svc := s3.New(sess, config)
 	var output []string
-	var nextContinuationToken string = ""
+	var nextContinuationToken = ""
 	for {
 		input := &s3.ListObjectsV2Input{
 			// We choose a lower number than the default max of 1000 to ensure we exercise the
@@ -106,7 +110,7 @@ func (b *bucket) listFilesS3(ctx context.Context) ([]string, error) {
 		}
 		resp, err := svc.ListObjectsV2(input)
 		if err != nil {
-			return nil, fmt.Errorf("unable to list items in bucket %q, %w", b.bucketName, err)
+			return nil, fmt.Errorf("unable to list items in Bucket %q, %w", b.bucketName, err)
 		}
 		for _, item := range resp.Contents {
 			output = append(output, *item.Key)
@@ -119,9 +123,9 @@ func (b *bucket) listFilesS3(ctx context.Context) ([]string, error) {
 	return output, nil
 }
 
-func (b *bucket) listFilesGS(ctx context.Context) ([]string, error) {
+func (b *Bucket) listFilesGS(ctx context.Context) ([]string, error) {
 	if b.identity != "" {
-		return nil, fmt.Errorf("workflow-manager doesn't support non-default identity %q for GS bucket %q", b.identity, b.bucketName)
+		return nil, fmt.Errorf("workflow-manager doesn't support non-default identity %q for GS Bucket %q", b.identity, b.bucketName)
 	}
 	client, err := storage.NewClient(ctx)
 	if err != nil {
@@ -135,7 +139,7 @@ func (b *bucket) listFilesGS(ctx context.Context) ([]string, error) {
 	var output []string
 	it := bkt.Objects(ctx, query)
 
-	// Use the paginated API to list bucket contents, as otherwise we would only get the first 1,000 objects in the bucket.
+	// Use the paginated API to list Bucket contents, as otherwise we would only get the first 1,000 objects in the Bucket.
 	// As in the S3 case above, we get 100 results at a time to ensure we exercise the pagination case.
 	// https://cloud.google.com/storage/docs/json_api/v1/objects/list
 	p := iterator.NewPager(it, 100, "")
