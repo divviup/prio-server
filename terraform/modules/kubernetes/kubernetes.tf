@@ -12,7 +12,7 @@ variable "environment" {
 
 variable "container_registry" {
   type    = string
-  default = "us.gcr.io/jsha-prio-bringup/letsencrypt"
+  default = "letsencrypt"
 }
 
 variable "workflow_manager_image" {
@@ -22,7 +22,7 @@ variable "workflow_manager_image" {
 
 variable "workflow_manager_version" {
   type    = string
-  default = "0.4.1a"
+  default = "latest"
 }
 
 variable "facilitator_image" {
@@ -32,7 +32,7 @@ variable "facilitator_image" {
 
 variable "facilitator_version" {
   type    = string
-  default = "0.4.1a"
+  default = "latest"
 }
 
 variable "gcp_project" {
