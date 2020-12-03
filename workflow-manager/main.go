@@ -55,23 +55,20 @@ var peerValidationIdentity = flag.String("peer-validation-identity", "", "Identi
 var facilitatorImage = flag.String("facilitator-image", "", "Name (optionally including repository) of facilitator image")
 var aggregationPeriod = flag.String("aggregation-period", "3h", "How much time each aggregation covers")
 var gracePeriod = flag.String("grace-period", "1h", "Wait this amount of time after the end of an aggregation timeslice to run the aggregation")
-var monitoringTool = flag.String("monitoring-tool", "", "Set this to the monitoring tool you want the workflow-manager to use. (prometheus,)")
+var pushGateway = flag.String("push-gateway", "", "Set this to the gateway to use with prometheus. If left empty, workflow-manager will not use prometheus.")
 
+// monitoring things
 var (
 	intakesStarted      monitor.CounterMonitor = &monitor.NoopCounter{}
 	aggregationsStarted monitor.CounterMonitor = &monitor.NoopCounter{}
 )
 
-// This uses Kubernetes' DNS-based service discovery. Service name is prometheus-pushgateway
-// in the default namespace. Port 9091 for pushgateway is a well-known default.
-const pushGateway = "prometheus-pushgateway.default:9091"
-
 func main() {
 	log.Printf("starting %s version %s. Args: %s", os.Args[0], BuildInfo, os.Args[1:])
 	flag.Parse()
 
-	if *monitoringTool == "prometheus" {
-		push.New(pushGateway, "workflow-manager").Gatherer(prometheus.DefaultGatherer).Push()
+	if *pushGateway != "" {
+		push.New(*pushGateway, "workflow-manager").Gatherer(prometheus.DefaultGatherer).Push()
 		intakesStarted = promauto.NewCounter(prometheus.CounterOpts{
 			Name: "intake_jobs_started",
 			Help: "The number of intake-batch jobs successfully started",
