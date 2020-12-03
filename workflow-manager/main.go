@@ -18,6 +18,7 @@ import (
 	"github.com/letsencrypt/prio-server/workflow-manager/batchpath"
 	"github.com/letsencrypt/prio-server/workflow-manager/bucket"
 	wferror "github.com/letsencrypt/prio-server/workflow-manager/errors"
+	"github.com/letsencrypt/prio-server/workflow-manager/monitor"
 	"github.com/letsencrypt/prio-server/workflow-manager/retry"
 	"github.com/letsencrypt/prio-server/workflow-manager/utils"
 	"github.com/prometheus/client_golang/prometheus"
@@ -54,16 +55,11 @@ var peerValidationIdentity = flag.String("peer-validation-identity", "", "Identi
 var facilitatorImage = flag.String("facilitator-image", "", "Name (optionally including repository) of facilitator image")
 var aggregationPeriod = flag.String("aggregation-period", "3h", "How much time each aggregation covers")
 var gracePeriod = flag.String("grace-period", "1h", "Wait this amount of time after the end of an aggregation timeslice to run the aggregation")
+var monitoringTool = flag.String("monitoring-tool", "", "Set this to the monitoring tool you want the workflow-manager to use. (prometheus,)")
 
 var (
-	intakesStarted = promauto.NewCounter(prometheus.CounterOpts{
-		Name: "intake_jobs_started",
-		Help: "The number of intake-batch jobs successfully started",
-	})
-	aggregationsStarted = promauto.NewCounter(prometheus.CounterOpts{
-		Name: "aggregation_jobs_started",
-		Help: "The number of aggregate jobs successfully started",
-	})
+	intakesStarted      monitor.CounterMonitor = &monitor.NoopCounter{}
+	aggregationsStarted monitor.CounterMonitor = &monitor.NoopCounter{}
 )
 
 // This uses Kubernetes' DNS-based service discovery. Service name is prometheus-pushgateway
@@ -74,7 +70,18 @@ func main() {
 	log.Printf("starting %s version %s. Args: %s", os.Args[0], BuildInfo, os.Args[1:])
 	flag.Parse()
 
-	push.New(pushGateway, "workflow-manager").Gatherer(prometheus.DefaultGatherer).Push()
+	if *monitoringTool == "prometheus" {
+		push.New(pushGateway, "workflow-manager").Gatherer(prometheus.DefaultGatherer).Push()
+		intakesStarted = promauto.NewCounter(prometheus.CounterOpts{
+			Name: "intake_jobs_started",
+			Help: "The number of intake-batch jobs successfully started",
+		})
+
+		aggregationsStarted = promauto.NewCounter(prometheus.CounterOpts{
+			Name: "aggregation_jobs_started",
+			Help: "The number of aggregate jobs successfully started",
+		})
+	}
 
 	ownValidationBucket, err := bucket.New(*ownValidationInput, *ownValidationIdentity)
 	if err != nil {
