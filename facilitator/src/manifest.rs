@@ -185,10 +185,11 @@ struct IngestionServerIdentity {
     gcp_service_account_email: String,
 }
 
-/// Represents an ingestion server's global manifest.
+/// Represents an ingestion server's manifest. This could be a global manifest
+/// or a locality-specific manifest.
 #[derive(Debug, Deserialize, PartialEq)]
 #[serde(rename_all = "kebab-case")]
-pub struct IngestionServerGlobalManifest {
+pub struct IngestionServerManifest {
     /// Format version of the manifest. Versions besides the currently supported
     /// one are rejected.
     format: u32,
@@ -201,19 +202,36 @@ pub struct IngestionServerGlobalManifest {
     batch_signing_public_keys: HashMap<String, BatchSigningPublicKey>,
 }
 
-impl IngestionServerGlobalManifest {
+impl IngestionServerManifest {
     /// Loads the global manifest relative to the provided base path and returns
-    /// it. Returns an error if the manifest could not be loaded or parsed.
-    pub fn from_https(base_path: &str) -> Result<Self> {
-        let manifest_url = format!("{}/global-manifest.json", base_path);
-        IngestionServerGlobalManifest::from_slice(fetch_manifest(&manifest_url)?.as_bytes())
+    /// it. First tries to load a global manifest, then falls back to a specific
+    /// manifest for the specified locality. Returns an error if no manifest
+    /// could be found at either location, or if either was unparseable.
+    pub fn from_https(base_path: &str, locality: Option<&str>) -> Result<Self> {
+        IngestionServerManifest::from_http(base_path, locality, fetch_manifest)
+    }
+
+    fn from_http(
+        base_path: &str,
+        locality: Option<&str>,
+        fetcher: ManifestFetcher,
+    ) -> Result<Self> {
+        match fetcher(&format!("{}/global-manifest.json", base_path)) {
+            Ok(body) => IngestionServerManifest::from_slice(body.as_bytes()),
+            Err(err) => match locality {
+                Some(locality) => IngestionServerManifest::from_slice(
+                    fetcher(&format!("{}/{}-manifest.json", base_path, locality))?.as_bytes(),
+                ),
+                None => Err(err),
+            },
+        }
     }
 
     /// Loads the manifest from the provided String. Returns an error if
     /// the manifest could not be parsed.
     pub fn from_slice(json: &[u8]) -> Result<Self> {
         let manifest: Self =
-            serde_json::from_slice(json).context("failed to decode JSON global manifest")?;
+            serde_json::from_slice(json).context("failed to decode JSON manifest")?;
         if manifest.format != 1 {
             return Err(anyhow!("unsupported manifest format {}", manifest.format));
         }
@@ -298,7 +316,12 @@ impl PortalServerGlobalManifest {
     }
 }
 
-/// Obtains a manifest file from the provided URL
+/// A function that fetches a manifest from the provided URL, returning the
+/// manifest body as a String on success.
+type ManifestFetcher = fn(&str) -> Result<String>;
+
+/// Obtains a manifest file from the provided URL, returning an error if the URL
+/// is not https or if a problem occurs during the transfer.
 fn fetch_manifest(manifest_url: &str) -> Result<String> {
     if !manifest_url.starts_with("https://") {
         return Err(anyhow!("Manifest must be fetched over HTTPS"));
@@ -698,7 +721,7 @@ mod tests {
     }
 
     #[test]
-    fn load_ingestor_global_manifest() {
+    fn load_ingestor_manifest() {
         let manifest_with_aws_identity = r#"
 {
     "format": 1,
@@ -736,8 +759,7 @@ mod tests {
             "#;
 
         let manifest =
-            IngestionServerGlobalManifest::from_slice(manifest_with_aws_identity.as_bytes())
-                .unwrap();
+            IngestionServerManifest::from_slice(manifest_with_aws_identity.as_bytes()).unwrap();
         assert_eq!(
             manifest.server_identity.aws_iam_entity,
             Some("arn:aws:iam::338276578713:role/ingestor-1-role".to_owned())
@@ -755,8 +777,7 @@ mod tests {
         assert!(batch_signing_public_keys.get("nosuchkey").is_none());
 
         let manifest =
-            IngestionServerGlobalManifest::from_slice(manifest_with_gcp_identity.as_bytes())
-                .unwrap();
+            IngestionServerManifest::from_slice(manifest_with_gcp_identity.as_bytes()).unwrap();
         assert_eq!(manifest.server_identity.aws_iam_entity, None);
         assert_eq!(
             manifest.server_identity.gcp_service_account_email,
@@ -826,7 +847,7 @@ mod tests {
         ];
 
         for invalid_manifest in &invalid_manifests {
-            IngestionServerGlobalManifest::from_slice(invalid_manifest.as_bytes()).unwrap_err();
+            IngestionServerManifest::from_slice(invalid_manifest.as_bytes()).unwrap_err();
         }
     }
 
@@ -906,5 +927,135 @@ mod tests {
         for invalid_manifest in &invalid_manifests {
             PortalServerGlobalManifest::from_slice(invalid_manifest.as_bytes()).unwrap_err();
         }
+    }
+
+    use mockito::mock;
+
+    #[test]
+    fn ingestor_global_manifest() {
+        let mocked_get = mock("GET", "/global-manifest.json")
+            .with_status(200)
+            .with_body(r#"
+{
+    "format": 1,
+    "server-identity": {
+        "aws-iam-entity": "arn:aws:iam::338276578713:role/ingestor-1-role",
+        "gcp-service-account-id": "12345678901234567890",
+        "gcp-service-account-email": "foo@bar.com"
+    },
+    "batch-signing-public-keys": {
+        "key-identifier-1": {
+            "public-key": "-----BEGIN PUBLIC KEY-----\nMFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAE/8OzWHOvmin1KeaiMWFQXfNwS9uZ\n839EjwMff1VB4dnurW38FRP+Z0KxIdvvrPsGMWdPXoTASRAPEHHqpWlTlg==\n-----END PUBLIC KEY-----\n",
+            "expiration": "2021-01-15T18:53:20Z"
+        }
+    }
+}
+            "#)
+            .expect(1)
+            .create();
+
+        IngestionServerManifest::from_http(&mockito::server_url(), None, http::get_url).unwrap();
+
+        mocked_get.assert();
+    }
+
+    #[test]
+    fn unparseable_ingestor_global_manifest() {
+        let mocked_get = mock("GET", "/global-manifest.json")
+            .with_status(200)
+            .with_body("invalid manifest")
+            .expect(1)
+            .create();
+
+        IngestionServerManifest::from_http(&mockito::server_url(), None, http::get_url)
+            .unwrap_err();
+
+        mocked_get.assert();
+    }
+
+    #[test]
+    fn ingestor_specific_manifest_fallback() {
+        let mocked_global_get = mock("GET", "/global-manifest.json")
+            .with_status(404)
+            .expect(1)
+            .create();
+
+        let mocked_specific_get = mock("GET", "/instance-name-manifest.json")
+        .with_status(200)
+        .with_body(r#"
+{
+    "format": 1,
+    "server-identity": {
+        "aws-iam-entity": "arn:aws:iam::338276578713:role/ingestor-1-role",
+        "gcp-service-account-id": "12345678901234567890",
+        "gcp-service-account-email": "foo@bar.com"
+    },
+    "batch-signing-public-keys": {
+        "key-identifier-1": {
+            "public-key": "-----BEGIN PUBLIC KEY-----\nMFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAE/8OzWHOvmin1KeaiMWFQXfNwS9uZ\n839EjwMff1VB4dnurW38FRP+Z0KxIdvvrPsGMWdPXoTASRAPEHHqpWlTlg==\n-----END PUBLIC KEY-----\n",
+            "expiration": "2021-01-15T18:53:20Z"
+        }
+    }
+}
+            "#)
+            .expect(1)
+            .create();
+
+        IngestionServerManifest::from_http(
+            &mockito::server_url(),
+            Some("instance-name"),
+            http::get_url,
+        )
+        .unwrap();
+
+        mocked_global_get.assert();
+        mocked_specific_get.assert();
+    }
+
+    #[test]
+    fn unparseable_ingestor_specific_manifest() {
+        let mocked_global_get = mock("GET", "/global-manifest.json")
+            .with_status(404)
+            .expect(1)
+            .create();
+
+        let mocked_specific_get = mock("GET", "/instance-name-manifest.json")
+            .with_status(200)
+            .with_body("invalid manifest")
+            .expect(1)
+            .create();
+
+        IngestionServerManifest::from_http(
+            &mockito::server_url(),
+            Some("instance-name"),
+            http::get_url,
+        )
+        .unwrap_err();
+
+        mocked_global_get.assert();
+        mocked_specific_get.assert();
+    }
+
+    #[test]
+    fn missing_ingestor_specific_manifest() {
+        let mocked_global_get = mock("GET", "/global-manifest.json")
+            .with_status(404)
+            .expect(1)
+            .create();
+
+        let mocked_specific_get = mock("GET", "/instance-name-manifest.json")
+            .with_status(404)
+            .expect(1)
+            .create();
+
+        IngestionServerManifest::from_http(
+            &mockito::server_url(),
+            Some("instance-name"),
+            http::get_url,
+        )
+        .unwrap_err();
+
+        mocked_global_get.assert();
+        mocked_specific_get.assert();
     }
 }

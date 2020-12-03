@@ -239,17 +239,7 @@ module "gke" {
   ]
 }
 
-# For each peer data share processor, we will receive ingestion batches from two
-# ingestion servers. We create a distinct data share processor instance for each
-# (peer, ingestor) pair.
-# First, we fetch the ingestor global manifests, which yields a map of ingestor
-# name => HTTP content.
-data "http" "ingestor_global_manifests" {
-  for_each = var.ingestors
-  url      = "https://${each.value}/global-manifest.json"
-}
-
-# Then we fetch the single global manifest for all the peer share processors.
+# We fetch the single global manifest for all the peer share processors.
 data "http" "peer_share_processor_global_manifest" {
   url = "https://${var.peer_share_processor_manifest_base_url}/global-manifest.json"
 }
@@ -290,8 +280,13 @@ resource "kubernetes_secret" "ingestion_packet_decryption_keys" {
   }
 }
 
-# Now, we take the set product of localities x ingestor names to
-# get the config values for all the data share processors we need to create.
+# We will receive ingestion batches from multiple ingestion servers for each
+# locality. We create a distinct data share processor for each (locality,
+# ingestor) pair. e.g., "us-pa-apple" processes data for Pennsylvanians received
+# from Apple's server, and "us-az-g-enpa" processes data for Arizonans received
+# from Google's server.
+# We take the set product of localities x ingestor names to get the config
+# values for all the data share processors we need to create.
 locals {
   locality_ingestor_pairs = {
     for pair in setproduct(toset(var.localities), keys(var.ingestors)) :
@@ -299,7 +294,6 @@ locals {
       ingestor                                = pair[1]
       kubernetes_namespace                    = kubernetes_namespace.namespaces[pair[0]].metadata[0].name
       packet_decryption_key_kubernetes_secret = kubernetes_secret.ingestion_packet_decryption_keys[pair[0]].metadata[0].name
-      ingestor_gcp_service_account_email      = jsondecode(data.http.ingestor_global_manifests[pair[1]].body).server-identity.gcp-service-account-id
       ingestor_manifest_base_url              = var.ingestors[pair[1]]
     }
   }
@@ -336,7 +330,6 @@ module "data_share_processors" {
   manifest_bucket                                = module.manifest.bucket
   kubernetes_namespace                           = each.value.kubernetes_namespace
   certificate_domain                             = "${var.environment}.certificates.${var.manifest_domain}"
-  ingestor_gcp_service_account_email             = each.value.ingestor_gcp_service_account_email
   ingestor_manifest_base_url                     = each.value.ingestor_manifest_base_url
   packet_decryption_key_kubernetes_secret        = each.value.packet_decryption_key_kubernetes_secret
   peer_share_processor_aws_account_id            = local.peer_share_processor_server_identity.aws-account-id
