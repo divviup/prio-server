@@ -13,7 +13,7 @@ use rusoto_core::{
         AutoRefreshingProvider, AwsCredentials, ContainerProvider, CredentialsError,
         InstanceMetadataProvider, ProfileProvider, ProvideAwsCredentials, Secret, Variable,
     },
-    ByteStream, Region,
+    ByteStream, Region, RusotoError, RusotoResult,
 };
 use rusoto_s3::{
     AbortMultipartUploadRequest, CompleteMultipartUploadRequest, CompletedMultipartUpload,
@@ -45,9 +45,42 @@ const METADATA_SERVICE_TOKEN_URL: &str = "http://metadata.google.internal:80/com
 // via environment variable.
 const AWS_ACCOUNT_ID_ENVIRONMENT_VARIABLE: &str = "AWS_ACCOUNT_ID";
 
+/// We attempt AWS API requests up to three times (i.e., two retries)
+const MAX_ATTEMPT_COUNT: i32 = 3;
+
+/// ClientProvider allows mocking out a client for testing.
+type ClientProvider = Box<dyn Fn(&Region, Option<String>) -> Result<S3Client>>;
+
 /// Constructs a basic runtime suitable for use in our single threaded context
 fn basic_runtime() -> Result<Runtime> {
     Ok(Builder::new().basic_scheduler().enable_all().build()?)
+}
+
+/// Calls the provided closure, retrying up to MAX_ATTEMPT_COUNT times if it
+/// fails with RusotoError::HttpDispatch, which indicates a problem sending the
+/// request such as the connection getting closed under us.
+fn retry_request<F, T, E>(action: &str, mut f: F) -> RusotoResult<T, E>
+where
+    F: FnMut() -> RusotoResult<T, E>,
+{
+    let mut attempts = 0;
+    loop {
+        match f() {
+            Err(RusotoError::HttpDispatch(err)) => {
+                attempts += 1;
+                if attempts >= MAX_ATTEMPT_COUNT {
+                    break Err(RusotoError::HttpDispatch(err));
+                }
+                info!(
+                    "failed to {} (will retry {} more times): {}",
+                    action,
+                    MAX_ATTEMPT_COUNT - attempts,
+                    err
+                );
+            }
+            result => break result,
+        }
+    }
 }
 
 /// Implementation of Transport that reads and writes objects from Amazon S3.
@@ -72,12 +105,11 @@ impl S3Transport {
                 // has been idle too long. Until this is fixed in Rusoto[3], we
                 // construct our own HTTP request dispatcher whose underlying
                 // hyper::Client is configured to timeout idle connections after
-                // 10 seconds. We could also implement retries on our layer[4].
+                // 10 seconds.
                 //
                 // [1]: https://docs.rs/hyper/0.13.8/hyper/client/struct.Builder.html#method.pool_idle_timeout
                 // [2]: https://aws.amazon.com/premiumsupport/knowledge-center/s3-socket-connection-timeout-error/
                 // [3]: https://github.com/rusoto/rusoto/issues/1686
-                // [4]: https://github.com/abetterinternet/prio-server/issues/41
                 let mut builder = hyper::Client::builder();
                 builder.pool_idle_timeout(Duration::from_secs(10));
                 let connector = HttpsConnector::new();
@@ -180,9 +212,6 @@ impl S3Transport {
     }
 }
 
-// ClientProvider allows mocking out a client for testing.
-type ClientProvider = Box<dyn Fn(&Region, Option<String>) -> Result<S3Client>>;
-
 impl Transport for S3Transport {
     fn path(&self) -> String {
         self.path.to_string()
@@ -192,13 +221,15 @@ impl Transport for S3Transport {
         info!("get {}/{} as {:?}", self.path, key, self.iam_role);
         let mut runtime = basic_runtime()?;
         let client = (self.client_provider)(&self.path.region, self.iam_role.clone())?;
-        let get_output = runtime
-            .block_on(client.get_object(GetObjectRequest {
+
+        let get_output = retry_request("get s3 object", || {
+            runtime.block_on(client.get_object(GetObjectRequest {
                 bucket: self.path.bucket.to_owned(),
                 key: [&self.path.key, key].concat(),
                 ..Default::default()
             }))
-            .context("error getting S3 object")?;
+        })
+        .context("error getting S3 object")?;
 
         let body = get_output.body.context("no body in GetObjectResponse")?;
 
@@ -281,8 +312,8 @@ impl MultipartUploadWriter {
         // We use the "bucket-owner-full-control" canned ACL to ensure that
         // objects we send to peers will be owned by them.
         // https://docs.aws.amazon.com/AmazonS3/latest/dev/about-object-ownership.html
-        let create_output = runtime
-            .block_on(
+        let create_output = retry_request("create multipart upload", || {
+            runtime.block_on(
                 client.create_multipart_upload(CreateMultipartUploadRequest {
                     bucket: bucket.to_string(),
                     key: key.to_string(),
@@ -290,10 +321,11 @@ impl MultipartUploadWriter {
                     ..Default::default()
                 }),
             )
-            .context(format!(
-                "error creating multipart upload to s3://{}",
-                bucket
-            ))?;
+        })
+        .context(format!(
+            "error creating multipart upload to s3://{}",
+            bucket
+        ))?;
 
         Ok(MultipartUploadWriter {
             runtime,
@@ -320,34 +352,33 @@ impl MultipartUploadWriter {
 
         let part_number = (self.completed_parts.len() + 1) as i64;
 
-        let upload_output = self
-            .runtime
-            .block_on(
-                self.client.upload_part(UploadPartRequest {
+        // Move internal buffer into request object and replace it with a new,
+        // empty buffer. UploadPartRequest assumes ownership of the request body
+        // so sadly we have to clone the buffer in order to be able to retry.
+        let body = mem::replace(
+            &mut self.buffer,
+            Vec::with_capacity(self.minimum_upload_part_size * 2),
+        );
+
+        let upload_output = retry_request("upload part", || {
+            self.runtime
+                .block_on(self.client.upload_part(UploadPartRequest {
                     bucket: self.bucket.to_string(),
                     key: self.key.to_string(),
                     upload_id: self.upload_id.clone(),
                     part_number: part_number as i64,
-                    body: Some(
-                        // Move internal buffer into request object and replace
-                        // it with a new, empty buffer.
-                        mem::replace(
-                            &mut self.buffer,
-                            Vec::with_capacity(self.minimum_upload_part_size * 2),
-                        )
-                        .into(),
-                    ),
+                    body: Some(body.clone().into()),
                     ..Default::default()
-                }),
-            )
-            .context("failed to upload_part")
-            .map_err(|e| {
-                // Clean up botched uploads
-                if let Err(cancel) = self.cancel_upload() {
-                    return cancel.context(e);
-                }
-                e
-            })?;
+                }))
+        })
+        .context("failed to upload part")
+        .map_err(|e| {
+            // Clean up botched uploads
+            if let Err(cancel) = self.cancel_upload() {
+                return cancel.context(e);
+            }
+            e
+        })?;
 
         let e_tag = upload_output
             .e_tag
@@ -394,20 +425,22 @@ impl TransportWriter for MultipartUploadWriter {
 
         // Ignore output for now, but we might want the e_tag to check the
         // digest
-        self.runtime
-            .block_on(
-                self.client
-                    .complete_multipart_upload(CompleteMultipartUploadRequest {
-                        bucket: self.bucket.to_string(),
-                        key: self.key.to_string(),
-                        upload_id: self.upload_id.clone(),
-                        multipart_upload: Some(CompletedMultipartUpload {
-                            parts: Some(mem::take(&mut self.completed_parts)),
-                        }),
-                        ..Default::default()
+        let completed_parts = mem::take(&mut self.completed_parts);
+        retry_request("complete upload", || {
+            self.runtime.block_on(self.client.complete_multipart_upload(
+                CompleteMultipartUploadRequest {
+                    bucket: self.bucket.to_string(),
+                    key: self.key.to_string(),
+                    upload_id: self.upload_id.clone(),
+                    multipart_upload: Some(CompletedMultipartUpload {
+                        parts: Some(completed_parts.clone()),
                     }),
-            )
-            .context("error completing upload")?;
+                    ..Default::default()
+                },
+            ))
+        })
+        .context("error completing upload")?;
+
         Ok(())
     }
 
@@ -429,12 +462,24 @@ impl TransportWriter for MultipartUploadWriter {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use rusoto_core::signature::SignedRequest;
+    use log::LevelFilter;
+    use rusoto_core::{request::HttpDispatchError, signature::SignedRequest};
     use rusoto_mock::{
         MockCredentialsProvider, MockRequestDispatcher, MultipleMockRequestDispatcher,
     };
     use rusoto_s3::CreateMultipartUploadError;
     use std::io::Read;
+
+    // Disappointingly there's no builtin way to run a setup or init function
+    // before all tests in Rust, so per env_logger's advice we call init() at
+    // the top of any test we want logs from.
+    // https://docs.rs/env_logger/0.8.2/env_logger/#capturing-logs-in-tests
+    fn init() {
+        let _ = env_logger::builder()
+            .filter_level(LevelFilter::Info)
+            .is_test(true)
+            .try_init();
+    }
 
     // Rusoto provides us the ability to create mock clients and play canned
     // responses to API requests. Besides that, we want to verify that we get
@@ -537,6 +582,7 @@ mod tests {
 
     #[test]
     fn multipart_upload_create_fails() {
+        init();
         let err = MultipartUploadWriter::new(
             String::from(TEST_BUCKET),
             String::from(TEST_KEY),
@@ -558,6 +604,7 @@ mod tests {
 
     #[test]
     fn multipart_upload_create_no_upload_id() {
+        init();
         // Response body format from
         // https://docs.aws.amazon.com/AmazonS3/latest/API/API_Operations_Amazon_Simple_Storage_Service.html
         MultipartUploadWriter::new(
@@ -583,6 +630,7 @@ mod tests {
 
     #[test]
     fn multipart_upload() {
+        init();
         // Response body format from
         // https://docs.aws.amazon.com/AmazonS3/latest/API/API_Operations_Amazon_Simple_Storage_Service.html
         let mut writer =
@@ -599,6 +647,12 @@ mod tests {
 </InitiateMultipartUploadResult>"#,
                         )
                         .with_request_checker(is_create_multipart_upload_request),
+                    // Response to UploadPart. DispatchError will cause a single
+                    // retry.
+                    MockRequestDispatcher::with_dispatch_error(HttpDispatchError::new(
+                        "fake error".to_owned(),
+                    ))
+                    .with_request_checker(is_upload_part_request),
                     // Response to UploadPart. HTTP 401 will cause failure.
                     MockRequestDispatcher::with_status(401)
                         .with_request_checker(is_upload_part_request),
@@ -646,8 +700,9 @@ mod tests {
    <ETag>fake-etag</ETag>
 </CompleteMultipartUploadResult>"#,
                         ),
-                    // Failure response to CompleteMultipartUpload
+                    // Failure response to CompleteMultipartUpload.
                     MockRequestDispatcher::with_status(400)
+                        .with_body("first 400")
                         .with_request_checker(is_complete_multipart_upload_request),
                 ];
                 S3Client::new_with(
@@ -678,6 +733,7 @@ mod tests {
 
     #[test]
     fn roundtrip_s3_transport() {
+        init();
         let s3_path = S3Path {
             region: Region::UsWest2,
             bucket: TEST_BUCKET.into(),
