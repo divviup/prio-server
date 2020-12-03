@@ -17,6 +17,8 @@ import (
 
 	"github.com/letsencrypt/prio-server/workflow-manager/batchpath"
 	"github.com/letsencrypt/prio-server/workflow-manager/bucket"
+	wferror "github.com/letsencrypt/prio-server/workflow-manager/errors"
+	"github.com/letsencrypt/prio-server/workflow-manager/retry"
 	"github.com/letsencrypt/prio-server/workflow-manager/utils"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
@@ -177,8 +179,19 @@ func main() {
 	log.Printf("looking for batches to aggregate in interval %s", interval)
 	aggregationBatches = withinInterval(aggregationBatches, interval)
 	aggregationMap := groupByAggregationID(aggregationBatches)
+	r := retry.Retry{
+		Identifier: "Aggregation",
+		Retryable: func() error {
+			return launchAggregationJobs(context.Background(), aggregationMap, interval)
+		},
+		ShouldRequeue: wferror.IsTransientErr,
+		// 5 is an arbitrary number... it seemed right
+		MaxTries: 5,
+		// No need to wait between retries
+		TimeBetweenTries: 0,
+	}
 
-	if err := launchAggregationJobs(context.Background(), aggregationMap, interval); err != nil {
+	if err := r.Start(); err != nil {
 		log.Fatal(err)
 	} else {
 		aggregationsStarted.Inc()
@@ -434,9 +447,21 @@ func launchIntake(ctx context.Context, readyBatches batchpath.List, ageLimit tim
 		return fmt.Errorf("clientset: %w", err)
 	}
 
-	log.Printf("starting %d jobs", len(readyBatches))
+	log.Printf("starting %d jobs", readyBatches.Len())
 	for _, batch := range readyBatches {
-		if err := startIntakeJob(ctx, clientset, batch, ageLimit); err != nil {
+		r := retry.Retry{
+			Identifier: batch.String(),
+			Retryable: func() error {
+				return startIntakeJob(ctx, clientset, batch, ageLimit)
+			},
+			ShouldRequeue: wferror.IsTransientErr,
+			// 5 Seems right, we're retrying the same amount for this as we do for the aggregation jobs
+			MaxTries: 5,
+			// lets not wait between retries
+			TimeBetweenTries: 0,
+		}
+
+		if err := r.Start(); err != nil {
 			return fmt.Errorf("starting job for batch %s: %w", batch, err)
 		}
 		intakesStarted.Inc()
