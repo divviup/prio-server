@@ -139,7 +139,6 @@ module "account_mapping" {
 # Allows the Kubernetes service account to request auth tokens for the GCP
 # service account.
 resource "google_service_account_iam_binding" "workflow_manager_token" {
-  provider           = google-beta
   service_account_id = module.account_mapping.google_service_account_name
   role               = "roles/iam.serviceAccountTokenCreator"
   members = [

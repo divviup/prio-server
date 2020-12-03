@@ -37,7 +37,6 @@ resource "random_string" "account_id" {
 
 # We first create a GCP service account.
 resource "google_service_account" "account" {
-  provider = google-beta
   # The Account ID must be unique across the whole GCP project, and not just the
   # namespace. It must also be fewer than 30 characters, so we can't concatenate
   # environment and PHA name to get something unique. Instead, we generate a
@@ -69,7 +68,6 @@ locals {
 
 # Allows the Kubernetes service account to impersonate the GCP service account.
 resource "google_service_account_iam_binding" "binding" {
-  provider           = google-beta
   service_account_id = google_service_account.account.name
   role               = "roles/iam.workloadIdentityUser"
   members = [

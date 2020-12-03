@@ -1,6 +1,9 @@
 package main
 
-import "testing"
+import (
+	"github.com/letsencrypt/prio-server/workflow-manager/batchpath"
+	"testing"
+)
 
 func TestIntakeJobNameForBatchPath(t *testing.T) {
 	var testCases = []struct {
@@ -21,7 +24,7 @@ func TestIntakeJobNameForBatchPath(t *testing.T) {
 	}
 	for _, testCase := range testCases {
 		t.Run(testCase.name, func(t *testing.T) {
-			batchPath, err := newBatchPath(testCase.input)
+			batchPath, err := batchpath.New(testCase.input)
 			if err != nil {
 				t.Fatalf("unexpected batch path parse failure: %s", err)
 			}

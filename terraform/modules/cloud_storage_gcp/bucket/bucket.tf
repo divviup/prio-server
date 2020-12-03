@@ -19,7 +19,6 @@ variable "bucket_writer" {
 }
 
 resource "google_storage_bucket" "bucket" {
-  provider = google-beta
   name     = var.name
   location = var.gcp_region
   # Force deletion of bucket contents on bucket destroy. Bucket contents would
@@ -44,18 +43,16 @@ resource "google_storage_bucket" "bucket" {
 }
 
 resource "google_storage_bucket_iam_binding" "bucket_writer" {
-  provider = google-beta
-  bucket   = google_storage_bucket.bucket.name
-  role     = "roles/storage.objectCreator"
+  bucket = google_storage_bucket.bucket.name
+  role   = "roles/storage.objectCreator"
   members = [
     "serviceAccount:${var.bucket_writer}"
   ]
 }
 
 resource "google_storage_bucket_iam_binding" "bucket_reader" {
-  provider = google-beta
-  bucket   = google_storage_bucket.bucket.name
-  role     = "roles/storage.objectViewer"
+  bucket = google_storage_bucket.bucket.name
+  role   = "roles/storage.objectViewer"
   members = [
     "serviceAccount:${var.bucket_reader}"
   ]

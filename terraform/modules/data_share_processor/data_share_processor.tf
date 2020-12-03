@@ -46,10 +46,6 @@ variable "ingestor_manifest_base_url" {
   type = string
 }
 
-variable "ingestor_gcp_service_account_email" {
-  type = string
-}
-
 variable "peer_share_processor_aws_account_id" {
   type = string
 }
@@ -100,7 +96,44 @@ variable "pushgateway" {
   type = string
 }
 
+# We need the ingestion server's manifest so that we can discover the GCP
+# service account it will use to upload ingestion batches. Some ingestors
+# (Apple) are singletons, and advertise a single global manifest which contains
+# the single GCP SA used by that server to send ingestion batches. Others
+# (Google) operate a distinct instance per locality, using a distinct GCP SA for
+# each. We first check for a global manifest, and fall back to a specific
+# manifest if it cannot be found. A Terraform data.http block would cause the
+# entire plan or apply to fail if the specified URL can't be loaded, so we use
+# this data.external block to check the HTTP status.
+data "external" "global_manifest_http_status" {
+  program = [
+    "curl",
+    "--silent",
+    "--output", "/dev/null",
+    # Terraform insists that the output of the program be JSON so that it can be
+    # parsed into a Terraform map.
+    "--write-out", "{ \"http_code\": \"%%{http_code}\" }",
+    "https://${var.ingestor_manifest_base_url}/global-manifest.json"
+  ]
+}
+
+data "http" "ingestor_global_manifest" {
+  count = local.ingestor_global_manifest_exists ? 1 : 0
+  url   = "https://${var.ingestor_manifest_base_url}/global-manifest.json"
+}
+
+data "http" "ingestor_specific_manifest" {
+  count = local.ingestor_global_manifest_exists ? 0 : 1
+  url   = "https://${var.ingestor_manifest_base_url}/${var.data_share_processor_name}-manifest.json"
+}
+
 locals {
+  ingestor_global_manifest_exists = data.external.global_manifest_http_status.result.http_code == "200"
+  ingestor_gcp_service_account_email = local.ingestor_global_manifest_exists ? (
+    jsondecode(data.http.ingestor_global_manifest[0].body).server-identity.gcp-service-account-email
+    ) : (
+    jsondecode(data.http.ingestor_specific_manifest[0].body).server-identity.gcp-service-account-email
+  )
   resource_prefix         = "prio-${var.environment}-${var.data_share_processor_name}"
   is_env_with_ingestor    = lookup(var.test_peer_environment, "env_with_ingestor", "") == var.environment
   is_env_without_ingestor = lookup(var.test_peer_environment, "env_without_ingestor", "") == var.environment
@@ -163,7 +196,7 @@ locals {
     {
       # Ingestors always act as a GCP service account, to which we grant write
       # permissions.
-      ingestion_bucket_writer = var.ingestor_gcp_service_account_email
+      ingestion_bucket_writer = local.ingestor_gcp_service_account_email
       # No special auth is needed to read from the ingestion bucket in GCS
       ingestion_bucket_reader = module.kubernetes.service_account_email
       # The identity that GKE jobs should assume or impersonate to access the
@@ -277,7 +310,6 @@ POLICY
 # share processor, enabling us to cryptographically destroy one instance's
 # storage without disrupting any others.
 resource "google_kms_crypto_key" "bucket_encryption" {
-  provider = google-beta
   name     = "${local.resource_prefix}-bucket-encryption-key"
   key_ring = var.kms_keyring
   purpose  = "ENCRYPT_DECRYPT"
@@ -288,9 +320,7 @@ resource "google_kms_crypto_key" "bucket_encryption" {
 
 # Permit the GCS service account to use the KMS key
 # https://registry.terraform.io/providers/hashicorp/google/latest/docs/data-sources/storage_project_service_account
-data "google_storage_project_service_account" "gcs_account" {
-  provider = google-beta
-}
+data "google_storage_project_service_account" "gcs_account" {}
 
 resource "google_kms_crypto_key_iam_binding" "bucket_encryption_key" {
   crypto_key_id = google_kms_crypto_key.bucket_encryption.id

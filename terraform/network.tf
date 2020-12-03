@@ -8,7 +8,6 @@ locals {
 # A VPC is a global resource in GCP, however, subnets inside it are regional
 # and so are created for each region by the gke module. See gke/network.tf
 resource "google_compute_network" "network" {
-  provider = google-beta
   # Add prefix to support existing multi-env GCP projects
   name = "${var.environment}-network"
   # We will always have to create a subnet for the cluster anyways, so the auto
