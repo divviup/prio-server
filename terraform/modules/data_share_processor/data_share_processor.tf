@@ -92,6 +92,10 @@ variable "kms_keyring" {
   type = string
 }
 
+variable "pushgateway" {
+  type = string
+}
+
 # We need the ingestion server's manifest so that we can discover the GCP
 # service account it will use to upload ingestion batches. Some ingestors
 # (Apple) are singletons, and advertise a single global manifest which contains
@@ -396,6 +400,7 @@ module "kubernetes" {
   is_first                                = var.is_first
   aggregation_period                      = var.aggregation_period
   aggregation_grace_period                = var.aggregation_grace_period
+  pushgateway                             = var.pushgateway
 }
 
 output "data_share_processor_name" {

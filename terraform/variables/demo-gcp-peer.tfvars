@@ -24,3 +24,4 @@ batch_signing_key_rotation       = 70
 packet_encryption_key_expiration = 90
 packet_encryption_key_rotation   = 70
 is_first                         = true
+pushgateway                      = "prometheus-pushgateway.default:9091"

@@ -19,6 +19,7 @@ log = "0.4.11"
 once_cell = "1.4"
 pem = "0.8"
 prio = "0.2"
+prometheus = { version = "0.10", features = [ "push" ] }
 rand = "0.7"
 regex = "1.4"
 ring = { version = "0.16.15", features = ["std"] }

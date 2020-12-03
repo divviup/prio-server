@@ -114,6 +114,12 @@ variable "packet_encryption_rotation" {
   description = "This value is used to specify the rotation interval of the packet encryption key"
 }
 
+variable "pushgateway" {
+  type        = string
+  default     = ""
+  description = "The location of a pushgateway in host:port form. Set to prometheus-pushgateway.default:9091 to enable metrics"
+}
+
 terraform {
   backend "gcs" {}
 
@@ -343,6 +349,7 @@ module "data_share_processors" {
   aggregation_period                             = var.aggregation_period
   aggregation_grace_period                       = var.aggregation_grace_period
   kms_keyring                                    = module.gke.kms_keyring
+  pushgateway                                    = var.pushgateway
 }
 
 # The portal owns two sum part buckets (one for each data share processor) and

@@ -1,0 +1,21 @@
+"apiVersion": "prio.isrg-prio.org/v1"
+"kind": "Locality"
+"metadata":
+  "name": "asph-locality"
+  "namespace": "asph"
+"spec":
+  "batchSigningKeySpec":
+    "keyRotationInterval": 300
+    "keyValidity": 390
+  "environmentName": "asph"
+  "ingestors":
+  - "baku"
+  - "lotophagi"
+  "manifestBucketLocation": "prio-fakecdc-manifests"
+  "packetEncryptionKeySpec":
+    "keyRotationInterval": 50
+    "keyValidity": 90
+  "schedule": "0 5 * * 0"
+
+---
+

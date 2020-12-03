@@ -1,7 +1,9 @@
 use anyhow::{anyhow, Context, Result};
 use chrono::{prelude::Utc, NaiveDateTime};
 use clap::{App, Arg, ArgMatches, SubCommand};
+use log::{error, info};
 use prio::encrypt::PrivateKey;
+use prometheus::{register_counter, register_counter_vec, Counter};
 use ring::signature::{
     EcdsaKeyPair, KeyPair, UnparsedPublicKey, ECDSA_P256_SHA256_ASN1,
     ECDSA_P256_SHA256_ASN1_SIGNING,
@@ -322,23 +324,22 @@ impl<'a, 'b> AppArgumentAdder for App<'a, 'b> {
 }
 
 fn main() -> Result<(), anyhow::Error> {
-    use log::info;
     env_logger::builder().format_timestamp_millis().init();
 
     let args: Vec<String> = std::env::args().collect();
     info!(
         "starting {} version {}. Args: [{}]",
-        "",
+        args[0],
         option_env!("BUILD_INFO").unwrap_or("(BUILD_INFO unavailable)"),
         args[1..].join(" "),
     );
     let matches = App::new("facilitator")
         .about("Prio data share processor")
         .arg(
-            Arg::with_name("verbose")
-                .long("verbose")
-                .short("v")
-                .help("Enable verbose output to stderr"),
+            Arg::with_name("pushgateway")
+                .long("pushgateway")
+                .env("PUSHGATEWAY")
+                .help("Address of a Prometheus pushgateway to push metrics to, in host:port form"),
         )
         .subcommand(
             SubCommand::with_name("generate-ingestion-sample")
@@ -608,9 +609,7 @@ fn main() -> Result<(), anyhow::Error> {
         )
         .get_matches();
 
-    let _verbose = matches.is_present("verbose");
-
-    match matches.subcommand() {
+    let result = match matches.subcommand() {
         // The configuration of the Args above should guarantee that the
         // various parameters are present and valid, so it is safe to use
         // unwrap() here.
@@ -619,7 +618,28 @@ fn main() -> Result<(), anyhow::Error> {
         ("aggregate", Some(sub_matches)) => aggregate(sub_matches),
         ("lint-manifest", Some(sub_matches)) => lint_manifest(sub_matches),
         (_, _) => Ok(()),
+    };
+
+    // Once we've run the subcommand, whether it succeeds or fails, we want to push any metrics
+    // we have collected.
+    if let Some(pushgateway) = matches.value_of("pushgateway") {
+        if pushgateway != "" {
+            info!("pushing metrics to {}", pushgateway);
+            let jobname: &str = matches.subcommand().0;
+            prometheus::push_metrics(
+                jobname,
+                prometheus::labels! {},
+                pushgateway,
+                prometheus::gather(),
+                None,
+            )
+            .map(|_| info!("done pushing metrics"))
+            .map_err(|e| error!("error pushing metrics: {}", e))
+            .ok();
+        }
     }
+
+    result
 }
 
 fn generate_sample(sub_matches: &ArgMatches) -> Result<(), anyhow::Error> {
@@ -711,17 +731,43 @@ fn intake_batch(sub_matches: &ArgMatches) -> Result<(), anyhow::Error> {
         batch_signing_key: batch_signing_key_from_arg(sub_matches)?,
     };
 
+    let batch_id: &str = sub_matches.value_of("batch-id").unwrap();
+    let batch_id: Uuid = Uuid::parse_str(batch_id).unwrap();
+
+    let date: &str = sub_matches.value_of("date").unwrap();
+    let date: NaiveDateTime = NaiveDateTime::parse_from_str(date, DATE_FORMAT).unwrap();
+
     let mut batch_intaker = BatchIntaker::new(
         &sub_matches.value_of("aggregation-id").unwrap(),
-        &Uuid::parse_str(sub_matches.value_of("batch-id").unwrap()).unwrap(),
-        &NaiveDateTime::parse_from_str(&sub_matches.value_of("date").unwrap(), DATE_FORMAT)
-            .unwrap(),
+        &batch_id,
+        &date,
         &mut intake_transport,
         &mut peer_validation_transport,
         &mut own_validation_transport,
         is_first_from_arg(sub_matches),
     )?;
-    batch_intaker.generate_validation_share()
+
+    let intake_started: Counter = register_counter!(
+        "intake_jobs_begun",
+        "Number of intake-batch jobs that started (on the facilitator side)"
+    )
+    .unwrap();
+    intake_started.inc();
+
+    let result = batch_intaker.generate_validation_share();
+
+    let intake_finished = register_counter_vec!(
+        "intake_jobs_finished",
+        "Number of intake-batch jobs that finished (on the facilitator side)",
+        &["status"]
+    )
+    .unwrap();
+    match result {
+        Ok(_) => intake_finished.with_label_values(&["success"]).inc(),
+        Err(_) => intake_finished.with_label_values(&["error"]).inc(),
+    }
+
+    result
 }
 
 fn aggregate(sub_matches: &ArgMatches) -> Result<(), anyhow::Error> {
@@ -831,37 +877,58 @@ fn aggregate(sub_matches: &ArgMatches) -> Result<(), anyhow::Error> {
         ));
     }
 
+    let start: &str = sub_matches.value_of("aggregation-start").unwrap();
+    let start: NaiveDateTime = NaiveDateTime::parse_from_str(start, DATE_FORMAT).unwrap();
+    let end: &str = sub_matches.value_of("aggregation-end").unwrap();
+    let end: NaiveDateTime = NaiveDateTime::parse_from_str(end, DATE_FORMAT).unwrap();
+
+    let mut own_validation_transport = VerifiableTransport {
+        transport: own_validation_transport,
+        batch_signing_public_keys: own_public_key_map,
+    };
+    let mut peer_validation_transport = VerifiableTransport {
+        transport: peer_validation_transport,
+        batch_signing_public_keys: peer_share_processor_pub_key_map,
+    };
+    let mut aggregation_transport = SignableTransport {
+        transport: aggregation_transport,
+        batch_signing_key,
+    };
+
     let batch_info: Vec<_> = batch_ids.into_iter().zip(batch_dates).collect();
-    BatchAggregator::new(
+    let mut aggregator = BatchAggregator::new(
         instance_name,
         &sub_matches.value_of("aggregation-id").unwrap(),
-        &NaiveDateTime::parse_from_str(
-            &sub_matches.value_of("aggregation-start").unwrap(),
-            DATE_FORMAT,
-        )
-        .unwrap(),
-        &NaiveDateTime::parse_from_str(
-            &sub_matches.value_of("aggregation-end").unwrap(),
-            DATE_FORMAT,
-        )
-        .unwrap(),
+        &start,
+        &end,
         is_first,
         &mut intake_transport,
-        &mut VerifiableTransport {
-            transport: own_validation_transport,
-            batch_signing_public_keys: own_public_key_map,
-        },
-        &mut VerifiableTransport {
-            transport: peer_validation_transport,
-            batch_signing_public_keys: peer_share_processor_pub_key_map,
-        },
-        &mut SignableTransport {
-            transport: aggregation_transport,
-            batch_signing_key,
-        },
-    )?
-    .generate_sum_part(&batch_info)?;
-    Ok(())
+        &mut own_validation_transport,
+        &mut peer_validation_transport,
+        &mut aggregation_transport,
+    )?;
+
+    let aggregation_started: Counter = register_counter!(
+        "aggregation_jobs_begun",
+        "Number of aggregation jobs that started (on the facilitator side)"
+    )
+    .unwrap();
+    aggregation_started.inc();
+
+    let result = aggregator.generate_sum_part(&batch_info);
+
+    let aggregation_finished = register_counter_vec!(
+        "aggregation_jobs_finished",
+        "Number of aggregation jobs that finished (on the facilitator side)",
+        &["status"]
+    )
+    .unwrap();
+    match result {
+        Ok(_) => aggregation_finished.with_label_values(&["success"]).inc(),
+        Err(_) => aggregation_finished.with_label_values(&["error"]).inc(),
+    }
+
+    result
 }
 
 fn lint_manifest(sub_matches: &ArgMatches) -> Result<(), anyhow::Error> {
