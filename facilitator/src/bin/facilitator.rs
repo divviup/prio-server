@@ -323,7 +323,7 @@ impl<'a, 'b> AppArgumentAdder for App<'a, 'b> {
 
 fn main() -> Result<(), anyhow::Error> {
     use log::info;
-    env_logger::init();
+    env_logger::builder().format_timestamp_millis().init();
 
     let args: Vec<String> = std::env::args().collect();
     info!(
