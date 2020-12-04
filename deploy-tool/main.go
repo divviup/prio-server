@@ -199,6 +199,7 @@ func manifestExists(fqdn, dsp string) bool {
 	if err != nil {
 		log.Fatalf("error when getting manifest %s: %s", path, err)
 	}
+	defer resp.Body.Close()
 
 	return resp.StatusCode == 200
 }

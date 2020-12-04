@@ -21,7 +21,6 @@ linters:
     - interfacer
     - misspell
     - nakedret
-    - noctx
     - nolintlint
     - rowserrcheck
     - staticcheck
