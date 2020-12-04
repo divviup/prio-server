@@ -465,24 +465,13 @@ impl TransportWriter for MultipartUploadWriter {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use log::LevelFilter;
+    use crate::test_utils::log_init;
     use rusoto_core::{request::HttpDispatchError, signature::SignedRequest};
     use rusoto_mock::{
         MockCredentialsProvider, MockRequestDispatcher, MultipleMockRequestDispatcher,
     };
     use rusoto_s3::CreateMultipartUploadError;
     use std::io::Read;
-
-    // Disappointingly there's no builtin way to run a setup or init function
-    // before all tests in Rust, so per env_logger's advice we call init() at
-    // the top of any test we want logs from.
-    // https://docs.rs/env_logger/0.8.2/env_logger/#capturing-logs-in-tests
-    fn init() {
-        let _ = env_logger::builder()
-            .filter_level(LevelFilter::Info)
-            .is_test(true)
-            .try_init();
-    }
 
     // Rusoto provides us the ability to create mock clients and play canned
     // responses to API requests. Besides that, we want to verify that we get
@@ -585,7 +574,7 @@ mod tests {
 
     #[test]
     fn multipart_upload_create_fails() {
-        init();
+        log_init();
         let err = MultipartUploadWriter::new(
             String::from(TEST_BUCKET),
             String::from(TEST_KEY),
@@ -607,7 +596,7 @@ mod tests {
 
     #[test]
     fn multipart_upload_create_no_upload_id() {
-        init();
+        log_init();
         // Response body format from
         // https://docs.aws.amazon.com/AmazonS3/latest/API/API_Operations_Amazon_Simple_Storage_Service.html
         MultipartUploadWriter::new(
@@ -633,7 +622,7 @@ mod tests {
 
     #[test]
     fn multipart_upload() {
-        init();
+        log_init();
         // Response body format from
         // https://docs.aws.amazon.com/AmazonS3/latest/API/API_Operations_Amazon_Simple_Storage_Service.html
         let mut writer =
@@ -736,7 +725,7 @@ mod tests {
 
     #[test]
     fn roundtrip_s3_transport() {
-        init();
+        log_init();
         let s3_path = S3Path {
             region: Region::UsWest2,
             bucket: TEST_BUCKET.into(),

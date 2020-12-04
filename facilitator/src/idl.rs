@@ -7,6 +7,7 @@ use avro_rs::{
 use prio::{finite_field::Field, server::VerificationMessage};
 use serde::{Deserialize, Serialize};
 use std::{
+    cmp::{Ord, Ordering, PartialOrd},
     convert::TryFrom,
     io::{Read, Write},
     num::TryFromIntError,
@@ -512,6 +513,18 @@ impl Packet for IngestionDataSharePacket {
     }
 }
 
+impl Ord for IngestionDataSharePacket {
+    fn cmp(&self, other: &Self) -> Ordering {
+        self.uuid.cmp(&other.uuid)
+    }
+}
+
+impl PartialOrd for IngestionDataSharePacket {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
 /// The header on a Prio validation (sometimes referred to as verification)
 /// batch.
 #[derive(Debug, Deserialize, Serialize, PartialEq)]
@@ -740,6 +753,18 @@ impl Packet for ValidationPacket {
         })?;
 
         Ok(())
+    }
+}
+
+impl Ord for ValidationPacket {
+    fn cmp(&self, other: &Self) -> Ordering {
+        self.uuid.cmp(&other.uuid)
+    }
+}
+
+impl PartialOrd for ValidationPacket {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
     }
 }
 
@@ -997,6 +1022,17 @@ impl Header for SumPart {
 pub struct InvalidPacket {
     pub uuid: Uuid,
 }
+impl Ord for InvalidPacket {
+    fn cmp(&self, other: &Self) -> Ordering {
+        self.uuid.cmp(&other.uuid)
+    }
+}
+
+impl PartialOrd for InvalidPacket {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
+}
 
 impl Packet for InvalidPacket {
     fn schema_raw() -> &'static str {
@@ -1008,7 +1044,7 @@ impl Packet for InvalidPacket {
             Some(Ok(h)) => h,
             Some(Err(e)) => {
                 return Err(Error::AvroError(
-                    "failed to read header from Avro reader".to_owned(),
+                    "failed to read invalid packet from Avro reader".to_owned(),
                     e,
                 ))
             }
@@ -1016,7 +1052,7 @@ impl Packet for InvalidPacket {
         };
 
         from_value::<InvalidPacket>(&header)
-            .map_err(|e| Error::AvroError("failed to parse validation header".to_owned(), e))
+            .map_err(|e| Error::AvroError("failed to parse invalid packet".to_owned(), e))
     }
 
     fn write<W: Write>(&self, writer: &mut Writer<W>) -> Result<(), Error> {

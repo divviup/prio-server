@@ -146,7 +146,10 @@ pub fn generate_ingestion_sample(
                         };
 
                         if drop_packet(count, drop_nth_pha_packet) {
-                            info!("dropping packet #{} from PHA ingestion batch", count);
+                            info!(
+                                "dropping packet #{} {} from PHA ingestion batch",
+                                count, packet_uuid
+                            );
                             pha_dropped_packets.push(packet_uuid);
                         } else {
                             pha_packet.write(&mut pha_packet_writer)?;
@@ -163,8 +166,8 @@ pub fn generate_ingestion_sample(
 
                         if drop_packet(count, drop_nth_facilitator_packet) {
                             info!(
-                                "dropping packet #{} from facilitator ingestion batch",
-                                count
+                                "dropping packet #{} {} from facilitator ingestion batch",
+                                count, packet_uuid
                             );
                             facilitator_dropped_packets.push(packet_uuid);
                         } else {

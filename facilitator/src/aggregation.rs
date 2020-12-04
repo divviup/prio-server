@@ -8,9 +8,15 @@ use crate::{
     BatchSigningKey, Error,
 };
 use anyhow::{anyhow, Context, Result};
+use avro_rs::Reader;
 use chrono::NaiveDateTime;
+use log::info;
 use prio::server::{Server, VerificationMessage};
-use std::convert::TryFrom;
+use std::{
+    collections::{HashMap, HashSet},
+    convert::TryFrom,
+    io::Cursor,
+};
 use uuid::Uuid;
 
 pub struct BatchAggregator<'a> {
@@ -204,71 +210,65 @@ impl<'a> BatchAggregator<'a> {
             ));
         }
 
-        let mut peer_validation_packet_reader =
-            peer_validation_batch.packet_file_reader(&peer_validation_header)?;
-        let mut own_validation_packet_reader =
-            own_validation_batch.packet_file_reader(&own_validation_header)?;
+        // We can't be sure that the peer validation, own validation and
+        // ingestion batches contain all the same packets or that they are in
+        // the same order. There could also be duplicate packets. Compared to
+        // the ingestion packets, the validation packets are small (they only
+        // contain a UUID and three i64s), so we construct a hashmap of the
+        // validation batches, mapping packet UUID to a ValidationPacket, then
+        // iterate over the ingestion packets. For each ingestion packet, if we
+        // have the corresponding validation packets and the proofs are good, we
+        // accumulate. Otherwise we drop the packet and move on.
+        let peer_validation_packets = validation_packet_map(
+            &mut peer_validation_batch.packet_file_reader(&peer_validation_header)?,
+        )?;
+        let own_validation_packets = validation_packet_map(
+            &mut own_validation_batch.packet_file_reader(&own_validation_header)?,
+        )?;
+
+        // Keep track of the ingestion packets we have seen so we can reject
+        // duplicates.
+        let mut processed_ingestion_packets = HashSet::new();
+
         let mut ingestion_packet_reader = ingestion_batch.packet_file_reader(&ingestion_header)?;
 
         loop {
-            let peer_validation_packet =
-                match ValidationPacket::read(&mut peer_validation_packet_reader) {
-                    Ok(p) => Some(p),
-                    Err(Error::EofError) => None,
-                    Err(e) => return Err(e.into()),
-                };
-            let own_validation_packet =
-                match ValidationPacket::read(&mut own_validation_packet_reader) {
-                    Ok(p) => Some(p),
-                    Err(Error::EofError) => None,
-                    Err(e) => return Err(e.into()),
-                };
             let ingestion_packet =
                 match IngestionDataSharePacket::read(&mut ingestion_packet_reader) {
-                    Ok(p) => Some(p),
-                    Err(Error::EofError) => None,
+                    Ok(p) => p,
+                    Err(Error::EofError) => break,
                     Err(e) => return Err(e.into()),
                 };
 
-            // All three packet files should contain the same number of packets,
-            // so if any of the readers hit EOF before the others, something is
-            // fishy.
-            let (peer_validation_packet, own_validation_packet, ingestion_packet) = match (
-                &peer_validation_packet,
-                &own_validation_packet,
-                &ingestion_packet,
+            // Ignore duplicate packets
+            if processed_ingestion_packets.contains(&ingestion_packet.uuid) {
+                info!("ignoring duplicate packet {}", ingestion_packet.uuid);
+                continue;
+            }
+
+            // Make sure we have own validation and peer validation packets
+            // matching the ingestion packet.
+            let peer_validation_packet = match get_validation_packet(
+                &ingestion_packet.uuid,
+                &peer_validation_packets,
+                "peer",
+                invalid_uuids,
             ) {
-                (Some(a), Some(b), Some(c)) => (a, b, c),
-                (None, None, None) => break,
-                (_, _, _) => {
-                    return Err(anyhow!(
-                        "unexpected early EOF when checking peer validations"
-                    ));
-                }
+                Some(p) => p,
+                None => continue,
             };
 
-            // TODO(timg) we need to make sure we are evaluating a valid triple
-            // of (peer validation, own validation, ingestion), i.e., they must
-            // have the same UUID. Can we assume that the peer validations will
-            // be in the same order as ours, or do we need to do an O(n) search
-            // of the peer validation packets to find the right UUID? Further,
-            // if aggregation fails, then we record the invalid UUID and send
-            // that along to the aggregator. But if some UUIDs are missing from
-            // the peer validation packet file (the EOF case handled above),
-            // should that UUID be marked as invalid or do we abort handling of
-            // the whole batch?
-            // For now I am assuming that all batches maintain the same order
-            // and that they are required to contain the same set of UUIDs.
-            if peer_validation_packet.uuid != own_validation_packet.uuid
-                || peer_validation_packet.uuid != ingestion_packet.uuid
-                || own_validation_packet.uuid != ingestion_packet.uuid
-            {
-                return Err(anyhow!(
-                    "mismatch between peer validation, own validation and ingestion packet UUIDs: {} {} {}",
-                    peer_validation_packet.uuid,
-                    own_validation_packet.uuid,
-                    ingestion_packet.uuid));
-            }
+            let own_validation_packet = match get_validation_packet(
+                &ingestion_packet.uuid,
+                &own_validation_packets,
+                "own",
+                invalid_uuids,
+            ) {
+                Some(p) => p,
+                None => continue,
+            };
+
+            processed_ingestion_packets.insert(ingestion_packet.uuid);
 
             let mut did_aggregate_shares = false;
             let mut last_err = None;
@@ -303,5 +303,36 @@ impl<'a> BatchAggregator<'a> {
         }
 
         Ok(())
+    }
+}
+
+fn validation_packet_map(
+    reader: &mut Reader<Cursor<Vec<u8>>>,
+) -> Result<HashMap<Uuid, ValidationPacket>> {
+    let mut map = HashMap::new();
+    loop {
+        match ValidationPacket::read(reader) {
+            Ok(p) => {
+                map.insert(p.uuid, p);
+            }
+            Err(Error::EofError) => return Ok(map),
+            Err(e) => return Err(e.into()),
+        }
+    }
+}
+
+fn get_validation_packet<'a>(
+    uuid: &Uuid,
+    validation_packets: &'a HashMap<Uuid, ValidationPacket>,
+    kind: &str,
+    invalid_uuids: &mut Vec<Uuid>,
+) -> Option<&'a ValidationPacket> {
+    match validation_packets.get(uuid) {
+        None => {
+            info!("no {} validation packet for {}", kind, uuid);
+            invalid_uuids.push(*uuid);
+            None
+        }
+        result => result,
     }
 }
