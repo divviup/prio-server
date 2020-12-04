@@ -207,7 +207,7 @@ locals {
       remote_validation_bucket_writer = aws_iam_role.bucket_role.arn
       # We permit the peer's GCP service account to write their validations to
       # our bucket
-      local_peer_validation_bucket_writer = var.peer_share_processor_gcp_service_account_email
+      peer_validation_bucket_writer = var.peer_share_processor_gcp_service_account_email
       # No special auth is needed to read from the validation bucket in GCS
       peer_validation_bucket_reader = module.kubernetes.service_account_email
       # The identity that GKE jobs should assume or impersonate to access the
