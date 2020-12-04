@@ -280,6 +280,7 @@ resource "kubernetes_cron_job" "workflow_manager" {
                 "--intake-batch-config-map", kubernetes_config_map.intake_batch_job_config_map.metadata[0].name,
                 "--aggregate-config-map", kubernetes_config_map.aggregate_job_config_map.metadata[0].name,
                 "--facilitator-image", "${var.container_registry}/${var.facilitator_image}:${var.facilitator_version}",
+                "--push-gateway", var.pushgateway,
               ]
             }
             # If we use any other restart policy, then when the job is finally
