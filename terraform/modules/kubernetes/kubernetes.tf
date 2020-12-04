@@ -217,7 +217,7 @@ resource "kubernetes_config_map" "aggregate_job_config_map" {
     INGESTOR_MANIFEST_BASE_URL           = "https://${var.ingestor_manifest_base_url}"
     INSTANCE_NAME                        = var.data_share_processor_name
     OWN_INPUT                            = var.own_validation_bucket
-    OWN_MANIFEST_BASE_URL                = var.own_manifest_base_url
+    OWN_MANIFEST_BASE_URL                = "https://${var.own_manifest_base_url}"
     PEER_INPUT                           = var.peer_validation_bucket
     PEER_IDENTITY                        = var.peer_validation_bucket_identity
     PEER_MANIFEST_BASE_URL               = "https://${var.peer_manifest_base_url}"

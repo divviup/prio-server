@@ -374,6 +374,9 @@ module "bucket" {
   bucket_writer = module.kubernetes.service_account_email
   kms_key       = google_kms_crypto_key.bucket_encryption.id
   gcp_region    = var.gcp_region
+  # Ensure the GCS service account exists and has permission to use the KMS key
+  # before creating buckets.
+  depends_on = [google_kms_crypto_key_iam_binding.bucket_encryption_key]
 }
 
 module "kubernetes" {
