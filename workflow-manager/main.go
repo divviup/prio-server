@@ -177,8 +177,6 @@ func main() {
 		}
 	}
 
-	log.Printf("aggregation batches: %q", aggregationBatches)
-
 	interval := aggregationInterval(aggregationPeriodParsed, gracePeriodParsed)
 	log.Printf("looking for batches to aggregate in interval %s", interval)
 	aggregationBatches = withinInterval(aggregationBatches, interval)
