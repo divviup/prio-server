@@ -396,7 +396,7 @@ output "specific_manifests" {
   }
 }
 
-output "own_manifest_url" {
+output "own_manifest_base_url" {
   value = module.manifest.base_url
 }
 

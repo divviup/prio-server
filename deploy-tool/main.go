@@ -89,9 +89,10 @@ type TerraformOutput struct {
 	ManifestBucket struct {
 		Value string
 	} `json:"manifest_bucket"`
-	OwnManifestUrl struct {
+	// OwnManifestBaseURL is a URL without a scheme (https), that manifests can be found in
+	OwnManifestBaseURL struct {
 		Value string
-	} `json:"own_manifest_url"`
+	} `json:"own_manifest_base_url"`
 	SpecificManifests struct {
 		Value map[string]struct {
 			KubernetesNamespace string           `json:"kubernetes-namespace"`
@@ -196,7 +197,7 @@ func manifestExists(fqdn, dsp string) bool {
 
 	resp, err := http.Get(path)
 	if err != nil {
-		log.Printf("error when getting manifest %s: %s", path, err)
+		log.Fatalf("error when getting manifest %s: %s", path, err)
 	}
 
 	return resp.StatusCode == 200
@@ -213,7 +214,7 @@ func main() {
 	certificatesByNamespace := map[string]PacketEncryptionKey{}
 
 	for dataShareProcessorName, manifestWrapper := range terraformOutput.SpecificManifests.Value {
-		if manifestExists(terraformOutput.OwnManifestUrl.Value, dataShareProcessorName) {
+		if manifestExists(terraformOutput.OwnManifestBaseURL.Value, dataShareProcessorName) {
 			log.Printf("manifest for %s exists - ignoring", dataShareProcessorName)
 			continue
 		}
