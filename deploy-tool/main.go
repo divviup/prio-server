@@ -12,8 +12,10 @@ import (
 	"io"
 	"io/ioutil"
 	"log"
+	"net/http"
 	"os"
 	"os/exec"
+	"sync"
 	"time"
 
 	"github.com/abetterinternet/prio-server/deploy-tool/key"
@@ -87,6 +89,9 @@ type TerraformOutput struct {
 	ManifestBucket struct {
 		Value string
 	} `json:"manifest_bucket"`
+	OwnManifestUrl struct {
+		Value string
+	} `json:"own_manifest_url"`
 	SpecificManifests struct {
 		Value map[string]struct {
 			KubernetesNamespace string           `json:"kubernetes-namespace"`
@@ -185,7 +190,20 @@ func generateAndDeployKeyPair(namespace, keyName string, keyMarshaler privateKey
 	return p256Key, nil
 }
 
+func manifestExists(fqdn, dsp string) bool {
+	// Remove the locality name from the FQDN
+	path := fmt.Sprintf("https://%s/%s-manifest.json", fqdn, dsp)
+
+	resp, err := http.Get(path)
+	if err != nil {
+		log.Printf("error when getting manifest %s: %s", path, err)
+	}
+
+	return resp.StatusCode == 200
+}
+
 func main() {
+	wg := sync.WaitGroup{}
 	var terraformOutput TerraformOutput
 
 	if err := json.NewDecoder(os.Stdin).Decode(&terraformOutput); err != nil {
@@ -195,6 +213,10 @@ func main() {
 	certificatesByNamespace := map[string]PacketEncryptionKey{}
 
 	for dataShareProcessorName, manifestWrapper := range terraformOutput.SpecificManifests.Value {
+		if manifestExists(terraformOutput.OwnManifestUrl.Value, dataShareProcessorName) {
+			log.Printf("manifest for %s exists - ignoring", dataShareProcessorName)
+			continue
+		}
 		newBatchSigningPublicKeys := map[string]BatchSigningPublicKey{}
 		for name, batchSigningPublicKey := range manifestWrapper.SpecificManifest.BatchSigningPublicKeys {
 			if batchSigningPublicKey.PublicKey != "" {
@@ -290,11 +312,14 @@ func main() {
 		if err != nil {
 			log.Fatalf("could not get pipe to gsutil stdin: %v", err)
 		}
+		// We're going to need to sync once the goroutine below is complete
+		wg.Add(1)
 
 		// Do this async because if we don't close gsutil's stdin, it will
 		// never be able to get started.
 		go func() {
 			defer stdin.Close()
+			defer wg.Done()
 			log.Printf("uploading manifest %+v", manifestWrapper.SpecificManifest)
 			manifestEncoder := json.NewEncoder(stdin)
 			if err := manifestEncoder.Encode(manifestWrapper.SpecificManifest); err != nil {
@@ -306,4 +331,7 @@ func main() {
 			log.Fatalf("gsutil failed: %v\noutput: %s", err, output)
 		}
 	}
+
+	// Make sure everything can cleanly exit
+	wg.Wait()
 }

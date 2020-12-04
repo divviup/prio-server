@@ -396,6 +396,10 @@ output "specific_manifests" {
   }
 }
 
+output "own_manifest_url" {
+  value = module.manifest.base_url
+}
+
 output "use_test_pha_decryption_key" {
   value = lookup(var.test_peer_environment, "env_without_ingestor", "") == var.environment
 }
