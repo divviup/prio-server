@@ -84,10 +84,13 @@ where
 }
 
 /// Implementation of Transport that reads and writes objects from Amazon S3.
+#[derive(Derivative)]
+#[derivative(Debug)]
 pub struct S3Transport {
     path: S3Path,
     iam_role: Option<String>,
     // client_provider allows injection of mock S3Client for testing purposes
+    #[derivative(Debug = "ignore")]
     client_provider: ClientProvider,
 }
 
