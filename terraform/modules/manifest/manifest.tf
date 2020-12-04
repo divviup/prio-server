@@ -132,5 +132,6 @@ output "bucket" {
 }
 
 output "base_url" {
-  value = local.domain_name
+  # local.domain_name is a fully qualified DNS name, ending in '.'
+  value = trimsuffix(local.domain_name, ".")
 }
