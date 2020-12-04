@@ -169,3 +169,25 @@ jobs:
         file: "manifest-updater/cover.out"
         flags: manifest_updater_tests
         name: manifest-updater tests
+
+  workflow-manager-test:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: workflow-manager
+    steps:
+    - uses: actions/checkout@v2
+    - name: Setup go
+      uses: actions/setup-go@v1
+      with:
+        go-version: 1.15
+    - name: Test
+      run: go test -race --coverprofile=cover.out --covermode=atomic ./... 
+    - name: Upload test coverage
+      if: success()
+      uses: codecov/codecov-action@v1
+      with:
+        fail_ci_if_error: false
+        file: "workflow-manager/cover.out"
+        flags: workflow_manager_tests
+        name: workflow-manager tests
