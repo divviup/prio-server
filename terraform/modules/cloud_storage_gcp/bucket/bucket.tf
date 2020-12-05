@@ -44,7 +44,7 @@ resource "google_storage_bucket" "bucket" {
 
 resource "google_storage_bucket_iam_binding" "bucket_writer" {
   bucket = google_storage_bucket.bucket.name
-  role   = "roles/storage.objectCreator"
+  role   = "roles/storage.legacyBucketWriter"
   members = [
     "serviceAccount:${var.bucket_writer}"
   ]
