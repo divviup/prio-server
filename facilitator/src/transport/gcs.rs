@@ -138,7 +138,7 @@ impl OauthTokenProvider {
         };
         Ok(OauthTokenProvider {
             default_service_account_key_file: key_file,
-            account_to_impersonate: account_to_impersonate,
+            account_to_impersonate,
             default_account_token: None,
             impersonated_account_token: None,
         })
