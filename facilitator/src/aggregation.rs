@@ -9,6 +9,7 @@ use crate::{
 };
 use anyhow::{anyhow, Context, Result};
 use chrono::NaiveDateTime;
+use log::info;
 use prio::server::{Server, VerificationMessage};
 use std::convert::TryFrom;
 use uuid::Uuid;
@@ -65,6 +66,13 @@ impl<'a> BatchAggregator<'a> {
     /// Compute the sum part for all the provided batch IDs and write it out to
     /// the aggregation transport.
     pub fn generate_sum_part(&mut self, batch_ids: &[(Uuid, NaiveDateTime)]) -> Result<()> {
+        info!(
+            "processing intake from {}, own validity from {}, peer validity from {} and saving sum parts to {}",
+            self.ingestion_transport.transport.transport.path(),
+            self.own_validation_transport.transport.path(),
+            self.peer_validation_transport.transport.path(),
+            self.aggregation_batch.path(),
+        );
         let mut invalid_uuids = Vec::new();
 
         let ingestion_header = self.ingestion_header(&batch_ids[0].0, &batch_ids[0].1)?;
@@ -280,6 +288,10 @@ impl<'a> BatchAggregator<'a> {
                 ) {
                     Ok(valid) => {
                         if !valid {
+                            info!(
+                                "rejecting packet {} due to invalid proof",
+                                peer_validation_packet.uuid
+                            );
                             invalid_uuids.push(peer_validation_packet.uuid);
                         }
                         self.total_individual_clients += 1;
