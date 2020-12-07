@@ -312,6 +312,7 @@ impl OauthTokenProvider {
 /// struct can either use the default service account from the metadata service,
 /// or can impersonate another GCP service account if one is provided to
 /// GCSTransport::new.
+#[derive(Debug)]
 pub struct GCSTransport {
     path: GCSPath,
     oauth_token_provider: OauthTokenProvider,

@@ -167,13 +167,13 @@ impl<'a> BatchIntaker<'a> {
 mod tests {
     use super::*;
     use crate::{
-        sample::generate_ingestion_sample,
+        sample::{generate_ingestion_sample, SampleOutput},
         test_utils::{
             default_facilitator_signing_private_key, default_ingestor_private_key,
             default_ingestor_public_key, default_pha_signing_private_key,
             DEFAULT_FACILITATOR_ECIES_PRIVATE_KEY, DEFAULT_PHA_ECIES_PRIVATE_KEY,
         },
-        transport::{LocalFileTransport, VerifiableTransport},
+        transport::{LocalFileTransport, SignableTransport, VerifiableTransport},
     };
 
     #[test]
@@ -187,20 +187,38 @@ mod tests {
         let date = NaiveDateTime::from_timestamp(1234567890, 654321);
         let batch_uuid = Uuid::new_v4();
 
+        let mut pha_output = SampleOutput {
+            transport: SignableTransport {
+                transport: Box::new(LocalFileTransport::new(pha_tempdir.path().to_path_buf())),
+                batch_signing_key: default_ingestor_private_key(),
+            },
+            packet_encryption_key: PrivateKey::from_base64(DEFAULT_PHA_ECIES_PRIVATE_KEY).unwrap(),
+            drop_nth_packet: None,
+        };
+
+        let mut facilitator_output = SampleOutput {
+            transport: SignableTransport {
+                transport: Box::new(LocalFileTransport::new(
+                    facilitator_tempdir.path().to_path_buf(),
+                )),
+                batch_signing_key: default_ingestor_private_key(),
+            },
+            packet_encryption_key: PrivateKey::from_base64(DEFAULT_FACILITATOR_ECIES_PRIVATE_KEY)
+                .unwrap(),
+            drop_nth_packet: None,
+        };
+
         generate_ingestion_sample(
-            &mut LocalFileTransport::new(pha_tempdir.path().to_path_buf()),
-            &mut LocalFileTransport::new(facilitator_tempdir.path().to_path_buf()),
             &batch_uuid,
             &aggregation_name,
             &date,
-            &PrivateKey::from_base64(DEFAULT_PHA_ECIES_PRIVATE_KEY).unwrap(),
-            &PrivateKey::from_base64(DEFAULT_FACILITATOR_ECIES_PRIVATE_KEY).unwrap(),
-            &default_ingestor_private_key(),
             10,
             10,
             0.11,
             100,
             100,
+            &mut pha_output,
+            &mut facilitator_output,
         )
         .expect("failed to generate sample");
 

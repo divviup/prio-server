@@ -1,4 +1,5 @@
 use crate::BatchSigningKey;
+use log::LevelFilter;
 use ring::signature::{
     EcdsaKeyPair, KeyPair, UnparsedPublicKey, ECDSA_P256_SHA256_ASN1,
     ECDSA_P256_SHA256_ASN1_SIGNING,
@@ -111,4 +112,15 @@ pub fn default_pha_signing_public_key() -> UnparsedPublicKey<Vec<u8>> {
             .as_ref()
             .to_vec(),
     )
+}
+
+// Disappointingly there's no builtin way to run a setup or init function
+// before all tests in Rust, so per env_logger's advice we call init() at
+// the top of any test we want logs from.
+// https://docs.rs/env_logger/0.8.2/env_logger/#capturing-logs-in-tests
+pub fn log_init() {
+    let _ = env_logger::builder()
+        .filter_level(LevelFilter::Info)
+        .is_test(true)
+        .try_init();
 }

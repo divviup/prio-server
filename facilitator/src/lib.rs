@@ -103,6 +103,7 @@ impl<T: Write, W: Write> Write for SidecarWriter<T, W> {
 
 /// This struct represents a key used by this data share processor to sign
 /// batches (ingestion, validation or sum part).
+#[derive(Debug)]
 pub struct BatchSigningKey {
     /// The ECDSA P256 key pair to use when signing batches.
     pub key: EcdsaKeyPair,

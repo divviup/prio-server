@@ -19,7 +19,7 @@ use facilitator::{
         DataShareProcessorGlobalManifest, IngestionServerManifest, PortalServerGlobalManifest,
         SpecificManifest,
     },
-    sample::generate_ingestion_sample,
+    sample::{generate_ingestion_sample, SampleOutput},
     transport::{
         GCSTransport, LocalFileTransport, S3Transport, SignableTransport, Transport,
         VerifiableAndDecryptableTransport, VerifiableTransport,
@@ -645,16 +645,35 @@ fn main() -> Result<(), anyhow::Error> {
 fn generate_sample(sub_matches: &ArgMatches) -> Result<(), anyhow::Error> {
     let peer_output_path = StoragePath::from_str(sub_matches.value_of("peer-output").unwrap())?;
     let peer_identity = sub_matches.value_of("peer-identity");
-    let mut peer_transport = transport_for_path(peer_output_path, peer_identity, sub_matches)?;
+    let mut peer_transport = SampleOutput {
+        transport: SignableTransport {
+            transport: transport_for_path(peer_output_path, peer_identity, sub_matches)?,
+            batch_signing_key: batch_signing_key_from_arg(sub_matches)?,
+        },
+        packet_encryption_key: PrivateKey::from_base64(
+            sub_matches
+                .value_of("facilitator-ecies-private-key")
+                .unwrap(),
+        )
+        .unwrap(),
+        drop_nth_packet: None,
+    };
 
     let own_output_path = StoragePath::from_str(sub_matches.value_of("own-output").unwrap())?;
     let own_identity = sub_matches.value_of("own-identity");
-    let mut own_transport = transport_for_path(own_output_path, own_identity, sub_matches)?;
-    let ingestor_batch_signing_key = batch_signing_key_from_arg(sub_matches)?;
+    let mut own_transport = SampleOutput {
+        transport: SignableTransport {
+            transport: transport_for_path(own_output_path, own_identity, sub_matches)?,
+            batch_signing_key: batch_signing_key_from_arg(sub_matches)?,
+        },
+        packet_encryption_key: PrivateKey::from_base64(
+            sub_matches.value_of("pha-ecies-private-key").unwrap(),
+        )
+        .unwrap(),
+        drop_nth_packet: None,
+    };
 
     generate_ingestion_sample(
-        &mut *peer_transport,
-        &mut *own_transport,
         &sub_matches
             .value_of("batch-id")
             .map_or_else(Uuid::new_v4, |v| Uuid::parse_str(v).unwrap()),
@@ -663,14 +682,6 @@ fn generate_sample(sub_matches: &ArgMatches) -> Result<(), anyhow::Error> {
             || Utc::now().naive_utc(),
             |v| NaiveDateTime::parse_from_str(&v, DATE_FORMAT).unwrap(),
         ),
-        &PrivateKey::from_base64(sub_matches.value_of("pha-ecies-private-key").unwrap()).unwrap(),
-        &PrivateKey::from_base64(
-            sub_matches
-                .value_of("facilitator-ecies-private-key")
-                .unwrap(),
-        )
-        .unwrap(),
-        &ingestor_batch_signing_key,
         sub_matches
             .value_of("dimension")
             .unwrap()
@@ -696,6 +707,8 @@ fn generate_sample(sub_matches: &ArgMatches) -> Result<(), anyhow::Error> {
             .unwrap()
             .parse::<i64>()
             .unwrap(),
+        &mut own_transport,
+        &mut peer_transport,
     )?;
     Ok(())
 }
