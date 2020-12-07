@@ -84,10 +84,10 @@ resource "google_container_node_pool" "worker_nodes" {
   name               = "${var.resource_prefix}-node-pool"
   location           = var.gcp_region
   cluster            = google_container_cluster.cluster.name
-  initial_node_count = 1
+  initial_node_count = 3
   autoscaling {
-    min_node_count = 1
-    max_node_count = 3
+    min_node_count = 2
+    max_node_count = 5
   }
   node_config {
     disk_size_gb = "25"
