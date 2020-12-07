@@ -11,8 +11,7 @@ variable "environment" {
 }
 
 variable "container_registry" {
-  type    = string
-  default = "letsencrypt"
+  type = string
 }
 
 variable "workflow_manager_image" {
@@ -21,8 +20,7 @@ variable "workflow_manager_image" {
 }
 
 variable "workflow_manager_version" {
-  type    = string
-  default = "latest"
+  type = string
 }
 
 variable "facilitator_image" {
@@ -31,8 +29,7 @@ variable "facilitator_image" {
 }
 
 variable "facilitator_version" {
-  type    = string
-  default = "latest"
+  type = string
 }
 
 variable "gcp_project" {

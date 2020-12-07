@@ -96,6 +96,18 @@ variable "pushgateway" {
   type = string
 }
 
+variable "container_registry" {
+  type = string
+}
+
+variable "workflow_manager_version" {
+  type = string
+}
+
+variable "facilitator_version" {
+  type = string
+}
+
 # We need the ingestion server's manifest so that we can discover the GCP
 # service account it will use to upload ingestion batches. Some ingestors
 # (Apple) are singletons, and advertise a single global manifest which contains
@@ -404,6 +416,9 @@ module "kubernetes" {
   aggregation_period                      = var.aggregation_period
   aggregation_grace_period                = var.aggregation_grace_period
   pushgateway                             = var.pushgateway
+  container_registry                      = var.container_registry
+  workflow_manager_version                = var.workflow_manager_version
+  facilitator_version                     = var.facilitator_version
 }
 
 output "data_share_processor_name" {

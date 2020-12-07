@@ -120,6 +120,21 @@ variable "pushgateway" {
   description = "The location of a pushgateway in host:port form. Set to prometheus-pushgateway.default:9091 to enable metrics"
 }
 
+variable "container_registry" {
+  type    = string
+  default = "letsencrypt"
+}
+
+variable "workflow_manager_version" {
+  type    = string
+  default = "latest"
+}
+
+variable "facilitator_version" {
+  type    = string
+  default = "latest"
+}
+
 terraform {
   backend "gcs" {}
 
@@ -350,6 +365,9 @@ module "data_share_processors" {
   aggregation_grace_period                       = var.aggregation_grace_period
   kms_keyring                                    = module.gke.kms_keyring
   pushgateway                                    = var.pushgateway
+  workflow_manager_version                       = var.workflow_manager_version
+  facilitator_version                            = var.facilitator_version
+  container_registry                             = var.container_registry
 }
 
 # The portal owns two sum part buckets (one for each data share processor) and
