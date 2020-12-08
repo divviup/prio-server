@@ -1,6 +1,6 @@
 use anyhow::{anyhow, Context, Result};
 use chrono::{prelude::Utc, NaiveDateTime};
-use clap::{App, Arg, ArgMatches, SubCommand};
+use clap::{value_t, App, Arg, ArgMatches, SubCommand};
 use log::{error, info};
 use prio::encrypt::PrivateKey;
 use prometheus::{register_counter, register_counter_vec, Counter};
@@ -674,39 +674,17 @@ fn generate_sample(sub_matches: &ArgMatches) -> Result<(), anyhow::Error> {
     };
 
     generate_ingestion_sample(
-        &sub_matches
-            .value_of("batch-id")
-            .map_or_else(Uuid::new_v4, |v| Uuid::parse_str(v).unwrap()),
+        &value_t!(sub_matches.value_of("batch-id"), Uuid).unwrap_or_else(|_| Uuid::new_v4()),
         &sub_matches.value_of("aggregation-id").unwrap(),
         &sub_matches.value_of("date").map_or_else(
             || Utc::now().naive_utc(),
             |v| NaiveDateTime::parse_from_str(&v, DATE_FORMAT).unwrap(),
         ),
-        sub_matches
-            .value_of("dimension")
-            .unwrap()
-            .parse::<i32>()
-            .unwrap(),
-        sub_matches
-            .value_of("packet-count")
-            .unwrap()
-            .parse::<usize>()
-            .unwrap(),
-        sub_matches
-            .value_of("epsilon")
-            .unwrap()
-            .parse::<f64>()
-            .unwrap(),
-        sub_matches
-            .value_of("batch-start-time")
-            .unwrap()
-            .parse::<i64>()
-            .unwrap(),
-        sub_matches
-            .value_of("batch-end-time")
-            .unwrap()
-            .parse::<i64>()
-            .unwrap(),
+        value_t!(sub_matches.value_of("dimension"), i32)?,
+        value_t!(sub_matches.value_of("packet-count"), usize)?,
+        value_t!(sub_matches.value_of("epsilon"), f64)?,
+        value_t!(sub_matches.value_of("batch-start-time"), i64)?,
+        value_t!(sub_matches.value_of("batch-end-time"), i64)?,
         &mut own_transport,
         &mut peer_transport,
     )?;
