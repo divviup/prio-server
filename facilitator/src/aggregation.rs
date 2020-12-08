@@ -226,10 +226,10 @@ impl<'a> BatchAggregator<'a> {
         // iterate over the ingestion packets. For each ingestion packet, if we
         // have the corresponding validation packets and the proofs are good, we
         // accumulate. Otherwise we drop the packet and move on.
-        let peer_validation_packets = validation_packet_map(
+        let peer_validation_packets: HashMap<Uuid, ValidationPacket> = validation_packet_map(
             &mut peer_validation_batch.packet_file_reader(&peer_validation_header)?,
         )?;
-        let own_validation_packets = validation_packet_map(
+        let own_validation_packets: HashMap<Uuid, ValidationPacket> = validation_packet_map(
             &mut own_validation_batch.packet_file_reader(&own_validation_header)?,
         )?;
 
@@ -255,22 +255,24 @@ impl<'a> BatchAggregator<'a> {
 
             // Make sure we have own validation and peer validation packets
             // matching the ingestion packet.
-            let peer_validation_packet = match get_validation_packet(
+            let peer_validation_packet = get_validation_packet(
                 &ingestion_packet.uuid,
                 &peer_validation_packets,
                 "peer",
                 invalid_uuids,
-            ) {
+            );
+            let peer_validation_packet: &ValidationPacket = match peer_validation_packet {
                 Some(p) => p,
                 None => continue,
             };
 
-            let own_validation_packet = match get_validation_packet(
+            let own_validation_packet = get_validation_packet(
                 &ingestion_packet.uuid,
                 &own_validation_packets,
                 "own",
                 invalid_uuids,
-            ) {
+            );
+            let own_validation_packet: &ValidationPacket = match own_validation_packet {
                 Some(p) => p,
                 None => continue,
             };

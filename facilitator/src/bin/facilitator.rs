@@ -645,17 +645,18 @@ fn main() -> Result<(), anyhow::Error> {
 fn generate_sample(sub_matches: &ArgMatches) -> Result<(), anyhow::Error> {
     let peer_output_path = StoragePath::from_str(sub_matches.value_of("peer-output").unwrap())?;
     let peer_identity = sub_matches.value_of("peer-identity");
+    let packet_encryption_key = PrivateKey::from_base64(
+        sub_matches
+            .value_of("facilitator-ecies-private-key")
+            .unwrap(),
+    )
+    .unwrap();
     let mut peer_transport = SampleOutput {
         transport: SignableTransport {
             transport: transport_for_path(peer_output_path, peer_identity, sub_matches)?,
             batch_signing_key: batch_signing_key_from_arg(sub_matches)?,
         },
-        packet_encryption_key: PrivateKey::from_base64(
-            sub_matches
-                .value_of("facilitator-ecies-private-key")
-                .unwrap(),
-        )
-        .unwrap(),
+        packet_encryption_key,
         drop_nth_packet: None,
     };
 
