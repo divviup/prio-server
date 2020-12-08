@@ -7,7 +7,6 @@ use avro_rs::{
 use prio::{finite_field::Field, server::VerificationMessage};
 use serde::{Deserialize, Serialize};
 use std::{
-    cmp::{Ord, Ordering, PartialOrd},
     convert::TryFrom,
     io::{Read, Write},
     num::TryFromIntError,
@@ -48,6 +47,8 @@ pub trait Packet: Sized {
     /// schema returned from Packet::schema.
     fn write<W: Write>(&self, writer: &mut Writer<W>) -> Result<(), Error>;
 
+    /// Implementations of Packet should return their Avro schemas as strings
+    /// from this method.
     fn schema_raw() -> &'static str;
 
     /// Creates an avro_rs::Schema from the packet schema. For constructing the
@@ -513,18 +514,6 @@ impl Packet for IngestionDataSharePacket {
     }
 }
 
-impl Ord for IngestionDataSharePacket {
-    fn cmp(&self, other: &Self) -> Ordering {
-        self.uuid.cmp(&other.uuid)
-    }
-}
-
-impl PartialOrd for IngestionDataSharePacket {
-    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        Some(self.cmp(other))
-    }
-}
-
 /// The header on a Prio validation (sometimes referred to as verification)
 /// batch.
 #[derive(Debug, Deserialize, Serialize, PartialEq)]
@@ -753,18 +742,6 @@ impl Packet for ValidationPacket {
         })?;
 
         Ok(())
-    }
-}
-
-impl Ord for ValidationPacket {
-    fn cmp(&self, other: &Self) -> Ordering {
-        self.uuid.cmp(&other.uuid)
-    }
-}
-
-impl PartialOrd for ValidationPacket {
-    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        Some(self.cmp(other))
     }
 }
 
@@ -1021,17 +998,6 @@ impl Header for SumPart {
 #[derive(Debug, Deserialize, Serialize, PartialEq, Eq)]
 pub struct InvalidPacket {
     pub uuid: Uuid,
-}
-impl Ord for InvalidPacket {
-    fn cmp(&self, other: &Self) -> Ordering {
-        self.uuid.cmp(&other.uuid)
-    }
-}
-
-impl PartialOrd for InvalidPacket {
-    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        Some(self.cmp(other))
-    }
 }
 
 impl Packet for InvalidPacket {

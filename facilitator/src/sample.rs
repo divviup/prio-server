@@ -33,7 +33,7 @@ pub struct ReferenceSum {
     /// The reference sum, covering those packets whose shares appear in both
     /// PHA and facilitator ingestion batches.
     pub sum: Vec<Field>,
-    /// The number of contributiosn that went into the reference sum.
+    /// The number of contributions that went into the reference sum.
     pub contributions: usize,
     /// UUIDs of PHA packets that were dropped
     pub pha_dropped_packets: Vec<Uuid>,
