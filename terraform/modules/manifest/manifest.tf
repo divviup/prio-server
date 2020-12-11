@@ -56,7 +56,7 @@ resource "google_storage_bucket_object" "global_manifest" {
   content = jsonencode({
     format = 0
     server-identity = {
-      aws-account-id            = tonumber(data.aws_caller_identity.current.account_id)
+      aws-account-id            = data.aws_caller_identity.current.account_id
       gcp-service-account-email = var.sum_part_bucket_service_account_email
     }
   })

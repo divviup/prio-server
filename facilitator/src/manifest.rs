@@ -58,7 +58,7 @@ pub struct DataShareProcessorGlobalManifest {
 pub struct DataShareProcessorServerIdentity {
     /// The numeric account ID of the AWS account this data share processor will
     /// use to access peer cloud resources.
-    aws_account_id: u64,
+    aws_account_id: Option<String>,
     /// The email address of the GCP service account this data share processor
     /// will use to access peer cloud resources.
     gcp_service_account_email: String,
@@ -77,7 +77,7 @@ impl DataShareProcessorGlobalManifest {
     pub fn from_slice(json: &[u8]) -> Result<Self> {
         let manifest: Self =
             serde_json::from_slice(json).context("failed to decode JSON global manifest")?;
-        if manifest.format != 0 {
+        if manifest.format != 1 {
             return Err(anyhow!("unsupported manifest format {}", manifest.format));
         }
         Ok(manifest)
@@ -387,19 +387,19 @@ mod tests {
     fn load_data_share_processor_global_manifest() {
         let json = br#"
 {
-    "format": 0,
+    "format": 1,
     "server-identity": {
-        "aws-account-id": 12345678901234567,
+        "aws-account-id": "12345678901234567",
         "gcp-service-account-email": "service-account@project-name.iam.gserviceaccount.com"
     }
 }
             "#;
         let manifest = DataShareProcessorGlobalManifest::from_slice(json).unwrap();
-        assert_eq!(manifest.format, 0);
+        assert_eq!(manifest.format, 1);
         assert_eq!(
             manifest.server_identity,
             DataShareProcessorServerIdentity {
-                aws_account_id: 12345678901234567,
+                aws_account_id: Some("12345678901234567".to_owned()),
                 gcp_service_account_email: "service-account@project-name.iam.gserviceaccount.com"
                     .to_owned(),
             }
@@ -413,7 +413,7 @@ mod tests {
             r#"
 {
     "server-identity": {
-        "aws-account-id": 12345678901234567,
+        "aws-account-id": "12345678901234567",
         "gcp-service-account-email": "service-account@project-name.iam.gserviceaccount.com"
     }
 }
@@ -423,7 +423,7 @@ mod tests {
  {
     "format": 2,
     "server-identity": {
-        "aws-account-id": 12345678901234567,
+        "aws-account-id": "12345678901234567",
         "gcp-service-account-email": "service-account@project-name.iam.gserviceaccount.com"
     }
 }
@@ -431,24 +431,15 @@ mod tests {
             // no server identity
             r#"
  {
-    "format": 0
+    "format": 1
 }
         "#,
-            // missing aws account
+            // numeric aws account
             r#"
  {
-    "format": 0,
+    "format": 1,
     "server-identity": {
-        "gcp-service-account-email": "service-account@project-name.iam.gserviceaccount.com"
-    }
-}
-        "#,
-            // non numeric aws account
-            r#"
- {
-    "format": 0,
-    "server-identity": {
-        "aws-account-id": "not-a-number",
+        "aws-account-id": 1234567890,
         "gcp-service-account-email": "service-account@project-name.iam.gserviceaccount.com"
     }
 }
@@ -456,18 +447,18 @@ mod tests {
             // missing GCP email
             r#"
  {
-    "format": 0,
+    "format": 1,
     "server-identity": {
-        "aws-account-id": 12345678901234567
+        "aws-account-id": "12345678901234567"
     }
 }
         "#,
             // non-string GCP email
             r#"
  {
-    "format": 0,
+    "format": 1,
     "server-identity": {
-        "aws-account-id": 12345678901234567,
+        "aws-account-id": "12345678901234567",
         "gcp-service-account-email": 14
     }
 }
