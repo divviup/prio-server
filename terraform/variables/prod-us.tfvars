@@ -2,7 +2,7 @@ environment     = "prod-us"
 gcp_region      = "us-west1"
 gcp_project     = "prio-prod-us"
 machine_type    = "e2-standard-8"
-localities      = ["aq-aq", "ta-ta"]
+localities      = ["aq-aq", "ta-ta", "us-ct"]
 aws_region      = "us-west-1"
 manifest_domain = "isrg-prio.org"
 managed_dns_zone = {
@@ -13,7 +13,7 @@ ingestors = {
   apple  = "exposure-notification.apple.com/manifest"
   g-enpa = "storage.googleapis.com/prio-manifests"
 }
-peer_share_processor_manifest_base_url = "test-en-analytics.cancer.gov"
+peer_share_processor_manifest_base_url = "en-analytics.cancer.gov"
 portal_server_manifest_base_url        = "manifest.enpa-pha.io"
 is_first                               = false
 use_aws                                = false
