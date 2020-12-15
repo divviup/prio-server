@@ -370,7 +370,7 @@ func launchAggregationJobs(ctx context.Context, batchesByID aggregationMap, inte
 								Args:            args,
 								Name:            "facile-container",
 								Image:           *facilitatorImage,
-								ImagePullPolicy: "Always",
+								ImagePullPolicy: "IfNotPresent",
 								VolumeMounts:    volumeMounts,
 								Resources: corev1.ResourceRequirements{
 									Requests: corev1.ResourceList{
@@ -512,7 +512,7 @@ func startIntakeJob(
 							Args:            args,
 							Name:            "facile-container",
 							Image:           *facilitatorImage,
-							ImagePullPolicy: "Always",
+							ImagePullPolicy: "IfNotPresent",
 							VolumeMounts:    volumeMounts,
 							Resources: corev1.ResourceRequirements{
 								Requests: corev1.ResourceList{
