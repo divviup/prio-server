@@ -19,5 +19,5 @@ is_first                               = false
 use_aws                                = false
 aggregation_period                     = "8h"
 aggregation_grace_period               = "4h"
-workflow_manager_version               = "0.5.0"
-facilitator_version                    = "0.5.0"
+workflow_manager_version               = "0.5.1"
+facilitator_version                    = "0.5.1"
