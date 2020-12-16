@@ -288,7 +288,7 @@ resource "google_service_account" "sum_part_bucket_writer" {
 
 # Call the locality_kubernetes module per each locality/namespace
 module "locality_kubernetes" {
-  for_each = kubernetes_namespace.namespaces
+  for_each = toset(var.localities)
   source   = "./modules/locality_kubernetes"
 
   environment                            = var.environment
@@ -300,7 +300,7 @@ module "locality_kubernetes" {
   manifest_bucket                        = module.manifest.bucket
   manifest_bucket_base_url               = module.manifest.base_url
   certificate_domain                     = "${var.environment}.certificates.${var.manifest_domain}"
-  kubernetes_namespace                   = each.value.metadata[0].name
+  kubernetes_namespace                   = each.value
   ingestors                              = var.ingestors
 
   batch_signing_key_expiration                        = var.batch_signing_key_expiration
