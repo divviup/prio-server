@@ -315,6 +315,12 @@ module "locality_kubernetes" {
   aggregation_period                                  = var.aggregation_period
   aggregation_grace_period                            = var.aggregation_grace_period
   kms_keyring                                         = module.gke.kms_keyring
+  pushgateway                                         = var.pushgateway
+  workflow_manager_version                            = var.workflow_manager_version
+  facilitator_version                                 = var.facilitator_version
+  container_registry                                  = var.container_registry
+
+  depends_on = [kubernetes_namespace.namespaces]
 }
 
 module "fake_server_resources" {

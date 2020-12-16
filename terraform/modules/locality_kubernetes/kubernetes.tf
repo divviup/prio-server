@@ -189,6 +189,23 @@ variable "kms_keyring" {
   type = string
 }
 
+variable "pushgateway" {
+  type = string
+}
+
+variable "container_registry" {
+  type = string
+}
+
+variable "workflow_manager_version" {
+  type = string
+}
+
+variable "facilitator_version" {
+  type = string
+}
+
+
 # For each peer data share processor, we will receive ingestion batches from two
 # ingestion servers. We create a distinct data share processor instance for each
 # (peer, ingestor) pair.
@@ -222,7 +239,6 @@ module "data_share_processors" {
   manifest_bucket           = var.manifest_bucket
   kubernetes_namespace      = var.kubernetes_namespace
 
-  ingestor_gcp_service_account_email             = jsondecode(data.http.ingestor_global_manifests[each.key].body).server-identity.gcp-service-account-id
   ingestor_manifest_base_url                     = each.value
   peer_share_processor_aws_account_id            = local.peer_share_processor_server_identity.aws-account-id
   peer_share_processor_gcp_service_account_email = local.peer_share_processor_server_identity.gcp-service-account-email
@@ -235,6 +251,10 @@ module "data_share_processors" {
   aggregation_period                             = var.aggregation_period
   aggregation_grace_period                       = var.aggregation_grace_period
   kms_keyring                                    = var.kms_keyring
+  pushgateway                                    = var.pushgateway
+  workflow_manager_version                       = var.workflow_manager_version
+  facilitator_version                            = var.facilitator_version
+  container_registry                             = var.container_registry
 }
 
 resource "kubernetes_config_map" "manifest_updater_config" {

@@ -407,10 +407,10 @@ module "kubernetes" {
   is_first                               = var.is_first
   aggregation_period                     = var.aggregation_period
   aggregation_grace_period               = var.aggregation_grace_period
-  pushgateway                             = var.pushgateway
-  container_registry                      = var.container_registry
-  workflow_manager_version                = var.workflow_manager_version
-  facilitator_version                     = var.facilitator_version
+  pushgateway                            = var.pushgateway
+  container_registry                     = var.container_registry
+  workflow_manager_version               = var.workflow_manager_version
+  facilitator_version                    = var.facilitator_version
 }
 
 output "data_share_processor_name" {
