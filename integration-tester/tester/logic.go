@@ -7,7 +7,7 @@ import (
 	"time"
 
 	m "github.com/abetterinternet/prio-server/manifest-updater/manifest"
-	"github.com/abetterinternet/prio-server/tester/kubernetes"
+	"github.com/abetterinternet/prio-server/integration-tester/kubernetes"
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -31,9 +31,9 @@ func (t *Tester) createJob(manifest *m.DataShareSpecificManifest, bsk, pdk *core
 
 	return &batchv1.Job{
 		ObjectMeta: metav1.ObjectMeta{
-			GenerateName: "tester-",
+			GenerateName: "integration-tester-",
 			Labels: map[string]string{
-				"type": "tester",
+				"type": "integration-tester",
 			},
 		},
 		Spec: batchv1.JobSpec{
@@ -44,7 +44,7 @@ func (t *Tester) createJob(manifest *m.DataShareSpecificManifest, bsk, pdk *core
 					AutomountServiceAccountToken: &trueP,
 					Containers: []corev1.Container{
 						{
-							Name:  "tester",
+							Name:  "integration-tester",
 							Image: t.facilitatorImage,
 							Args: []string{
 								"--pushgateway", t.pushGateway,

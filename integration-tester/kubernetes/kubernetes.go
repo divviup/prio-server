@@ -1,6 +1,7 @@
 package kubernetes
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"sort"
@@ -28,7 +29,7 @@ func GetSortedSecrets(namespace, labelSelector string) ([]corev1.Secret, error) 
 		return nil, err
 	}
 
-	secrets, err := client.CoreV1().Secrets(namespace).List(metav1.ListOptions{LabelSelector: labelSelector})
+	secrets, err := client.CoreV1().Secrets(namespace).List(context.Background(), metav1.ListOptions{LabelSelector: labelSelector})
 
 	if err != nil {
 		return nil, fmt.Errorf("problem when listing secrets with label %s: %v", labelSelector, err)
@@ -57,7 +58,7 @@ func ScheduleJob(namespace string, job *batchv1.Job) error {
 		return err
 	}
 
-	_, err = client.BatchV1().Jobs(namespace).Create(job)
+	_, err = client.BatchV1().Jobs(namespace).Create(context.Background(), job, metav1.CreateOptions{})
 	if err != nil {
 		return fmt.Errorf("job creation failed: %v", err)
 	}

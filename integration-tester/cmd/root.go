@@ -11,18 +11,18 @@ import (
 )
 
 var (
-	namespace          string
-	name               string
-	manifestFileUrl    string
-	serviceAccountName string
+	namespace          = ""
+	name               = ""
+	manifestFileUrl    = ""
+	serviceAccountName = ""
 
-	facilitatorImage string
-	pushGateway      string
-	peerIdentity     string
+	facilitatorImage = ""
+	pushGateway      = ""
+	peerIdentity     = ""
 )
 
 var rootCmd = &cobra.Command{
-	Use: "tester",
+	Use: "integration-tester",
 	PersistentPreRun: func(cmd *cobra.Command, args []string) {
 		v := viper.New()
 
@@ -52,14 +52,14 @@ func handleDashes(cmd *cobra.Command, v *viper.Viper) {
 }
 
 func init() {
-	rootCmd.PersistentFlags().StringVarP(&name, "name", "n", "", "The name of this ingestor")
-	rootCmd.PersistentFlags().StringVarP(&namespace, "namespace", "ns", "", "The namespace this will run in")
-	rootCmd.PersistentFlags().StringVarP(&manifestFileUrl, "manifest-file-url", "mu", "", "The URL where the manifest can be accessed")
-	rootCmd.PersistentFlags().StringVarP(&serviceAccountName, "service-account-name", "sau", "", "The service account name for kubernetes")
+	rootCmd.PersistentFlags().StringVarP(&name, "name", "", "", "The name of this ingestor")
+	rootCmd.PersistentFlags().StringVarP(&namespace, "namespace", "", "", "The namespace this will run in")
+	rootCmd.PersistentFlags().StringVarP(&manifestFileUrl, "manifest-file-url", "", "", "The URL where the manifest can be accessed")
+	rootCmd.PersistentFlags().StringVarP(&serviceAccountName, "service-account-name", "", "", "The service account name for kubernetes")
 
-	rootCmd.PersistentFlags().StringVarP(&facilitatorImage, "facilitator-image", "fi", "", "The image for the facilitator")
-	rootCmd.PersistentFlags().StringVarP(&pushGateway, "push-gateway", "pg", "", "The push gateway")
-	rootCmd.PersistentFlags().StringVarP(&peerIdentity, "peer-identity", "pi", "", "The peer identity")
+	rootCmd.PersistentFlags().StringVarP(&facilitatorImage, "facilitator-image", "", "", "The image for the facilitator")
+	rootCmd.PersistentFlags().StringVarP(&pushGateway, "push-gateway", "", "", "The push gateway")
+	rootCmd.PersistentFlags().StringVarP(&peerIdentity, "peer-identity", "", "", "The peer identity")
 }
 
 func Execute() {
