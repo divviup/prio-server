@@ -9,14 +9,22 @@ import (
 	"context"
 	"flag"
 	"fmt"
+	"io/ioutil"
 	"log"
+	"net/http"
 	"os"
 	"regexp"
+	"sort"
 	"strings"
 	"time"
 
+	"cloud.google.com/go/storage"
+	"github.com/aws/aws-sdk-go/aws"
+	"github.com/aws/aws-sdk-go/aws/arn"
+	"github.com/aws/aws-sdk-go/aws/credentials"
+	"github.com/aws/aws-sdk-go/aws/credentials/stscreds"
+	"github.com/aws/aws-sdk-go/service/s3"
 	"github.com/letsencrypt/prio-server/workflow-manager/batchpath"
-	"github.com/letsencrypt/prio-server/workflow-manager/bucket"
 	wferror "github.com/letsencrypt/prio-server/workflow-manager/errors"
 	"github.com/letsencrypt/prio-server/workflow-manager/monitor"
 	"github.com/letsencrypt/prio-server/workflow-manager/retry"
@@ -24,6 +32,8 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
 	"github.com/prometheus/client_golang/prometheus/push"
+	"google.golang.org/api/iterator"
+	"google.golang.org/api/sts/v1"
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
@@ -41,8 +51,8 @@ var k8sNS = flag.String("k8s-namespace", "", "Kubernetes namespace")
 var isFirst = flag.Bool("is-first", false, "Whether this set of servers is \"first\", aka PHA servers")
 var maxAge = flag.String("intake-max-age", "1h", "Max age (in Go duration format) for intake batches to be worth processing.")
 var k8sServiceAccount = flag.String("k8s-service-account", "", "Kubernetes service account for intake and aggregate jobs")
-var bskSecretName = flag.String("bsk-secret-selector", "", "Label selector of k8s secret for batch signing key")
-var pdksSecretName = flag.String("pdks-secret-selector", "", "Label selector of k8s secret for packet decrypt keys")
+var bskSecretSelector = flag.String("bsk-secret-selector", "", "Label selector of k8s secret for batch signing key")
+var pdksSecretSelector = flag.String("pdks-secret-selector", "", "Label selector of k8s secret for packet decrypt keys")
 var gcpServiceAccountKeyFileSecretName = flag.String("gcp-service-account-key-file-secret-name", "", "Name of k8s secret for default GCP service account key file")
 var intakeConfigMap = flag.String("intake-batch-config-map", "", "Name of config map for intake jobs")
 var aggregateConfigMap = flag.String("aggregate-config-map", "", "Name of config map for aggregate jobs")
@@ -202,6 +212,195 @@ func main() {
 	log.Print("done")
 }
 
+type tokenFetcher struct {
+	audience string
+}
+
+func (tf tokenFetcher) FetchToken(credentials.Context) ([]byte, error) {
+	url := fmt.Sprintf("http://metadata.google.internal:80/computeMetadata/v1/instance/service-accounts/default/identity?audience=%s", tf.audience)
+	req, err := http.NewRequest("GET", url, nil)
+	if err != nil {
+		return nil, fmt.Errorf("building request: %w", err)
+	}
+	req.Header.Add("Metadata-Flavor", "Google")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("fetching %s: %w", url, err)
+	}
+	bytes, err := ioutil.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("reading body of %s: %w", url, err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("status code %d from metadata service at %s: %s",
+			resp.StatusCode, url, string(bytes))
+	}
+	log.Printf("fetched token from %s", url)
+	return bytes, nil
+}
+
+type bucket struct {
+	service string // "s3" or "gs"
+	// bucketName includes the region for S3
+	bucketName string
+	identity   string
+}
+
+func newBucket(bucketURL, identity string) (*bucket, error) {
+	if bucketURL == "" {
+		log.Fatalf("empty bucket URL")
+	}
+	if !strings.HasPrefix(bucketURL, "s3://") && !strings.HasPrefix(bucketURL, "gs://") {
+		return nil, fmt.Errorf("invalid bucket %q with identity %q", bucketURL, identity)
+	}
+	if strings.HasPrefix(bucketURL, "gs://") && identity != "" {
+		return nil, fmt.Errorf("workflow-manager doesn't support alternate identities (%s) for gs:// bucket (%q)",
+			identity, bucketURL)
+	}
+	return &bucket{
+		service:    bucketURL[0:2],
+		bucketName: bucketURL[5:],
+		identity:   identity,
+	}, nil
+}
+
+func (b *bucket) listFiles(ctx context.Context) ([]string, error) {
+	switch b.service {
+	case "s3":
+		return b.listFilesS3(ctx)
+	case "gs":
+		return b.listFilesGS(ctx)
+	default:
+		return nil, fmt.Errorf("invalid storage service %q", b.service)
+	}
+}
+
+func webIDP(sess *aws_session.Session, identity string) (*credentials.Credentials, error) {
+	parsed, err := arn.Parse(identity)
+	if err != nil {
+		return nil, err
+	}
+	audience := fmt.Sprintf("sts.amazonaws.com/%s", parsed.AccountID)
+
+	stsSTS := sts.New(sess)
+	roleSessionName := ""
+	roleProvider := stscreds.NewWebIdentityRoleProviderWithToken(
+		stsSTS, identity, roleSessionName, tokenFetcher{audience})
+
+	return credentials.NewCredentials(roleProvider), nil
+}
+
+func (b *bucket) listFilesS3(ctx context.Context) ([]string, error) {
+	parts := strings.SplitN(b.bucketName, "/", 2)
+	if len(parts) != 2 {
+		return nil, fmt.Errorf("invalid S3 bucket name %q", b.bucketName)
+	}
+	region := parts[0]
+	bucket := parts[1]
+	sess, err := aws_session.NewSession()
+	if err != nil {
+		return nil, fmt.Errorf("making AWS session: %w", err)
+	}
+
+	log.Printf("listing files in s3://%s as %q", bucket, b.identity)
+	config := aws.NewConfig().
+		WithRegion(region)
+	if b.identity != "" {
+		creds, err := webIDP(sess, b.identity)
+		if err != nil {
+			return nil, err
+		}
+		config = config.WithCredentials(creds)
+	}
+	svc := s3.New(sess, config)
+	var output []string
+	var nextContinuationToken = ""
+	for {
+		input := &s3.ListObjectsV2Input{
+			// We choose a lower number than the default max of 1000 to ensure we exercise the
+			// cursoring case regularly.
+			MaxKeys: aws.Int64(100),
+			Bucket:  aws.String(bucket),
+		}
+		if nextContinuationToken != "" {
+			input.ContinuationToken = &nextContinuationToken
+		}
+		resp, err := svc.ListObjectsV2(input)
+		if err != nil {
+			return nil, fmt.Errorf("Unable to list items in bucket %q, %w", b.bucketName, err)
+		}
+		for _, item := range resp.Contents {
+			output = append(output, *item.Key)
+		}
+		if !*resp.IsTruncated {
+			break
+		}
+		nextContinuationToken = *resp.NextContinuationToken
+	}
+	return output, nil
+}
+
+func (b *bucket) listFilesGS(ctx context.Context) ([]string, error) {
+	if b.identity != "" {
+		return nil, fmt.Errorf("workflow-manager doesn't support non-default identity %q for GS bucket %q", b.identity, b.bucketName)
+	}
+	client, err := storage.NewClient(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("storage.newClient: %w", err)
+	}
+
+	bkt := client.Bucket(b.bucketName)
+	query := &storage.Query{Prefix: ""}
+
+	log.Printf("looking for ready batches in gs://%s as (ambient service account)", b.bucketName)
+	var output []string
+	it := bkt.Objects(ctx, query)
+	for {
+		attrs, err := it.Next()
+		if err == iterator.Done {
+			break
+		}
+		if err != nil {
+			return nil, fmt.Errorf("iterating on inputBucket objects from %q: %w", b.bucketName, err)
+		}
+		output = append(output, attrs.Name)
+	}
+	return output, nil
+}
+
+func readyBatches(files []string, infix string) ([]*batchPath, error) {
+	batches := make(map[string]*batchPath)
+	for _, name := range files {
+		basename := basename(name, infix)
+		b := batches[basename]
+		var err error
+		if b == nil {
+			b, err = newBatchPath(basename)
+			if err != nil {
+				return nil, err
+			}
+			batches[basename] = b
+		}
+		if strings.HasSuffix(name, fmt.Sprintf(".%s", infix)) {
+			b.metadata = true
+		}
+		if strings.HasSuffix(name, fmt.Sprintf(".%s.avro", infix)) {
+			b.avro = true
+		}
+		if strings.HasSuffix(name, fmt.Sprintf(".%s.sig", infix)) {
+			b.sig = true
+		}
+	}
+
+	var output []*batchPath
+	for _, v := range batches {
+		output = append(output, v)
+	}
+	sort.Sort(batchPathList(output))
+
+	return output, nil
+}
+
 // interval represents a half-open interval of time.
 // It includes `begin` and excludes `end`.
 type interval struct {
@@ -311,6 +510,72 @@ func secretVolumesAndMounts() ([]corev1.Volume, []corev1.VolumeMount) {
 	return volumes, volumeMounts
 }
 
+func getLatestBatchSigningKey(ctx context.Context, client *kubernetes.Clientset) (*corev1.Secret, error) {
+	secrets, err := getSecretsWithLabel(ctx, client, *bskSecretSelector)
+	if err != nil {
+		return nil, fmt.Errorf("bsks: %w", err)
+	}
+
+	if len(secrets) == 0 {
+		return nil, fmt.Errorf("secrets did not exist. %w", err)
+	}
+
+	// secrets with descending (older) creation dates
+	sort.Slice(secrets, func(i, j int) bool {
+		item1 := secrets[i]
+		item2 := secrets[j]
+
+		time1 := item1.GetCreationTimestamp().Time
+		time2 := item2.GetCreationTimestamp().Time
+
+		return time1.After(time2)
+	})
+
+	return &secrets[0], nil
+}
+
+func getAvailablePacketDecryptionKeys(ctx context.Context, client *kubernetes.Clientset) ([]corev1.Secret, error) {
+	return getSecretsWithLabel(ctx, client, *pdksSecretSelector)
+}
+
+func getSecretsWithLabel(ctx context.Context, client *kubernetes.Clientset, labelSelector string) ([]corev1.Secret, error) {
+	secrets, err := client.CoreV1().Secrets(*k8sNS).List(ctx, metav1.ListOptions{LabelSelector: labelSelector})
+	if err != nil {
+		return nil, fmt.Errorf("secrets with label %s: %w", labelSelector, err)
+	}
+
+	if secrets.Items == nil {
+		return nil, fmt.Errorf("pdks were nil after retrieving them from k8s")
+	}
+
+	return secrets.Items, nil
+}
+
+func getBSKAndPDKs(ctx context.Context, client *kubernetes.Clientset) (*corev1.Secret, *string, error) {
+	bsk, err := getLatestBatchSigningKey(context.Background(), client)
+	if err != nil {
+		return nil, nil, fmt.Errorf("bsk: %w", err)
+	}
+
+	pdks, err := getAvailablePacketDecryptionKeys(context.Background(), client)
+	if err != nil {
+		return nil, nil, fmt.Errorf("pdks: %w", err)
+	}
+
+	pdksStringArray := make([]string, len(pdks))
+	for _, pdk := range pdks {
+		data := pdk.Data["secret_key"]
+		if len(data) == 0 {
+			return nil, nil, fmt.Errorf("pdk did not contain secret_key")
+		}
+		pdksStringArray = append(pdksStringArray, string(data))
+	}
+
+	pdksDelimited := strings.Join(pdksStringArray, ",")
+
+	return bsk, &pdksDelimited, nil
+}
+
 func launchAggregationJobs(ctx context.Context, batchesByID aggregationMap, inter interval) error {
 	if len(batchesByID) == 0 {
 		log.Printf("no batches to aggregate")
@@ -324,6 +589,11 @@ func launchAggregationJobs(ctx context.Context, batchesByID aggregationMap, inte
 	clientset, err := kubernetes.NewForConfig(config)
 	if err != nil {
 		return fmt.Errorf("clientset: %w", err)
+	}
+
+	bsk, pdks, err := getBSKAndPDKs(ctx, clientset)
+	if err != nil {
+		return fmt.Errorf("bsk and pdks: %w", err)
 	}
 
 	for _, readyBatches := range batchesByID {
@@ -397,22 +667,15 @@ func launchAggregationJobs(ctx context.Context, batchesByID aggregationMap, inte
 										ValueFrom: &corev1.EnvVarSource{
 											SecretKeyRef: &corev1.SecretKeySelector{
 												LocalObjectReference: corev1.LocalObjectReference{
-													Name: *bskSecretName,
+													Name: bsk.Name,
 												},
 												Key: "secret_key",
 											},
 										},
 									},
 									{
-										Name: "PACKET_DECRYPTION_KEYS",
-										ValueFrom: &corev1.EnvVarSource{
-											SecretKeyRef: &corev1.SecretKeySelector{
-												LocalObjectReference: corev1.LocalObjectReference{
-													Name: *pdksSecretName,
-												},
-												Key: "secret_key",
-											},
-										},
+										Name:  "PACKET_DECRYPTION_KEYS",
+										Value: *pdks,
 									},
 								},
 							},
@@ -476,6 +739,8 @@ func startIntakeJob(
 	clientset *kubernetes.Clientset,
 	batchPath *batchpath.BatchPath,
 	ageLimit time.Duration,
+	batchSigningKey *corev1.Secret,
+	packetDecryptionDelimited string,
 ) error {
 	age := time.Now().Sub(batchPath.Time)
 	if age > ageLimit {
@@ -539,22 +804,15 @@ func startIntakeJob(
 									ValueFrom: &corev1.EnvVarSource{
 										SecretKeyRef: &corev1.SecretKeySelector{
 											LocalObjectReference: corev1.LocalObjectReference{
-												Name: *bskSecretName,
+												Name: batchSigningKey.Name,
 											},
 											Key: "secret_key",
 										},
 									},
 								},
 								{
-									Name: "PACKET_DECRYPTION_KEYS",
-									ValueFrom: &corev1.EnvVarSource{
-										SecretKeyRef: &corev1.SecretKeySelector{
-											LocalObjectReference: corev1.LocalObjectReference{
-												Name: *pdksSecretName,
-											},
-											Key: "secret_key",
-										},
-									},
+									Name:  "PACKET_DECRYPTION_KEYS",
+									Value: packetDecryptionDelimited,
 								},
 							},
 						},
