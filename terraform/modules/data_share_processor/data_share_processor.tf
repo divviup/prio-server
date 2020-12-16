@@ -34,14 +34,6 @@ variable "kubernetes_namespace" {
   type = string
 }
 
-variable "packet_decryption_key_kubernetes_secret" {
-  type = string
-}
-
-variable "certificate_domain" {
-  type = string
-}
-
 variable "ingestor_manifest_base_url" {
   type = string
 }
@@ -391,30 +383,50 @@ module "bucket" {
   depends_on = [google_kms_crypto_key_iam_binding.bucket_encryption_key]
 }
 
+resource "google_storage_bucket" "own_validation_bucket" {
+  provider = google-beta
+  name     = "${local.resource_prefix}-own-validation"
+  location = var.gcp_region
+  # Force deletion of bucket contents on bucket destroy. Bucket contents would
+  # be re-created by a subsequent deploy so no reason to keep them around.
+  force_destroy               = true
+  uniform_bucket_level_access = true
+}
+
+# Permit the workflow manager and facilitator service account to manage the
+# bucket
+resource "google_storage_bucket_iam_binding" "own_validation_bucket_admin" {
+  bucket = google_storage_bucket.own_validation_bucket.name
+  role   = "roles/storage.objectAdmin"
+  members = [
+    "serviceAccount:${module.kubernetes.service_account_email}"
+  ]
+}
+
 module "kubernetes" {
-  source                                  = "../../modules/kubernetes/"
-  data_share_processor_name               = var.data_share_processor_name
-  ingestor                                = var.ingestor
-  gcp_project                             = var.gcp_project
-  environment                             = var.environment
-  kubernetes_namespace                    = var.kubernetes_namespace
-  ingestion_bucket                        = local.ingestion_bucket_url
-  ingestion_bucket_identity               = local.bucket_access_identities.ingestion_identity
-  ingestor_manifest_base_url              = var.ingestor_manifest_base_url
-  packet_decryption_key_kubernetes_secret = var.packet_decryption_key_kubernetes_secret
-  peer_manifest_base_url                  = var.peer_share_processor_manifest_base_url
-  remote_peer_validation_bucket_identity  = local.bucket_access_identities.remote_validation_bucket_writer
-  peer_validation_bucket                  = local.peer_validation_bucket_url
-  peer_validation_bucket_identity         = local.bucket_access_identities.peer_validation_identity
-  own_validation_bucket                   = "gs://${local.own_validation_bucket_name}"
-  own_manifest_base_url                   = var.own_manifest_base_url
-  sum_part_bucket_service_account_email   = var.remote_bucket_writer_gcp_service_account_email
-  portal_server_manifest_base_url         = var.portal_server_manifest_base_url
-  is_env_with_ingestor                    = local.is_env_with_ingestor
-  test_peer_ingestion_bucket              = local.test_peer_ingestion_bucket
-  is_first                                = var.is_first
-  aggregation_period                      = var.aggregation_period
-  aggregation_grace_period                = var.aggregation_grace_period
+  source                    = "../../modules/data_share_processor_kubernetes/"
+  data_share_processor_name = var.data_share_processor_name
+
+  ingestor                               = var.ingestor
+  gcp_project                            = var.gcp_project
+  environment                            = var.environment
+  kubernetes_namespace                   = var.kubernetes_namespace
+  ingestion_bucket                       = local.ingestion_bucket_url
+  ingestion_bucket_identity              = local.bucket_access_identities.ingestion_identity
+  ingestor_manifest_base_url             = var.ingestor_manifest_base_url
+  peer_manifest_base_url                 = var.peer_share_processor_manifest_base_url
+  remote_peer_validation_bucket_identity = local.bucket_access_identities.remote_validation_bucket_writer
+  peer_validation_bucket                 = local.peer_validation_bucket_url
+  peer_validation_bucket_identity        = local.bucket_access_identities.peer_validation_identity
+  own_validation_bucket                  = "gs://${google_storage_bucket.own_validation_bucket.name}"
+  own_manifest_base_url                  = var.own_manifest_base_url
+  sum_part_bucket_service_account_email  = var.remote_bucket_writer_gcp_service_account_email
+  portal_server_manifest_base_url        = var.portal_server_manifest_base_url
+  is_env_with_ingestor                   = local.is_env_with_ingestor
+  test_peer_ingestion_bucket             = local.test_peer_ingestion_bucket
+  is_first                               = var.is_first
+  aggregation_period                     = var.aggregation_period
+  aggregation_grace_period               = var.aggregation_grace_period
   pushgateway                             = var.pushgateway
   container_registry                      = var.container_registry
   workflow_manager_version                = var.workflow_manager_version
@@ -425,33 +437,18 @@ output "data_share_processor_name" {
   value = var.data_share_processor_name
 }
 
-output "kubernetes_namespace" {
-  value = var.kubernetes_namespace
-}
-
-output "certificate_fqdn" {
-  value = "${var.kubernetes_namespace}.${var.certificate_domain}"
-}
-
 output "service_account_email" {
   value = module.kubernetes.service_account_email
 }
 
-output "specific_manifest" {
-  value = {
-    format                 = 1
-    ingestion-bucket       = local.ingestion_bucket_url,
-    peer-validation-bucket = local.peer_validation_bucket_url,
-    batch-signing-public-keys = {
-      (module.kubernetes.batch_signing_key) = {
-        public-key = ""
-        expiration = ""
-      }
-    }
-    packet-encryption-keys = {
-      (var.packet_decryption_key_kubernetes_secret) = {
-        certificate-signing-request = ""
-      }
-    }
-  }
+output "ingestion_bucket_url" {
+  value = local.ingestion_bucket_url
+}
+
+output "peer_validation_bucket_url" {
+  value = local.peer_validation_bucket_url
+}
+
+output "ingestor" {
+  value = var.ingestor
 }

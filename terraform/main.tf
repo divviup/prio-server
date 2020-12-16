@@ -260,10 +260,6 @@ module "gke" {
   ]
 }
 
-# We fetch the single global manifest for all the peer share processors.
-data "http" "peer_share_processor_global_manifest" {
-  url = "https://${var.peer_share_processor_manifest_base_url}/global-manifest.json"
-}
 
 # While we create a distinct data share processor for each (ingestor, locality)
 # pair, we only create one packet decryption key for each locality, and use it
@@ -281,95 +277,6 @@ resource "kubernetes_namespace" "namespaces" {
   }
 }
 
-resource "kubernetes_secret" "ingestion_packet_decryption_keys" {
-  for_each = toset(var.localities)
-  metadata {
-    name      = "${var.environment}-${each.key}-ingestion-packet-decryption-key"
-    namespace = kubernetes_namespace.namespaces[each.key].metadata[0].name
-  }
-
-  data = {
-    # See comment on batch_signing_key, in modules/kubernetes/kubernetes.tf,
-    # about the initial value and the lifecycle block here.
-    secret_key = "not-a-real-key"
-  }
-
-  lifecycle {
-    ignore_changes = [
-      data["secret_key"]
-    ]
-  }
-}
-
-# We will receive ingestion batches from multiple ingestion servers for each
-# locality. We create a distinct data share processor for each (locality,
-# ingestor) pair. e.g., "us-pa-apple" processes data for Pennsylvanians received
-# from Apple's server, and "us-az-g-enpa" processes data for Arizonans received
-# from Google's server.
-# We take the set product of localities x ingestor names to get the config
-# values for all the data share processors we need to create.
-locals {
-  locality_ingestor_pairs = {
-    for pair in setproduct(toset(var.localities), keys(var.ingestors)) :
-    "${pair[0]}-${pair[1]}" => {
-      ingestor                                = pair[1]
-      kubernetes_namespace                    = kubernetes_namespace.namespaces[pair[0]].metadata[0].name
-      packet_decryption_key_kubernetes_secret = kubernetes_secret.ingestion_packet_decryption_keys[pair[0]].metadata[0].name
-      ingestor_manifest_base_url              = var.ingestors[pair[1]]
-    }
-  }
-  peer_share_processor_server_identity = jsondecode(data.http.peer_share_processor_global_manifest.body).server-identity
-}
-
-# Call the locality_kubernetes module per
-# each locality/namespace
-module "locality_kubernetes" {
-  for_each             = kubernetes_namespace.namespaces
-  source               = "./modules/locality_kubernetes"
-  environment          = var.environment
-  gcp_project          = var.gcp_project
-  manifest_bucket      = module.manifest.bucket
-  kubernetes_namespace = each.value.metadata[0].name
-  ingestors            = keys(var.ingestors)
-
-  batch_signing_key_expiration     = var.batch_signing_key_expiration
-  batch_signing_key_rotation       = var.batch_signing_key_rotation
-  packet_encryption_key_expiration = var.packet_encryption_key_expiration
-  packet_encryption_rotation       = var.packet_encryption_rotation
-}
-
-module "data_share_processors" {
-  for_each                                       = local.locality_ingestor_pairs
-  source                                         = "./modules/data_share_processor"
-  environment                                    = var.environment
-  data_share_processor_name                      = each.key
-  ingestor                                       = each.value.ingestor
-  use_aws                                        = var.use_aws
-  aws_region                                     = var.aws_region
-  gcp_region                                     = var.gcp_region
-  gcp_project                                    = var.gcp_project
-  manifest_bucket                                = module.manifest.bucket
-  kubernetes_namespace                           = each.value.kubernetes_namespace
-  certificate_domain                             = "${var.environment}.certificates.${var.manifest_domain}"
-  ingestor_manifest_base_url                     = each.value.ingestor_manifest_base_url
-  packet_decryption_key_kubernetes_secret        = each.value.packet_decryption_key_kubernetes_secret
-  peer_share_processor_aws_account_id            = local.peer_share_processor_server_identity.aws-account-id
-  peer_share_processor_gcp_service_account_email = local.peer_share_processor_server_identity.gcp-service-account-email
-  peer_share_processor_manifest_base_url         = var.peer_share_processor_manifest_base_url
-  remote_bucket_writer_gcp_service_account_email = google_service_account.sum_part_bucket_writer.email
-  portal_server_manifest_base_url                = var.portal_server_manifest_base_url
-  own_manifest_base_url                          = module.manifest.base_url
-  test_peer_environment                          = var.test_peer_environment
-  is_first                                       = var.is_first
-  aggregation_period                             = var.aggregation_period
-  aggregation_grace_period                       = var.aggregation_grace_period
-  kms_keyring                                    = module.gke.kms_keyring
-  pushgateway                                    = var.pushgateway
-  workflow_manager_version                       = var.workflow_manager_version
-  facilitator_version                            = var.facilitator_version
-  container_registry                             = var.container_registry
-}
-
 # The portal owns two sum part buckets (one for each data share processor) and
 # the one for this data share processor gets configured by the portal operator
 # to permit writes from this GCP service account, whose email the portal
@@ -379,12 +286,34 @@ resource "google_service_account" "sum_part_bucket_writer" {
   display_name = "prio-${var.environment}-sum-part-bucket-writer"
 }
 
-# Permit the service accounts for all the data share processors to request Oauth
-# tokens allowing them to impersonate the sum part bucket writer.
-resource "google_service_account_iam_binding" "data_share_processors_to_sum_part_bucket_writer_token_creator" {
-  service_account_id = google_service_account.sum_part_bucket_writer.name
-  role               = "roles/iam.serviceAccountTokenCreator"
-  members            = [for v in module.data_share_processors : "serviceAccount:${v.service_account_email}"]
+# Call the locality_kubernetes module per each locality/namespace
+module "locality_kubernetes" {
+  for_each = kubernetes_namespace.namespaces
+  source   = "./modules/locality_kubernetes"
+
+  environment                            = var.environment
+  gcp_region                             = var.gcp_region
+  gcp_project                            = var.gcp_project
+  aws_region                             = var.aws_region
+  use_aws                                = var.use_aws
+  peer_share_processor_manifest_base_url = var.peer_share_processor_manifest_base_url
+  manifest_bucket                        = module.manifest.bucket
+  manifest_bucket_base_url               = module.manifest.base_url
+  kubernetes_namespace                   = each.value.metadata[0].name
+  ingestors                              = var.ingestors
+
+  batch_signing_key_expiration                        = var.batch_signing_key_expiration
+  batch_signing_key_rotation                          = var.batch_signing_key_rotation
+  packet_encryption_key_expiration                    = var.packet_encryption_key_expiration
+  packet_encryption_rotation                          = var.packet_encryption_rotation
+  google_service_account_sum_part_bucket_writer_name  = google_service_account.sum_part_bucket_writer.name
+  google_service_account_sum_part_bucket_writer_email = google_service_account.sum_part_bucket_writer.email
+  portal_server_manifest_base_url                     = var.portal_server_manifest_base_url
+  test_peer_environment                               = var.test_peer_environment
+  is_first                                            = var.is_first
+  aggregation_period                                  = var.aggregation_period
+  aggregation_grace_period                            = var.aggregation_grace_period
+  kms_keyring = module.gke.kms_keyring
 }
 
 module "fake_server_resources" {
@@ -397,29 +326,9 @@ module "fake_server_resources" {
   ingestors                    = var.ingestors
 }
 
-output "manifest_bucket" {
-  value = module.manifest.bucket
-}
 
 output "gke_kubeconfig" {
   value = "Run this command to update your kubectl config: gcloud container clusters get-credentials ${module.gke.cluster_name} --region ${var.gcp_region} --project ${var.gcp_project}"
-}
-
-output "specific_manifests" {
-  value = { for v in module.data_share_processors : v.data_share_processor_name => {
-    kubernetes-namespace = v.kubernetes_namespace
-    certificate-fqdn     = v.certificate_fqdn
-    specific-manifest    = v.specific_manifest
-    }
-  }
-}
-
-output "own_manifest_base_url" {
-  value = module.manifest.base_url
-}
-
-output "use_test_pha_decryption_key" {
-  value = lookup(var.test_peer_environment, "env_without_ingestor", "") == var.environment
 }
 
 provider "helm" {

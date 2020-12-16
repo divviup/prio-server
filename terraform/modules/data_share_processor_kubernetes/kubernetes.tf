@@ -76,10 +76,6 @@ variable "kubernetes_namespace" {
   type = string
 }
 
-variable "packet_decryption_key_kubernetes_secret" {
-  type = string
-}
-
 variable "portal_server_manifest_base_url" {
   type = string
 }
@@ -143,28 +139,6 @@ resource "google_service_account_iam_binding" "workflow_manager_token" {
   ]
 }
 
-resource "kubernetes_secret" "batch_signing_key" {
-  metadata {
-    name      = "${var.environment}-${var.data_share_processor_name}-batch-signing-key"
-    namespace = var.kubernetes_namespace
-  }
-
-  data = {
-    # We want this to be a Terraform resource that can be managed and destroyed
-    # by this module, but we do not want the cleartext private key to appear in
-    # the TF statefile. So we set a dummy value here, and will update the value
-    # later using kubectl. We use lifecycle.ignore_changes so that Terraform
-    # won't blow away the replaced value on subsequent applies.
-    secret_key = "not-a-real-key"
-  }
-
-  lifecycle {
-    ignore_changes = [
-      data["secret_key"]
-    ]
-  }
-}
-
 # ConfigMap containing the parameters that are common to every intake-batch job
 # that will be spawned in this data share processor, except for secrets.
 resource "kubernetes_config_map" "intake_batch_job_config_map" {
@@ -181,7 +155,7 @@ resource "kubernetes_config_map" "intake_batch_job_config_map" {
     # BATCH_SIGNING_PRIVATE_KEY is a Kubernetes secret
     IS_FIRST                             = var.is_first ? "true" : "false"
     AWS_ACCOUNT_ID                       = data.aws_caller_identity.current.account_id
-    BATCH_SIGNING_PRIVATE_KEY_IDENTIFIER = kubernetes_secret.batch_signing_key.metadata[0].name
+    BATCH_SIGNING_PRIVATE_KEY_IDENTIFIER = "type=batch-signing-key"
     INGESTOR_IDENTITY                    = var.ingestion_bucket_identity
     INGESTOR_INPUT                       = var.ingestion_bucket
     INGESTOR_MANIFEST_BASE_URL           = "https://${var.ingestor_manifest_base_url}"
@@ -208,7 +182,7 @@ resource "kubernetes_config_map" "aggregate_job_config_map" {
     # BATCH_SIGNING_PRIVATE_KEY is a Kubernetes secret
     IS_FIRST                             = var.is_first ? "true" : "false"
     AWS_ACCOUNT_ID                       = data.aws_caller_identity.current.account_id
-    BATCH_SIGNING_PRIVATE_KEY_IDENTIFIER = kubernetes_secret.batch_signing_key.metadata[0].name
+    BATCH_SIGNING_PRIVATE_KEY_IDENTIFIER = "type=batch-signing-key"
     INGESTOR_INPUT                       = var.ingestion_bucket
     INGESTOR_IDENTITY                    = var.ingestion_bucket_identity
     INGESTOR_MANIFEST_BASE_URL           = "https://${var.ingestor_manifest_base_url}"
@@ -272,8 +246,8 @@ resource "kubernetes_cron_job" "workflow_manager" {
                 "--own-validation-input", var.own_validation_bucket,
                 "--peer-validation-input", var.peer_validation_bucket,
                 "--peer-validation-identity", var.peer_validation_bucket_identity,
-                "--bsk-secret-name", kubernetes_secret.batch_signing_key.metadata[0].name,
-                "--pdks-secret-name", var.packet_decryption_key_kubernetes_secret,
+                "--bsk-secret-selector", "type=batch-signing-key",
+                "--pdks-secret-selector", "type=packet-decryption-key",
                 "--intake-batch-config-map", kubernetes_config_map.intake_batch_job_config_map.metadata[0].name,
                 "--aggregate-config-map", kubernetes_config_map.aggregate_job_config_map.metadata[0].name,
                 "--facilitator-image", "${var.container_registry}/${var.facilitator_image}:${var.facilitator_version}",
@@ -291,90 +265,6 @@ resource "kubernetes_cron_job" "workflow_manager" {
             restart_policy                  = "Never"
             service_account_name            = module.account_mapping.kubernetes_account_name
             automount_service_account_token = true
-          }
-        }
-      }
-    }
-  }
-}
-
-resource "kubernetes_cron_job" "sample_maker" {
-  # This sample maker acts as an ingestion server in our test setup. It only
-  # gets created in one of the two envs, and writes to both env's ingestion
-  # buckets.
-  count = var.is_env_with_ingestor ? 1 : 0
-  metadata {
-    name      = "sample-maker-${var.ingestor}-${var.environment}"
-    namespace = var.kubernetes_namespace
-
-    annotations = {
-      environment = var.environment
-    }
-  }
-  spec {
-    schedule                      = "* * * * *"
-    concurrency_policy            = "Forbid"
-    successful_jobs_history_limit = 5
-    failed_jobs_history_limit     = 3
-    job_template {
-      metadata {}
-      spec {
-        template {
-          metadata {}
-          spec {
-            restart_policy                  = "Never"
-            service_account_name            = module.account_mapping.kubernetes_account_name
-            automount_service_account_token = true
-            container {
-              name  = "sample-maker"
-              image = "${var.container_registry}/${var.facilitator_image}:${var.facilitator_version}"
-              args = [
-                "--pushgateway", var.pushgateway,
-                "generate-ingestion-sample",
-                "--own-output", var.ingestion_bucket,
-                "--peer-output", var.test_peer_ingestion_bucket,
-                "--peer-identity", var.remote_peer_validation_bucket_identity,
-                "--aggregation-id", "kittens-seen",
-                # All instances of the sample maker use the same batch signing
-                # key, thus simulating being a single server.
-                "--batch-signing-private-key", "MIGHAgEAMBMGByqGSM49AgEGCCqGSM49AwEHBG0wawIBAQQggoa08rQR90Asvhy5bWIgFBDeGaO8FnVEF3PVpNVmDGChRANCAAQ2mZfm4UC73PkWsYz3Uub6UTIAFQCPGxouP1O1PlmntOpfLYdvyZDCuenAzv1oCfyToolNArNjwo/+harNn1fs",
-                "--batch-signing-private-key-identifier", "sample-maker-signing-key",
-                "--packet-count", "10",
-                # We use a fixed packet encryption key so that we can make sure
-                # to use the same one in the corresponding data share processor
-                # in the other env.
-                "--pha-ecies-private-key", "BIl6j+J6dYttxALdjISDv6ZI4/VWVEhUzaS05LgrsfswmbLOgNt9HUC2E0w+9RqZx3XMkdEHBHfNuCSMpOwofVSq3TfyKwn0NrftKisKKVSaTOt5seJ67P5QL4hxgPWvxw==",
-                # These parameters get recorded in Avro messages but otherwise
-                # do not affect any system behavior, so the values don't matter.
-                "--batch-start-time", "1000000000",
-                "--batch-end-time", "1000000100",
-                "--dimension", "123",
-                "--epsilon", "0.23",
-              ]
-              env {
-                name  = "RUST_LOG"
-                value = "info"
-              }
-              env {
-                name  = "RUST_BACKTRACE"
-                value = "1"
-              }
-              env {
-                name  = "AWS_ACCOUNT_ID"
-                value = data.aws_caller_identity.current.account_id
-              }
-              # We use the packet decryption key that was generated in this
-              # deploy to exercise that key provisioning flow.
-              env {
-                name = "FACILITATOR_ECIES_PRIVATE_KEY"
-                value_from {
-                  secret_key_ref {
-                    name = var.packet_decryption_key_kubernetes_secret
-                    key  = "secret_key"
-                  }
-                }
-              }
-            }
           }
         }
       }
@@ -424,8 +314,4 @@ output "service_account_unique_id" {
 
 output "service_account_email" {
   value = module.account_mapping.google_service_account_email
-}
-
-output "batch_signing_key" {
-  value = kubernetes_secret.batch_signing_key.metadata[0].name
 }
