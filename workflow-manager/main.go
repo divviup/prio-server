@@ -9,22 +9,15 @@ import (
 	"context"
 	"flag"
 	"fmt"
-	"io/ioutil"
 	"log"
-	"net/http"
 	"os"
 	"regexp"
 	"sort"
 	"strings"
 	"time"
 
-	"cloud.google.com/go/storage"
-	"github.com/aws/aws-sdk-go/aws"
-	"github.com/aws/aws-sdk-go/aws/arn"
-	"github.com/aws/aws-sdk-go/aws/credentials"
-	"github.com/aws/aws-sdk-go/aws/credentials/stscreds"
-	"github.com/aws/aws-sdk-go/service/s3"
 	"github.com/letsencrypt/prio-server/workflow-manager/batchpath"
+	"github.com/letsencrypt/prio-server/workflow-manager/bucket"
 	wferror "github.com/letsencrypt/prio-server/workflow-manager/errors"
 	"github.com/letsencrypt/prio-server/workflow-manager/monitor"
 	"github.com/letsencrypt/prio-server/workflow-manager/retry"
@@ -32,8 +25,6 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
 	"github.com/prometheus/client_golang/prometheus/push"
-	"google.golang.org/api/iterator"
-	"google.golang.org/api/sts/v1"
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
@@ -210,195 +201,6 @@ func main() {
 	}
 
 	log.Print("done")
-}
-
-type tokenFetcher struct {
-	audience string
-}
-
-func (tf tokenFetcher) FetchToken(credentials.Context) ([]byte, error) {
-	url := fmt.Sprintf("http://metadata.google.internal:80/computeMetadata/v1/instance/service-accounts/default/identity?audience=%s", tf.audience)
-	req, err := http.NewRequest("GET", url, nil)
-	if err != nil {
-		return nil, fmt.Errorf("building request: %w", err)
-	}
-	req.Header.Add("Metadata-Flavor", "Google")
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("fetching %s: %w", url, err)
-	}
-	bytes, err := ioutil.ReadAll(resp.Body)
-	if err != nil {
-		return nil, fmt.Errorf("reading body of %s: %w", url, err)
-	}
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("status code %d from metadata service at %s: %s",
-			resp.StatusCode, url, string(bytes))
-	}
-	log.Printf("fetched token from %s", url)
-	return bytes, nil
-}
-
-type bucket struct {
-	service string // "s3" or "gs"
-	// bucketName includes the region for S3
-	bucketName string
-	identity   string
-}
-
-func newBucket(bucketURL, identity string) (*bucket, error) {
-	if bucketURL == "" {
-		log.Fatalf("empty bucket URL")
-	}
-	if !strings.HasPrefix(bucketURL, "s3://") && !strings.HasPrefix(bucketURL, "gs://") {
-		return nil, fmt.Errorf("invalid bucket %q with identity %q", bucketURL, identity)
-	}
-	if strings.HasPrefix(bucketURL, "gs://") && identity != "" {
-		return nil, fmt.Errorf("workflow-manager doesn't support alternate identities (%s) for gs:// bucket (%q)",
-			identity, bucketURL)
-	}
-	return &bucket{
-		service:    bucketURL[0:2],
-		bucketName: bucketURL[5:],
-		identity:   identity,
-	}, nil
-}
-
-func (b *bucket) listFiles(ctx context.Context) ([]string, error) {
-	switch b.service {
-	case "s3":
-		return b.listFilesS3(ctx)
-	case "gs":
-		return b.listFilesGS(ctx)
-	default:
-		return nil, fmt.Errorf("invalid storage service %q", b.service)
-	}
-}
-
-func webIDP(sess *aws_session.Session, identity string) (*credentials.Credentials, error) {
-	parsed, err := arn.Parse(identity)
-	if err != nil {
-		return nil, err
-	}
-	audience := fmt.Sprintf("sts.amazonaws.com/%s", parsed.AccountID)
-
-	stsSTS := sts.New(sess)
-	roleSessionName := ""
-	roleProvider := stscreds.NewWebIdentityRoleProviderWithToken(
-		stsSTS, identity, roleSessionName, tokenFetcher{audience})
-
-	return credentials.NewCredentials(roleProvider), nil
-}
-
-func (b *bucket) listFilesS3(ctx context.Context) ([]string, error) {
-	parts := strings.SplitN(b.bucketName, "/", 2)
-	if len(parts) != 2 {
-		return nil, fmt.Errorf("invalid S3 bucket name %q", b.bucketName)
-	}
-	region := parts[0]
-	bucket := parts[1]
-	sess, err := aws_session.NewSession()
-	if err != nil {
-		return nil, fmt.Errorf("making AWS session: %w", err)
-	}
-
-	log.Printf("listing files in s3://%s as %q", bucket, b.identity)
-	config := aws.NewConfig().
-		WithRegion(region)
-	if b.identity != "" {
-		creds, err := webIDP(sess, b.identity)
-		if err != nil {
-			return nil, err
-		}
-		config = config.WithCredentials(creds)
-	}
-	svc := s3.New(sess, config)
-	var output []string
-	var nextContinuationToken = ""
-	for {
-		input := &s3.ListObjectsV2Input{
-			// We choose a lower number than the default max of 1000 to ensure we exercise the
-			// cursoring case regularly.
-			MaxKeys: aws.Int64(100),
-			Bucket:  aws.String(bucket),
-		}
-		if nextContinuationToken != "" {
-			input.ContinuationToken = &nextContinuationToken
-		}
-		resp, err := svc.ListObjectsV2(input)
-		if err != nil {
-			return nil, fmt.Errorf("Unable to list items in bucket %q, %w", b.bucketName, err)
-		}
-		for _, item := range resp.Contents {
-			output = append(output, *item.Key)
-		}
-		if !*resp.IsTruncated {
-			break
-		}
-		nextContinuationToken = *resp.NextContinuationToken
-	}
-	return output, nil
-}
-
-func (b *bucket) listFilesGS(ctx context.Context) ([]string, error) {
-	if b.identity != "" {
-		return nil, fmt.Errorf("workflow-manager doesn't support non-default identity %q for GS bucket %q", b.identity, b.bucketName)
-	}
-	client, err := storage.NewClient(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("storage.newClient: %w", err)
-	}
-
-	bkt := client.Bucket(b.bucketName)
-	query := &storage.Query{Prefix: ""}
-
-	log.Printf("looking for ready batches in gs://%s as (ambient service account)", b.bucketName)
-	var output []string
-	it := bkt.Objects(ctx, query)
-	for {
-		attrs, err := it.Next()
-		if err == iterator.Done {
-			break
-		}
-		if err != nil {
-			return nil, fmt.Errorf("iterating on inputBucket objects from %q: %w", b.bucketName, err)
-		}
-		output = append(output, attrs.Name)
-	}
-	return output, nil
-}
-
-func readyBatches(files []string, infix string) ([]*batchPath, error) {
-	batches := make(map[string]*batchPath)
-	for _, name := range files {
-		basename := basename(name, infix)
-		b := batches[basename]
-		var err error
-		if b == nil {
-			b, err = newBatchPath(basename)
-			if err != nil {
-				return nil, err
-			}
-			batches[basename] = b
-		}
-		if strings.HasSuffix(name, fmt.Sprintf(".%s", infix)) {
-			b.metadata = true
-		}
-		if strings.HasSuffix(name, fmt.Sprintf(".%s.avro", infix)) {
-			b.avro = true
-		}
-		if strings.HasSuffix(name, fmt.Sprintf(".%s.sig", infix)) {
-			b.sig = true
-		}
-	}
-
-	var output []*batchPath
-	for _, v := range batches {
-		output = append(output, v)
-	}
-	sort.Sort(batchPathList(output))
-
-	return output, nil
 }
 
 // interval represents a half-open interval of time.
@@ -711,13 +513,17 @@ func launchIntake(ctx context.Context, readyBatches batchpath.List, ageLimit tim
 	if err != nil {
 		return fmt.Errorf("clientset: %w", err)
 	}
+	bsk, pdks, err := getBSKAndPDKs(ctx, clientset)
+	if err != nil {
+		return fmt.Errorf("bsk and pdks: %w", err)
+	}
 
 	log.Printf("starting %d jobs", readyBatches.Len())
 	for _, batch := range readyBatches {
 		r := retry.Retry{
 			Identifier: batch.String(),
 			Retryable: func() error {
-				return startIntakeJob(ctx, clientset, batch, ageLimit)
+				return startIntakeJob(ctx, clientset, batch, ageLimit, bsk, *pdks)
 			},
 			ShouldRequeue: wferror.IsTransientErr,
 			// 5 Seems right, we're retrying the same amount for this as we do for the aggregation jobs
