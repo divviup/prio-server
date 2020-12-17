@@ -79,19 +79,19 @@ We deploy Prometheus and Grafana into Prio clusters. A variety of Kubernetes met
 
 None of Grafana, Prometheus or any of Prometheus' components are exposed publicly. You can access them using `kubectl port-forward` to make a port on remote pod's network accessible locally. So, to make Prometheus' `server` component reachable at `localhost:8080`, you would do:
 
-    kubectl port-forward $(kubectl get pod --selector="app=prometheus,component=server,release=prometheus" --output jsonpath='{.items[0].metadata.name}') 8080:9090
+    kubectl -n monitoring port-forward $(kubectl -n monitoring get pod --selector="app=prometheus,component=server,release=prometheus" --output jsonpath='{.items[0].metadata.name}') 8080:9090
 
 For `prometheus-alertmanager`:
 
-    kubectl port-forward $(kubectl get pod --selector="app=prometheus,component=alertmanager,release=prometheus" --output jsonpath='{.items[0].metadata.name}') <LOCAL PORT>:9093
+    kubectl -n monitoring port-forward $(kubectl -n monitoring get pod --selector="app=prometheus,component=alertmanager,release=prometheus" --output jsonpath='{.items[0].metadata.name}') <LOCAL PORT>:9093
 
 And for Grafana:
 
-    kubectl port-forward $(kubectl get pod --selector="app.kubernetes.io/instance=grafana,app.kubernetes.io/name=grafana" --output jsonpath='{.items[0].metadata.name}') <LOCAL PORT>:3000
+    kubectl -n monitoring port-forward $(kubectl -n monitoring get pod --selector="app.kubernetes.io/instance=grafana,app.kubernetes.io/name=grafana" --output jsonpath='{.items[0].metadata.name}') <LOCAL PORT>:3000
 
 To access other components, look up the labels on the pod for the component you want to reach to construct an appropriate `--selector` argument, and check the running container's configuration to see what port(s) it listens on.
 
-Grafana requires authentication. You can login as the `admin` user. The password is in a Kubernetes secret. Run `kubectl -n default get secret grafana -o=yaml`, then base64 decode the value for `admin-password` and use it to authenticate.
+Grafana requires authentication. You can login as the `admin` user. The password is in a Kubernetes secret. Run `kubectl -n monitoring get secret grafana -o=yaml`, then base64 decode the value for `admin-password` and use it to authenticate.
 
 ### Hooking up VictorOps/Splunk Oncall alerts
 
@@ -117,7 +117,7 @@ Sending alerts from Prometheus Alertmanager to VictorOps requires an API key, wh
 
 Next, we want to store this in the `prometheus-alertmanager-config` Kubernetes secret that was created by Terraform with a dummy value. There's no straightforward way to update a secret value using kubectl, so we use [this trick](https://blog.atomist.com/updating-a-kubernetes-secret-or-configmap/):
 
-    kubectl -n default create secret generic prometheus-alertmanager-config --from-file=alertmanager.yml=/path/to/config/file.yml --dry-run=client -o=json | kubectl apply -f -
+    kubectl -n monitoring create secret generic prometheus-alertmanager-config --from-file=alertmanager.yml=/path/to/config/file.yml --dry-run=client -o=json | kubectl apply -f -
 
 For more details, see the [VictorOps docs on Prometheus integration](https://help.victorops.com/knowledge-base/victorops-prometheus-integration/).
 

@@ -397,6 +397,12 @@ module "fake_server_resources" {
   ingestors                    = var.ingestors
 }
 
+module "monitoring" {
+  source                 = "./modules/monitoring"
+  cluster_endpoint       = module.gke.cluster_endpoint
+  cluster_ca_certificate = base64decode(module.gke.certificate_authority_data)
+}
+
 output "manifest_bucket" {
   value = module.manifest.bucket
 }
@@ -420,92 +426,4 @@ output "own_manifest_base_url" {
 
 output "use_test_pha_decryption_key" {
   value = lookup(var.test_peer_environment, "env_without_ingestor", "") == var.environment
-}
-
-provider "helm" {
-  kubernetes {
-    host                   = module.gke.cluster_endpoint
-    cluster_ca_certificate = base64decode(module.gke.certificate_authority_data)
-    token                  = data.google_client_config.current.access_token
-    load_config_file       = false
-  }
-}
-
-# Prometheus alertmanager must be hooked up to VictorOps to deliver alerts,
-# which requires an API key. We don't want to check that key into git, so
-# similarly to the batch signing and packet decryption keys, we make a dummy
-# k8s secret here and fill in a real value later. See terraform/README.md.
-resource "kubernetes_secret" "prometheus_alertmanager_config" {
-  metadata {
-    name = "prometheus-alertmanager-config"
-    # Prometheus runs in the default namespace
-    namespace = "default"
-  }
-
-  data = {
-    # See comment on batch_signing_key, in modules/kubernetes/kubernetes.tf,
-    # about the initial value and the lifecycle block here. The key of the
-    # secret map must match "alertmanager.configFileName" in
-    # resource.helm_release.prometheus, below.
-    "alertmanager.yml" = "not-a-real-key"
-  }
-
-  lifecycle {
-    ignore_changes = [
-      data["alertmanager.yml"]
-    ]
-  }
-}
-
-resource "helm_release" "prometheus" {
-  name       = "prometheus"
-  chart      = "prometheus"
-  repository = "https://charts.helm.sh/stable"
-  set {
-    name  = "alertmanager.configFromSecret"
-    value = "prometheus-alertmanager-config"
-  }
-  set {
-    name  = "alertmanager.configFileName"
-    value = "alertmanager.yml"
-  }
-}
-
-# Configures Grafana to get data from Prometheus. The label on this config map
-# must match the value of sidecar.datasources.label in helm_release.grafana for
-# the datasource provider sidecar to find it.
-resource "kubernetes_config_map" "grafana_datasource_prometheus" {
-  metadata {
-    name      = "grafana-datasource-prometheus"
-    namespace = "default"
-    labels = {
-      grafana-datasources = 1
-    }
-  }
-
-  data = {
-    "prometheus-datasource.yml" = <<DATASOURCE
-apiVersion: 1
-datasources:
-- name: prometheus
-  type: prometheus
-  url: prometheus-server
-DATASOURCE
-  }
-}
-
-resource "helm_release" "grafana" {
-  name       = "grafana"
-  chart      = "grafana"
-  repository = "https://grafana.github.io/helm-charts"
-
-  set {
-    name  = "sidecar.datasources.enabled"
-    value = "true"
-  }
-
-  set {
-    name  = "sidecar.datasources.label"
-    value = "grafana-datasources"
-  }
 }
