@@ -261,21 +261,7 @@ module "gke" {
 }
 
 
-# While we create a distinct data share processor for each (ingestor, locality)
-# pair, we only create one packet decryption key for each locality, and use it
-# for all ingestors. Since the secret must be in a namespace and accessible
-# from all of our data share processors, that means all data share processors
-# associated with a given ingestor must be in a single Kubernetes namespace,
-# which we create here and pass into the data share processor module.
-resource "kubernetes_namespace" "namespaces" {
-  for_each = toset(var.localities)
-  metadata {
-    name = each.key
-    annotations = {
-      environment = var.environment
-    }
-  }
-}
+
 
 # The portal owns two sum part buckets (one for each data share processor) and
 # the one for this data share processor gets configured by the portal operator
@@ -288,7 +274,7 @@ resource "google_service_account" "sum_part_bucket_writer" {
 
 # Call the locality_kubernetes module per each locality/namespace
 module "locality_kubernetes" {
-  for_each = toset(var.localities)
+  for_each = keys(var.localities)
   source   = "./modules/locality_kubernetes"
 
   environment                            = var.environment
@@ -319,8 +305,6 @@ module "locality_kubernetes" {
   workflow_manager_version                            = var.workflow_manager_version
   facilitator_version                                 = var.facilitator_version
   container_registry                                  = var.container_registry
-
-  depends_on = [kubernetes_namespace.namespaces]
 }
 
 module "fake_server_resources" {

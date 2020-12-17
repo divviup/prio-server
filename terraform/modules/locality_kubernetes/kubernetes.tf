@@ -205,6 +205,19 @@ variable "facilitator_version" {
   type = string
 }
 
+# While we create a distinct data share processor for each (ingestor, locality)
+# pair, we only create one packet decryption key for each locality, and use it
+# for all ingestors. Since the secret must be in a namespace and accessible
+# from all of our data share processors, that means all data share processors
+# associated with a given ingestor must be in a single Kubernetes namespace
+resource "kubernetes_namespace" "namespaces" {
+  metadata {
+    name = var.kubernetes_namespace
+    annotations = {
+      environment = var.environment
+    }
+  }
+}
 
 # For each peer data share processor, we will receive ingestion batches from two
 # ingestion servers. We create a distinct data share processor instance for each
