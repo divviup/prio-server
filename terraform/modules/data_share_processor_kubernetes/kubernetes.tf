@@ -129,6 +129,54 @@ module "account_mapping" {
   gcp_project             = var.gcp_project
 }
 
+resource "kubernetes_cron_job" "integration_tester" {
+  # This sample maker acts as an ingestion server in our test setup. It only
+  # gets created in one of the two envs, and writes to both env's ingestion
+  # buckets.
+  count = var.is_env_with_ingestor ? 1 : 0
+  metadata {
+    name      = "integration-tester-${var.ingestor}-${var.environment}"
+    namespace = var.kubernetes_namespace
+
+    annotations = {
+      environment = var.environment
+    }
+  }
+  spec {
+    schedule                      = "* * * * *"
+    concurrency_policy            = "Forbid"
+    successful_jobs_history_limit = 1
+    failed_jobs_history_limit     = 1
+    job_template {
+      metadata {}
+      spec {
+        template {
+          metadata {}
+          spec {
+            restart_policy                  = "Never"
+            service_account_name            = module.account_mapping.kubernetes_account_name
+            automount_service_account_token = true
+            container {
+              name  = "integration-tester"
+              image = "us.gcr.io/prio-bringup-290620/integration-tester:latest"
+              args = [
+                "--name", var.ingestor,
+                "--namespace", var.kubernetes_namespace,
+                "--manifest-file-url", "https://${var.environment}.manifests.isrg-prio.org/${var.kubernetes_namespace}-${var.ingestor}-manifest.json",
+                "--service-account-name", module.account_mapping.kubernetes_account_name,
+                "--facilitator-image", "${var.container_registry}/${var.facilitator_image}:${var.facilitator_version}",
+                "--push-gateway", var.pushgateway,
+                "--peer-identity", var.remote_peer_validation_bucket_identity,
+                "--aws-account-id", data.aws_caller_identity.current.account_id
+              ]
+            }
+          }
+        }
+      }
+    }
+  }
+}
+
 # Allows the Kubernetes service account to request auth tokens for the GCP
 # service account.
 resource "google_service_account_iam_binding" "workflow_manager_token" {
@@ -287,7 +335,22 @@ resource "kubernetes_role" "workflow_manager_role" {
     resources = ["namespaces", "pods", "jobs"]
     verbs     = ["get", "list", "watch", "create"]
   }
+
+  // Allow the workflow manager role to read/list secrets as well
+  rule {
+    api_groups = [
+      ""
+    ]
+    resources = [
+      "secrets"
+    ]
+    verbs = [
+      "list",
+      "get",
+    ]
+  }
 }
+
 
 resource "kubernetes_role_binding" "workflow_manager_rolebinding" {
   metadata {

@@ -43,11 +43,25 @@ variable "packet_encryption_rotation" {
   type = number
 }
 
+# While we create a distinct data share processor for each (ingestor, locality)
+# pair, we only create one packet decryption key for each locality, and use it
+# for all ingestors. Since the secret must be in a namespace and accessible
+# from all of our data share processors, that means all data share processors
+# associated with a given ingestor must be in a single Kubernetes namespace
+resource "kubernetes_namespace" "namespaces" {
+  metadata {
+    name = var.kubernetes_namespace
+    annotations = {
+      environment = var.environment
+    }
+  }
+}
+
 module "account_mapping" {
   source                  = "../account_mapping"
   google_account_name     = "${var.environment}-${var.kubernetes_namespace}-manifest-updater"
   kubernetes_account_name = "manifest-updater"
-  kubernetes_namespace    = var.kubernetes_namespace
+  kubernetes_namespace    = kubernetes_namespace.namespaces.metadata[0].name
   environment             = var.environment
   gcp_project             = var.gcp_project
 }
@@ -79,7 +93,7 @@ resource "kubernetes_role" "manifest_updater_role" {
 resource "kubernetes_role_binding" "manifest_updater_rolebinding" {
   metadata {
     name      = "${var.environment}-manifest-updater-can-update"
-    namespace = var.kubernetes_namespace
+    namespace = kubernetes_namespace.namespaces.metadata[0].name
   }
 
   role_ref {
@@ -205,19 +219,7 @@ variable "facilitator_version" {
   type = string
 }
 
-# While we create a distinct data share processor for each (ingestor, locality)
-# pair, we only create one packet decryption key for each locality, and use it
-# for all ingestors. Since the secret must be in a namespace and accessible
-# from all of our data share processors, that means all data share processors
-# associated with a given ingestor must be in a single Kubernetes namespace
-resource "kubernetes_namespace" "namespaces" {
-  metadata {
-    name = var.kubernetes_namespace
-    annotations = {
-      environment = var.environment
-    }
-  }
-}
+
 
 # For each peer data share processor, we will receive ingestion batches from two
 # ingestion servers. We create a distinct data share processor instance for each
@@ -250,7 +252,7 @@ module "data_share_processors" {
   gcp_region                = var.gcp_region
   gcp_project               = var.gcp_project
   manifest_bucket           = var.manifest_bucket
-  kubernetes_namespace      = var.kubernetes_namespace
+  kubernetes_namespace      = kubernetes_namespace.namespaces.metadata[0].name
 
   ingestor_manifest_base_url                     = each.value
   peer_share_processor_aws_account_id            = local.peer_share_processor_server_identity.aws-account-id
@@ -273,7 +275,7 @@ module "data_share_processors" {
 resource "kubernetes_config_map" "manifest_updater_config" {
   metadata {
     name      = "manifest-updater-config"
-    namespace = var.kubernetes_namespace
+    namespace = kubernetes_namespace.namespaces.metadata[0].name
     labels = {
       type : "manifest-updater-config"
     }

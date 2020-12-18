@@ -274,7 +274,7 @@ resource "google_service_account" "sum_part_bucket_writer" {
 
 # Call the locality_kubernetes module per each locality/namespace
 module "locality_kubernetes" {
-  for_each = keys(var.localities)
+  for_each = toset(var.localities)
   source   = "./modules/locality_kubernetes"
 
   environment                            = var.environment
