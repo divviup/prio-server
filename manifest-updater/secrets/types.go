@@ -20,6 +20,8 @@ type PrioKey struct {
 	Expiration     *string
 }
 
+type Unmarshaler = func([]byte) (*PrioKey, error)
+
 func NewPrioKey() (*PrioKey, error) {
 	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	if err != nil {
@@ -31,7 +33,7 @@ func NewPrioKey() (*PrioKey, error) {
 	}, nil
 }
 
-func NewKeyFromKubernetesSecret(secret *corev1.Secret) (*PrioKey, error) {
+func NewKeyFromKubernetes(secret *corev1.Secret, unmarshaler Unmarshaler) (*PrioKey, error) {
 	encodedKey := secret.Data[secretKeyMap]
 	key := make([]byte, base64.StdEncoding.DecodedLen(len(encodedKey)))
 	_, err := base64.StdEncoding.Decode(key, secret.Data[secretKeyMap])
@@ -39,13 +41,16 @@ func NewKeyFromKubernetesSecret(secret *corev1.Secret) (*PrioKey, error) {
 		return nil, fmt.Errorf("unable to decode old secret key: %w", err)
 	}
 
-	prioKey := PrioKeyFromX962UncompressedKey(key)
+	prioKey, err := unmarshaler(key)
+	if err != nil {
+		return nil, fmt.Errorf("Unable to parse key %s: %w", secret.Name, err)
+	}
 	prioKey.KubeIdentifier = &secret.Name
 
-	return &prioKey, nil
+	return prioKey, nil
 }
 
-func PrioKeyFromX962UncompressedKey(key []byte) PrioKey {
+func PrioKeyFromX962UncompressedKey(key []byte) (*PrioKey, error) {
 	publicKey := key[:65]
 	d := key[65:]
 
@@ -61,14 +66,26 @@ func PrioKeyFromX962UncompressedKey(key []byte) PrioKey {
 	priv.PublicKey.X = x
 	priv.PublicKey.Y = y
 
-	return PrioKey{
+	return &PrioKey{
 		key: priv,
-	}
+	}, nil
+}
+
+func PrioKeyFromPKCS8PrivateKey(key []byte) (*PrioKey, error) {
+	k, err := x509.ParsePKCS8PrivateKey(key)
+
+	return &PrioKey{
+		key: k.(*ecdsa.PrivateKey),
+	}, err
 }
 
 func (p *PrioKey) marshallX962UncompressedPrivateKey() []byte {
 	marshalledPublicKey := elliptic.Marshal(elliptic.P256(), p.key.PublicKey.X, p.key.PublicKey.Y)
 	return append(marshalledPublicKey, p.key.D.Bytes()...)
+}
+
+func (p *PrioKey) marshalPKCS8PrivateKey() ([]byte, error) {
+	return x509.MarshalPKCS8PrivateKey(p.key)
 }
 
 func (p *PrioKey) GetPemEncodedPublicKey() (string, error) {

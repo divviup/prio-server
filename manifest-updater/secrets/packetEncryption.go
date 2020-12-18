@@ -4,9 +4,10 @@ import (
 	"context"
 	"encoding/base64"
 	"fmt"
+	"time"
+
 	corev1 "k8s.io/api/core/v1"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"time"
 )
 
 const (
@@ -14,7 +15,7 @@ const (
 )
 
 func (k *Kube) validateAndUpdatePacketEncryptionKey(secret *corev1.Secret) ([]*PrioKey, error) {
-	oldPrioKey, err := NewKeyFromKubernetesSecret(secret)
+	oldPrioKey, err := NewKeyFromKubernetes(secret, PrioKeyFromX962UncompressedKey)
 	if err != nil {
 		return nil, fmt.Errorf("unable to create PrioKey from kubernetes secret: %v", err)
 	}

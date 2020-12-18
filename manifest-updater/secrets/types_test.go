@@ -17,7 +17,7 @@ func TestPrioKeyMarshallAndUnmarshall(t *testing.T) {
 	key := PrioKey{key: p256Key}
 	x92 := key.marshallX962UncompressedPrivateKey()
 
-	newKey := PrioKeyFromX962UncompressedKey(x92)
+	newKey, _ := PrioKeyFromX962UncompressedKey(x92)
 
 	equality := key.key.Equal(newKey.key)
 

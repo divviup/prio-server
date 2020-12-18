@@ -15,7 +15,7 @@ const (
 )
 
 func (k *Kube) validateAndUpdateBatchSigningKey(keyName, ingestor string, secret *corev1.Secret) ([]*PrioKey, error) {
-	oldPrioKey, err := NewKeyFromKubernetesSecret(secret)
+	oldPrioKey, err := NewKeyFromKubernetes(secret, PrioKeyFromPKCS8PrivateKey)
 	if err != nil {
 		return nil, fmt.Errorf("unable to create PrioKey from kubernetes secret: %v", err)
 	}
@@ -57,6 +57,12 @@ func (k *Kube) createAndStoreBatchSigningKey(name, ingestor string) (*PrioKey, e
 		return nil, fmt.Errorf("unable to create a batch signing key: %w", err)
 	}
 
+	pkcs8Key, err := key.marshalPKCS8PrivateKey()
+
+	if err != nil {
+		return nil, fmt.Errorf("unable to marshall pkcs8 key: %w", err)
+	}
+
 	immutable := true
 
 	expiration := time.
@@ -77,7 +83,7 @@ func (k *Kube) createAndStoreBatchSigningKey(name, ingestor string) (*PrioKey, e
 		Immutable: &immutable,
 
 		StringData: map[string]string{
-			secretKeyMap:     base64.StdEncoding.EncodeToString(key.marshallX962UncompressedPrivateKey()),
+			secretKeyMap:     base64.StdEncoding.EncodeToString(pkcs8Key),
 			expirationKeyMap: expiration,
 		},
 	}
