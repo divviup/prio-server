@@ -1031,7 +1031,8 @@ fn batch_signing_key_from_arg(matches: &ArgMatches) -> Result<BatchSigningKey> {
         .value_of("batch-signing-private-key-identifier")
         .unwrap();
     Ok(BatchSigningKey {
-        key: EcdsaKeyPair::from_pkcs8(&ECDSA_P256_SHA256_ASN1_SIGNING, &key_bytes)?,
+        key: EcdsaKeyPair::from_pkcs8(&ECDSA_P256_SHA256_ASN1_SIGNING, &key_bytes)
+            .with_context("failed to parse pkcs8 key for batch signing key")?,
         identifier: key_identifier.to_owned(),
     })
 }
