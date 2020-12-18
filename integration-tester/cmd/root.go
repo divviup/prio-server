@@ -19,6 +19,7 @@ var (
 	facilitatorImage = ""
 	pushGateway      = ""
 	peerIdentity     = ""
+	awsAccountId     = ""
 )
 
 var rootCmd = &cobra.Command{
@@ -60,6 +61,7 @@ func init() {
 	rootCmd.PersistentFlags().StringVarP(&facilitatorImage, "facilitator-image", "", "", "The image for the facilitator")
 	rootCmd.PersistentFlags().StringVarP(&pushGateway, "push-gateway", "", "", "The push gateway")
 	rootCmd.PersistentFlags().StringVarP(&peerIdentity, "peer-identity", "", "", "The peer identity")
+	rootCmd.PersistentFlags().StringVarP(&awsAccountId, "aws-account-id", "", "", "The aws account ID")
 }
 
 func Execute() {

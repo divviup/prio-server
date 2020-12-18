@@ -11,8 +11,8 @@ var runCmd = &cobra.Command{
 	Use:   "run",
 	Short: "Run the integration-tester",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		fmt.Println(namespace, name, manifestFileUrl, serviceAccountName, facilitatorImage, pushGateway, peerIdentity)
-		t := tester.New(namespace, name, manifestFileUrl, serviceAccountName, facilitatorImage, pushGateway, peerIdentity)
+		fmt.Println(namespace, name, manifestFileUrl, serviceAccountName, facilitatorImage, pushGateway, peerIdentity, awsAccountId)
+		t := tester.New(namespace, name, manifestFileUrl, serviceAccountName, facilitatorImage, pushGateway, peerIdentity, awsAccountId)
 		return t.Start()
 	},
 }

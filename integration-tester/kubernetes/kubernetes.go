@@ -15,13 +15,6 @@ import (
 	"k8s.io/client-go/tools/clientcmd"
 )
 
-/**
-GetSecret retrieves the stringified key
-*/
-func GetSecret(secret *corev1.Secret) string {
-	return string(secret.Data["secret_key"])
-}
-
 // GetSortedSecrets gets a list of secrets that were sorted by the secret's creation date
 func GetSortedSecrets(namespace, labelSelector string) ([]corev1.Secret, error) {
 	client, err := getKubernetes()

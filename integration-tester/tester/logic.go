@@ -6,8 +6,8 @@ import (
 	"net/http"
 	"time"
 
-	m "github.com/abetterinternet/prio-server/manifest-updater/manifest"
 	"github.com/abetterinternet/prio-server/integration-tester/kubernetes"
+	m "github.com/abetterinternet/prio-server/manifest-updater/manifest"
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -19,7 +19,14 @@ func (t *Tester) Start() error {
 		return err
 	}
 	bsk, err := t.getValidBSK(manifest)
+	if err != nil {
+		return err
+	}
+
 	pdk, err := t.getValidPDK(manifest)
+	if err != nil {
+		return err
+	}
 
 	job := t.createJob(manifest, bsk, pdk)
 
@@ -28,10 +35,25 @@ func (t *Tester) Start() error {
 
 func (t *Tester) createJob(manifest *m.DataShareSpecificManifest, bsk, pdk *corev1.Secret) *batchv1.Job {
 	trueP := true
+	env := []corev1.EnvVar{
+		{Name: "FACILITATOR_ECIES_PRIVATE_KEY",
+			ValueFrom: &corev1.EnvVarSource{SecretKeyRef: &corev1.SecretKeySelector{
+				LocalObjectReference: corev1.LocalObjectReference{Name: pdk.Name},
+				Key:                  "secret_key",
+			}}},
+		{Name: "BATCH_SIGNING_PRIVATE_KEY",
+			ValueFrom: &corev1.EnvVarSource{SecretKeyRef: &corev1.SecretKeySelector{
+				LocalObjectReference: corev1.LocalObjectReference{Name: bsk.Name},
+				Key:                  "secret_key",
+			}}},
+		{Name: "RUST_LOG", Value: "debug"},
+		{Name: "RUST_BACKTRACE", Value: "1"},
+		{Name: "AWS_ACCOUNT_ID", Value: t.awsAccountId},
+	}
 
 	return &batchv1.Job{
 		ObjectMeta: metav1.ObjectMeta{
-			GenerateName: "integration-tester-",
+			GenerateName: "integration-tester-facilitator",
 			Labels: map[string]string{
 				"type": "integration-tester",
 			},
@@ -46,6 +68,7 @@ func (t *Tester) createJob(manifest *m.DataShareSpecificManifest, bsk, pdk *core
 						{
 							Name:  "integration-tester",
 							Image: t.facilitatorImage,
+							Env:   env,
 							Args: []string{
 								"--pushgateway", t.pushGateway,
 								"generate-ingestion-sample",
@@ -54,9 +77,8 @@ func (t *Tester) createJob(manifest *m.DataShareSpecificManifest, bsk, pdk *core
 								"--peer-identity", t.peerIdentity,
 								"--aggregation-id", "kittens-seen",
 								// The various keys
-								"--batch-signing-private-key", kubernetes.GetSecret(bsk),
 								"--batch-signing-private-key-identifier", bsk.Name,
-								"--pha-ecies-private-key", kubernetes.GetSecret(pdk),
+								"--pha-ecies-private-key", "BIl6j+J6dYttxALdjISDv6ZI4/VWVEhUzaS05LgrsfswmbLOgNt9HUC2E0w+9RqZx3XMkdEHBHfNuCSMpOwofVSq3TfyKwn0NrftKisKKVSaTOt5seJ67P5QL4hxgPWvxw==",
 								"--packet-count", "10",
 								// These parameters get recorded in Avro messages but otherwise
 								// do not affect any system behavior, so the values don't matter.
@@ -97,7 +119,7 @@ func (t *Tester) getValidPDK(manifest *m.DataShareSpecificManifest) (*corev1.Sec
 		return nil, err
 	}
 	secretMap := indexSecretsByName(secrets)
-	for name := range manifest.BatchSigningPublicKeys {
+	for name := range manifest.PacketEncryptionKeyCSRs {
 		val, ok := secretMap[name]
 
 		if ok {

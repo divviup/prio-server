@@ -9,13 +9,14 @@ type Tester struct {
 	facilitatorImage string
 	pushGateway      string
 	peerIdentity     string
+	awsAccountId     string
 }
 
 func New(
 	namespace, name,
 	manifestFileUrl, serviceAccountName,
 	facilitatorImage, pushGateway,
-	peerIdentity string) *Tester {
+	peerIdentity, awsAccountId string) *Tester {
 	return &Tester{
 		namespace,
 		name,
@@ -24,5 +25,6 @@ func New(
 		facilitatorImage,
 		pushGateway,
 		peerIdentity,
+		awsAccountId,
 	}
 }
