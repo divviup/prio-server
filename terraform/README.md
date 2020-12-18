@@ -71,6 +71,67 @@ In your test setup, you might want to exercise reading and writing data to AWS S
 
 When instantiating a new GKE cluster, you will want to merge its configuration into your local `~/.kube/config` so that you can use `kubectl` for cluster management. After a successful `apply`, Terraform will emit a `gcloud` invocation that will update your local config file. More generally, `gcloud container clusters get-credentials <YOUR CLUSTER NAME> --region <GCP REGION>"` will do the trick.
 
+## Metrics, graphs and alerting
+
+We deploy Prometheus and Grafana into Prio clusters. A variety of Kubernetes metrics automagically are recorded into Prometheus, and a small number of metrics are recorded by `workflow-manager` and `facilitator`. There are some manual steps before you can see any graphs or get alerts, though.
+
+### Accessing Prometheus and Grafana
+
+None of Grafana, Prometheus or any of Prometheus' components are exposed publicly. You can access them using `kubectl port-forward` to make a port on remote pod's network accessible locally. So, to make Prometheus' `server` component reachable at `localhost:8080`, you would do:
+
+    kubectl -n monitoring port-forward $(kubectl -n monitoring get pod --selector="app=prometheus,component=server,release=prometheus" --output jsonpath='{.items[0].metadata.name}') 8080:9090
+
+For `prometheus-alertmanager`:
+
+    kubectl -n monitoring port-forward $(kubectl -n monitoring get pod --selector="app=prometheus,component=alertmanager,release=prometheus" --output jsonpath='{.items[0].metadata.name}') <LOCAL PORT>:9093
+
+And for Grafana:
+
+    kubectl -n monitoring port-forward $(kubectl -n monitoring get pod --selector="app.kubernetes.io/instance=grafana,app.kubernetes.io/name=grafana" --output jsonpath='{.items[0].metadata.name}') <LOCAL PORT>:3000
+
+To access other components, look up the labels on the pod for the component you want to reach to construct an appropriate `--selector` argument, and check the running container's configuration to see what port(s) it listens on.
+
+Grafana requires authentication. You can login as the `admin` user. The password is in a Kubernetes secret. Run `kubectl -n monitoring get secret grafana -o=yaml`, then base64 decode the value for `admin-password` and use it to authenticate.
+
+### Hooking up VictorOps/Splunk Oncall alerts
+
+Sending alerts from Prometheus Alertmanager to VictorOps requires an API key, which we do not want to store in source control, and so you must update a Kubernetes secret. First, get the appropriate routing key and API key from the [VictorOps portal](https://portal.victorops.com) (configuring VictorOps teams, rotations, and escalation policies is out of scope for this document). Then, make a YAML file like this:
+
+    global:
+      resolve_timeout: 5m
+      http_config: {}
+      victorops_api_url: https://alert.victorops.com/integrations/generic/20131114/alert/
+    route:
+      receiver: victorops-receiver
+      group_by: ['alertname', 'cluster', 'service']
+      group_wait: 10s
+      group_interval: 5m
+      repeat_interval: 3h
+    receivers:
+    - name: victorops-receiver
+      victorops_configs:
+      - api_key: <VICTOROPS SECRET API KEY HERE>
+        routing_key: <VICTOROPS ROUTING KEY HERE>
+        state_message: 'Alert: {{ .CommonLabels.alertname }}. Summary:{{ .CommonAnnotations.summary }}. RawData: {{ .CommonLabels }}'
+    templates: []
+
+Next, we want to store this in the `prometheus-alertmanager-config` Kubernetes secret that was created by Terraform with a dummy value. There's no straightforward way to update a secret value using kubectl, so we use [this trick](https://blog.atomist.com/updating-a-kubernetes-secret-or-configmap/):
+
+    kubectl -n monitoring create secret generic prometheus-alertmanager-config --from-file=alertmanager.yml=/path/to/config/file.yml --dry-run=client -o=json | kubectl apply -f -
+
+For more details, see the [VictorOps docs on Prometheus integration](https://help.victorops.com/knowledge-base/victorops-prometheus-integration/).
+
+### Configuring Kubernetes dashboard in Grafana
+
+No dashboards are automatically configured in Grafana. To get [a dashboard with an overview of Kubernetes status](https://grafana.com/grafana/dashboards/315):
+
+* Log into Grafana (see "Accessing Prometheus and Grafana", above)
+* Go to Dashboards -> Manage
+* Hit "Import"
+* Enter "315" into the "Import via grafana.com" box (or the ID of whatever dashboard you wish to configure)
+* Select the "prometheus" data source
+* Enjoy the graphs'n'gauges
+
 ## Formatting
 
 Our continuous integration is set up to do basic validation of Terraform files on pull requests. Besides any other testing, make sure to run `terraform fmt --recursive` or you will get build failures!
