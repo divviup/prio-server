@@ -84,9 +84,9 @@ resource "google_container_node_pool" "worker_nodes" {
   name               = "${var.resource_prefix}-node-pool"
   location           = var.gcp_region
   cluster            = google_container_cluster.cluster.name
-  initial_node_count = 3
+  initial_node_count = 4
   autoscaling {
-    min_node_count = 2
+    min_node_count = 4
     max_node_count = 5
   }
   node_config {
