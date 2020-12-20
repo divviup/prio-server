@@ -1,12 +1,12 @@
 // workflow-manager looks for batches to be processed from an input bucket,
-// and spins up `facilitator intake-batch` jobs to process those batches.
+// and schedules intake-batch tasks for intake-batch-workers to process those
+// batches.
 //
-// It also looks for batches that have been intake'd, and spins up
-// `facilitator aggregate` jobs to aggregate them and write to a portal bucket.
+// It also looks for batches that have been intake'd, and schedules aggregate
+// tasks.
 package main
 
 import (
-	"context"
 	"flag"
 	"fmt"
 	"log"
@@ -17,21 +17,15 @@ import (
 
 	"github.com/letsencrypt/prio-server/workflow-manager/batchpath"
 	"github.com/letsencrypt/prio-server/workflow-manager/bucket"
-	wferror "github.com/letsencrypt/prio-server/workflow-manager/errors"
+	wfkubernetes "github.com/letsencrypt/prio-server/workflow-manager/kubernetes"
 	"github.com/letsencrypt/prio-server/workflow-manager/monitor"
-	"github.com/letsencrypt/prio-server/workflow-manager/retry"
+	"github.com/letsencrypt/prio-server/workflow-manager/task"
 	"github.com/letsencrypt/prio-server/workflow-manager/utils"
+
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
 	"github.com/prometheus/client_golang/prometheus/push"
 	batchv1 "k8s.io/api/batch/v1"
-	corev1 "k8s.io/api/core/v1"
-	"k8s.io/apimachinery/pkg/api/errors"
-	"k8s.io/apimachinery/pkg/api/resource"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/client-go/kubernetes"
-	_ "k8s.io/client-go/plugin/pkg/client/auth/gcp"
-	"k8s.io/client-go/rest"
 )
 
 // BuildInfo is generated at build time - see the Dockerfile.
@@ -40,22 +34,32 @@ var BuildInfo string
 var k8sNS = flag.String("k8s-namespace", "", "Kubernetes namespace")
 var isFirst = flag.Bool("is-first", false, "Whether this set of servers is \"first\", aka PHA servers")
 var maxAge = flag.String("intake-max-age", "1h", "Max age (in Go duration format) for intake batches to be worth processing.")
-var k8sServiceAccount = flag.String("k8s-service-account", "", "Kubernetes service account for intake and aggregate jobs")
-var bskSecretName = flag.String("bsk-secret-name", "", "Name of k8s secret for batch signing key")
-var pdksSecretName = flag.String("pdks-secret-name", "", "Name of k8s secret for packet decrypt keys")
-var gcpServiceAccountKeyFileSecretName = flag.String("gcp-service-account-key-file-secret-name", "", "Name of k8s secret for default GCP service account key file")
-var intakeConfigMap = flag.String("intake-batch-config-map", "", "Name of config map for intake jobs")
-var aggregateConfigMap = flag.String("aggregate-config-map", "", "Name of config map for aggregate jobs")
 var ingestorInput = flag.String("ingestor-input", "", "Bucket for input from ingestor (s3:// or gs://) (Required)")
 var ingestorIdentity = flag.String("ingestor-identity", "", "Identity to use with ingestor bucket (Required for S3)")
 var ownValidationInput = flag.String("own-validation-input", "", "Bucket for input of validation batches from self (s3:// or gs://) (required)")
 var ownValidationIdentity = flag.String("own-validation-identity", "", "Identity to use with own validation bucket (Required for S3)")
 var peerValidationInput = flag.String("peer-validation-input", "", "Bucket for input of validation batches from peer (s3:// or gs://) (required)")
 var peerValidationIdentity = flag.String("peer-validation-identity", "", "Identity to use with peer validation bucket (Required for S3)")
-var facilitatorImage = flag.String("facilitator-image", "", "Name (optionally including repository) of facilitator image")
 var aggregationPeriod = flag.String("aggregation-period", "3h", "How much time each aggregation covers")
 var gracePeriod = flag.String("grace-period", "1h", "Wait this amount of time after the end of an aggregation timeslice to run the aggregation")
 var pushGateway = flag.String("push-gateway", "", "Set this to the gateway to use with prometheus. If left empty, workflow-manager will not use prometheus.")
+var kubeconfigPath = flag.String("kube-config-path", "", "Path to the kubeconfig file to be used to authenticate to Kubernetes API")
+var dryRun = flag.Bool("dry-run", false, "If set, no operations with side effects will be done.")
+var taskQueueKind = flag.String("task-queue-kind", "", "Which task queue kind to use.")
+var intakeTasksTopic = flag.String("intake-tasks-topic", "", "Name of the topic to which intake-batch tasks should be published")
+var aggregateTasksTopic = flag.String("aggregate-tasks-topic", "", "Name of the topic to which aggregate tasks should be published")
+
+// Arguments for gcp-pubsub task queue
+var gcpPubSubCreatePubSubTopics = flag.Bool("gcp-pubsub-create-topics", false, "Whether to create the GCP PubSub topics used for intake and aggregation tasks.")
+var gcpPubSubProjectID = flag.String("gcp-project-id", "", "Name of the GCP project ID being used for PubSub..")
+
+// Arguments for aws-sns task queue
+var awsSNSRegion = flag.String("aws-sns-region", "", "AWS region in which to publish to SNS topic")
+var awsSNSIdentity = flag.String("aws-sns-identity", "", "AWS IAM ARN of the role to be assumed to publish to SNS topics")
+
+// Define flags and arguments for other task queue implementations here.
+// Argument names should be prefixed with the corresponding value of
+// task-queue-kind to avoid conflicts.
 
 // monitoring things
 var (
@@ -80,24 +84,17 @@ func main() {
 		})
 	}
 
-	ownValidationBucket, err := bucket.New(*ownValidationInput, *ownValidationIdentity)
+	ownValidationBucket, err := bucket.New(*ownValidationInput, *ownValidationIdentity, *dryRun)
+	if err != nil {
+		log.Fatalf("--own-validation-input: %s", err)
+	}
+	peerValidationBucket, err := bucket.New(*peerValidationInput, *peerValidationIdentity, *dryRun)
+	if err != nil {
+		log.Fatalf("--peer-validation-input: %s", err)
+	}
+	intakeBucket, err := bucket.New(*ingestorInput, *ingestorIdentity, *dryRun)
 	if err != nil {
 		log.Fatalf("--ingestor-input: %s", err)
-	}
-	peerValidationBucket, err := bucket.New(*peerValidationInput, *peerValidationIdentity)
-	if err != nil {
-		log.Fatalf("--ingestor-input: %s", err)
-	}
-	intakeBucket, err := bucket.New(*ingestorInput, *ingestorIdentity)
-	if err != nil {
-		log.Fatalf("--ingestor-input: %s", err)
-	}
-
-	if *intakeConfigMap == "" || *aggregateConfigMap == "" {
-		log.Fatal("--intake-batch-config-map and --aggregate-config-map are required")
-	}
-	if *facilitatorImage == "" {
-		log.Fatal("--facilitator-image is required")
 	}
 
 	maxAgeParsed, err := time.ParseDuration(*maxAge)
@@ -115,57 +112,195 @@ func main() {
 		log.Fatalf("--aggregation-time-slice: %s", err)
 	}
 
-	intakeFiles, err := intakeBucket.ListFiles(context.Background())
+	if *taskQueueKind == "" || *intakeTasksTopic == "" || *aggregateTasksTopic == "" {
+		log.Fatalf("--task-queue-kind, --intake-tasks-topic and --aggregate-tasks-topic are required")
+	}
+
+	var intakeTaskEnqueuer task.Enqueuer
+	var aggregationTaskEnqueuer task.Enqueuer
+
+	switch *taskQueueKind {
+	case "gcp-pubsub":
+		if *gcpPubSubProjectID == "" {
+			log.Fatal("--gcp-project-id is required for task-queue-kind=gcp-pubsub")
+		}
+
+		if *gcpPubSubCreatePubSubTopics {
+			if err := task.CreatePubSubTopic(
+				*gcpPubSubProjectID,
+				*intakeTasksTopic,
+			); err != nil {
+				log.Fatalf("creating pubsub topic: %s", err)
+			}
+			if err := task.CreatePubSubTopic(
+				*gcpPubSubProjectID,
+				*aggregateTasksTopic,
+			); err != nil {
+				log.Fatalf("creating pubsub topic: %s", err)
+			}
+		}
+
+		intakeTaskEnqueuer, err = task.NewGCPPubSubEnqueuer(
+			*gcpPubSubProjectID,
+			*intakeTasksTopic,
+			*dryRun,
+		)
+		if err != nil {
+			log.Fatal(err)
+		}
+
+		aggregationTaskEnqueuer, err = task.NewGCPPubSubEnqueuer(
+			*gcpPubSubProjectID,
+			*aggregateTasksTopic,
+			*dryRun,
+		)
+		if err != nil {
+			log.Fatal(err)
+		}
+	case "aws-sns":
+		if *awsSNSRegion == "" {
+			log.Fatal("--aws-sns-region is required for task-queue-kind=aws-sns")
+		}
+
+		intakeTaskEnqueuer, err = task.NewAWSSNSEnqueuer(
+			*awsSNSRegion,
+			*awsSNSIdentity,
+			*intakeTasksTopic,
+			*dryRun,
+		)
+		if err != nil {
+			log.Fatal(err)
+		}
+
+		aggregationTaskEnqueuer, err = task.NewAWSSNSEnqueuer(
+			*awsSNSRegion,
+			*awsSNSIdentity,
+			*aggregateTasksTopic,
+			*dryRun,
+		)
+		if err != nil {
+			log.Fatal(err)
+		}
+	// To implement a new task queue kind, add a case here. You should
+	// initialize intakeTaskEnqueuer and aggregationTaskEnqueuer.
+	default:
+		log.Fatalf("unknown task queue kind %s", *taskQueueKind)
+	}
+
+	kubernetesClient, err := wfkubernetes.NewClient(*k8sNS, *kubeconfigPath, *dryRun)
 	if err != nil {
 		log.Fatal(err)
 	}
 
-	intakeBatches, err := batchpath.ReadyBatches(intakeFiles, "batch")
+	// Get a listing of all jobs in the namespace so the finished ones can be
+	// reaped later on, and to avoid scheduling redudant work.
+	existingJobs, err := kubernetesClient.ListJobs()
 	if err != nil {
 		log.Fatal(err)
+	}
+
+	intakeFiles, err := intakeBucket.ListFiles()
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	ownValidationFiles, err := ownValidationBucket.ListFiles()
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	peerValidationFiles, err := peerValidationBucket.ListFiles()
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	scheduleTasks(scheduleTasksConfig{
+		isFirst:                 *isFirst,
+		clock:                   utils.DefaultClock(),
+		intakeFiles:             intakeFiles,
+		ownValidationFiles:      ownValidationFiles,
+		peerValidationFiles:     peerValidationFiles,
+		existingJobs:            existingJobs,
+		intakeTaskEnqueuer:      intakeTaskEnqueuer,
+		aggregationTaskEnqueuer: aggregationTaskEnqueuer,
+		ownValidationBucket:     ownValidationBucket,
+		maxAge:                  maxAgeParsed,
+		aggregationPeriod:       aggregationPeriodParsed,
+		gracePeriod:             gracePeriodParsed,
+	})
+
+	log.Print("done")
+}
+
+type scheduleTasksConfig struct {
+	isFirst                                              bool
+	clock                                                utils.Clock
+	intakeFiles, ownValidationFiles, peerValidationFiles []string
+	existingJobs                                         map[string]batchv1.Job
+	intakeTaskEnqueuer, aggregationTaskEnqueuer          task.Enqueuer
+	ownValidationBucket                                  bucket.TaskMarkerWriter
+	maxAge, aggregationPeriod, gracePeriod               time.Duration
+}
+
+// scheduleTasks evaluates bucket contents and kubernetes cluster state to
+// schedule new tasks or delete old jobs
+func scheduleTasks(config scheduleTasksConfig) {
+	intakeBatches, err := batchpath.ReadyBatches(config.intakeFiles, "batch")
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	// Make a set of the tasks for which we have marker objects for efficient
+	// lookup later.
+	taskMarkers := map[string]struct{}{}
+	for _, object := range config.ownValidationFiles {
+		if !strings.HasPrefix(object, "task-markers/") {
+			continue
+		}
+		taskMarkers[strings.TrimPrefix(object, "task-markers/")] = struct{}{}
 	}
 
 	currentIntakeBatches := withinInterval(intakeBatches, interval{
-		begin: time.Now().Add(-maxAgeParsed),
-		end:   time.Now().Add(24 * time.Hour),
+		begin: config.clock.Now().Add(-config.maxAge),
+		end:   config.clock.Now().Add(24 * time.Hour),
 	})
 	log.Printf("skipping %d batches as too old", len(intakeBatches)-len(currentIntakeBatches))
 
-	if err := launchIntake(context.Background(), currentIntakeBatches, maxAgeParsed); err != nil {
-		log.Fatal(err)
-	}
-
-	ownValidationFiles, err := ownValidationBucket.ListFiles(context.Background())
+	err = enqueueIntakeTasks(
+		config.clock,
+		currentIntakeBatches,
+		config.maxAge,
+		taskMarkers,
+		config.existingJobs,
+		config.ownValidationBucket,
+		config.intakeTaskEnqueuer,
+	)
 	if err != nil {
 		log.Fatal(err)
 	}
 
-	ownValidityInfix := fmt.Sprintf("validity_%d", utils.Index(*isFirst))
-	ownValidationBatches, err := batchpath.ReadyBatches(ownValidationFiles, ownValidityInfix)
+	ownValidityInfix := fmt.Sprintf("validity_%d", utils.Index(config.isFirst))
+	ownValidationBatches, err := batchpath.ReadyBatches(config.ownValidationFiles, ownValidityInfix)
 	if err != nil {
 		log.Fatal(err)
 	}
 
 	log.Printf("found %d own validations", len(ownValidationBatches))
 
-	peerValidationFiles, err := peerValidationBucket.ListFiles(context.Background())
-	if err != nil {
-		log.Fatal(err)
-	}
-
-	peerValidityInfix := fmt.Sprintf("validity_%d", utils.Index(!*isFirst))
-	peerValidationBatches, err := batchpath.ReadyBatches(peerValidationFiles, peerValidityInfix)
+	peerValidityInfix := fmt.Sprintf("validity_%d", utils.Index(!config.isFirst))
+	peerValidationBatches, err := batchpath.ReadyBatches(config.peerValidationFiles, peerValidityInfix)
 	if err != nil {
 		log.Fatal(err)
 	}
 
 	log.Printf("found %d peer validations", len(peerValidationBatches))
 
-	// Take the intersection of the sets of own validations and peer validations to get the list of
-	// batches we can aggregate.
-	// Go doesn't have sets, so we have to use a map[string]bool. We use the batch ID as the key to
-	// the set, because batchPath is not a valid map key type, and using a *batchPath wouldn't give
-	// us the lookup semantics we want.
+	// Take the intersection of the sets of own validations and peer validations
+	// to get the list of batches we can aggregate.
+	// Go doesn't have sets, so we have to use a map[string]bool. We use the
+	// batch ID as the key to the set, because batchPath is not a valid map key
+	// type, and using a *batchPath wouldn't give us the lookup semantics we
+	// want.
 	ownValidationsSet := map[string]bool{}
 	for _, ownValidationBatch := range ownValidationBatches {
 		ownValidationsSet[ownValidationBatch.ID] = true
@@ -177,29 +312,26 @@ func main() {
 		}
 	}
 
-	interval := aggregationInterval(aggregationPeriodParsed, gracePeriodParsed)
+	interval := aggregationInterval(config.clock, config.aggregationPeriod, config.gracePeriod)
 	log.Printf("looking for batches to aggregate in interval %s", interval)
 	aggregationBatches = withinInterval(aggregationBatches, interval)
 	aggregationMap := groupByAggregationID(aggregationBatches)
-	r := retry.Retry{
-		Identifier: "Aggregation",
-		Retryable: func() error {
-			return launchAggregationJobs(context.Background(), aggregationMap, interval)
-		},
-		ShouldRequeue: wferror.IsTransientErr,
-		// 5 is an arbitrary number... it seemed right
-		MaxTries: 5,
-		// No need to wait between retries
-		TimeBetweenTries: 0,
-	}
-
-	if err := r.Start(); err != nil {
+	err = enqueueAggregationTasks(
+		aggregationMap,
+		interval,
+		taskMarkers,
+		config.existingJobs,
+		config.ownValidationBucket,
+		config.aggregationTaskEnqueuer,
+	)
+	if err != nil {
 		log.Fatal(err)
-	} else {
-		aggregationsStarted.Inc()
 	}
 
-	log.Print("done")
+	// Ensure both task enqueuers have completed their asynchronous work before
+	// allowing the process to exit
+	config.intakeTaskEnqueuer.Stop()
+	config.aggregationTaskEnqueuer.Stop()
 }
 
 // interval represents a half-open interval of time.
@@ -257,9 +389,9 @@ func aggregationJobNameFragment(aggregationID string, maxLength int) string {
 // aggregationInterval calculates the interval we want to run an aggregation for, if any.
 // That is whatever interval is `gracePeriod` earlier than now and aligned on multiples
 // of `aggregationPeriod` (relative to the zero time).
-func aggregationInterval(aggregationPeriod, gracePeriod time.Duration) interval {
+func aggregationInterval(clock utils.Clock, aggregationPeriod, gracePeriod time.Duration) interval {
 	var output interval
-	output.end = time.Now().Add(-gracePeriod).Truncate(aggregationPeriod)
+	output.end = clock.Now().Add(-gracePeriod).Truncate(aggregationPeriod)
 	output.begin = output.end.Add(-aggregationPeriod)
 	return output
 }
@@ -288,58 +420,30 @@ func groupByAggregationID(batches batchpath.List) aggregationMap {
 	return output
 }
 
-func secretVolumesAndMounts() ([]corev1.Volume, []corev1.VolumeMount) {
-	volumes := []corev1.Volume{}
-	volumeMounts := []corev1.VolumeMount{}
-	if *gcpServiceAccountKeyFileSecretName != "" {
-		volumes = append(volumes, corev1.Volume{
-			Name: "default-gcp-sa-key-file",
-			VolumeSource: corev1.VolumeSource{
-				Secret: &corev1.SecretVolumeSource{
-					SecretName: *gcpServiceAccountKeyFileSecretName,
-				},
-			},
-		})
-
-		volumeMounts = append(volumeMounts, corev1.VolumeMount{
-			Name:      "default-gcp-sa-key-file",
-			MountPath: "/etc/secrets",
-			ReadOnly:  true,
-		})
-	}
-
-	return volumes, volumeMounts
-}
-
-func launchAggregationJobs(ctx context.Context, batchesByID aggregationMap, inter interval) error {
+func enqueueAggregationTasks(
+	batchesByID aggregationMap,
+	inter interval,
+	taskMarkers map[string]struct{},
+	existingJobs map[string]batchv1.Job,
+	ownValidationBucket bucket.TaskMarkerWriter,
+	enqueuer task.Enqueuer,
+) error {
 	if len(batchesByID) == 0 {
 		log.Printf("no batches to aggregate")
 		return nil
 	}
 
-	config, err := rest.InClusterConfig()
-	if err != nil {
-		return fmt.Errorf("cluster config: %w", err)
-	}
-	clientset, err := kubernetes.NewForConfig(config)
-	if err != nil {
-		return fmt.Errorf("clientset: %w", err)
-	}
-
 	for _, readyBatches := range batchesByID {
 		aggregationID := readyBatches[0].AggregationID
+		batches := []task.Batch{}
 
-		args := []string{
-			"aggregate",
-			"--aggregation-id", aggregationID,
-			"--aggregation-start", fmtTime(inter.begin),
-			"--aggregation-end", fmtTime(inter.end),
-		}
+		batchCount := 0
 		for _, batchPath := range readyBatches {
-			args = append(args, "--batch-id")
-			args = append(args, batchPath.ID)
-			args = append(args, "--batch-time")
-			args = append(args, batchPath.DateString())
+			batchCount++
+			batches = append(batches, task.Batch{
+				ID:   batchPath.ID,
+				Time: task.Timestamp(batchPath.Time),
+			})
 
 			// All batches should have the same aggregation ID?
 			if aggregationID != batchPath.AggregationID {
@@ -347,231 +451,117 @@ func launchAggregationJobs(ctx context.Context, batchesByID aggregationMap, inte
 			}
 		}
 
-		jobName := fmt.Sprintf("a-%s-%s", aggregationJobNameFragment(aggregationID, 30), strings.ReplaceAll(fmtTime(inter.begin), "/", "-"))
-
-		log.Printf("starting aggregation job %s (interval %s) with args %s", jobName, inter, args)
-
-		var one int32 = 1
-		volumes, volumeMounts := secretVolumesAndMounts()
-		job := &batchv1.Job{
-			ObjectMeta: metav1.ObjectMeta{
-				Name:      jobName,
-				Namespace: *k8sNS,
-			},
-			Spec: batchv1.JobSpec{
-				BackoffLimit: &one,
-				Template: corev1.PodTemplateSpec{
-					Spec: corev1.PodSpec{
-						ServiceAccountName: *k8sServiceAccount,
-						RestartPolicy:      "Never",
-						Volumes:            volumes,
-						Containers: []corev1.Container{
-							{
-								Args:            args,
-								Name:            "facile-container",
-								Image:           *facilitatorImage,
-								ImagePullPolicy: "IfNotPresent",
-								VolumeMounts:    volumeMounts,
-								Resources: corev1.ResourceRequirements{
-									Requests: corev1.ResourceList{
-										corev1.ResourceMemory: resource.MustParse("500Mi"),
-										corev1.ResourceCPU:    resource.MustParse("1.0"),
-									},
-									Limits: corev1.ResourceList{
-										corev1.ResourceMemory: resource.MustParse("550Mi"),
-										corev1.ResourceCPU:    resource.MustParse("1.5"),
-									},
-								},
-								EnvFrom: []corev1.EnvFromSource{
-									{
-										ConfigMapRef: &corev1.ConfigMapEnvSource{
-											LocalObjectReference: corev1.LocalObjectReference{
-												Name: *aggregateConfigMap,
-											},
-										},
-									},
-								},
-								Env: []corev1.EnvVar{
-									{
-										Name: "BATCH_SIGNING_PRIVATE_KEY",
-										ValueFrom: &corev1.EnvVarSource{
-											SecretKeyRef: &corev1.SecretKeySelector{
-												LocalObjectReference: corev1.LocalObjectReference{
-													Name: *bskSecretName,
-												},
-												Key: "secret_key",
-											},
-										},
-									},
-									{
-										Name: "PACKET_DECRYPTION_KEYS",
-										ValueFrom: &corev1.EnvVarSource{
-											SecretKeyRef: &corev1.SecretKeySelector{
-												LocalObjectReference: corev1.LocalObjectReference{
-													Name: *pdksSecretName,
-												},
-												Key: "secret_key",
-											},
-										},
-									},
-								},
-							},
-						},
-					},
-				},
-			},
+		aggregationTask := task.Aggregation{
+			AggregationID:    aggregationID,
+			AggregationStart: task.Timestamp(inter.begin),
+			AggregationEnd:   task.Timestamp(inter.end),
+			Batches:          batches,
 		}
-		createdJob, err := clientset.BatchV1().Jobs(*k8sNS).Create(ctx, job, metav1.CreateOptions{})
-		if err != nil {
-			if errors.IsAlreadyExists(err) {
-				log.Printf("skipping %q because a job for it already exists (err %T = %#v)",
-					jobName, err, err)
-				continue
-			}
-			log.Printf("creating job: %s", err)
+
+		if _, ok := taskMarkers[aggregationTask.Marker()]; ok {
+			skippedDueToMarker++
 			continue
 		}
-		log.Printf("Created job %q: %s", jobName, createdJob.ObjectMeta.UID)
+
+		taskName := fmt.Sprintf(
+			"a-%s-%s",
+			aggregationJobNameFragment(aggregationID, 30),
+			strings.ReplaceAll(fmtTime(inter.begin), "/", "-"),
+		)
+		if _, ok := existingJobs[taskName]; ok {
+			skippedDueToMarker++
+			// If we made it here, a Kubernetes job for this aggregation
+			// existed, but we did not find a marker for the task. The job was
+			// most likely created by an older workflow-manager, so write out a
+			// marker for this task, which makes it safe to reap the job when it
+			// finishes.
+			if err := ownValidationBucket.WriteTaskMarker(aggregationTask.Marker()); err != nil {
+				return err
+			}
+			continue
+		}
+
+		log.Printf("scheduling aggregation task %s (interval %s) for aggregation ID %s over %d batches",
+			taskName, inter, aggregationID, batchCount)
+		scheduled++
+		enqueuer.Enqueue(aggregationTask, func(err error) {
+			if err != nil {
+				log.Printf("failed to enqueue aggregation task: %s", err)
+				return
+			}
+
+			// Write a marker to cloud storage to ensure we don't schedule
+			// redundant tasks
+			if err := ownValidationBucket.WriteTaskMarker(aggregationTask.Marker()); err != nil {
+				log.Printf("failed to write aggregation task marker: %s", err)
+			}
+
+			aggregationsStarted.Inc()
+		})
 	}
 
 	return nil
 }
 
-func launchIntake(ctx context.Context, readyBatches batchpath.List, ageLimit time.Duration) error {
-	// This uses the credentials that an instance running in the k8s cluster
-	// gets automatically, via automount_service_account_token in the Terraform config.
-	config, err := rest.InClusterConfig()
-	if err != nil {
-		return fmt.Errorf("cluster config: %w", err)
-	}
-	clientset, err := kubernetes.NewForConfig(config)
-	if err != nil {
-		return fmt.Errorf("clientset: %w", err)
-	}
-
-	log.Printf("starting %d jobs", readyBatches.Len())
-	for _, batch := range readyBatches {
-		r := retry.Retry{
-			Identifier: batch.String(),
-			Retryable: func() error {
-				return startIntakeJob(ctx, clientset, batch, ageLimit)
-			},
-			ShouldRequeue: wferror.IsTransientErr,
-			// 5 Seems right, we're retrying the same amount for this as we do for the aggregation jobs
-			MaxTries: 5,
-			// lets not wait between retries
-			TimeBetweenTries: 0,
-		}
-
-		if err := r.Start(); err != nil {
-			return fmt.Errorf("starting job for batch %s: %w", batch, err)
-		}
-		intakesStarted.Inc()
-	}
-	return nil
-}
-
-func startIntakeJob(
-	ctx context.Context,
-	clientset *kubernetes.Clientset,
-	batchPath *batchpath.BatchPath,
+func enqueueIntakeTasks(
+	clock utils.Clock,
+	readyBatches batchpath.List,
 	ageLimit time.Duration,
+	taskMarkers map[string]struct{},
+	existingJobs map[string]batchv1.Job,
+	ownValidationBucket bucket.TaskMarkerWriter,
+	enqueuer task.Enqueuer,
 ) error {
-	age := time.Now().Sub(batchPath.Time)
-	if age > ageLimit {
-		log.Printf("skipping batch %s because it is too old (%s)", batchPath, age)
-		return nil
-	}
-
-	jobName := intakeJobNameForBatchPath(batchPath)
-	args := []string{
-		"intake-batch",
-		"--aggregation-id", batchPath.AggregationID,
-		"--batch-id", batchPath.ID,
-		"--date", batchPath.DateString(),
-	}
-	log.Printf("starting job for batch %s with args %s", batchPath, args)
-
-	volumes, volumeMounts := secretVolumesAndMounts()
-
-	var one int32 = 1
-	job := &batchv1.Job{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      jobName,
-			Namespace: *k8sNS,
-		},
-		Spec: batchv1.JobSpec{
-			BackoffLimit: &one,
-			Template: corev1.PodTemplateSpec{
-				Spec: corev1.PodSpec{
-					ServiceAccountName: *k8sServiceAccount,
-					RestartPolicy:      "Never",
-					Volumes:            volumes,
-					Containers: []corev1.Container{
-						{
-							Args:            args,
-							Name:            "facile-container",
-							Image:           *facilitatorImage,
-							ImagePullPolicy: "IfNotPresent",
-							VolumeMounts:    volumeMounts,
-							Resources: corev1.ResourceRequirements{
-								Requests: corev1.ResourceList{
-									corev1.ResourceMemory: resource.MustParse("500Mi"),
-									corev1.ResourceCPU:    resource.MustParse("1.0"),
-								},
-								Limits: corev1.ResourceList{
-									corev1.ResourceMemory: resource.MustParse("550Mi"),
-									corev1.ResourceCPU:    resource.MustParse("1.5"),
-								},
-							},
-							EnvFrom: []corev1.EnvFromSource{
-								{
-									ConfigMapRef: &corev1.ConfigMapEnvSource{
-										LocalObjectReference: corev1.LocalObjectReference{
-											Name: *intakeConfigMap,
-										},
-									},
-								},
-							},
-							Env: []corev1.EnvVar{
-								{
-									Name: "BATCH_SIGNING_PRIVATE_KEY",
-									ValueFrom: &corev1.EnvVarSource{
-										SecretKeyRef: &corev1.SecretKeySelector{
-											LocalObjectReference: corev1.LocalObjectReference{
-												Name: *bskSecretName,
-											},
-											Key: "secret_key",
-										},
-									},
-								},
-								{
-									Name: "PACKET_DECRYPTION_KEYS",
-									ValueFrom: &corev1.EnvVarSource{
-										SecretKeyRef: &corev1.SecretKeySelector{
-											LocalObjectReference: corev1.LocalObjectReference{
-												Name: *pdksSecretName,
-											},
-											Key: "secret_key",
-										},
-									},
-								},
-							},
-						},
-					},
-				},
-			},
-		},
-	}
-	createdJob, err := clientset.BatchV1().Jobs(*k8sNS).Create(ctx, job, metav1.CreateOptions{})
-	if err != nil {
-		if errors.IsAlreadyExists(err) {
-			log.Printf("skipping %s because a job for it already exists", batchPath)
-			return nil
+	for _, batch := range readyBatches {
+		age := clock.Now().Sub(batch.Time)
+		if age > ageLimit {
+			log.Printf("skipping batch %s because it is too old (%s)", batch, age)
+			continue
 		}
-		return fmt.Errorf("creating job: %w", err)
+
+		intakeTask := task.IntakeBatch{
+			AggregationID: batch.AggregationID,
+			BatchID:       batch.ID,
+			Date:          task.Timestamp(batch.Time),
+		}
+
+		if _, ok := taskMarkers[intakeTask.Marker()]; ok {
+			skippedDueToMarker++
+			continue
+		}
+
+		taskName := intakeJobNameForBatchPath(batch)
+		if _, ok := existingJobs[taskName]; ok {
+			skippedDueToMarker++
+			// If we made it here, a Kubernetes job for this intake task
+			// existed, but we did not find a marker for the task. The job was
+			// most likely created by an older workflow-manager, so write out a
+			// marker for this task, which makes it safe to reap the job when it
+			// finishes.
+			if err := ownValidationBucket.WriteTaskMarker(intakeTask.Marker()); err != nil {
+				return err
+			}
+
+			continue
+		}
+
+		log.Printf("scheduling intake task for batch %s", batch)
+		scheduled++
+		enqueuer.Enqueue(intakeTask, func(err error) {
+			if err != nil {
+				log.Printf("failed to enqueue intake task: %s", err)
+				return
+			}
+			// Write a marker to cloud storage to ensure we don't schedule
+			// redundant tasks
+			if err := ownValidationBucket.WriteTaskMarker(intakeTask.Marker()); err != nil {
+				log.Printf("failed to write intake task marker: %s", err)
+				return
+			}
+
+			intakesStarted.Inc()
+		})
 	}
-	log.Printf("Created job %q: %s", jobName, createdJob.ObjectMeta.UID)
 
 	return nil
 }

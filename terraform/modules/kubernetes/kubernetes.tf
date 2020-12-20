@@ -278,6 +278,10 @@ resource "kubernetes_cron_job" "workflow_manager" {
                 "--aggregate-config-map", kubernetes_config_map.aggregate_job_config_map.metadata[0].name,
                 "--facilitator-image", "${var.container_registry}/${var.facilitator_image}:${var.facilitator_version}",
                 "--push-gateway", var.pushgateway,
+                "--task-queue-kind", "gcp-pubsub",
+                "--intake-tasks-topic", var.intake_tasks_queue,
+                "--aggregate-tasks-topic", var.aggregate_tasks_queue,
+                "--gcp-project-id", data.google_project.project.project_id,
               ]
             }
             # If we use any other restart policy, then when the job is finally
@@ -395,7 +399,7 @@ resource "kubernetes_role" "workflow_manager_role" {
     // Note: Some of these permissions will probably wind up not being needed.
     // Starting with a moderately generous demonstration set.
     resources = ["namespaces", "pods", "jobs"]
-    verbs     = ["get", "list", "watch", "create"]
+    verbs     = ["get", "list", "watch", "delete"]
   }
 }
 
