@@ -100,9 +100,7 @@ func (b *Bucket) listFilesS3(ctx context.Context) ([]string, error) {
 	var nextContinuationToken = ""
 	for {
 		input := &s3.ListObjectsV2Input{
-			// We choose a lower number than the default max of 1000 to ensure we exercise the
-			// cursoring case regularly.
-			MaxKeys: aws.Int64(100),
+			MaxKeys: aws.Int64(1000),
 			Bucket:  aws.String(bucket),
 		}
 		if nextContinuationToken != "" {
@@ -139,10 +137,10 @@ func (b *Bucket) listFilesGS(ctx context.Context) ([]string, error) {
 	var output []string
 	it := bkt.Objects(ctx, query)
 
-	// Use the paginated API to list Bucket contents, as otherwise we would only get the first 1,000 objects in the Bucket.
-	// As in the S3 case above, we get 100 results at a time to ensure we exercise the pagination case.
+	// Use the paginated API to list Bucket contents, as otherwise we would only
+	// get the first 1,000 objects in the Bucket.
 	// https://cloud.google.com/storage/docs/json_api/v1/objects/list
-	p := iterator.NewPager(it, 100, "")
+	p := iterator.NewPager(it, 1000, "")
 	var objects []*storage.ObjectAttrs
 	for {
 		// NextPage will append to the objects slice
