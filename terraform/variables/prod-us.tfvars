@@ -10,8 +10,22 @@ managed_dns_zone = {
   gcp_project = "prio-bringup-290620"
 }
 ingestors = {
-  apple  = "exposure-notification.apple.com/manifest"
-  g-enpa = "storage.googleapis.com/prio-manifests"
+  apple = {
+    manifest_base_url = "exposure-notification.apple.com/manifest"
+    localities = {
+      us-ct = {
+        intake_worker_count    = 1
+        aggregate_worker_count = 1
+      }
+    }
+  }
+  g-enpa = {
+    manifest_base_url = "storage.googleapis.com/prio-manifests"
+    us-ct = {
+      intake_worker_count    = 1
+      aggregate_worker_count = 1
+    }
+  }
 }
 peer_share_processor_manifest_base_url = "en-analytics.cancer.gov"
 portal_server_manifest_base_url        = "manifest.enpa-pha.io"

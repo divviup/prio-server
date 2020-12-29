@@ -108,6 +108,14 @@ variable "facilitator_version" {
   type = string
 }
 
+variable "intake_worker_count" {
+  type = number
+}
+
+variable "aggregate_worker_count" {
+  type = number
+}
+
 # We need the ingestion server's manifest so that we can discover the GCP
 # service account it will use to upload ingestion batches. Some ingestors
 # (Apple) are singletons, and advertise a single global manifest which contains
@@ -391,6 +399,16 @@ module "bucket" {
   depends_on = [google_kms_crypto_key_iam_binding.bucket_encryption_key]
 }
 
+module "pubsub" {
+  for_each                   = toset(["intake", "aggregate"])
+  source                     = "../../modules/pubsub"
+  environment                = var.environment
+  data_share_processor_name  = var.data_share_processor_name
+  publisher_service_account  = module.kubernetes.service_account_email
+  subscriber_service_account = module.kubernetes.service_account_email
+  task                       = each.key
+}
+
 module "kubernetes" {
   source                                  = "../../modules/kubernetes/"
   data_share_processor_name               = var.data_share_processor_name
@@ -419,6 +437,10 @@ module "kubernetes" {
   container_registry                      = var.container_registry
   workflow_manager_version                = var.workflow_manager_version
   facilitator_version                     = var.facilitator_version
+  intake_queue                            = module.pubsub["intake"].queue
+  aggregate_queue                         = module.pubsub["aggregate"].queue
+  intake_worker_count                     = var.intake_worker_count
+  aggregate_worker_count                  = var.aggregate_worker_count
 }
 
 output "data_share_processor_name" {

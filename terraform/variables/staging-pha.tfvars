@@ -11,12 +11,38 @@ managed_dns_zone = {
 }
 ingestors = {
   ingestor-1 = {
-    manifest_base_url          = "storage.googleapis.com/prio-staging-pha-manifests/ingestor-1"
-    intake_batch_replica_count = 1
+    manifest_base_url = "storage.googleapis.com/prio-staging-pha-manifests/ingestor-1"
+    localities = {
+      narnia = {
+        intake_worker_count    = 1
+        aggregate_worker_count = 1
+      }
+      gondor = {
+        intake_worker_count    = 2
+        aggregate_worker_count = 1
+      }
+      asgard = {
+        intake_worker_count    = 1
+        aggregate_worker_count = 1
+      }
+    }
   }
   ingestor-2 = {
-    manifest_base_url          = "storage.googleapis.com/prio-staging-pha-manifests/ingestor-2"
-    intake_batch_replica_count = 1
+    manifest_base_url = "storage.googleapis.com/prio-staging-pha-manifests/ingestor-2"
+    localities = {
+      narnia = {
+        intake_worker_count    = 2
+        aggregate_worker_count = 1
+      }
+      gondor = {
+        intake_worker_count    = 1
+        aggregate_worker_count = 1
+      }
+      asgard = {
+        intake_worker_count    = 1
+        aggregate_worker_count = 1
+      }
+    }
   }
 }
 peer_share_processor_manifest_base_url = "storage.googleapis.com/prio-staging-facil-manifests"

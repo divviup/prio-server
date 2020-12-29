@@ -112,6 +112,22 @@ variable "pushgateway" {
   type = string
 }
 
+variable "intake_queue" {
+  type = string
+}
+
+variable "aggregate_queue" {
+  type = string
+}
+
+variable "intake_worker_count" {
+  type = number
+}
+
+variable "aggregate_worker_count" {
+  type = number
+}
+
 data "aws_caller_identity" "current" {}
 
 # Workload identity[1] lets us map GCP service accounts to Kubernetes service
@@ -165,9 +181,9 @@ resource "kubernetes_secret" "batch_signing_key" {
   }
 }
 
-# ConfigMap containing the parameters that are common to every intake-batch job
-# that will be spawned in this data share processor, except for secrets.
-resource "kubernetes_config_map" "intake_batch_job_config_map" {
+# ConfigMap containing the parameters that are common to every intake-batch task
+# that will be handled in this data share processor, except for secrets.
+resource "kubernetes_config_map" "intake_batch_config_map" {
   metadata {
     name      = "${var.data_share_processor_name}-intake-batch-config"
     namespace = var.kubernetes_namespace
@@ -192,12 +208,16 @@ resource "kubernetes_config_map" "intake_batch_job_config_map" {
     RUST_LOG                             = "info"
     RUST_BACKTRACE                       = "1"
     PUSHGATEWAY                          = var.pushgateway
+    TASK_QUEUE_KIND                      = "gcp-pubsub"
+    TASK_QUEUE_NAME                      = var.intake_queue
+    GCP_PROJECT_ID                       = data.google_project.project.project_id
+
   }
 }
 
-# ConfigMap containing the parameters that are common to every aggregation job
-# that will be spawned in this data share processor, except for secrets.
-resource "kubernetes_config_map" "aggregate_job_config_map" {
+# ConfigMap containing the parameters that are common to every aggregation task
+# that will be handled in this data share processor, except for secrets.
+resource "kubernetes_config_map" "aggregate_config_map" {
   metadata {
     name      = "${var.data_share_processor_name}-aggregate-config"
     namespace = var.kubernetes_namespace
@@ -223,8 +243,13 @@ resource "kubernetes_config_map" "aggregate_job_config_map" {
     RUST_LOG                             = "info"
     RUST_BACKTRACE                       = "1"
     PUSHGATEWAY                          = var.pushgateway
+    TASK_QUEUE_KIND                      = "gcp-pubsub"
+    TASK_QUEUE_NAME                      = var.aggregate_queue
+    GCP_PROJECT_ID                       = data.google_project.project.project_id
   }
 }
+
+data "google_project" "project" {}
 
 resource "kubernetes_cron_job" "workflow_manager" {
   metadata {
@@ -266,21 +291,15 @@ resource "kubernetes_cron_job" "workflow_manager" {
                 "--intake-max-age", "24h",
                 "--is-first=${var.is_first ? "true" : "false"}",
                 "--k8s-namespace", var.kubernetes_namespace,
-                "--k8s-service-account", module.account_mapping.kubernetes_account_name,
                 "--ingestor-input", var.ingestion_bucket,
                 "--ingestor-identity", var.ingestion_bucket_identity,
                 "--own-validation-input", var.own_validation_bucket,
                 "--peer-validation-input", var.peer_validation_bucket,
                 "--peer-validation-identity", var.peer_validation_bucket_identity,
-                "--bsk-secret-name", kubernetes_secret.batch_signing_key.metadata[0].name,
-                "--pdks-secret-name", var.packet_decryption_key_kubernetes_secret,
-                "--intake-batch-config-map", kubernetes_config_map.intake_batch_job_config_map.metadata[0].name,
-                "--aggregate-config-map", kubernetes_config_map.aggregate_job_config_map.metadata[0].name,
-                "--facilitator-image", "${var.container_registry}/${var.facilitator_image}:${var.facilitator_version}",
                 "--push-gateway", var.pushgateway,
                 "--task-queue-kind", "gcp-pubsub",
-                "--intake-tasks-topic", var.intake_tasks_queue,
-                "--aggregate-tasks-topic", var.aggregate_tasks_queue,
+                "--intake-tasks-topic", var.intake_queue,
+                "--aggregate-tasks-topic", var.aggregate_queue,
                 "--gcp-project-id", data.google_project.project.project_id,
               ]
             }
@@ -295,6 +314,148 @@ resource "kubernetes_cron_job" "workflow_manager" {
             restart_policy                  = "Never"
             service_account_name            = module.account_mapping.kubernetes_account_name
             automount_service_account_token = true
+          }
+        }
+      }
+    }
+  }
+}
+
+resource "kubernetes_deployment" "intake_batch" {
+  metadata {
+    name      = "intake-batch-${var.ingestor}"
+    namespace = var.kubernetes_namespace
+  }
+
+  spec {
+    replicas = var.intake_worker_count
+    selector {
+      match_labels = {
+        name = "intake-batch-${var.ingestor}"
+      }
+    }
+    template {
+      metadata {
+        labels = {
+          name = "intake-batch-${var.ingestor}"
+        }
+      }
+      spec {
+        service_account_name = module.account_mapping.kubernetes_account_name
+        container {
+          name  = "facile-container"
+          image = "${var.container_registry}/${var.facilitator_image}:${var.facilitator_version}"
+          args  = ["intake-batch-worker"]
+          resources {
+            # Batch intake is single threaded, and we never expect to see
+            # batches larger than 3-400 MB, so set the limits such that we can
+            # process whole batches in memory (plus a safety margin) and we can
+            # use an entire core if necessary. However we set the requests much
+            # lower since most batches are much smaller than 3-400 MB and we get
+            # more efficient bin packing this way.
+            requests {
+              memory = "50Mi"
+              cpu    = "0.1"
+            }
+            limits {
+              memory = "550Mi"
+              cpu    = "1.5"
+            }
+          }
+          env {
+            name = "BATCH_SIGNING_PRIVATE_KEY"
+            value_from {
+              secret_key_ref {
+                name     = kubernetes_secret.batch_signing_key.metadata[0].name
+                key      = "secret_key"
+                optional = false
+              }
+            }
+          }
+          env {
+            name = "PACKET_DECRYPTION_KEYS"
+            value_from {
+              secret_key_ref {
+                name     = var.packet_decryption_key_kubernetes_secret
+                key      = "secret_key"
+                optional = false
+              }
+            }
+          }
+          env_from {
+            config_map_ref {
+              name     = kubernetes_config_map.intake_batch_config_map.metadata[0].name
+              optional = false
+            }
+          }
+        }
+      }
+    }
+  }
+}
+
+resource "kubernetes_deployment" "aggregate" {
+  metadata {
+    name      = "aggregate-${var.ingestor}"
+    namespace = var.kubernetes_namespace
+  }
+
+  spec {
+    replicas = var.aggregate_worker_count
+    selector {
+      match_labels = {
+        name = "aggregate-${var.ingestor}"
+      }
+    }
+    template {
+      metadata {
+        labels = {
+          name = "aggregate-${var.ingestor}"
+        }
+      }
+      spec {
+        service_account_name = module.account_mapping.kubernetes_account_name
+        container {
+          name  = "facile-container"
+          image = "${var.container_registry}/${var.facilitator_image}:${var.facilitator_version}"
+          args  = ["aggregate-worker"]
+          resources {
+            # As in the intake-batch case, aggregate jobs are single threaded
+            # and need to fit whole ingestion batches into memory.
+            requests {
+              memory = "50Mi"
+              cpu    = "0.1"
+            }
+            limits {
+              memory = "550Mi"
+              cpu    = "1.5"
+            }
+          }
+          env {
+            name = "BATCH_SIGNING_PRIVATE_KEY"
+            value_from {
+              secret_key_ref {
+                name     = kubernetes_secret.batch_signing_key.metadata[0].name
+                key      = "secret_key"
+                optional = false
+              }
+            }
+          }
+          env {
+            name = "PACKET_DECRYPTION_KEYS"
+            value_from {
+              secret_key_ref {
+                name     = var.packet_decryption_key_kubernetes_secret
+                key      = "secret_key"
+                optional = false
+              }
+            }
+          }
+          env_from {
+            config_map_ref {
+              name     = kubernetes_config_map.aggregate_config_map.metadata[0].name
+              optional = false
+            }
           }
         }
       }
@@ -335,9 +496,9 @@ resource "kubernetes_cron_job" "sample_maker" {
               args = [
                 "--pushgateway", var.pushgateway,
                 "generate-ingestion-sample",
-                "--own-output", var.ingestion_bucket,
-                "--peer-output", var.test_peer_ingestion_bucket,
-                "--peer-identity", var.remote_peer_validation_bucket_identity,
+                "--peer-output", var.ingestion_bucket,
+                "--own-output", var.test_peer_ingestion_bucket,
+                "--own-identity", var.remote_peer_validation_bucket_identity,
                 "--aggregation-id", "kittens-seen",
                 # All instances of the sample maker use the same batch signing
                 # key, thus simulating being a single server.
@@ -395,11 +556,11 @@ resource "kubernetes_role" "workflow_manager_role" {
   rule {
     // API group "" means the core API group.
     api_groups = ["batch", ""]
-    // Workflow manager can list pods and create jobs.
+    // Workflow manager can list pods and jobs.
     // Note: Some of these permissions will probably wind up not being needed.
     // Starting with a moderately generous demonstration set.
     resources = ["namespaces", "pods", "jobs"]
-    verbs     = ["get", "list", "watch", "delete"]
+    verbs     = ["get", "list", "watch"]
   }
 }
 

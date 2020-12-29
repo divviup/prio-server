@@ -15,7 +15,7 @@ variable "sum_part_bucket_writer_email" {
 }
 
 variable "ingestors" {
-  type = map(string)
+  type = list(string)
 }
 
 # For our purposes, a fake portal server is simply a bucket where we can write
@@ -63,7 +63,7 @@ resource "google_storage_bucket_object" "portal_server_global_manifest" {
 # Constructs global manifests for this env's ingestion servers, populated with
 # public keys that match what the sample_maker will use.
 resource "google_storage_bucket_object" "ingestor_global_manifests" {
-  for_each     = var.ingestors
+  for_each     = toset(var.ingestors)
   name         = "${each.key}/global-manifest.json"
   bucket       = var.manifest_bucket
   content_type = "application/json"
