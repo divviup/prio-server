@@ -13,13 +13,14 @@ use uuid::Uuid;
 
 use facilitator::{
     aggregation::BatchAggregator,
-    config::{Identity, ManifestKind, StoragePath},
+    config::{Identity, ManifestKind, StoragePath, TaskQueueKind},
     intake::BatchIntaker,
     manifest::{
         DataShareProcessorGlobalManifest, IngestionServerManifest, PortalServerGlobalManifest,
         SpecificManifest,
     },
     sample::{generate_ingestion_sample, SampleOutput},
+    task::{AggregationTask, AwsSqsTaskQueue, GcpPubSubTaskQueue, IntakeBatchTask, TaskQueue},
     transport::{
         GCSTransport, LocalFileTransport, S3Transport, SignableTransport, Transport,
         VerifiableAndDecryptableTransport, VerifiableTransport,
@@ -37,14 +38,6 @@ fn date_validator(s: String) -> Result<(), String> {
     NaiveDateTime::parse_from_str(&s, DATE_FORMAT)
         .map(|_| ())
         .map_err(|e| format!("{} {}", s, e.to_string()))
-}
-
-fn b64_validator(s: String) -> Result<(), String> {
-    if s == "not-a-real-key" {
-        return Err("'not-a-real-key'. Run deploy-tool to generate secrets".to_string());
-    }
-    base64::decode(s).map_err(|e| format!("decoding base64: {}", e))?;
-    Ok(())
 }
 
 fn uuid_validator(s: String) -> Result<(), String> {
@@ -75,6 +68,8 @@ trait AppArgumentAdder {
     fn add_packet_decryption_key_argument(self: Self) -> Self;
 
     fn add_gcp_service_account_key_file_argument(self: Self) -> Self;
+
+    fn add_task_queue_arguments(self: Self) -> Self;
 }
 
 const SHARED_HELP: &str = "Storage arguments: Any flag ending in -input or -output can take an \
@@ -242,8 +237,7 @@ impl<'a, 'b> AppArgumentAdder for App<'a, 'b> {
                 .help(leak_string(format!(
                     "Batch signing public key for the {}",
                     entity.str()
-                )))
-                .validator(b64_validator),
+                ))),
         )
         .arg(
             Arg::with_name(entity.suffix("-public-key-identifier"))
@@ -268,8 +262,7 @@ impl<'a, 'b> AppArgumentAdder for App<'a, 'b> {
                     batch signing private key to be used by this server when \
                     sending messages to other servers.",
                 )
-                .required(true)
-                .validator(b64_validator),
+                .required(true),
         )
         .arg(
             Arg::with_name("batch-signing-private-key-identifier")
@@ -301,7 +294,6 @@ impl<'a, 'b> AppArgumentAdder for App<'a, 'b> {
                 .multiple(true)
                 .min_values(1)
                 .use_delimiter(true)
-                .validator(b64_validator)
                 .required(true),
         )
     }
@@ -319,6 +311,60 @@ impl<'a, 'b> AppArgumentAdder for App<'a, 'b> {
                     account found in the GKE metadata service will be used for \
                     authentication or impersonation.",
                 ),
+        )
+    }
+
+    fn add_task_queue_arguments(self: App<'a, 'b>) -> App<'a, 'b> {
+        self.arg(
+            Arg::with_name("task-queue-kind")
+                .long("task-queue-kind")
+                .env("TASK_QUEUE_KIND")
+                .help("kind of task queue to use")
+                .possible_value(leak_string(TaskQueueKind::GcpPubSub.to_string()))
+                .possible_value(leak_string(TaskQueueKind::AwsSqs.to_string()))
+                .required(true),
+        )
+        .arg(
+            Arg::with_name("task-queue-name")
+                .long("task-queue-name")
+                .env("TASK_QUEUE_NAME")
+                .help("Name of queue from which tasks should be pulled.")
+                .long_help(
+                    "Name of queue from which tasks should be pulled. On GCP, \
+                    a PubSub subscription ID. On AWS, an SQS queue URL.",
+                )
+                .required(true),
+        )
+        .arg(
+            Arg::with_name("task-queue-identity")
+                .long("task-queue-identity")
+                .env("TASK_QUEUE_IDENTITY")
+                .help("Identity to assume when accessing task queue"),
+        )
+        .arg(
+            Arg::with_name("gcp-project-id")
+                .long("gcp-project-id")
+                .env("GCP_PROJECT_ID")
+                .help("Project ID for GCP PubSub topic")
+                .long_help(
+                    "The GCP Project ID in which the PubSub topic implementing \
+                    the work queue was created. Required if the task queue is \
+                    a PubSub topic.",
+                ),
+        )
+        .arg(
+            Arg::with_name("pubsub-api-endpoint")
+                .long("pubsub-api-endpoint")
+                .env("PUBSUB_API_ENDPOINT")
+                .help("API endpoint for GCP PubSub")
+                .default_value("https://pubsub.googleapis.com")
+                .help("API endpoint for GCP PubSub. Optional."),
+        )
+        .arg(
+            Arg::with_name("sqs-region")
+                .long("sqs-region")
+                .env("SQS_REGION")
+                .help("AWS region in which to use SQS"),
         )
     }
 }
@@ -406,8 +452,7 @@ fn main() -> Result<(), anyhow::Error> {
                             "Base64 encoded ECIES private key for the PHA \
                             server",
                         )
-                        .required(true)
-                        .validator(b64_validator),
+                        .required(true),
                 )
                 .arg(
                     Arg::with_name("facilitator-ecies-private-key")
@@ -418,8 +463,7 @@ fn main() -> Result<(), anyhow::Error> {
                             "Base64 encoded ECIES private key for the \
                             facilitator server",
                         )
-                        .required(true)
-                        .validator(b64_validator),
+                        .required(true),
                 )
                 .add_batch_signing_key_arguments()
                 .arg(
@@ -607,6 +651,42 @@ fn main() -> Result<(), anyhow::Error> {
                     )
             )
         )
+        .subcommand(
+            SubCommand::with_name("intake-batch-worker")
+                .about(format!("Consume intake batch tasks from a queue, validating an input share (from an ingestor's bucket) and emit a validation share.\n\n{}", SHARED_HELP).as_str())
+                .add_instance_name_argument()
+                .add_is_first_argument()
+                .add_gcp_service_account_key_file_argument()
+                .add_packet_decryption_key_argument()
+                .add_batch_public_key_arguments(Entity::Ingestor)
+                .add_batch_signing_key_arguments()
+                .add_manifest_base_url_argument(Entity::Ingestor)
+                .add_storage_arguments(Entity::Ingestor, InOut::Input)
+                .add_manifest_base_url_argument(Entity::Peer)
+                .add_storage_arguments(Entity::Peer, InOut::Output)
+                .add_storage_arguments(Entity::Own, InOut::Output)
+                .add_task_queue_arguments()
+        )
+        .subcommand(
+            SubCommand::with_name("aggregate-worker")
+                .about(format!("Consume aggregate tasks from a queue.\n\n{}", SHARED_HELP).as_str())
+                .add_instance_name_argument()
+                .add_is_first_argument()
+                .add_gcp_service_account_key_file_argument()
+                .add_manifest_base_url_argument(Entity::Ingestor)
+                .add_storage_arguments(Entity::Ingestor, InOut::Input)
+                .add_batch_public_key_arguments(Entity::Ingestor)
+                .add_manifest_base_url_argument(Entity::Own)
+                .add_storage_arguments(Entity::Own, InOut::Input)
+                .add_manifest_base_url_argument(Entity::Peer)
+                .add_storage_arguments(Entity::Peer, InOut::Input)
+                .add_batch_public_key_arguments(Entity::Peer)
+                .add_manifest_base_url_argument(Entity::Portal)
+                .add_storage_arguments(Entity::Portal, InOut::Output)
+                .add_packet_decryption_key_argument()
+                .add_batch_signing_key_arguments()
+                .add_task_queue_arguments()
+        )
         .get_matches();
 
     let result = match matches.subcommand() {
@@ -614,30 +694,13 @@ fn main() -> Result<(), anyhow::Error> {
         // various parameters are present and valid, so it is safe to use
         // unwrap() here.
         ("generate-ingestion-sample", Some(sub_matches)) => generate_sample(sub_matches),
-        ("intake-batch", Some(sub_matches)) => intake_batch(sub_matches),
-        ("aggregate", Some(sub_matches)) => aggregate(sub_matches),
+        ("intake-batch", Some(sub_matches)) => intake_batch_subcommand(sub_matches),
+        ("intake-batch-worker", Some(sub_matches)) => intake_batch_worker(sub_matches),
+        ("aggregate", Some(sub_matches)) => aggregate_subcommand(sub_matches),
+        ("aggregate-worker", Some(sub_matches)) => aggregate_worker(sub_matches),
         ("lint-manifest", Some(sub_matches)) => lint_manifest(sub_matches),
         (_, _) => Ok(()),
     };
-
-    // Once we've run the subcommand, whether it succeeds or fails, we want to push any metrics
-    // we have collected.
-    if let Some(pushgateway) = matches.value_of("pushgateway") {
-        if pushgateway != "" {
-            info!("pushing metrics to {}", pushgateway);
-            let jobname: &str = matches.subcommand().0;
-            prometheus::push_metrics(
-                jobname,
-                prometheus::labels! {},
-                pushgateway,
-                prometheus::gather(),
-                None,
-            )
-            .map(|_| info!("done pushing metrics"))
-            .map_err(|e| error!("error pushing metrics: {}", e))
-            .ok();
-        }
-    }
 
     result
 }
@@ -692,7 +755,12 @@ fn generate_sample(sub_matches: &ArgMatches) -> Result<(), anyhow::Error> {
     Ok(())
 }
 
-fn intake_batch(sub_matches: &ArgMatches) -> Result<(), anyhow::Error> {
+fn intake_batch(
+    aggregation_id: &str,
+    batch_id: &str,
+    date: &str,
+    sub_matches: &ArgMatches,
+) -> Result<(), anyhow::Error> {
     let mut intake_transport = intake_transport_from_args(sub_matches)?;
 
     // We need the bucket to which we will write validations for the
@@ -723,14 +791,12 @@ fn intake_batch(sub_matches: &ArgMatches) -> Result<(), anyhow::Error> {
         batch_signing_key: batch_signing_key_from_arg(sub_matches)?,
     };
 
-    let batch_id: &str = sub_matches.value_of("batch-id").unwrap();
     let batch_id: Uuid = Uuid::parse_str(batch_id).unwrap();
 
-    let date: &str = sub_matches.value_of("date").unwrap();
     let date: NaiveDateTime = NaiveDateTime::parse_from_str(date, DATE_FORMAT).unwrap();
 
     let mut batch_intaker = BatchIntaker::new(
-        &sub_matches.value_of("aggregation-id").unwrap(),
+        &aggregation_id,
         &batch_id,
         &date,
         &mut intake_transport,
@@ -739,30 +805,69 @@ fn intake_batch(sub_matches: &ArgMatches) -> Result<(), anyhow::Error> {
         is_first_from_arg(sub_matches),
     )?;
 
+    batch_intaker.generate_validation_share()
+}
+
+fn intake_batch_subcommand(sub_matches: &ArgMatches) -> Result<(), anyhow::Error> {
+    intake_batch(
+        sub_matches.value_of("aggregation-id").unwrap(),
+        sub_matches.value_of("batch-id").unwrap(),
+        sub_matches.value_of("date").unwrap(),
+        sub_matches,
+    )
+}
+
+fn intake_batch_worker(sub_matches: &ArgMatches) -> Result<(), anyhow::Error> {
     let intake_started: Counter = register_counter!(
         "intake_jobs_begun",
         "Number of intake-batch jobs that started (on the facilitator side)"
     )
-    .unwrap();
-    intake_started.inc();
-
-    let result = batch_intaker.generate_validation_share();
+    .context("failed to register metrics counter for started intakes")?;
 
     let intake_finished = register_counter_vec!(
         "intake_jobs_finished",
         "Number of intake-batch jobs that finished (on the facilitator side)",
         &["status"]
     )
-    .unwrap();
-    match result {
-        Ok(_) => intake_finished.with_label_values(&["success"]).inc(),
-        Err(_) => intake_finished.with_label_values(&["error"]).inc(),
+    .context("failed to register metrics counter for finished intakes")?;
+
+    let mut queue = intake_task_queue_from_args(sub_matches)?;
+
+    loop {
+        if let Some(task_handle) = queue.dequeue()? {
+            info!("dequeued task: {:?}", task_handle);
+            intake_started.inc();
+            let result = intake_batch(
+                &task_handle.task.aggregation_id,
+                &task_handle.task.batch_id,
+                &task_handle.task.date,
+                sub_matches,
+            );
+
+            match result {
+                Ok(_) => {
+                    intake_finished.with_label_values(&["success"]).inc();
+                    queue.acknowledge_task(task_handle)?;
+                }
+                Err(err) => {
+                    error!("error while processing task {:?}: {:?}", task_handle, err);
+                    intake_finished.with_label_values(&["error"]).inc();
+                    queue.nacknowledge_task(task_handle)?;
+                }
+            }
+        }
     }
 
-    result
+    // unreachable
 }
 
-fn aggregate(sub_matches: &ArgMatches) -> Result<(), anyhow::Error> {
+fn aggregate(
+    aggregation_id: &str,
+    start: &str,
+    end: &str,
+    batches: Vec<(&str, &str)>,
+    sub_matches: &ArgMatches,
+) -> Result<()> {
     let instance_name = sub_matches.value_of("instance-name").unwrap();
     let is_first = is_first_from_arg(sub_matches);
 
@@ -788,7 +893,7 @@ fn aggregate(sub_matches: &ArgMatches) -> Result<(), anyhow::Error> {
                 .batch_signing_public_keys()?
         }
         (_, Some(private_key), Some(private_key_identifier)) => {
-            public_key_map_from_arg(private_key, private_key_identifier)
+            public_key_map_from_arg(private_key, private_key_identifier)?
         }
         _ => {
             return Err(anyhow!(
@@ -821,7 +926,7 @@ fn aggregate(sub_matches: &ArgMatches) -> Result<(), anyhow::Error> {
                 .batch_signing_public_keys()?
         }
         (Some(public_key), Some(public_key_identifier), _) => {
-            public_key_map_from_arg(public_key, public_key_identifier)
+            public_key_map_from_arg(public_key, public_key_identifier)?
         }
         _ => {
             return Err(anyhow!(
@@ -853,25 +958,7 @@ fn aggregate(sub_matches: &ArgMatches) -> Result<(), anyhow::Error> {
     // portal server.
     let batch_signing_key = batch_signing_key_from_arg(sub_matches)?;
 
-    let batch_ids: Vec<Uuid> = sub_matches
-        .values_of("batch-id")
-        .context("no batch-id")?
-        .map(|v| Uuid::parse_str(v).unwrap())
-        .collect();
-    let batch_dates: Vec<NaiveDateTime> = sub_matches
-        .values_of("batch-time")
-        .context("no batch-time")?
-        .map(|s| NaiveDateTime::parse_from_str(&s, DATE_FORMAT).unwrap())
-        .collect();
-    if batch_ids.len() != batch_dates.len() {
-        return Err(anyhow!(
-            "must provide same number of batch-id and batch-date values"
-        ));
-    }
-
-    let start: &str = sub_matches.value_of("aggregation-start").unwrap();
     let start: NaiveDateTime = NaiveDateTime::parse_from_str(start, DATE_FORMAT).unwrap();
-    let end: &str = sub_matches.value_of("aggregation-end").unwrap();
     let end: NaiveDateTime = NaiveDateTime::parse_from_str(end, DATE_FORMAT).unwrap();
 
     let mut own_validation_transport = VerifiableTransport {
@@ -887,10 +974,17 @@ fn aggregate(sub_matches: &ArgMatches) -> Result<(), anyhow::Error> {
         batch_signing_key,
     };
 
-    let batch_info: Vec<_> = batch_ids.into_iter().zip(batch_dates).collect();
+    let mut parsed_batches: Vec<(Uuid, NaiveDateTime)> = Vec::new();
+    for raw_batch in batches.iter() {
+        let uuid = Uuid::parse_str(raw_batch.0).context("batch ID is not a UUID")?;
+        let date = NaiveDateTime::parse_from_str(raw_batch.1, DATE_FORMAT)
+            .context("batch date is not in expected format")?;
+        parsed_batches.push((uuid, date));
+    }
+
     let mut aggregator = BatchAggregator::new(
         instance_name,
-        &sub_matches.value_of("aggregation-id").unwrap(),
+        aggregation_id,
         &start,
         &end,
         is_first,
@@ -900,27 +994,84 @@ fn aggregate(sub_matches: &ArgMatches) -> Result<(), anyhow::Error> {
         &mut aggregation_transport,
     )?;
 
+    aggregator.generate_sum_part(&parsed_batches)
+}
+
+fn aggregate_subcommand(sub_matches: &ArgMatches) -> Result<(), anyhow::Error> {
+    let batch_ids: Vec<&str> = sub_matches
+        .values_of("batch-id")
+        .context("no batch-id")?
+        .collect();
+    let batch_dates: Vec<&str> = sub_matches
+        .values_of("batch-time")
+        .context("no batch-time")?
+        .collect();
+
+    if batch_ids.len() != batch_dates.len() {
+        return Err(anyhow!(
+            "must provide same number of batch-id and batch-date values"
+        ));
+    }
+    let batch_info: Vec<_> = batch_ids.into_iter().zip(batch_dates).collect();
+
+    aggregate(
+        &sub_matches.value_of("aggregation-id").unwrap(),
+        sub_matches.value_of("aggregation-start").unwrap(),
+        sub_matches.value_of("aggregation-end").unwrap(),
+        batch_info,
+        sub_matches,
+    )
+}
+
+fn aggregate_worker(sub_matches: &ArgMatches) -> Result<(), anyhow::Error> {
     let aggregation_started: Counter = register_counter!(
         "aggregation_jobs_begun",
         "Number of aggregation jobs that started (on the facilitator side)"
     )
-    .unwrap();
-    aggregation_started.inc();
-
-    let result = aggregator.generate_sum_part(&batch_info);
-
+    .context("failed to register counter for started aggregations")?;
     let aggregation_finished = register_counter_vec!(
         "aggregation_jobs_finished",
         "Number of aggregation jobs that finished (on the facilitator side)",
         &["status"]
     )
-    .unwrap();
-    match result {
-        Ok(_) => aggregation_finished.with_label_values(&["success"]).inc(),
-        Err(_) => aggregation_finished.with_label_values(&["error"]).inc(),
+    .context("failed to register counter for finished aggregations")?;
+
+    let mut queue = aggregation_task_queue_from_args(sub_matches)?;
+
+    loop {
+        if let Some(task_handle) = queue.dequeue()? {
+            info!("dequeued task: {:?}", task_handle);
+            aggregation_started.inc();
+
+            let batches: Vec<(&str, &str)> = task_handle
+                .task
+                .batches
+                .iter()
+                .map(|b| (b.id.as_str(), b.time.as_str()))
+                .collect();
+            let result = aggregate(
+                &task_handle.task.aggregation_id,
+                &task_handle.task.aggregation_start,
+                &task_handle.task.aggregation_end,
+                batches,
+                sub_matches,
+            );
+
+            match result {
+                Ok(_) => {
+                    aggregation_finished.with_label_values(&["success"]).inc();
+                    queue.acknowledge_task(task_handle)?;
+                }
+                Err(err) => {
+                    error!("error while processing task {:?}: {:?}", task_handle, err);
+                    aggregation_finished.with_label_values(&["error"]).inc();
+                    queue.nacknowledge_task(task_handle)?;
+                }
+            }
+        }
     }
 
-    result
+    // unreachable
 }
 
 fn lint_manifest(sub_matches: &ArgMatches) -> Result<(), anyhow::Error> {
@@ -1008,10 +1159,10 @@ fn is_first_from_arg(matches: &ArgMatches) -> bool {
 fn public_key_map_from_arg(
     key: &str,
     key_identifier: &str,
-) -> HashMap<String, UnparsedPublicKey<Vec<u8>>> {
+) -> Result<HashMap<String, UnparsedPublicKey<Vec<u8>>>> {
     // UnparsedPublicKey::new doesn't return an error, so try parsing the
     // argument as a private key first.
-    let key_bytes = base64::decode(key).unwrap();
+    let key_bytes = decode_base64_key(key)?;
     let public_key = match EcdsaKeyPair::from_pkcs8(&ECDSA_P256_SHA256_ASN1_SIGNING, &key_bytes) {
         Ok(priv_key) => UnparsedPublicKey::new(
             &ECDSA_P256_SHA256_ASN1,
@@ -1022,11 +1173,11 @@ fn public_key_map_from_arg(
 
     let mut key_map = HashMap::new();
     key_map.insert(key_identifier.to_owned(), public_key);
-    key_map
+    Ok(key_map)
 }
 
 fn batch_signing_key_from_arg(matches: &ArgMatches) -> Result<BatchSigningKey> {
-    let key_bytes = base64::decode(matches.value_of("batch-signing-private-key").unwrap()).unwrap();
+    let key_bytes = decode_base64_key(matches.value_of("batch-signing-private-key").unwrap())?;
     let key_identifier = matches
         .value_of("batch-signing-private-key-identifier")
         .unwrap();
@@ -1054,7 +1205,7 @@ fn intake_transport_from_args(matches: &ArgMatches) -> Result<VerifiableAndDecry
         matches.value_of("ingestor-manifest-base-url"),
     ) {
         (Some(public_key), Some(public_key_identifier), _) => {
-            public_key_map_from_arg(public_key, public_key_identifier)
+            public_key_map_from_arg(public_key, public_key_identifier)?
         }
         (_, _, Some(manifest_base_url)) => IngestionServerManifest::from_https(
             manifest_base_url,
@@ -1069,8 +1220,7 @@ fn intake_transport_from_args(matches: &ArgMatches) -> Result<VerifiableAndDecry
         }
     };
 
-    // Get the keys we will use to decrypt packets in the ingestion
-    // batch
+    // Get the keys we will use to decrypt packets in the ingestion batch
     let packet_decryption_keys = matches
         .values_of("packet-decryption-keys")
         .unwrap()
@@ -1120,5 +1270,92 @@ fn transport_for_path(
             key_file_reader,
         )?)),
         StoragePath::LocalPath(path) => Ok(Box::new(LocalFileTransport::new(path))),
+    }
+}
+
+fn decode_base64_key(s: &str) -> Result<Vec<u8>> {
+    if s == "not-a-real-key" {
+        return Err(anyhow!(
+            "'not-a-real-key'. Run deploy-tool to generate secrets"
+        ));
+    }
+    base64::decode(s).context("decoding key from base64")
+}
+
+// You can't make a trait object out of a trait that is generic in another trait
+// (as would be the case for TaskQueue<T: Task>) because such traits are not
+// "object safe" [1], so we can't write a function like
+// fn task_queue_from_args<T: Task>() -> Result<Box<dyn TaskQueue<T>>>.
+// To work around this we manually provide specializations on
+// task_queue_from_args for IntakeBatchTask and AggregationTask.
+//
+// [1] https://doc.rust-lang.org/book/ch17-02-trait-objects.html#object-safety-is-required-for-trait-objects
+fn intake_task_queue_from_args(
+    matches: &ArgMatches,
+) -> Result<Box<dyn TaskQueue<IntakeBatchTask>>> {
+    let task_queue_kind = TaskQueueKind::from_str(
+        matches
+            .value_of("task-queue-kind")
+            .ok_or(anyhow!("task-queue-kind is required"))?,
+    )?;
+    let identity = matches.value_of("task-queue-identity");
+    let queue_name = matches
+        .value_of("task-queue-name")
+        .ok_or(anyhow!("task-queue-name is required"))?;
+
+    match task_queue_kind {
+        TaskQueueKind::GcpPubSub => {
+            let gcp_project_id = matches
+                .value_of("gcp-project-id")
+                .ok_or(anyhow!("gcp-project-id is required"))?;
+            let pubsub_api_endpoint = matches.value_of("pubsub-api-endpoint");
+            Ok(Box::new(GcpPubSubTaskQueue::new(
+                pubsub_api_endpoint,
+                gcp_project_id,
+                queue_name,
+                identity,
+            )?))
+        }
+        TaskQueueKind::AwsSqs => {
+            let sqs_region = matches
+                .value_of("aws-sqs-region")
+                .ok_or(anyhow!("aws-sqs-region is required"))?;
+            Ok(Box::new(AwsSqsTaskQueue::new(sqs_region, queue_name)?))
+        }
+    }
+}
+
+fn aggregation_task_queue_from_args(
+    matches: &ArgMatches,
+) -> Result<Box<dyn TaskQueue<AggregationTask>>> {
+    let task_queue_kind = TaskQueueKind::from_str(
+        matches
+            .value_of("task-queue-kind")
+            .ok_or(anyhow!("task-queue-kind is required"))?,
+    )?;
+    let identity = matches.value_of("task-queue-identity");
+    let queue_name = matches
+        .value_of("task-queue-name")
+        .ok_or(anyhow!("task-queue-name is required"))?;
+
+    match task_queue_kind {
+        TaskQueueKind::GcpPubSub => {
+            let gcp_project_id = matches
+                .value_of("gcp-project-id")
+                .ok_or(anyhow!("gcp-project-id is required"))?;
+            let pubsub_api_endpoint = matches.value_of("pubsub-api-endpoint");
+            Ok(Box::new(GcpPubSubTaskQueue::new(
+                pubsub_api_endpoint,
+                gcp_project_id,
+                queue_name,
+                identity,
+            )?))
+        }
+        TaskQueueKind::AwsSqs => {
+            let sqs_region = matches
+                .value_of("aws-sqs-region")
+                .ok_or(anyhow!("aws-sqs-region is required"))?;
+            Ok(Box::new(AwsSqsTaskQueue::new(sqs_region, queue_name)?))
+        }
     }
 }

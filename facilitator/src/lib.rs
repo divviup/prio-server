@@ -3,13 +3,16 @@ use ring::{digest, signature::EcdsaKeyPair};
 use std::io::Write;
 
 pub mod aggregation;
+mod aws_credentials;
 pub mod batch;
 pub mod config;
+mod gcp_oauth;
 pub mod http;
 pub mod idl;
 pub mod intake;
 pub mod manifest;
 pub mod sample;
+pub mod task;
 pub mod test_utils;
 pub mod transport;
 mod workflow;

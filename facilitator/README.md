@@ -1,6 +1,6 @@
 # facilitator
 
-This is ISRG's implementation of a Prio accumulation server. It ingests a share of data uploaded by a device, validates it against other facilitators, then emits the accumulated share to a Prio aggregator.
+This is ISRG's implementation of a Prio accumulation server. It ingests a share of data uploaded by a device, validates it against other facilitators, then emits the accumulated share to a Prio aggregator. It implements the subscriber portion of the `prio-server` pub/sub architecture. Each instance of `facilitator` is provided a task queue from which to dequeue tasks, which are either intake-batch or aggregate tasks.
 
 ## Getting started
 
@@ -21,6 +21,28 @@ The `facilitator lint-manifest` subcommand can validate the various manifest fil
 ## Working with Avro files
 
 If you want to examine Avro-encoded messages, you can use the `avro-tools` jar from the [Apache Avro project's releases](https://downloads.apache.org/avro/avro-1.10.0/java/), and then [use it from the command line to examine individual Avro encoded objects](https://www.michael-noll.com/blog/2013/03/17/reading-and-writing-avro-files-from-the-command-line/).
+
+## Task queues
+
+When run with either the `intake-batch-worker` or `aggregate-worker` subcommand (or other `-worker` subcommands not yet implemented), `facilitator` runs as a persistent server whose workloop pulls tasks from a task queue. Supported task queue implementations are documented below.
+
+### [Google PubSub](https://cloud.google.com/pubsub/docs)
+
+Implemented in `PubSubTaskQueue` in `src/task/pubsub.rs`. `facilitator` expects that a subscription already exists and is attached to a topic to which a `workflow-manager` instance is publishing tasks. `facilitator` can share a single subscription with multiple instances of `facilitator`.
+
+To use the PubSub task queue, pass `--task-queue-kind=gcp-pubsub` and see the program's usage for other required parameters.
+
+Google provides a [PubSub emulator](https://cloud.google.com/pubsub/docs/emulator) useful for local testing. See the emulator documentation for information getting it set up, then simply set the `--pubsub-api-endpoint` argument to the emulator's address.
+
+### [AWS SNS](https://docs.aws.amazon.com/sns/latest/dg/welcome.html) (**EXPERIMENTAL SUPPORT**)
+
+Implemented in `SqsTaskQueue` in `src/task/sqs.rs`. `facilitator` expects that an SQS queue already exists and is subscribed to an SNS topic to which a `workflow-manager` instance is publishing tasks. `facilitator` can share a single SQS queue with multiple instances of `facilitator`.
+
+AWS SNS/SQS support is experimental and has not been validated. To use it, pass `--task-queue-kind=aws-sqs` and see the program's usage for other required parameters.
+
+### Implementing new task queues
+
+To support new task queues, simply add an implementation of the `TaskQueue` trait, defined in `src/task.rs`. Then, add the necessary argument handling and initialization logic to `src/bin/facilitator.rs`.
 
 ## References
 
