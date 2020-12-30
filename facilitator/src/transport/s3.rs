@@ -7,7 +7,7 @@ use crate::{
 use anyhow::{Context, Result};
 use derivative::Derivative;
 use hyper_rustls::HttpsConnector;
-use log::info;
+use log::{debug, info};
 use rusoto_core::{
     credential::{AutoRefreshingProvider, CredentialsError, Secret, Variable},
     ByteStream, Region, RusotoError, RusotoResult,
@@ -54,6 +54,7 @@ type ClientProvider = Box<dyn Fn(&Region, Option<String>) -> Result<S3Client>>;
 fn retry_request<F, T, E>(action: &str, mut f: F) -> RusotoResult<T, E>
 where
     F: FnMut() -> RusotoResult<T, E>,
+    E: std::fmt::Debug,
 {
     let mut attempts = 0;
     loop {
@@ -69,6 +70,10 @@ where
                     MAX_ATTEMPT_COUNT - attempts,
                     err
                 );
+            }
+            Err(err) => {
+                debug!("encountered non retryable error: {:?}", err);
+                break Err(err);
             }
             result => break result,
         }

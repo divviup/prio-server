@@ -127,8 +127,6 @@ impl<T: Task> TaskQueue<T> for GcpPubSubTaskQueue<T> {
             ));
         }
 
-        info!("dequeued message {:?}", received_messages.get(0));
-
         if received_messages.len() == 0 {
             return Ok(None);
         }

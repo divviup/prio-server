@@ -835,7 +835,7 @@ fn intake_batch_worker(sub_matches: &ArgMatches) -> Result<(), anyhow::Error> {
 
     loop {
         if let Some(task_handle) = queue.dequeue()? {
-            info!("dequeued task: {:?}", task_handle);
+            info!("dequeued task: {}", task_handle);
             intake_started.inc();
             let result = intake_batch(
                 &task_handle.task.aggregation_id,
@@ -850,7 +850,7 @@ fn intake_batch_worker(sub_matches: &ArgMatches) -> Result<(), anyhow::Error> {
                     queue.acknowledge_task(task_handle)?;
                 }
                 Err(err) => {
-                    error!("error while processing task {:?}: {:?}", task_handle, err);
+                    error!("error while processing task {}: {:?}", task_handle, err);
                     intake_finished.with_label_values(&["error"]).inc();
                     queue.nacknowledge_task(task_handle)?;
                 }
@@ -1040,7 +1040,7 @@ fn aggregate_worker(sub_matches: &ArgMatches) -> Result<(), anyhow::Error> {
 
     loop {
         if let Some(task_handle) = queue.dequeue()? {
-            info!("dequeued task: {:?}", task_handle);
+            info!("dequeued task: {}", task_handle);
             aggregation_started.inc();
 
             let batches: Vec<(&str, &str)> = task_handle
@@ -1063,7 +1063,7 @@ fn aggregate_worker(sub_matches: &ArgMatches) -> Result<(), anyhow::Error> {
                     queue.acknowledge_task(task_handle)?;
                 }
                 Err(err) => {
-                    error!("error while processing task {:?}: {:?}", task_handle, err);
+                    error!("error while processing task {}: {:?}", task_handle, err);
                     aggregation_finished.with_label_values(&["error"]).inc();
                     queue.nacknowledge_task(task_handle)?;
                 }

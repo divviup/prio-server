@@ -433,6 +433,9 @@ func enqueueAggregationTasks(
 		return nil
 	}
 
+	skippedDueToMarker := 0
+	scheduled := 0
+
 	for _, readyBatches := range batchesByID {
 		aggregationID := readyBatches[0].AggregationID
 		batches := []task.Batch{}
@@ -500,6 +503,9 @@ func enqueueAggregationTasks(
 		})
 	}
 
+	log.Printf("skipped %d aggregation tasks that already existed. Scheduled %d new aggregation tasks.",
+		skippedDueToMarker, scheduled)
+
 	return nil
 }
 
@@ -512,10 +518,13 @@ func enqueueIntakeTasks(
 	ownValidationBucket bucket.TaskMarkerWriter,
 	enqueuer task.Enqueuer,
 ) error {
+	skippedDueToAge := 0
+	skippedDueToMarker := 0
+	scheduled := 0
 	for _, batch := range readyBatches {
 		age := clock.Now().Sub(batch.Time)
 		if age > ageLimit {
-			log.Printf("skipping batch %s because it is too old (%s)", batch, age)
+			skippedDueToAge++
 			continue
 		}
 
@@ -562,6 +571,9 @@ func enqueueIntakeTasks(
 			intakesStarted.Inc()
 		})
 	}
+
+	log.Printf("skipped %d batches as too old, %d with existing tasks. Scheduled %d new intake tasks.",
+		skippedDueToAge, skippedDueToMarker, scheduled)
 
 	return nil
 }
