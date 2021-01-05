@@ -51,7 +51,7 @@ var aggregateTasksTopic = flag.String("aggregate-tasks-topic", "", "Name of the 
 
 // Arguments for gcp-pubsub task queue
 var gcpPubSubCreatePubSubTopics = flag.Bool("gcp-pubsub-create-topics", false, "Whether to create the GCP PubSub topics used for intake and aggregation tasks.")
-var gcpPubSubProjectID = flag.String("gcp-project-id", "", "Name of the GCP project ID being used for PubSub..")
+var gcpProjectID = flag.String("gcp-project-id", "", "Name of the GCP project ID being used for PubSub.")
 
 // Arguments for aws-sns task queue
 var awsSNSRegion = flag.String("aws-sns-region", "", "AWS region in which to publish to SNS topic")
@@ -63,57 +63,119 @@ var awsSNSIdentity = flag.String("aws-sns-identity", "", "AWS IAM ARN of the rol
 
 // monitoring things
 var (
-	intakesStarted      monitor.CounterMonitor = &monitor.NoopCounter{}
-	aggregationsStarted monitor.CounterMonitor = &monitor.NoopCounter{}
+	intakesStarted                   monitor.GaugeMonitor = &monitor.NoopGauge{}
+	intakesSkippedDueToAge           monitor.GaugeMonitor = &monitor.NoopGauge{}
+	intakesSkippedDueToMarker        monitor.GaugeMonitor = &monitor.NoopGauge{}
+	intakesSkippedDueToKubernetesJob monitor.GaugeMonitor = &monitor.NoopGauge{}
+
+	aggregationsStarted                   monitor.GaugeMonitor = &monitor.NoopGauge{}
+	aggregationsSkippedDueToMarker        monitor.GaugeMonitor = &monitor.NoopGauge{}
+	aggregationsSkippedDueToKubernetesJob monitor.GaugeMonitor = &monitor.NoopGauge{}
+
+	workflowManagerLastSuccess monitor.GaugeMonitor = &monitor.NoopGauge{}
+	workflowManagerLastFailure monitor.GaugeMonitor = &monitor.NoopGauge{}
+	workflowManagerRuntime     monitor.GaugeMonitor = &monitor.NoopGauge{}
 )
 
+func fail(format string, args ...interface{}) {
+	log.Printf(format, args...)
+	workflowManagerLastFailure.SetToCurrentTime()
+}
+
 func main() {
+	startTime := time.Now()
 	log.Printf("starting %s version %s. Args: %s", os.Args[0], BuildInfo, os.Args[1:])
 	flag.Parse()
 
 	if *pushGateway != "" {
-		push.New(*pushGateway, "workflow-manager").Gatherer(prometheus.DefaultGatherer).Push()
-		intakesStarted = promauto.NewCounter(prometheus.CounterOpts{
-			Name: "intake_jobs_started",
-			Help: "The number of intake-batch jobs successfully started",
+		pusher := push.New(*pushGateway, "workflow-manager").
+			Gatherer(prometheus.DefaultGatherer).
+			Grouping("locality", *k8sNS)
+
+		defer pusher.Push()
+		intakesStarted = promauto.NewGauge(prometheus.GaugeOpts{
+			Name: "workflow_manager_intake_tasks_scheduled",
+			Help: "The number of intake-batch tasks successfully scheduled",
+		})
+		intakesSkippedDueToAge = promauto.NewGauge(prometheus.GaugeOpts{
+			Name: "workflow_manager_intake_tasks_skipped_due_to_age",
+			Help: "The number of intake-batch tasks not scheduled because the batch was too old",
+		})
+		intakesSkippedDueToMarker = promauto.NewGauge(prometheus.GaugeOpts{
+			Name: "workflow_manager_intake_tasks_skipped_due_to_marker",
+			Help: "The number of intake-batch tasks not scheduled because a task marker was found",
+		})
+		intakesSkippedDueToKubernetesJob = promauto.NewGauge(prometheus.GaugeOpts{
+			Name: "workflow_manager_intake_tasks_skipped_due_to_kubernetes_job",
+			Help: "The number of intake-batch tasks not scheduled because a corresponding Kubernetes job was found",
 		})
 
-		aggregationsStarted = promauto.NewCounter(prometheus.CounterOpts{
-			Name: "aggregation_jobs_started",
-			Help: "The number of aggregate jobs successfully started",
+		aggregationsStarted = promauto.NewGauge(prometheus.GaugeOpts{
+			Name: "workflow_manager_aggregation_tasks_scheduled",
+			Help: "The number of aggregate tasks successfully scheduled",
+		})
+		aggregationsSkippedDueToMarker = promauto.NewGauge(prometheus.GaugeOpts{
+			Name: "workflow_manager_aggregation_tasks_skipped_due_to_marker",
+			Help: "The number of aggregate tasks not scheduled because a task marker was found",
+		})
+		aggregationsSkippedDueToKubernetesJob = promauto.NewGauge(prometheus.GaugeOpts{
+			Name: "workflow_manager_aggregation_tasks_skipped_due_to_kubernetes_job",
+			Help: "The number of aggregate tasks not scheduled because a corresponding Kubernetes job was found",
+		})
+
+		workflowManagerLastSuccess = promauto.NewGauge(prometheus.GaugeOpts{
+			Name: "workflow_manager_last_success_seconds",
+			Help: "Time of last successful run of workflow-manager in seconds since UNIX epoch",
+		})
+
+		workflowManagerLastFailure = promauto.NewGauge(prometheus.GaugeOpts{
+			Name: "workflow_manager_last_failure_seconds",
+			Help: "Time of last failed run of workflow-manager in seconds since UNIX epoch",
+		})
+
+		workflowManagerRuntime = promauto.NewGauge(prometheus.GaugeOpts{
+			Name: "workflow_manager_runtime_seconds",
+			Help: "How long successful workflow-manager runs take",
 		})
 	}
 
 	ownValidationBucket, err := bucket.New(*ownValidationInput, *ownValidationIdentity, *dryRun)
 	if err != nil {
-		log.Fatalf("--own-validation-input: %s", err)
+		fail("--own-validation-input: %s", err)
+		return
 	}
 	peerValidationBucket, err := bucket.New(*peerValidationInput, *peerValidationIdentity, *dryRun)
 	if err != nil {
-		log.Fatalf("--peer-validation-input: %s", err)
+		fail("--peer-validation-input: %s", err)
+		return
 	}
 	intakeBucket, err := bucket.New(*ingestorInput, *ingestorIdentity, *dryRun)
 	if err != nil {
-		log.Fatalf("--ingestor-input: %s", err)
+		fail("--ingestor-input: %s", err)
+		return
 	}
 
 	maxAgeParsed, err := time.ParseDuration(*maxAge)
 	if err != nil {
-		log.Fatalf("--max-age: %s", err)
+		fail("--max-age: %s", err)
+		return
 	}
 
 	gracePeriodParsed, err := time.ParseDuration(*gracePeriod)
 	if err != nil {
-		log.Fatalf("--grace-period: %s", err)
+		fail("--grace-period: %s", err)
+		return
 	}
 
 	aggregationPeriodParsed, err := time.ParseDuration(*aggregationPeriod)
 	if err != nil {
-		log.Fatalf("--aggregation-time-slice: %s", err)
+		fail("--aggregation-time-slice: %s", err)
+		return
 	}
 
 	if *taskQueueKind == "" || *intakeTasksTopic == "" || *aggregateTasksTopic == "" {
-		log.Fatalf("--task-queue-kind, --intake-tasks-topic and --aggregate-tasks-topic are required")
+		fail("--task-queue-kind, --intake-tasks-topic and --aggregate-tasks-topic are required")
+		return
 	}
 
 	var intakeTaskEnqueuer task.Enqueuer
@@ -121,45 +183,51 @@ func main() {
 
 	switch *taskQueueKind {
 	case "gcp-pubsub":
-		if *gcpPubSubProjectID == "" {
-			log.Fatal("--gcp-project-id is required for task-queue-kind=gcp-pubsub")
+		if *gcpProjectID == "" {
+			fail("--gcp-project-id is required for task-queue-kind=gcp-pubsub")
+			return
 		}
 
 		if *gcpPubSubCreatePubSubTopics {
 			if err := task.CreatePubSubTopic(
-				*gcpPubSubProjectID,
+				*gcpProjectID,
 				*intakeTasksTopic,
 			); err != nil {
-				log.Fatalf("creating pubsub topic: %s", err)
+				fail("creating pubsub topic: %s", err)
+				return
 			}
 			if err := task.CreatePubSubTopic(
-				*gcpPubSubProjectID,
+				*gcpProjectID,
 				*aggregateTasksTopic,
 			); err != nil {
-				log.Fatalf("creating pubsub topic: %s", err)
+				fail("creating pubsub topic: %s", err)
+				return
 			}
 		}
 
 		intakeTaskEnqueuer, err = task.NewGCPPubSubEnqueuer(
-			*gcpPubSubProjectID,
+			*gcpProjectID,
 			*intakeTasksTopic,
 			*dryRun,
 		)
 		if err != nil {
-			log.Fatal(err)
+			fail("%s", err)
+			return
 		}
 
 		aggregationTaskEnqueuer, err = task.NewGCPPubSubEnqueuer(
-			*gcpPubSubProjectID,
+			*gcpProjectID,
 			*aggregateTasksTopic,
 			*dryRun,
 		)
 		if err != nil {
-			log.Fatal(err)
+			fail("%s", err)
+			return
 		}
 	case "aws-sns":
 		if *awsSNSRegion == "" {
-			log.Fatal("--aws-sns-region is required for task-queue-kind=aws-sns")
+			fail("--aws-sns-region is required for task-queue-kind=aws-sns")
+			return
 		}
 
 		intakeTaskEnqueuer, err = task.NewAWSSNSEnqueuer(
@@ -169,7 +237,8 @@ func main() {
 			*dryRun,
 		)
 		if err != nil {
-			log.Fatal(err)
+			fail("%s", err)
+			return
 		}
 
 		aggregationTaskEnqueuer, err = task.NewAWSSNSEnqueuer(
@@ -179,39 +248,46 @@ func main() {
 			*dryRun,
 		)
 		if err != nil {
-			log.Fatal(err)
+			fail("%s", err)
+			return
 		}
 	// To implement a new task queue kind, add a case here. You should
 	// initialize intakeTaskEnqueuer and aggregationTaskEnqueuer.
 	default:
-		log.Fatalf("unknown task queue kind %s", *taskQueueKind)
+		fail("unknown task queue kind %s", *taskQueueKind)
+		return
 	}
 
 	kubernetesClient, err := wfkubernetes.NewClient(*k8sNS, *kubeconfigPath, *dryRun)
 	if err != nil {
-		log.Fatal(err)
+		fail("%s", err)
+		return
 	}
 
 	// Get a listing of all jobs in the namespace so the finished ones can be
 	// reaped later on, and to avoid scheduling redudant work.
 	existingJobs, err := kubernetesClient.ListJobs()
 	if err != nil {
-		log.Fatal(err)
+		fail("%s", err)
+		return
 	}
 
 	intakeFiles, err := intakeBucket.ListFiles()
 	if err != nil {
-		log.Fatal(err)
+		fail("%s", err)
+		return
 	}
 
 	ownValidationFiles, err := ownValidationBucket.ListFiles()
 	if err != nil {
-		log.Fatal(err)
+		fail("%s", err)
+		return
 	}
 
 	peerValidationFiles, err := peerValidationBucket.ListFiles()
 	if err != nil {
-		log.Fatal(err)
+		fail("%s", err)
+		return
 	}
 
 	scheduleTasks(scheduleTasksConfig{
@@ -229,6 +305,11 @@ func main() {
 		gracePeriod:             gracePeriodParsed,
 	})
 
+	workflowManagerLastSuccess.SetToCurrentTime()
+	endTime := time.Now()
+
+	workflowManagerRuntime.Set(endTime.Sub(startTime).Seconds())
+
 	log.Print("done")
 }
 
@@ -242,12 +323,12 @@ type scheduleTasksConfig struct {
 	maxAge, aggregationPeriod, gracePeriod               time.Duration
 }
 
-// scheduleTasks evaluates bucket contents and kubernetes cluster state to
-// schedule new tasks or delete old jobs
-func scheduleTasks(config scheduleTasksConfig) {
+// scheduleTasks evaluates bucket contents and Kubernetes cluster state to
+// schedule new tasks
+func scheduleTasks(config scheduleTasksConfig) error {
 	intakeBatches, err := batchpath.ReadyBatches(config.intakeFiles, "batch")
 	if err != nil {
-		log.Fatal(err)
+		return err
 	}
 
 	// Make a set of the tasks for which we have marker objects for efficient
@@ -276,13 +357,13 @@ func scheduleTasks(config scheduleTasksConfig) {
 		config.intakeTaskEnqueuer,
 	)
 	if err != nil {
-		log.Fatal(err)
+		return err
 	}
 
 	ownValidityInfix := fmt.Sprintf("validity_%d", utils.Index(config.isFirst))
 	ownValidationBatches, err := batchpath.ReadyBatches(config.ownValidationFiles, ownValidityInfix)
 	if err != nil {
-		log.Fatal(err)
+		return err
 	}
 
 	log.Printf("found %d own validations", len(ownValidationBatches))
@@ -290,7 +371,7 @@ func scheduleTasks(config scheduleTasksConfig) {
 	peerValidityInfix := fmt.Sprintf("validity_%d", utils.Index(!config.isFirst))
 	peerValidationBatches, err := batchpath.ReadyBatches(config.peerValidationFiles, peerValidityInfix)
 	if err != nil {
-		log.Fatal(err)
+		return err
 	}
 
 	log.Printf("found %d peer validations", len(peerValidationBatches))
@@ -325,13 +406,15 @@ func scheduleTasks(config scheduleTasksConfig) {
 		config.aggregationTaskEnqueuer,
 	)
 	if err != nil {
-		log.Fatal(err)
+		return err
 	}
 
 	// Ensure both task enqueuers have completed their asynchronous work before
 	// allowing the process to exit
 	config.intakeTaskEnqueuer.Stop()
 	config.aggregationTaskEnqueuer.Stop()
+
+	return nil
 }
 
 // interval represents a half-open interval of time.
@@ -434,6 +517,7 @@ func enqueueAggregationTasks(
 	}
 
 	skippedDueToMarker := 0
+	skippedDueToExistingJob := 0
 	scheduled := 0
 
 	for _, readyBatches := range batchesByID {
@@ -463,6 +547,7 @@ func enqueueAggregationTasks(
 
 		if _, ok := taskMarkers[aggregationTask.Marker()]; ok {
 			skippedDueToMarker++
+			aggregationsSkippedDueToMarker.Inc()
 			continue
 		}
 
@@ -472,7 +557,8 @@ func enqueueAggregationTasks(
 			strings.ReplaceAll(fmtTime(inter.begin), "/", "-"),
 		)
 		if _, ok := existingJobs[taskName]; ok {
-			skippedDueToMarker++
+			skippedDueToExistingJob++
+			aggregationsSkippedDueToKubernetesJob.Inc()
 			// If we made it here, a Kubernetes job for this aggregation
 			// existed, but we did not find a marker for the task. The job was
 			// most likely created by an older workflow-manager, so write out a
@@ -503,8 +589,8 @@ func enqueueAggregationTasks(
 		})
 	}
 
-	log.Printf("skipped %d aggregation tasks that already existed. Scheduled %d new aggregation tasks.",
-		skippedDueToMarker, scheduled)
+	log.Printf("skipped %d aggregation tasks due to markers, skipped %d due to existing Kubernetes jobs. Scheduled %d new aggregation tasks.",
+		skippedDueToMarker, skippedDueToExistingJob, scheduled)
 
 	return nil
 }
@@ -520,11 +606,13 @@ func enqueueIntakeTasks(
 ) error {
 	skippedDueToAge := 0
 	skippedDueToMarker := 0
+	skippedDueToExistingJob := 0
 	scheduled := 0
 	for _, batch := range readyBatches {
 		age := clock.Now().Sub(batch.Time)
 		if age > ageLimit {
 			skippedDueToAge++
+			intakesSkippedDueToAge.Inc()
 			continue
 		}
 
@@ -536,12 +624,14 @@ func enqueueIntakeTasks(
 
 		if _, ok := taskMarkers[intakeTask.Marker()]; ok {
 			skippedDueToMarker++
+			intakesSkippedDueToMarker.Inc()
 			continue
 		}
 
 		taskName := intakeJobNameForBatchPath(batch)
 		if _, ok := existingJobs[taskName]; ok {
-			skippedDueToMarker++
+			skippedDueToExistingJob++
+			intakesSkippedDueToKubernetesJob.Inc()
 			// If we made it here, a Kubernetes job for this intake task
 			// existed, but we did not find a marker for the task. The job was
 			// most likely created by an older workflow-manager, so write out a
@@ -572,8 +662,8 @@ func enqueueIntakeTasks(
 		})
 	}
 
-	log.Printf("skipped %d batches as too old, %d with existing tasks. Scheduled %d new intake tasks.",
-		skippedDueToAge, skippedDueToMarker, scheduled)
+	log.Printf("skipped %d batches as too old, %d with existing tasks, %d with existing k8s jobs. Scheduled %d new intake tasks.",
+		skippedDueToAge, skippedDueToMarker, skippedDueToExistingJob, scheduled)
 
 	return nil
 }
