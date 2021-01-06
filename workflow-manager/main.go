@@ -370,16 +370,16 @@ func launchAggregationJobs(ctx context.Context, batchesByID aggregationMap, inte
 								Args:            args,
 								Name:            "facile-container",
 								Image:           *facilitatorImage,
-								ImagePullPolicy: "Always",
+								ImagePullPolicy: "IfNotPresent",
 								VolumeMounts:    volumeMounts,
 								Resources: corev1.ResourceRequirements{
 									Requests: corev1.ResourceList{
 										corev1.ResourceMemory: resource.MustParse("500Mi"),
-										corev1.ResourceCPU:    resource.MustParse("0.5"),
+										corev1.ResourceCPU:    resource.MustParse("1.0"),
 									},
 									Limits: corev1.ResourceList{
 										corev1.ResourceMemory: resource.MustParse("550Mi"),
-										corev1.ResourceCPU:    resource.MustParse("0.7"),
+										corev1.ResourceCPU:    resource.MustParse("1.5"),
 									},
 								},
 								EnvFrom: []corev1.EnvFromSource{
@@ -512,16 +512,16 @@ func startIntakeJob(
 							Args:            args,
 							Name:            "facile-container",
 							Image:           *facilitatorImage,
-							ImagePullPolicy: "Always",
+							ImagePullPolicy: "IfNotPresent",
 							VolumeMounts:    volumeMounts,
 							Resources: corev1.ResourceRequirements{
 								Requests: corev1.ResourceList{
 									corev1.ResourceMemory: resource.MustParse("500Mi"),
-									corev1.ResourceCPU:    resource.MustParse("0.5"),
+									corev1.ResourceCPU:    resource.MustParse("1.0"),
 								},
 								Limits: corev1.ResourceList{
 									corev1.ResourceMemory: resource.MustParse("550Mi"),
-									corev1.ResourceCPU:    resource.MustParse("0.7"),
+									corev1.ResourceCPU:    resource.MustParse("1.5"),
 								},
 							},
 							EnvFrom: []corev1.EnvFromSource{
