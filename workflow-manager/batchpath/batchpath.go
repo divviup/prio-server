@@ -94,6 +94,10 @@ func (b *BatchPath) isComplete() bool {
 func ReadyBatches(files []string, infix string) (List, error) {
 	batches := make(map[string]*BatchPath)
 	for _, name := range files {
+		// Ignore task marker objects
+		if strings.HasPrefix(name, "task-markers/") {
+			continue
+		}
 		basename := basename(name, infix)
 		b := batches[basename]
 		var err error
