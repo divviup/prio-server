@@ -3,7 +3,6 @@ use crate::http;
 use anyhow::{anyhow, Context, Result};
 use ring::signature::{UnparsedPublicKey, ECDSA_P256_SHA256_ASN1};
 use serde::Deserialize;
-
 use std::{collections::HashMap, str::FromStr};
 
 // See discussion in SpecificManifest::batch_signing_public_key

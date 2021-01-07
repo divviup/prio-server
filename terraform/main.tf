@@ -34,8 +34,14 @@ variable "localities" {
 }
 
 variable "ingestors" {
-  type        = map(string)
-  description = "Map of ingestor names to the URL where their global manifest may be found."
+  type = map(object({
+    manifest_base_url = string
+    localities = map(object({
+      intake_worker_count    = number
+      aggregate_worker_count = number
+    }))
+  }))
+  description = "Map of ingestor names to per-ingestor configuration."
 }
 
 variable "manifest_domain" {
@@ -315,7 +321,9 @@ locals {
       ingestor                                = pair[1]
       kubernetes_namespace                    = kubernetes_namespace.namespaces[pair[0]].metadata[0].name
       packet_decryption_key_kubernetes_secret = kubernetes_secret.ingestion_packet_decryption_keys[pair[0]].metadata[0].name
-      ingestor_manifest_base_url              = var.ingestors[pair[1]]
+      ingestor_manifest_base_url              = var.ingestors[pair[1]].manifest_base_url
+      intake_worker_count                     = var.ingestors[pair[1]].localities[pair[0]].intake_worker_count
+      aggregate_worker_count                  = var.ingestors[pair[1]].localities[pair[0]].aggregate_worker_count
     }
   }
   peer_share_processor_server_identity = jsondecode(data.http.peer_share_processor_global_manifest.body).server-identity
@@ -368,6 +376,8 @@ module "data_share_processors" {
   workflow_manager_version                       = var.workflow_manager_version
   facilitator_version                            = var.facilitator_version
   container_registry                             = var.container_registry
+  intake_worker_count                            = each.value.intake_worker_count
+  aggregate_worker_count                         = each.value.aggregate_worker_count
 }
 
 # The portal owns two sum part buckets (one for each data share processor) and
@@ -394,7 +404,7 @@ module "fake_server_resources" {
   gcp_region                   = var.gcp_region
   environment                  = var.environment
   sum_part_bucket_writer_email = google_service_account.sum_part_bucket_writer.email
-  ingestors                    = var.ingestors
+  ingestors                    = keys(var.ingestors)
 }
 
 module "monitoring" {
