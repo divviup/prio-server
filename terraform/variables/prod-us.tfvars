@@ -13,17 +13,43 @@ ingestors = {
   apple = {
     manifest_base_url = "exposure-notification.apple.com/manifest"
     localities = {
-      us-ct = {
+      aq-aq = {
         intake_worker_count    = 1
         aggregate_worker_count = 1
+      }
+      ta-ta = {
+        intake_worker_count    = 1
+        aggregate_worker_count = 1
+      }
+      us-ct = {
+        intake_worker_count    = 5
+        aggregate_worker_count = 3
+      }
+      us-md = {
+        intake_worker_count    = 5
+        aggregate_worker_count = 3
       }
     }
   }
   g-enpa = {
     manifest_base_url = "storage.googleapis.com/prio-manifests"
-    us-ct = {
-      intake_worker_count    = 1
-      aggregate_worker_count = 1
+    localities = {
+      aq-aq = {
+        intake_worker_count    = 1
+        aggregate_worker_count = 1
+      }
+      ta-ta = {
+        intake_worker_count    = 1
+        aggregate_worker_count = 1
+      }
+      us-ct = {
+        intake_worker_count    = 3
+        aggregate_worker_count = 3
+      }
+      us-md = {
+        intake_worker_count    = 3
+        aggregate_worker_count = 3
+      }
     }
   }
 }
@@ -33,6 +59,6 @@ is_first                               = false
 use_aws                                = false
 aggregation_period                     = "8h"
 aggregation_grace_period               = "4h"
-workflow_manager_version               = "0.5.2"
-facilitator_version                    = "0.5.2"
+workflow_manager_version               = "0.6.0"
+facilitator_version                    = "0.6.0"
 pushgateway                            = "prometheus-pushgateway.monitoring:9091"

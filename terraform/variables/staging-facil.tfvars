@@ -51,7 +51,8 @@ test_peer_environment = {
   env_with_ingestor    = "staging-facil"
   env_without_ingestor = "staging-pha"
 }
-is_first           = false
-use_aws            = false
-container_registry = "us.gcr.io/prio-staging-300104"
-pushgateway        = "prometheus-pushgateway.monitoring:9091"
+is_first                 = false
+use_aws                  = false
+workflow_manager_version = "0.6.0"
+facilitator_version      = "0.6.0"
+pushgateway              = "prometheus-pushgateway.monitoring:9091"
