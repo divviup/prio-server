@@ -280,8 +280,8 @@ resource "kubernetes_cron_job" "workflow_manager" {
                   cpu    = "0.5"
                 }
                 limits {
-                  memory = "550Mi"
-                  cpu    = "0.7"
+                  memory = "2Gi"
+                  cpu    = "1.5"
                 }
               }
 
