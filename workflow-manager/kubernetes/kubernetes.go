@@ -2,8 +2,9 @@
 package kubernetes
 
 import (
-	"context"
 	"fmt"
+
+	"github.com/letsencrypt/prio-server/workflow-manager/utils"
 
 	batchv1 "k8s.io/api/batch/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -55,7 +56,9 @@ func (c *Client) ListJobs() (map[string]batchv1.Job, error) {
 	// provide on subsequent requests.
 	continueToken := ""
 	for {
-		jobsList, err := c.client.BatchV1().Jobs(c.namespace).List(context.Background(), metav1.ListOptions{
+		ctx, cancel := utils.ContextWithTimeout()
+		defer cancel()
+		jobsList, err := c.client.BatchV1().Jobs(c.namespace).List(ctx, metav1.ListOptions{
 			Limit:    1000,
 			Continue: continueToken,
 		})

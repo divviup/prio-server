@@ -1,13 +1,13 @@
 package bucket
 
 import (
-	"context"
 	"fmt"
 	"io"
 	"log"
 	"strings"
 
 	leaws "github.com/letsencrypt/prio-server/workflow-manager/aws"
+	"github.com/letsencrypt/prio-server/workflow-manager/utils"
 
 	"cloud.google.com/go/storage"
 	"github.com/aws/aws-sdk-go/aws"
@@ -173,10 +173,14 @@ func (b *Bucket) writeTaskMarkerS3(marker string) error {
 }
 
 func (b *Bucket) gcsClient() (*storage.Client, error) {
+	ctx, cancel := utils.ContextWithTimeout()
+	defer cancel()
+
 	if b.identity != "" {
 		return nil, fmt.Errorf("workflow-manager doesn't support non-default identity %q for GS Bucket %q", b.identity, b.bucketName)
 	}
-	client, err := storage.NewClient(context.Background())
+
+	client, err := storage.NewClient(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("storage.newClient: %w", err)
 	}
@@ -185,6 +189,9 @@ func (b *Bucket) gcsClient() (*storage.Client, error) {
 }
 
 func (b *Bucket) listFilesGS() ([]string, error) {
+	ctx, cancel := utils.ContextWithTimeout()
+	defer cancel()
+
 	client, err := b.gcsClient()
 	if err != nil {
 		return nil, err
@@ -195,7 +202,7 @@ func (b *Bucket) listFilesGS() ([]string, error) {
 
 	log.Printf("looking for ready batches in gs://%s as (ambient service account)", b.bucketName)
 	var output []string
-	it := bkt.Objects(context.Background(), query)
+	it := bkt.Objects(ctx, query)
 
 	// Use the paginated API to list Bucket contents, as otherwise we would only
 	// get the first 1,000 objects in the Bucket.
@@ -239,7 +246,11 @@ func (b *Bucket) writeTaskMarkerGS(marker string) error {
 	}
 
 	object := bkt.Object(marker)
-	writer := object.NewWriter(context.Background())
+
+	ctx, cancel := utils.ContextWithTimeout()
+	defer cancel()
+
+	writer := object.NewWriter(ctx)
 	_, err = io.WriteString(writer, marker)
 	if err != nil {
 		writer.Close()
