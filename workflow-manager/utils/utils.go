@@ -1,6 +1,7 @@
 package utils
 
 import (
+	"context"
 	"time"
 )
 
@@ -11,6 +12,10 @@ func Index(isFirst bool) int {
 		return 0
 	}
 	return 1
+}
+
+func ContextWithTimeout() (context.Context, context.CancelFunc) {
+	return context.WithTimeout(context.Background(), 30*time.Second)
 }
 
 // Clock allows mocking of time for testing purposes

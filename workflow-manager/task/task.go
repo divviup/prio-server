@@ -5,7 +5,6 @@
 package task
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -13,6 +12,7 @@ import (
 	"time"
 
 	leaws "github.com/letsencrypt/prio-server/workflow-manager/aws"
+	"github.com/letsencrypt/prio-server/workflow-manager/utils"
 
 	"cloud.google.com/go/pubsub"
 	"github.com/aws/aws-sdk-go/aws"
@@ -112,8 +112,9 @@ type Enqueuer interface {
 // subscription with the same ID that can later be used by a facilitator.
 // Returns error on failure.
 func CreatePubSubTopic(project string, topicID string) error {
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	ctx, cancel := utils.ContextWithTimeout()
 	defer cancel()
+
 	client, err := pubsub.NewClient(ctx, project)
 	if err != nil {
 		return fmt.Errorf("pubsub.newClient: %w", err)
@@ -150,7 +151,10 @@ type GCPPubSubEnqueuer struct {
 // should re-use a single instance as much as possible to enable batching of
 // publish requests.
 func NewGCPPubSubEnqueuer(project string, topicID string, dryRun bool) (*GCPPubSubEnqueuer, error) {
-	client, err := pubsub.NewClient(context.Background(), project)
+	ctx, cancel := utils.ContextWithTimeout()
+	defer cancel()
+
+	client, err := pubsub.NewClient(ctx, project)
 	if err != nil {
 		return nil, fmt.Errorf("pubsub.NewClient: %w", err)
 	}
@@ -182,8 +186,10 @@ func (e *GCPPubSubEnqueuer) Enqueue(task Task, completion func(error)) {
 		// automatically retries for us, so we just keep the handle so the caller
 		// can do whatever they need to after successful publication and we can
 		// block in Stop() until all tasks have been enqueued
-		res := e.topic.Publish(context.Background(), &pubsub.Message{Data: jsonTask})
-		if _, err := res.Get(context.Background()); err != nil {
+		ctx, cancel := utils.ContextWithTimeout()
+		defer cancel()
+		res := e.topic.Publish(ctx, &pubsub.Message{Data: jsonTask})
+		if _, err := res.Get(ctx); err != nil {
 			completion(fmt.Errorf("Failed to publish task %+v: %w", task, err))
 		}
 
