@@ -12,7 +12,12 @@ var runCmd = &cobra.Command{
 	Short: "Run the integration-tester",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		fmt.Println(namespace, name, manifestFileUrl, serviceAccountName, facilitatorImage, pushGateway, peerIdentity, awsAccountId)
-		t := tester.New(namespace, name, manifestFileUrl, serviceAccountName, facilitatorImage, pushGateway, peerIdentity, awsAccountId)
+		t := tester.New(kubeConfigPath,
+			namespace, name,
+			manifestFileUrl, serviceAccountName,
+			facilitatorImage, pushGateway,
+			peerIdentity, awsAccountId,
+			dryRun)
 		return t.Start()
 	},
 }

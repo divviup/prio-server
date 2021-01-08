@@ -11,6 +11,7 @@ import (
 )
 
 var (
+	kubeConfigPath     = ""
 	namespace          = ""
 	name               = ""
 	manifestFileUrl    = ""
@@ -21,6 +22,8 @@ var (
 	peerIdentity     = ""
 	awsAccountId     = ""
 )
+
+var dryRun bool
 
 var rootCmd = &cobra.Command{
 	Use: "integration-tester",
@@ -53,15 +56,19 @@ func handleDashes(cmd *cobra.Command, v *viper.Viper) {
 }
 
 func init() {
-	rootCmd.PersistentFlags().StringVarP(&name, "name", "", "", "The name of this ingestor")
-	rootCmd.PersistentFlags().StringVarP(&namespace, "namespace", "", "", "The namespace this will run in")
-	rootCmd.PersistentFlags().StringVarP(&manifestFileUrl, "manifest-file-url", "", "", "The URL where the manifest can be accessed")
-	rootCmd.PersistentFlags().StringVarP(&serviceAccountName, "service-account-name", "", "", "The service account name for kubernetes")
+	rootCmd.PersistentFlags().StringVar(&kubeConfigPath, "kube-config-path", "", "Path to the kubeconfig file to be used to authenticate to Kubernetes API")
 
-	rootCmd.PersistentFlags().StringVarP(&facilitatorImage, "facilitator-image", "", "", "The image for the facilitator")
-	rootCmd.PersistentFlags().StringVarP(&pushGateway, "push-gateway", "", "", "The push gateway")
-	rootCmd.PersistentFlags().StringVarP(&peerIdentity, "peer-identity", "", "", "The peer identity")
-	rootCmd.PersistentFlags().StringVarP(&awsAccountId, "aws-account-id", "", "", "The aws account ID")
+	rootCmd.PersistentFlags().StringVar(&name, "name", "", "The name of this ingestor")
+	rootCmd.PersistentFlags().StringVar(&namespace, "namespace", "", "The namespace this will run in")
+	rootCmd.PersistentFlags().StringVar(&manifestFileUrl, "manifest-file-url", "", "The URL where the manifest can be accessed")
+	rootCmd.PersistentFlags().StringVar(&serviceAccountName, "service-account-name", "", "The service account name for kubernetes")
+
+	rootCmd.PersistentFlags().StringVar(&facilitatorImage, "facilitator-image", "", "The image for the facilitator")
+	rootCmd.PersistentFlags().StringVar(&pushGateway, "push-gateway", "", "The push gateway")
+	rootCmd.PersistentFlags().StringVar(&peerIdentity, "peer-identity", "", "The peer identity")
+	rootCmd.PersistentFlags().StringVar(&awsAccountId, "aws-account-id", "", "The aws account ID")
+
+	rootCmd.PersistentFlags().BoolVar(&dryRun, "dry-run", false, "If set, no operations with side effects will be done")
 }
 
 func Execute() {

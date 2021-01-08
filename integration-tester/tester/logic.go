@@ -6,7 +6,6 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/abetterinternet/prio-server/integration-tester/kubernetes"
 	m "github.com/abetterinternet/prio-server/manifest-updater/manifest"
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -30,7 +29,12 @@ func (t *Tester) Start() error {
 
 	job := t.createJob(manifest, bsk, pdk)
 
-	return kubernetes.ScheduleJob(t.namespace, job)
+	_, err = t.kubeClient.ScheduleJob(t.namespace, job)
+	if err != nil {
+		return fmt.Errorf("scheduling job failed: %v", err)
+	}
+
+	return err
 }
 
 func (t *Tester) createJob(manifest *m.DataShareSpecificManifest, bsk, pdk *corev1.Secret) *batchv1.Job {
@@ -114,7 +118,7 @@ func GetManifest(url string) (*m.DataShareSpecificManifest, error) {
 
 func (t *Tester) getValidPacketDecryptionKey(manifest *m.DataShareSpecificManifest) (*corev1.Secret, error) {
 	labelSelector := fmt.Sprintf("type=packet-decryption-key")
-	secrets, err := kubernetes.GetSortedSecrets(t.namespace, labelSelector)
+	secrets, err := t.kubeClient.GetSortedSecrets(t.namespace, labelSelector)
 	if err != nil {
 		return nil, err
 	}
@@ -131,7 +135,7 @@ func (t *Tester) getValidPacketDecryptionKey(manifest *m.DataShareSpecificManife
 
 func (t *Tester) getValidBatchSigningKey(manifest *m.DataShareSpecificManifest) (*corev1.Secret, error) {
 	labelSelector := fmt.Sprintf("type=batch-signing-key,ingestor=%s", t.name)
-	secrets, err := kubernetes.GetSortedSecrets(t.namespace, labelSelector)
+	secrets, err := t.kubeClient.GetSortedSecrets(t.namespace, labelSelector)
 	if err != nil {
 		return nil, err
 	}
