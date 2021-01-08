@@ -201,6 +201,33 @@ impl Display for ManifestKind {
     }
 }
 
+#[derive(Clone, Debug, PartialEq)]
+pub enum TaskQueueKind {
+    GcpPubSub,
+    AwsSqs,
+}
+
+impl FromStr for TaskQueueKind {
+    type Err = anyhow::Error;
+
+    fn from_str(s: &str) -> Result<TaskQueueKind> {
+        match s {
+            "gcp-pubsub" => Ok(TaskQueueKind::GcpPubSub),
+            "aws-sqs" => Ok(TaskQueueKind::AwsSqs),
+            _ => Err(anyhow!(format!("unrecognized task queue kind {}", s))),
+        }
+    }
+}
+
+impl Display for TaskQueueKind {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        match self {
+            TaskQueueKind::GcpPubSub => write!(f, "gcp-pubsub"),
+            TaskQueueKind::AwsSqs => write!(f, "aws-sqs"),
+        }
+    }
+}
+
 /// Represents a simple duration specified in terms of whole hours, minutes and seconds. Mostly used
 /// for user input in flags or config files. For computations it should usually be converted to a
 /// [`chrono::Duration`] using [`to_duration`](DayDuration::to_duration).

@@ -33,7 +33,14 @@ resource "aws_s3_bucket" "ingestion_bucket" {
   bucket = var.ingestion_bucket_name
   # Force deletion of bucket contents on bucket destroy.
   force_destroy = true
-  policy        = <<POLICY
+  # Delete objects 7 days after creation
+  lifecycle_rule {
+    enabled = true
+    expiration {
+      days = 7
+    }
+  }
+  policy = <<POLICY
 {
   "Version": "2012-10-17",
   "Statement": [
@@ -82,7 +89,14 @@ resource "aws_s3_bucket" "peer_validation_bucket" {
   bucket = var.peer_validation_bucket_name
   # Force deletion of bucket contents on bucket destroy.
   force_destroy = true
-  policy        = <<POLICY
+  # Delete objects 7 days after creation
+  lifecycle_rule {
+    enabled = true
+    expiration {
+      days = 7
+    }
+  }
+  policy = <<POLICY
 {
   "Version": "2012-10-17",
   "Statement": [

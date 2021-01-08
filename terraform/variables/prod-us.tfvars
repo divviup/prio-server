@@ -10,8 +10,48 @@ managed_dns_zone = {
   gcp_project = "prio-bringup-290620"
 }
 ingestors = {
-  apple  = "exposure-notification.apple.com/manifest"
-  g-enpa = "storage.googleapis.com/prio-manifests"
+  apple = {
+    manifest_base_url = "exposure-notification.apple.com/manifest"
+    localities = {
+      aq-aq = {
+        intake_worker_count    = 1
+        aggregate_worker_count = 1
+      }
+      ta-ta = {
+        intake_worker_count    = 1
+        aggregate_worker_count = 1
+      }
+      us-ct = {
+        intake_worker_count    = 5
+        aggregate_worker_count = 3
+      }
+      us-md = {
+        intake_worker_count    = 5
+        aggregate_worker_count = 3
+      }
+    }
+  }
+  g-enpa = {
+    manifest_base_url = "storage.googleapis.com/prio-manifests"
+    localities = {
+      aq-aq = {
+        intake_worker_count    = 1
+        aggregate_worker_count = 1
+      }
+      ta-ta = {
+        intake_worker_count    = 1
+        aggregate_worker_count = 1
+      }
+      us-ct = {
+        intake_worker_count    = 3
+        aggregate_worker_count = 3
+      }
+      us-md = {
+        intake_worker_count    = 3
+        aggregate_worker_count = 3
+      }
+    }
+  }
 }
 peer_share_processor_manifest_base_url = "en-analytics.cancer.gov"
 portal_server_manifest_base_url        = "manifest.enpa-pha.io"
@@ -19,6 +59,6 @@ is_first                               = false
 use_aws                                = false
 aggregation_period                     = "8h"
 aggregation_grace_period               = "4h"
-workflow_manager_version               = "0.5.1"
-facilitator_version                    = "0.5.1"
+workflow_manager_version               = "0.6.0"
+facilitator_version                    = "0.6.0"
 pushgateway                            = "prometheus-pushgateway.monitoring:9091"
