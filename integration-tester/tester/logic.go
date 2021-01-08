@@ -112,7 +112,7 @@ func GetManifest(url string) (*m.DataShareSpecificManifest, error) {
 	return dsm, err
 }
 
-func (t *Tester) getValidPacketDecryptionKey(manifest *interface{}) (*interface{}, interface{}) {
+func (t *Tester) getValidPacketDecryptionKey(manifest *m.DataShareSpecificManifest) (*corev1.Secret, error) {
 	labelSelector := fmt.Sprintf("type=packet-decryption-key")
 	secrets, err := kubernetes.GetSortedSecrets(t.namespace, labelSelector)
 	if err != nil {
@@ -129,7 +129,7 @@ func (t *Tester) getValidPacketDecryptionKey(manifest *interface{}) (*interface{
 	return nil, fmt.Errorf("unable to find a suitable packet decryption key - manifest was: %s", manifest.PacketEncryptionKeyCSRs)
 }
 
-func (t *Tester) getValidBatchSigningKey(manifest *interface{}) (*interface{}, interface{}) {
+func (t *Tester) getValidBatchSigningKey(manifest *m.DataShareSpecificManifest) (*corev1.Secret, error) {
 	labelSelector := fmt.Sprintf("type=batch-signing-key,ingestor=%s", t.name)
 	secrets, err := kubernetes.GetSortedSecrets(t.namespace, labelSelector)
 	if err != nil {
