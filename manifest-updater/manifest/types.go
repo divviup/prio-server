@@ -24,6 +24,27 @@ type DataShareSpecificManifest struct {
 	PacketEncryptionKeyCSRs PacketEncryptionKeyCSRs `json:"packet-encryption-key-csrs"`
 }
 
+// IngestorGlobalManifest represents the global manifest file for an ingestor
+type IngestorGlobalManifest struct {
+	// Format is the version of the manifest.
+	Format int64 `json:"format"`
+	// ServerIdentity represents the server identity for the advertising party of the manifest
+	ServerIdentity ServerIdentity `json:"server-identity"`
+	// BatchSigningPublicKeys maps key identifiers to batch signing public keys.
+	// These are the keys that will be used to sign batches coming from this service
+	BatchSigningPublicKeys BatchSigningPublicKeys `json:"batch-signing-public-keys"`
+}
+
+// ServerIdentity represents the server identity for the advertising party of the manifest
+type ServerIdentity struct {
+	// AwsIamEntity is ARN of user or role - apple only
+	AwsIamEntity string `json:"aws-iam-entity"`
+	// GcpServiceAccountId is the numeric unique service account ID
+	GcpServiceAccountId string `json:"gcp-service-account-id"`
+	// GcpServiceAccountEmail is the email address of the gcp service account
+	GcpServiceAccountEmail string `json:"gcp-service-account-email"`
+}
+
 type BatchSigningPublicKeys = map[string]BatchSigningPublicKey
 type PacketEncryptionKeyCSRs = map[string]PacketEncryptionCertificate
 
