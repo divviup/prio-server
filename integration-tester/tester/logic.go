@@ -7,7 +7,7 @@ import (
 	"net/http"
 	"time"
 
-	m "github.com/abetterinternet/prio-server/manifest-updater/manifest"
+	"github.com/abetterinternet/prio-server/manifest-updater/manifest"
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -69,7 +69,7 @@ func (t *Tester) purgeOldJobs() error {
 	return nil
 }
 
-func (t *Tester) createJob(manifest *m.DataShareSpecificManifest, bsk, pdk *corev1.Secret) *batchv1.Job {
+func (t *Tester) createJob(manifest *manifest.DataShareSpecificManifest, bsk, pdk *corev1.Secret) *batchv1.Job {
 	trueP := true
 	env := []corev1.EnvVar{
 		{Name: "FACILITATOR_ECIES_PRIVATE_KEY",
@@ -132,8 +132,8 @@ func (t *Tester) createJob(manifest *m.DataShareSpecificManifest, bsk, pdk *core
 	}
 }
 
-func GetManifest(url string) (*m.DataShareSpecificManifest, error) {
-	dsm := &m.DataShareSpecificManifest{}
+func GetManifest(url string) (*manifest.DataShareSpecificManifest, error) {
+	dsm := &manifest.DataShareSpecificManifest{}
 	client := http.Client{Timeout: 10 * time.Second}
 
 	r, err := client.Get(url)
@@ -149,7 +149,7 @@ func GetManifest(url string) (*m.DataShareSpecificManifest, error) {
 	return dsm, err
 }
 
-func (t *Tester) getValidPacketDecryptionKey(manifest *m.DataShareSpecificManifest) (*corev1.Secret, error) {
+func (t *Tester) getValidPacketDecryptionKey(manifest *manifest.DataShareSpecificManifest) (*corev1.Secret, error) {
 	labelSelector := fmt.Sprintf("type=packet-decryption-key")
 	secrets, err := t.kubeClient.GetSortedSecrets(labelSelector)
 	if err != nil {
@@ -166,7 +166,7 @@ func (t *Tester) getValidPacketDecryptionKey(manifest *m.DataShareSpecificManife
 	return nil, fmt.Errorf("unable to find a suitable packet decryption key - manifest was: %s", manifest.PacketEncryptionKeyCSRs)
 }
 
-func (t *Tester) getValidBatchSigningKey(manifest *m.DataShareSpecificManifest) (*corev1.Secret, error) {
+func (t *Tester) getValidBatchSigningKey(manifest *manifest.DataShareSpecificManifest) (*corev1.Secret, error) {
 	labelSelector := fmt.Sprintf("type=batch-signing-key,ingestor=%s", t.name)
 	secrets, err := t.kubeClient.GetSortedSecrets(labelSelector)
 	if err != nil {
