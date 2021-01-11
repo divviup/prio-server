@@ -41,8 +41,7 @@ func (t *Tester) Start() error {
 	job := t.createJob(manifest, bsk, pdk)
 
 	log.Println("Scheduling job...")
-	scheduledJob, err := t.kubeClient.ScheduleJob(t.namespace, job)
-	_, err = t.kubeClient.ScheduleJob(job)
+	scheduledJob, err := t.kubeClient.ScheduleJob(job)
 	if err != nil {
 		return fmt.Errorf("scheduling job failed: %v", err)
 	}
