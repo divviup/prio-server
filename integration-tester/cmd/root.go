@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"fmt"
+	"log"
 	"os"
 	"strings"
 
@@ -42,7 +43,9 @@ var rootCmd = &cobra.Command{
 }
 
 func handleDashes(cmd *cobra.Command, v *viper.Viper) {
+	log.Println("flag values:")
 	cmd.Flags().VisitAll(func(f *pflag.Flag) {
+		log.Printf("\t--%s=%s\n", f.Name, f.Value)
 		if strings.Contains(f.Name, "-") {
 			envVarSuffix := strings.ToUpper(strings.ReplaceAll(f.Name, "-", "_"))
 			_ = v.BindEnv(f.Name, fmt.Sprintf("TESTER_%s", envVarSuffix))

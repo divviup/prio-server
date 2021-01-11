@@ -27,7 +27,6 @@ func (t *Tester) Start() error {
 	if err != nil {
 		return err
 	}
-
 	pdk, err := t.getValidPacketDecryptionKey(manifest)
 	if err != nil {
 		return err
@@ -41,9 +40,14 @@ func (t *Tester) Start() error {
 
 	job := t.createJob(manifest, bsk, pdk)
 
+	log.Println("Scheduling job...")
+	scheduledJob, err := t.kubeClient.ScheduleJob(t.namespace, job)
 	_, err = t.kubeClient.ScheduleJob(job)
 	if err != nil {
 		return fmt.Errorf("scheduling job failed: %v", err)
+	}
+	if scheduledJob != nil {
+		log.Printf("\tscheduled job: %s\n", scheduledJob.Name)
 	}
 
 	return err
