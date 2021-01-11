@@ -91,7 +91,7 @@ func (c *Client) ListJobs(options metav1.ListOptions) (map[string]batchv1.Job, e
 	return jobs, nil
 }
 
-// ScheduleJob schedules job at a given namespace and returns the created job
+// ScheduleJob schedules job in the specified namespace and returns the created job
 func (c *Client) ScheduleJob(job *batchv1.Job) (*batchv1.Job, error) {
 	createdJob, err := c.client.BatchV1().Jobs(c.namespace).Create(context.Background(), job, metav1.CreateOptions{})
 	if err != nil {
