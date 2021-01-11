@@ -194,7 +194,7 @@ func main() {
 
 	// Get a listing of all jobs in the namespace so the finished ones can be
 	// reaped later on, and to avoid scheduling redudant work.
-	existingJobs, err := kubernetesClient.ListJobs()
+	existingJobs, err := kubernetesClient.ListAllJobs()
 	if err != nil {
 		log.Fatal(err)
 	}

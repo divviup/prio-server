@@ -48,10 +48,18 @@ func NewClient(namespace string, kubeconfigPath string, dryRun bool) (*Client, e
 	}, nil
 }
 
-// ListJobs returns a map of Kubernetes jobs in the specified namespace, where
+// ListAllJobs returns a map of Kubernetes jobs in the specified namespace, where
 // the key is the name of the job and the value is the job structure, or an
 // error on failure.
-func (c *Client) ListJobs() (map[string]batchv1.Job, error) {
+func (c *Client) ListAllJobs() (map[string]batchv1.Job, error) {
+	return c.ListJobs(metav1.ListOptions{})
+}
+
+// ListJobs returns a map of Kubernetes jobs in the specified namespace.
+// the options allows filtering the list results, the Limit and Continue fields of the
+// ListOptions will be overwritten. The key of the map is the name of the job, the value
+// is the job structure.
+func (c *Client) ListJobs(options metav1.ListOptions) (map[string]batchv1.Job, error) {
 	jobs := map[string]batchv1.Job{}
 
 	// The jobs list API is paginated. We request 1000 entries at a time. If
@@ -61,10 +69,10 @@ func (c *Client) ListJobs() (map[string]batchv1.Job, error) {
 	for {
 		ctx, cancel := utils.ContextWithTimeout()
 		defer cancel()
-		jobsList, err := c.client.BatchV1().Jobs(c.namespace).List(ctx, metav1.ListOptions{
-			Limit:    1000,
-			Continue: continueToken,
-		})
+
+		options.Limit = 1000
+		options.Continue = continueToken
+		jobsList, err := c.client.BatchV1().Jobs(c.namespace).List(ctx, options)
 		if err != nil {
 			return nil, fmt.Errorf("failed to list jobs in namespace: %w", err)
 		}
@@ -84,8 +92,8 @@ func (c *Client) ListJobs() (map[string]batchv1.Job, error) {
 }
 
 // ScheduleJob schedules job at a given namespace and returns the created job
-func (c *Client) ScheduleJob(namespace string, job *batchv1.Job) (*batchv1.Job, error) {
-	createdJob, err := c.client.BatchV1().Jobs(namespace).Create(context.Background(), job, metav1.CreateOptions{})
+func (c *Client) ScheduleJob(job *batchv1.Job) (*batchv1.Job, error) {
+	createdJob, err := c.client.BatchV1().Jobs(c.namespace).Create(context.Background(), job, metav1.CreateOptions{})
 	if err != nil {
 		return nil, fmt.Errorf("job creation failed: %v", err)
 	}
@@ -93,9 +101,24 @@ func (c *Client) ScheduleJob(namespace string, job *batchv1.Job) (*batchv1.Job, 
 	return createdJob, nil
 }
 
+// RemoveJobCollection removes a collection of jobs defined by the listOptions.
+// The DryRun field of DeleteOptions will be overwritten based on how the client is configured
+func (c *Client) RemoveJobCollection(deleteOptions metav1.DeleteOptions, listOptions metav1.ListOptions) error {
+	if c.dryRun {
+		deleteOptions.DryRun = []string{"All"}
+	}
+	err := c.client.BatchV1().Jobs(c.namespace).DeleteCollection(context.Background(), deleteOptions, listOptions)
+
+	if err != nil {
+		return fmt.Errorf("deleting job collection failed: %v", err)
+	}
+
+	return nil
+}
+
 // GetSortedSecrets gets a list of secrets that were sorted by the secret's creation date (newest secret first)
-func (c *Client) GetSortedSecrets(namespace, labelSelector string) ([]corev1.Secret, error) {
-	secrets, err := c.client.CoreV1().Secrets(namespace).List(context.Background(), metav1.ListOptions{LabelSelector: labelSelector})
+func (c *Client) GetSortedSecrets(labelSelector string) ([]corev1.Secret, error) {
+	secrets, err := c.client.CoreV1().Secrets(c.namespace).List(context.Background(), metav1.ListOptions{LabelSelector: labelSelector})
 
 	if err != nil {
 		return nil, fmt.Errorf("problem when listing secrets with label %s: %v", labelSelector, err)

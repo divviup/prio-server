@@ -3,6 +3,7 @@ package tester
 import (
 	"encoding/json"
 	"fmt"
+	"log"
 	"net/http"
 	"time"
 
@@ -10,6 +11,11 @@ import (
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+)
+
+const (
+	LABEL_KEY   = "type"
+	LABEL_VALUE = "integration-tester"
 )
 
 func (t *Tester) Start() error {
@@ -27,14 +33,37 @@ func (t *Tester) Start() error {
 		return err
 	}
 
+	err = t.purgeOldJobs()
+	if err != nil {
+		// Don't stop executing because of this error
+		log.Printf("Error when purging old successful jobs: %v\n", err)
+	}
+
 	job := t.createJob(manifest, bsk, pdk)
 
-	_, err = t.kubeClient.ScheduleJob(t.namespace, job)
+	_, err = t.kubeClient.ScheduleJob(job)
 	if err != nil {
 		return fmt.Errorf("scheduling job failed: %v", err)
 	}
 
 	return err
+}
+
+// purgeOldJobs will remove all successful jobs from the kubernetes namespace
+func (t *Tester) purgeOldJobs() error {
+	labelSelector := fmt.Sprintf("%s=%s,ingestor=%s", LABEL_KEY, LABEL_VALUE, t.name)
+	fieldSelector := "status.successful=1"
+
+	err := t.kubeClient.RemoveJobCollection(metav1.DeleteOptions{}, metav1.ListOptions{
+		LabelSelector: labelSelector,
+		FieldSelector: fieldSelector,
+	})
+
+	if err != nil {
+		return fmt.Errorf("purging old successful jobs failed: %v", err)
+	}
+
+	return nil
 }
 
 func (t *Tester) createJob(manifest *m.DataShareSpecificManifest, bsk, pdk *corev1.Secret) *batchv1.Job {
@@ -59,7 +88,8 @@ func (t *Tester) createJob(manifest *m.DataShareSpecificManifest, bsk, pdk *core
 		ObjectMeta: metav1.ObjectMeta{
 			GenerateName: "integration-tester-facilitator",
 			Labels: map[string]string{
-				"type": "integration-tester",
+				LABEL_KEY:  LABEL_VALUE,
+				"ingestor": t.name,
 			},
 		},
 		Spec: batchv1.JobSpec{
@@ -118,7 +148,7 @@ func GetManifest(url string) (*m.DataShareSpecificManifest, error) {
 
 func (t *Tester) getValidPacketDecryptionKey(manifest *m.DataShareSpecificManifest) (*corev1.Secret, error) {
 	labelSelector := fmt.Sprintf("type=packet-decryption-key")
-	secrets, err := t.kubeClient.GetSortedSecrets(t.namespace, labelSelector)
+	secrets, err := t.kubeClient.GetSortedSecrets(labelSelector)
 	if err != nil {
 		return nil, err
 	}
@@ -135,7 +165,7 @@ func (t *Tester) getValidPacketDecryptionKey(manifest *m.DataShareSpecificManife
 
 func (t *Tester) getValidBatchSigningKey(manifest *m.DataShareSpecificManifest) (*corev1.Secret, error) {
 	labelSelector := fmt.Sprintf("type=batch-signing-key,ingestor=%s", t.name)
-	secrets, err := t.kubeClient.GetSortedSecrets(t.namespace, labelSelector)
+	secrets, err := t.kubeClient.GetSortedSecrets(labelSelector)
 	if err != nil {
 		return nil, err
 	}
