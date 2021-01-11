@@ -6,6 +6,7 @@ use serde::Deserialize;
 use std::{
     fmt,
     fmt::{Debug, Display},
+    time::Duration,
 };
 
 pub use pubsub::GcpPubSubTaskQueue;
@@ -29,6 +30,33 @@ pub trait TaskQueue<T: Task>: Debug {
     /// Signal to the task queue that the task was not handled and should be
     /// retried later.
     fn nacknowledge_task(&mut self, handle: TaskHandle<T>) -> Result<()>;
+
+    /// Signal to the task queue that more time is needed to handle the task.
+    fn extend_task_deadline(&mut self, handle: &TaskHandle<T>, increment: &Duration) -> Result<()>;
+
+    /// Extend the deadline for the provided task if enough time has elapsed
+    /// since the start of handling the task to require an extension. Returns
+    /// Ok(()) if either the task deadline does not need extension or if the
+    /// deadline was successfully extended, or an error if something goes wrong
+    /// extending the deadline.
+    fn maybe_extend_task_deadline(
+        &mut self,
+        handle: &TaskHandle<T>,
+        elapsed: &Duration,
+    ) -> Result<()> {
+        // We assume that 10 minutes is a reasonable deadline increment
+        // regardless of queue implementation or what the task is. In the future
+        // this could be a tunable parameter on facilitator.
+        let deadline_increment = Duration::from_secs(600);
+
+        // Extend the deadline when we get to 90% of the increment, to reduce
+        // the risk of a task being redelivered by the queue if a call to
+        // extend_task_deadline happens to take unusually long.
+        if elapsed >= &Duration::from_secs_f64(0.9 * Duration::from_secs(600).as_secs_f64()) {
+            return self.extend_task_deadline(handle, &deadline_increment);
+        }
+        Ok(())
+    }
 }
 
 /// Represents a task that can be assigned to a worker
