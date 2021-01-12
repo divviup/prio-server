@@ -2,7 +2,7 @@ use anyhow::{anyhow, Context, Result};
 use chrono::{prelude::Utc, NaiveDateTime};
 use clap::{value_t, App, Arg, ArgMatches, SubCommand};
 use log::{error, info};
-use prio::encrypt::PrivateKey;
+use prio::encrypt::{PublicKey, PrivateKey};
 use prometheus::{register_counter, register_counter_vec, Counter};
 use ring::signature::{
     EcdsaKeyPair, KeyPair, UnparsedPublicKey, ECDSA_P256_SHA256_ASN1,
@@ -444,8 +444,8 @@ fn main() -> Result<(), anyhow::Error> {
                         .help("Number of data packets to generate"),
                 )
                 .arg(
-                    Arg::with_name("pha-ecies-private-key")
-                        .long("pha-ecies-private-key")
+                    Arg::with_name("pha-ecies-public-key")
+                        .long("pha-ecies-public-key")
                         .env("PHA_ECIES_PRIVATE_KEY")
                         .value_name("B64")
                         .help(
@@ -455,8 +455,8 @@ fn main() -> Result<(), anyhow::Error> {
                         .required(true),
                 )
                 .arg(
-                    Arg::with_name("facilitator-ecies-private-key")
-                        .long("facilitator-ecies-private-key")
+                    Arg::with_name("facilitator-ecies-public-key")
+                        .long("facilitator-ecies-public-key")
                         .env("FACILITATOR_ECIES_PRIVATE_KEY")
                         .value_name("B64")
                         .help(
@@ -708,9 +708,9 @@ fn main() -> Result<(), anyhow::Error> {
 fn generate_sample(sub_matches: &ArgMatches) -> Result<(), anyhow::Error> {
     let peer_output_path = StoragePath::from_str(sub_matches.value_of("peer-output").unwrap())?;
     let peer_identity = sub_matches.value_of("peer-identity");
-    let packet_encryption_key = PrivateKey::from_base64(
+    let packet_encryption_key = PublicKey::from_base64(
         sub_matches
-            .value_of("facilitator-ecies-private-key")
+            .value_of("facilitator-ecies-public-key")
             .unwrap(),
     )
     .unwrap();
@@ -719,7 +719,7 @@ fn generate_sample(sub_matches: &ArgMatches) -> Result<(), anyhow::Error> {
             transport: transport_for_path(peer_output_path, peer_identity, sub_matches)?,
             batch_signing_key: batch_signing_key_from_arg(sub_matches)?,
         },
-        packet_encryption_key,
+        packet_encryption_public_key,
         drop_nth_packet: None,
     };
 
@@ -730,8 +730,8 @@ fn generate_sample(sub_matches: &ArgMatches) -> Result<(), anyhow::Error> {
             transport: transport_for_path(own_output_path, own_identity, sub_matches)?,
             batch_signing_key: batch_signing_key_from_arg(sub_matches)?,
         },
-        packet_encryption_key: PrivateKey::from_base64(
-            sub_matches.value_of("pha-ecies-private-key").unwrap(),
+        packet_encryption_public_key: PublicKey::from_base64(
+            sub_matches.value_of("pha-ecies-public-key").unwrap(),
         )
         .unwrap(),
         drop_nth_packet: None,

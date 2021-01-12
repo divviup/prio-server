@@ -21,7 +21,7 @@ pub struct SampleOutput {
     /// SignableTransport to which to write the ingestion batch
     pub transport: SignableTransport,
     /// Encryption key with which to encrypt ingestion shares
-    pub packet_encryption_key: PrivateKey,
+    pub packet_encryption_public_key: PublicKey,
     /// If this is Some(n), then generate_ingestion_sample will omit every nth
     /// packet generated from the ingestion batch sent to this output. This is
     /// intended for testing.
@@ -86,8 +86,8 @@ pub fn generate_ingestion_sample(
         // usize is probably bigger than i32 and we have checked that dim is
         // positive so this is safe
         dim as usize,
-        PublicKey::from(&pha_output.packet_encryption_key),
-        PublicKey::from(&facilitator_output.packet_encryption_key),
+        pha_output.packet_encryption_public_key.clone(),
+        facilitator_output.packet_encryption_public_key.clone(),
     )
     .context("failed to create client (bad dimension parameter?)")?;
 
@@ -109,9 +109,6 @@ pub fn generate_ingestion_sample(
         pha_ingestion_batch.packet_file_writer(|mut pha_packet_writer| {
             let facilitator_packet_file_digest = facilitator_ingestion_batch.packet_file_writer(
                 |mut facilitator_packet_writer| {
-                    // We need an instance of a libprio server to pick an r_pit.
-                    let fake_server = Server::new(dim as usize, true, key_copy);
-
                     for count in 0..packet_count {
                         // Generate random bit vector
                         let data = (0..dim)
@@ -133,7 +130,10 @@ pub fn generate_ingestion_sample(
                             .encode_simple(&data)
                             .context("failed to encode data")?;
 
-                        let r_pit = fake_server.choose_eval_at();
+                        // Hardcoded r_pit value
+                        // Some other options: 81133978, 998314904, 1103857271
+                        // Value obtained by running an instance of libprio::Server
+                        let r_pit: u32 = 998314904;
                         let packet_uuid = Uuid::new_v4();
 
                         let pha_packet = IngestionDataSharePacket {
@@ -254,7 +254,7 @@ mod tests {
                 )),
                 batch_signing_key: default_ingestor_private_key(),
             },
-            packet_encryption_key: PrivateKey::from_base64(DEFAULT_PHA_ECIES_PRIVATE_KEY).unwrap(),
+            packet_encryption_public_key: PublicKey::from(&PrivateKey::from_base64(DEFAULT_PHA_ECIES_PRIVATE_KEY).unwrap()).unwrap(),
             drop_nth_packet: None,
         };
         let mut facilitator_output = SampleOutput {
@@ -264,8 +264,7 @@ mod tests {
                 )),
                 batch_signing_key: default_ingestor_private_key(),
             },
-            packet_encryption_key: PrivateKey::from_base64(DEFAULT_FACILITATOR_ECIES_PRIVATE_KEY)
-                .unwrap(),
+            packet_encryption_public_key: PublicKey::from(&PrivateKey::from_base64(DEFAULT_FACILITATOR_ECIES_PRIVATE_KEY).unwrap()).unwrap(),
             drop_nth_packet: None,
         };
 
