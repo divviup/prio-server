@@ -17,7 +17,7 @@ use facilitator::{
     },
     Error,
 };
-use prio::{encrypt::PrivateKey, util::reconstruct_shares};
+use prio::{encrypt::PrivateKey, encrypt::PublicKey, util::reconstruct_shares};
 use std::collections::{HashMap, HashSet};
 use uuid::Uuid;
 
@@ -60,7 +60,9 @@ fn end_to_end_test(drop_nth_pha: Option<usize>, drop_nth_facilitator: Option<usi
             transport: Box::new(LocalFileTransport::new(pha_tempdir.path().to_path_buf())),
             batch_signing_key: default_ingestor_private_key(),
         },
-        packet_encryption_key: PrivateKey::from_base64(DEFAULT_PHA_ECIES_PRIVATE_KEY).unwrap(),
+        packet_encryption_public_key: PublicKey::from(
+            &PrivateKey::from_base64(DEFAULT_PHA_ECIES_PRIVATE_KEY).unwrap(),
+        ),
         drop_nth_packet: drop_nth_pha,
     };
 
@@ -71,8 +73,9 @@ fn end_to_end_test(drop_nth_pha: Option<usize>, drop_nth_facilitator: Option<usi
             )),
             batch_signing_key: default_ingestor_private_key(),
         },
-        packet_encryption_key: PrivateKey::from_base64(DEFAULT_FACILITATOR_ECIES_PRIVATE_KEY)
-            .unwrap(),
+        packet_encryption_public_key: PublicKey::from(
+            &PrivateKey::from_base64(DEFAULT_FACILITATOR_ECIES_PRIVATE_KEY).unwrap(),
+        ),
         drop_nth_packet: drop_nth_facilitator,
     };
 

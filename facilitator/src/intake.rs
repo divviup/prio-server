@@ -7,7 +7,7 @@ use crate::{
 use anyhow::{anyhow, ensure, Context, Result};
 use chrono::NaiveDateTime;
 use log::info;
-use prio::{encrypt::PrivateKey, finite_field::Field, server::Server};
+use prio::{encrypt::PrivateKey, encrypt::PublicKey, finite_field::Field, server::Server};
 use ring::signature::UnparsedPublicKey;
 use std::{collections::HashMap, convert::TryFrom, iter::Iterator};
 use uuid::Uuid;
@@ -192,7 +192,9 @@ mod tests {
                 transport: Box::new(LocalFileTransport::new(pha_tempdir.path().to_path_buf())),
                 batch_signing_key: default_ingestor_private_key(),
             },
-            packet_encryption_key: PrivateKey::from_base64(DEFAULT_PHA_ECIES_PRIVATE_KEY).unwrap(),
+            packet_encryption_public_key: PublicKey::from(
+                &PrivateKey::from_base64(DEFAULT_PHA_ECIES_PRIVATE_KEY).unwrap(),
+            ),
             drop_nth_packet: None,
         };
 
@@ -203,8 +205,9 @@ mod tests {
                 )),
                 batch_signing_key: default_ingestor_private_key(),
             },
-            packet_encryption_key: PrivateKey::from_base64(DEFAULT_FACILITATOR_ECIES_PRIVATE_KEY)
-                .unwrap(),
+            packet_encryption_public_key: PublicKey::from(
+                &PrivateKey::from_base64(DEFAULT_FACILITATOR_ECIES_PRIVATE_KEY).unwrap(),
+            ),
             drop_nth_packet: None,
         };
 
