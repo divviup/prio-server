@@ -94,7 +94,6 @@ pub fn generate_ingestion_sample(
     // Borrowing distinct parts of a struct like the SampleOutputs works, but
     // not under closures: https://github.com/rust-lang/rust/issues/53488
     // The workaround is to borrow or copy fields outside the closure.
-    let key_copy = pha_output.packet_encryption_key.clone();
     let facilitator_batch_signing_key_ref = &facilitator_output.transport.batch_signing_key;
     let drop_nth_pha_packet = pha_output.drop_nth_packet;
     let drop_nth_facilitator_packet = facilitator_output.drop_nth_packet;

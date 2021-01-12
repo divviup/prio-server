@@ -708,7 +708,7 @@ fn main() -> Result<(), anyhow::Error> {
 fn generate_sample(sub_matches: &ArgMatches) -> Result<(), anyhow::Error> {
     let peer_output_path = StoragePath::from_str(sub_matches.value_of("peer-output").unwrap())?;
     let peer_identity = sub_matches.value_of("peer-identity");
-    let packet_encryption_key = PublicKey::from_base64(
+    let packet_encryption_public_key = PublicKey::from_base64(
         sub_matches
             .value_of("facilitator-ecies-public-key")
             .unwrap(),
