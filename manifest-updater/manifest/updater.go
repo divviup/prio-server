@@ -57,7 +57,7 @@ func (u *Updater) UpdateDataShareSpecificManifest(keys map[string]BatchSigningPu
 	return nil
 }
 
-func (u *Updater) readExistingManifest(store *storage.BucketHandle, ingestor string) (*DataShareSpecificManifest, error) {
+func (u *Updater) readExistingManifest(store *storage.BucketHandle, ingestor string) (*DataShareProcessorSpecificManifest, error) {
 	u.log.WithField("ingestor", ingestor).Infoln("reading the manifest file")
 	manifestObj := store.Object(fmt.Sprintf("%s-%s-manifest.json", u.locality, ingestor))
 	r, err := manifestObj.NewReader(context.Background())
@@ -72,7 +72,7 @@ func (u *Updater) readExistingManifest(store *storage.BucketHandle, ingestor str
 		}
 	}()
 
-	manifest := &DataShareSpecificManifest{}
+	manifest := &DataShareProcessorSpecificManifest{}
 	err = json.NewDecoder(r).Decode(manifest)
 	if err != nil {
 		return nil, fmt.Errorf("decoding manifest json failed: %w", err)
@@ -81,7 +81,7 @@ func (u *Updater) readExistingManifest(store *storage.BucketHandle, ingestor str
 	return manifest, nil
 }
 
-func (u *Updater) writeManifest(store *storage.BucketHandle, manifest *DataShareSpecificManifest, ingestor string) error {
+func (u *Updater) writeManifest(store *storage.BucketHandle, manifest *DataShareProcessorSpecificManifest, ingestor string) error {
 	u.log.
 		WithField("ingestor", ingestor).
 		WithField("manifest", manifest).

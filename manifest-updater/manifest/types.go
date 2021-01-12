@@ -1,11 +1,14 @@
 package manifest
 
-// SpecificManifest represents the manifest file advertised by a data share
+// DataShareProcessorSpecificManifest represents the manifest file advertised by a data share
 // processor. See the design document for the full specification.
 // https://docs.google.com/document/d/1MdfM3QT63ISU70l63bwzTrxr93Z7Tv7EDjLfammzo6Q/edit#heading=h.3j8dgxqo5h68
-type DataShareSpecificManifest struct {
+type DataShareProcessorSpecificManifest struct {
 	// Format is the version of the manifest.
 	Format int64 `json:"format"`
+	// IngestionIdentity is the identity of the ingestion and is only necessary
+	// when an aws s3 ingestion server is used
+	IngestionIdentity string `json:"ingestion-identity,omitempty"`
 	// IngestionBucket is the region+name of the bucket that the data share
 	// processor which owns the manifest reads ingestion batches from.
 	IngestionBucket string `json:"ingestion-bucket"`
