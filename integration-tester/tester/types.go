@@ -10,21 +10,22 @@ type Tester struct {
 	kubeClient         *kubernetes.Client
 	namespace          string
 	name               string
-	manifestFileUrl    string
+	ownManifestUrl     string
+	phaManifestUrl     string
+	facilManifestUrl   string
 	serviceAccountName string
 
 	facilitatorImage string
 	pushGateway      string
-	peerIdentity     string
 	awsAccountId     string
 }
 
 func New(
 	kubeConfigPath,
 	namespace, name,
-	manifestFileUrl, serviceAccountName,
-	facilitatorImage, pushGateway,
-	peerIdentity, awsAccountId string,
+	ownManifestUrl, phaManifestUrl, facilManifestUrl,
+	serviceAccountName, facilitatorImage,
+	pushGateway, awsAccountId string,
 	dryRun bool) *Tester {
 
 	kubeClient, err := kubernetes.NewClient(namespace, kubeConfigPath, dryRun)
@@ -35,13 +36,9 @@ func New(
 
 	return &Tester{
 		kubeClient,
-		namespace,
-		name,
-		manifestFileUrl,
-		serviceAccountName,
-		facilitatorImage,
-		pushGateway,
-		peerIdentity,
-		awsAccountId,
+		namespace, name,
+		ownManifestUrl, phaManifestUrl, facilManifestUrl,
+		serviceAccountName, facilitatorImage,
+		pushGateway, awsAccountId,
 	}
 }

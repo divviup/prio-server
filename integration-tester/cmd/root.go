@@ -12,19 +12,22 @@ import (
 )
 
 var (
-	kubeConfigPath     = ""
-	namespace          = ""
-	name               = ""
-	manifestFileUrl    = ""
+	kubeConfigPath = ""
+	namespace      = ""
+	name           = ""
+
+	ownManifestUrl   = ""
+	phaManifestUrl   = ""
+	facilManifestUrl = ""
+
 	serviceAccountName = ""
 
 	facilitatorImage = ""
 	pushGateway      = ""
-	peerIdentity     = ""
 	awsAccountId     = ""
-)
 
-var dryRun bool
+	dryRun = true
+)
 
 var rootCmd = &cobra.Command{
 	Use: "integration-tester",
@@ -63,15 +66,18 @@ func init() {
 
 	rootCmd.PersistentFlags().StringVar(&name, "name", "", "The name of this ingestor")
 	rootCmd.PersistentFlags().StringVar(&namespace, "namespace", "", "The namespace this will run in")
-	rootCmd.PersistentFlags().StringVar(&manifestFileUrl, "manifest-file-url", "", "The URL where the manifest can be accessed")
+
+	rootCmd.PersistentFlags().StringVar(&ownManifestUrl, "own-manifest-url", "", "The URL where the manifest for the ingestor (integration-tester) can be accessed")
+	rootCmd.PersistentFlags().StringVar(&phaManifestUrl, "pha-manifest-url", "", "The URL where the manifest for the public health authority (pha) can be accessed")
+	rootCmd.PersistentFlags().StringVar(&facilManifestUrl, "facil-manifest-url", "", "The URL where the manifest for facilitator can be accessed")
+
 	rootCmd.PersistentFlags().StringVar(&serviceAccountName, "service-account-name", "", "The service account name for kubernetes")
 
 	rootCmd.PersistentFlags().StringVar(&facilitatorImage, "facilitator-image", "", "The image for the facilitator")
 	rootCmd.PersistentFlags().StringVar(&pushGateway, "push-gateway", "", "The push gateway")
-	rootCmd.PersistentFlags().StringVar(&peerIdentity, "peer-identity", "", "The peer identity")
 	rootCmd.PersistentFlags().StringVar(&awsAccountId, "aws-account-id", "", "The aws account ID")
 
-	rootCmd.PersistentFlags().BoolVar(&dryRun, "dry-run", false, "If set, no operations with side effects will be done")
+	rootCmd.PersistentFlags().BoolVar(&dryRun, "dry-run", true, "If set, no operations with side effects will be done")
 }
 
 func Execute() {
