@@ -254,7 +254,10 @@ mod tests {
                 )),
                 batch_signing_key: default_ingestor_private_key(),
             },
-            packet_encryption_public_key: PublicKey::from(&PrivateKey::from_base64(DEFAULT_PHA_ECIES_PRIVATE_KEY).unwrap()).unwrap(),
+            packet_encryption_public_key: PublicKey::from(
+                &PrivateKey::from_base64(DEFAULT_PHA_ECIES_PRIVATE_KEY).unwrap(),
+            )
+            .unwrap(),
             drop_nth_packet: None,
         };
         let mut facilitator_output = SampleOutput {
@@ -264,7 +267,10 @@ mod tests {
                 )),
                 batch_signing_key: default_ingestor_private_key(),
             },
-            packet_encryption_public_key: PublicKey::from(&PrivateKey::from_base64(DEFAULT_FACILITATOR_ECIES_PRIVATE_KEY).unwrap()).unwrap(),
+            packet_encryption_public_key: PublicKey::from(
+                &PrivateKey::from_base64(DEFAULT_FACILITATOR_ECIES_PRIVATE_KEY).unwrap(),
+            )
+            .unwrap(),
             drop_nth_packet: None,
         };
 

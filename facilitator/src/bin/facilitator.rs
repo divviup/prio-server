@@ -2,7 +2,7 @@ use anyhow::{anyhow, Context, Result};
 use chrono::{prelude::Utc, NaiveDateTime};
 use clap::{value_t, App, Arg, ArgMatches, SubCommand};
 use log::{error, info};
-use prio::encrypt::{PublicKey, PrivateKey};
+use prio::encrypt::{PrivateKey, PublicKey};
 use prometheus::{register_counter, register_counter_vec, Counter};
 use ring::signature::{
     EcdsaKeyPair, KeyPair, UnparsedPublicKey, ECDSA_P256_SHA256_ASN1,
