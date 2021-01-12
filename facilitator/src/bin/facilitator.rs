@@ -446,10 +446,10 @@ fn main() -> Result<(), anyhow::Error> {
                 .arg(
                     Arg::with_name("pha-ecies-public-key")
                         .long("pha-ecies-public-key")
-                        .env("PHA_ECIES_PRIVATE_KEY")
+                        .env("PHA_ECIES_PUBLIC_KEY")
                         .value_name("B64")
                         .help(
-                            "Base64 encoded ECIES private key for the PHA \
+                            "Base64 encoded X9.62 uncompressed public key for the PHA \
                             server",
                         )
                         .required(true),
@@ -457,10 +457,10 @@ fn main() -> Result<(), anyhow::Error> {
                 .arg(
                     Arg::with_name("facilitator-ecies-public-key")
                         .long("facilitator-ecies-public-key")
-                        .env("FACILITATOR_ECIES_PRIVATE_KEY")
+                        .env("FACILITATOR_ECIES_PUBLIC_KEY")
                         .value_name("B64")
                         .help(
-                            "Base64 encoded ECIES private key for the \
+                            "Base64 encoded X9.62 uncompressed public key for the \
                             facilitator server",
                         )
                         .required(true),

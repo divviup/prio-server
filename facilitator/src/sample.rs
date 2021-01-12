@@ -130,8 +130,10 @@ pub fn generate_ingestion_sample(
                             .context("failed to encode data")?;
 
                         // Hardcoded r_pit value
-                        // Some other options: 81133978, 998314904, 1103857271
-                        // Value obtained by running an instance of libprio::Server
+                        // This value can be dynamic by running an instance of libprio::Server
+                        // However, libprio::Server takes in a private key for initialization
+                        // which we don't have in this context. Using a constant value removes
+                        // the libprio::Server dependency for creating samples
                         let r_pit: u32 = 998314904;
                         let packet_uuid = Uuid::new_v4();
 
