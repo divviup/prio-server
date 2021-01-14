@@ -42,12 +42,12 @@ func (t *Tester) Start() error {
 		return err
 	}
 
-	phaPacketEncryptionKey, err := t.getValidPacketDecryptionKey(phaManifest)
+	phaPacketEncryptionKey, err := t.getValidPacketEncryptionKey(phaManifest)
 	if err != nil {
 		return err
 	}
 
-	facilPacketEncryptionKey, err := t.getValidPacketDecryptionKey(facilManifest)
+	facilPacketEncryptionKey, err := t.getValidPacketEncryptionKey(facilManifest)
 	if err != nil {
 		return err
 	}
@@ -191,7 +191,7 @@ func ReadIngestorGlobalManifests(url string) (manifest.IngestorGlobalManifest, e
 	return m, err
 }
 
-func (t *Tester) getValidPacketDecryptionKey(manifest manifest.DataShareProcessorSpecificManifest) (string, error) {
+func (t *Tester) getValidPacketEncryptionKey(manifest manifest.DataShareProcessorSpecificManifest) (string, error) {
 	for _, value := range manifest.PacketEncryptionKeyCSRs {
 		publicKey, err := getBase64PublicKeyFromCSR(value.CertificateSigningRequest)
 		if err != nil {
@@ -200,7 +200,7 @@ func (t *Tester) getValidPacketDecryptionKey(manifest manifest.DataShareProcesso
 
 		return publicKey, nil
 	}
-	return "", fmt.Errorf("no packet encryption CSRs in manifest: %v", manifest)
+	return "", fmt.Errorf("no packet encryption certificate signing requests in manifest: %v", manifest)
 }
 
 func getBase64PublicKeyFromCSR(pemCsr string) (string, error) {

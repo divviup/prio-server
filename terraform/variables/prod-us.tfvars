@@ -62,3 +62,9 @@ aggregation_grace_period               = "4h"
 workflow_manager_version               = "0.6.0"
 facilitator_version                    = "0.6.0"
 pushgateway                            = "prometheus-pushgateway.monitoring:9091"
+
+cluster_settings = {
+  initial_node_count: 4
+  min_node_count: 4
+  max_node_count: 5
+}

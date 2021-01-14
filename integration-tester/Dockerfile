@@ -4,9 +4,9 @@ RUN apk --update add ca-certificates
 
 WORKDIR /workspace
 COPY manifest-updater manifest-updater
+COPY workflow-manager workflow-manager
 COPY integration-tester integration-tester
 WORKDIR /workspace/integration-tester
-
 # cache deps before building and copying source so that we don't need to re-download as much
 # and so that source changes don't invalidate our downloaded layer
 RUN go mod download

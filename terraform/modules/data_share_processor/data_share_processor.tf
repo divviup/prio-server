@@ -447,6 +447,10 @@ output "data_share_processor_name" {
   value = var.data_share_processor_name
 }
 
+output "ingestor_name" {
+  value = var.ingestor
+}
+
 output "kubernetes_namespace" {
   value = var.kubernetes_namespace
 }

@@ -13,6 +13,7 @@ require (
 	k8s.io/client-go v0.20.0 // indirect
 )
 
-replace github.com/abetterinternet/prio-server/manifest-updater => ../manifest-updater
-
-replace github.com/abetterinternet/prio-server/workflow-manager => ../workflow-manager
+replace (
+	github.com/abetterinternet/prio-server/workflow-manager => ../workflow-manager
+	github.com/abetterinternet/prio-server/manifest-updater => ../manifest-updater
+)

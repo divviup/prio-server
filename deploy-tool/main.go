@@ -72,14 +72,38 @@ type SpecificManifest struct {
 	// BatchSigningPublicKeys maps key identifiers to batch signing public keys.
 	// These are the keys that peers reading batches emitted by this data share
 	// processor use to verify signatures.
-	BatchSigningPublicKeys map[string]BatchSigningPublicKey `json:"batch-signing-public-keys"`
+	BatchSigningPublicKeys BatchSigningPublicKeys `json:"batch-signing-public-keys"`
 	// PacketEncryptionCertificates maps key identifiers to packet encryption
 	// certificates. The values are PEM encoded X.509 certificates, which
 	// contain the public key corresponding to the private key that the data
 	// share processor which owns the manifest uses to decrypt ingestion share
 	// packets.
-	PacketEncryptionKeys map[string]PacketEncryptionKey `json:"packet-encryption-keys"`
+	PacketEncryptionKeys PacketEncryptionKeyCSRs `json:"packet-encryption-keys"`
 }
+
+// IngestorGlobalManifest represents the global manifest file for an ingestor
+type IngestorGlobalManifest struct {
+	// Format is the version of the manifest.
+	Format int64 `json:"format"`
+	// ServerIdentity represents the server identity for the advertising party of the manifest
+	ServerIdentity ServerIdentity `json:"server-identity"`
+	// BatchSigningPublicKeys maps key identifiers to batch signing public keys.
+	// These are the keys that will be used to sign batches coming from this service
+	BatchSigningPublicKeys BatchSigningPublicKeys `json:"batch-signing-public-keys"`
+}
+
+// ServerIdentity represents the server identity for the advertising party of the manifest
+type ServerIdentity struct {
+	// AwsIamEntity is ARN of user or role - apple only
+	AwsIamEntity string `json:"aws-iam-entity"`
+	// GcpServiceAccountId is the numeric unique service account ID
+	GcpServiceAccountId string `json:"gcp-service-account-id"`
+	// GcpServiceAccountEmail is the email address of the gcp service account
+	GcpServiceAccountEmail string `json:"gcp-service-account-email"`
+}
+
+type BatchSigningPublicKeys = map[string]BatchSigningPublicKey
+type PacketEncryptionKeyCSRs = map[string]PacketEncryptionKey
 
 // TerraformOutput represents the JSON output from `terraform apply` or
 // `terraform output --json`. This struct must match the output variables
@@ -95,14 +119,15 @@ type TerraformOutput struct {
 	} `json:"own_manifest_base_url"`
 	SpecificManifests struct {
 		Value map[string]struct {
+			IngestorName        string           `json:"ingestor-name"`
 			KubernetesNamespace string           `json:"kubernetes-namespace"`
 			CertificateFQDN     string           `json:"certificate-fqdn"`
 			SpecificManifest    SpecificManifest `json:"specific-manifest"`
 		}
 	} `json:"specific_manifests"`
-	UseTestPHADecryptionKey struct {
+	HasTestEnvironment struct {
 		Value bool
-	} `json:"use_test_pha_decryption_key"`
+	} `json:"has_test_environment"`
 }
 
 type privateKeyMarshaler func(*ecdsa.PrivateKey) ([]byte, error)
@@ -134,7 +159,7 @@ func marshalTestPHADecryptionKey(ecdsaKey *ecdsa.PrivateKey) ([]byte, error) {
 // encoded PKCS#8 encoding of that key in a Kubernetes secret with the provided
 // keyName, in the provided namespace. Returns the private key so the caller may
 // use it to populate specific manifests.
-func generateAndDeployKeyPair(namespace, keyName string, keyMarshaler privateKeyMarshaler) (*ecdsa.PrivateKey, error) {
+func generateAndDeployKeyPair(namespace, keyName, ingestorName, keyType string, keyMarshaler privateKeyMarshaler) (*ecdsa.PrivateKey, error) {
 	p256Key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	if err != nil {
 		return nil, fmt.Errorf("failed to generate P-256 key: %w", err)
@@ -170,9 +195,15 @@ func generateAndDeployKeyPair(namespace, keyName string, keyMarshaler privateKey
 	secretArgument := fmt.Sprintf("--from-file=secret_key=%s", tempFile.Name())
 	kubectlCreate := exec.Command("kubectl", "-n", namespace, "create",
 		"secret", "generic", keyName, secretArgument, "--dry-run=client", "-o=json")
+
+	kubectlLabel := exec.Command("kubectl", "label", "-f-", "--dry-run",
+		"-o=json", "--local",
+		fmt.Sprintf("type=%s", keyType), fmt.Sprintf("ingestor=%s", ingestorName))
+
 	kubectlApply := exec.Command("kubectl", "apply", "-f", "-")
+
 	read, write := io.Pipe()
-	kubectlApply.Stdin = read
+	kubectlLabel.Stdin = read
 	kubectlCreate.Stdout = write
 
 	// Do this async because if we don't close `kubectl create`'s stdout,
@@ -180,6 +211,16 @@ func generateAndDeployKeyPair(namespace, keyName string, keyMarshaler privateKey
 	go func() {
 		defer write.Close()
 		if err := kubectlCreate.Run(); err != nil {
+			log.Fatalf("failed to run kubectl create: %v", err)
+		}
+	}()
+
+	read2, write2 := io.Pipe()
+	kubectlLabel.Stdout = write2
+	kubectlApply.Stdin = read2
+	go func() {
+		defer write2.Close()
+		if err := kubectlLabel.Run(); err != nil {
 			log.Fatalf("failed to run kubectl create: %v", err)
 		}
 	}()
@@ -204,6 +245,84 @@ func manifestExists(fqdn, dsp string) bool {
 	return resp.StatusCode == 200
 }
 
+func setupTestEnvironment(kubernetesNamespace, ingestorName, manifestBucket string) {
+	name := "sample-maker-signing-key"
+	batchSigningPublicKey := createBatchSigningPublicKey(kubernetesNamespace, name, ingestorName)
+
+	manifest := IngestorGlobalManifest{
+		Format: 1,
+		ServerIdentity: ServerIdentity{
+			AwsIamEntity:           "irrelevant in test environment",
+			GcpServiceAccountId:    "irrelevant in test environment",
+			GcpServiceAccountEmail: "0",
+		},
+		BatchSigningPublicKeys: map[string]BatchSigningPublicKey{
+			name: batchSigningPublicKey,
+		},
+	}
+
+	destination := fmt.Sprintf("gs://%s/%s/global-manifest.json", manifestBucket, ingestorName)
+
+	log.Printf("uploading specific manifest %s", destination)
+	gsutil := exec.Command("gsutil",
+		"-h", "Content-Type:application/json",
+		"-h", "Cache-Control:no-cache",
+		"cp", "-", destination)
+	stdin, err := gsutil.StdinPipe()
+	if err != nil {
+		log.Fatalf("could not get pipe to gsutil stdin: %v", err)
+	}
+	wg := sync.WaitGroup{}
+	// We're going to need to sync once the goroutine below is complete
+	wg.Add(1)
+
+	// Do this async because if we don't close gsutil's stdin, it will
+	// never be able to get started.
+	go func() {
+		defer stdin.Close()
+		defer wg.Done()
+		log.Printf("uploading manifest %+v", manifest)
+		manifestEncoder := json.NewEncoder(stdin)
+		if err := manifestEncoder.Encode(manifest); err != nil {
+			log.Fatalf("failed to encode manifest into gsutil stdin: %v", err)
+		}
+	}()
+
+	if output, err := gsutil.CombinedOutput(); err != nil {
+		log.Fatalf("gsutil failed: %v\noutput: %s", err, output)
+	}
+	wg.Wait()
+
+}
+
+func createBatchSigningPublicKey(kubernetesNamespace, name, ingestorName string) BatchSigningPublicKey {
+	privateKey, err := generateAndDeployKeyPair(kubernetesNamespace, name, ingestorName, "batch-signing-key", marshalPKCS8PrivateKey)
+	if err != nil {
+		log.Fatalf("%s", err)
+	}
+
+	pkixPublic, err := x509.MarshalPKIXPublicKey(privateKey.Public())
+	if err != nil {
+		log.Fatalf("failed to marshal ECDSA public key to PKIX: %v", err)
+	}
+
+	block := pem.Block{
+		Type:  "PUBLIC KEY",
+		Bytes: pkixPublic,
+	}
+
+	expiration := time.
+		Now().
+		AddDate(0, 0, 90). // key expires in 90 days
+		UTC().
+		Format(time.RFC3339)
+
+	return BatchSigningPublicKey{
+		PublicKey:  string(pem.EncodeToMemory(&block)),
+		Expiration: expiration,
+	}
+}
+
 func main() {
 	wg := sync.WaitGroup{}
 	var terraformOutput TerraformOutput
@@ -215,9 +334,13 @@ func main() {
 	certificatesByNamespace := map[string]PacketEncryptionKey{}
 
 	for dataShareProcessorName, manifestWrapper := range terraformOutput.SpecificManifests.Value {
+		if terraformOutput.HasTestEnvironment.Value {
+			setupTestEnvironment(manifestWrapper.KubernetesNamespace, manifestWrapper.IngestorName, terraformOutput.ManifestBucket.Value)
+		}
+
 		if manifestExists(terraformOutput.OwnManifestBaseURL.Value, dataShareProcessorName) {
 			log.Printf("manifest for %s exists - ignoring", dataShareProcessorName)
-			continue
+			// continue
 		}
 		newBatchSigningPublicKeys := map[string]BatchSigningPublicKey{}
 		for name, batchSigningPublicKey := range manifestWrapper.SpecificManifest.BatchSigningPublicKeys {
@@ -226,30 +349,8 @@ func main() {
 				continue
 			}
 			log.Printf("generating ECDSA P256 key %s", name)
-			privateKey, err := generateAndDeployKeyPair(manifestWrapper.KubernetesNamespace, name, marshalPKCS8PrivateKey)
-			if err != nil {
-				log.Fatalf("%s", err)
-			}
 
-			pkixPublic, err := x509.MarshalPKIXPublicKey(privateKey.Public())
-			if err != nil {
-				log.Fatalf("failed to marshal ECDSA public key to PKIX: %v", err)
-			}
-
-			block := pem.Block{
-				Type:  "PUBLIC KEY",
-				Bytes: pkixPublic,
-			}
-
-			expiration := time.
-				Now().
-				AddDate(0, 0, 90). // key expires in 90 days
-				UTC().
-				Format(time.RFC3339)
-			newBatchSigningPublicKeys[name] = BatchSigningPublicKey{
-				PublicKey:  string(pem.EncodeToMemory(&block)),
-				Expiration: expiration,
-			}
+			newBatchSigningPublicKeys[name] = createBatchSigningPublicKey(manifestWrapper.KubernetesNamespace, name, manifestWrapper.IngestorName)
 		}
 
 		manifestWrapper.SpecificManifest.BatchSigningPublicKeys = newBatchSigningPublicKeys
@@ -270,15 +371,7 @@ func main() {
 
 			log.Printf("generating and certifying P256 key %s", name)
 			keyMarshaler := marshalX962UncompressedPrivateKey
-			if terraformOutput.UseTestPHADecryptionKey.Value {
-				// If we are configuring a special test environment, we populate
-				// Kubernetes secrets with a fixed packet decryption key. This
-				// means that the public key in the certificate in the manifest
-				// won't match the actual packet decryption key, but in this
-				// test setup, nothing currently consults those certificates.
-				keyMarshaler = marshalTestPHADecryptionKey
-			}
-			privKey, err := generateAndDeployKeyPair(manifestWrapper.KubernetesNamespace, name, keyMarshaler)
+			privKey, err := generateAndDeployKeyPair(manifestWrapper.KubernetesNamespace, name, manifestWrapper.IngestorName, "packet-decryption-key", keyMarshaler)
 			if err != nil {
 				log.Fatalf("%s", err)
 			}

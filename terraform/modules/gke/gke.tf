@@ -18,6 +18,14 @@ variable "machine_type" {
   type = string
 }
 
+variable "cluster_settings" {
+  type = object({
+    initial_node_count: number
+    min_node_count: number
+    max_node_count: number
+  })
+}
+
 resource "google_container_cluster" "cluster" {
   # The google provider seems to have not been updated to consider VPC-native
   # clusters as GA, even though they are GA and in fact are now the default for
@@ -84,10 +92,10 @@ resource "google_container_node_pool" "worker_nodes" {
   name               = "${var.resource_prefix}-node-pool"
   location           = var.gcp_region
   cluster            = google_container_cluster.cluster.name
-  initial_node_count = 4
+  initial_node_count = var.cluster_settings.initial_node_count
   autoscaling {
-    min_node_count = 4
-    max_node_count = 5
+    min_node_count = var.cluster_settings.min_node_count
+    max_node_count = var.cluster_settings.max_node_count
   }
   node_config {
     disk_size_gb = "25"

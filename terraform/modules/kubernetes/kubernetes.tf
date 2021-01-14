@@ -463,6 +463,53 @@ resource "kubernetes_deployment" "aggregate" {
   }
 }
 
+resource "kubernetes_cron_job" "integration-tester" {
+  count = var.is_env_with_ingestor ? 1 : 0
+  metadata {
+    name      = "integration-tester-${var.ingestor}-${var.environment}"
+    namespace = var.kubernetes_namespace
+
+    annotations = {
+      environment = var.environment
+    }
+  }
+  spec {
+    schedule                      = "* * * * *"
+    concurrency_policy            = "Forbid"
+    successful_jobs_history_limit = 5
+    failed_jobs_history_limit     = 3
+    job_template {
+      metadata {}
+      spec {
+        template {
+          metadata {}
+          spec {
+            restart_policy                  = "Never"
+            service_account_name            = module.account_mapping.kubernetes_account_name
+            automount_service_account_token = true
+            container {
+              name  = "integration-tester"
+              image = "us.gcr.io/prio-bringup-290620/integration-tester:latest"
+              args = [
+                "--name", var.ingestor,
+                "--namespace", var.kubernetes_namespace,
+                "--own-manifest-url", "https://${var.own_manifest_base_url}/${var.ingestor}/global-manifest.json",
+                "--pha-manifest-url", "https://${var.peer_manifest_base_url}/${var.data_share_processor_name}-manifest.json",
+                "--facil-manifest-url", "https://${var.own_manifest_base_url}/${var.data_share_processor_name}-manifest.json",
+                "--service-account-name", module.account_mapping.kubernetes_account_name,
+                "--facilitator-image", "us.gcr.io/prio-bringup-290620/facilitator:latest",
+                "--push-gateway", var.pushgateway,
+                "--aws-account-id", data.aws_caller_identity.current.account_id,
+                "--dry-run", "false"
+              ]
+            }
+          }
+        }
+      }
+    }
+  }
+}
+
 resource "kubernetes_cron_job" "sample_maker" {
   # This sample maker acts as an ingestion server in our test setup. It only
   # gets created in one of the two envs, and writes to both env's ingestion
@@ -477,7 +524,7 @@ resource "kubernetes_cron_job" "sample_maker" {
     }
   }
   spec {
-    schedule                      = "* * * * *"
+    schedule                      = "1 1 1 1 1"
     concurrency_policy            = "Forbid"
     successful_jobs_history_limit = 5
     failed_jobs_history_limit     = 3
@@ -555,12 +602,27 @@ resource "kubernetes_role" "workflow_manager_role" {
 
   rule {
     // API group "" means the core API group.
-    api_groups = ["batch", ""]
+    api_groups = [""]
     // Workflow manager can list pods and jobs.
     // Note: Some of these permissions will probably wind up not being needed.
     // Starting with a moderately generous demonstration set.
-    resources = ["namespaces", "pods", "jobs"]
+    resources = ["namespaces", "pods"]
     verbs     = ["get", "list", "watch"]
+  }
+
+  rule {
+    api_groups = [""]
+    // workflow-manager needs to be able to list and get secrets
+    // this is how the integration tester works as they share roles
+    resources  = ["secrets"]
+    verbs      = ["list", "get"]
+  }
+
+  rule {
+    api_groups = ["batch"]
+    // integration-tester needs to make jobs
+    resources  = ["jobs"]
+    verbs      = ["get", "list", "watch", "create"]
   }
 }
 

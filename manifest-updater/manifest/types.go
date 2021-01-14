@@ -24,7 +24,7 @@ type DataShareProcessorSpecificManifest struct {
 	// which contain the public key corresponding to the ECDSA P256 private key
 	// that the data share processor which owns the manifest uses to decrypt
 	// ingestion share packets.
-	PacketEncryptionKeyCSRs PacketEncryptionKeyCSRs `json:"packet-encryption-key-csrs"`
+	PacketEncryptionKeyCSRs PacketEncryptionKeyCSRs `json:"packet-encryption-keys"`
 }
 
 // IngestorGlobalManifest represents the global manifest file for an ingestor

@@ -141,6 +141,14 @@ variable "facilitator_version" {
   default = "latest"
 }
 
+variable "cluster_settings" {
+  type = object({
+    initial_node_count: number
+    min_node_count: number
+    max_node_count: number
+  })
+}
+
 terraform {
   backend "gcs" {}
 
@@ -258,6 +266,7 @@ module "gke" {
   machine_type    = var.machine_type
   network         = google_compute_network.network.self_link
   base_subnet     = local.cluster_subnet_block
+  cluster_settings = var.cluster_settings
 
   depends_on = [
     google_project_service.compute,
@@ -423,6 +432,7 @@ output "gke_kubeconfig" {
 
 output "specific_manifests" {
   value = { for v in module.data_share_processors : v.data_share_processor_name => {
+    ingestor-name        = v.ingestor_name
     kubernetes-namespace = v.kubernetes_namespace
     certificate-fqdn     = v.certificate_fqdn
     specific-manifest    = v.specific_manifest
@@ -436,4 +446,8 @@ output "own_manifest_base_url" {
 
 output "use_test_pha_decryption_key" {
   value = lookup(var.test_peer_environment, "env_without_ingestor", "") == var.environment
+}
+
+output "has_test_environment" {
+  value = lookup(var.test_peer_environment, "env_with_ingestor", "") == var.environment
 }

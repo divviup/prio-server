@@ -5,8 +5,7 @@ import (
 	"context"
 	"fmt"
 	"sort"
-
-	"github.com/letsencrypt/prio-server/workflow-manager/utils"
+	"time"
 
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -67,7 +66,11 @@ func (c *Client) ListJobs(options metav1.ListOptions) (map[string]batchv1.Job, e
 	// provide on subsequent requests.
 	continueToken := ""
 	for {
-		ctx, cancel := utils.ContextWithTimeout()
+		// Don't pull this in from utils - this module is being used by the integration-tester
+		// and go's build system needs this to not pull in dependencies from other workflow-manager modules
+		// e.g. it's perfectly fine for this to pull external dependencies, just nothing directly from workflow-manager
+		ctx, cancel := 	context.WithTimeout(context.Background(), 30*time.Second)
+
 		defer cancel()
 
 		options.Limit = 1000
