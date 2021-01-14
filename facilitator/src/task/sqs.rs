@@ -5,7 +5,7 @@ use rusoto_core::Region;
 use rusoto_sqs::{
     ChangeMessageVisibilityRequest, DeleteMessageRequest, ReceiveMessageRequest, Sqs, SqsClient,
 };
-use std::{marker::PhantomData, str::FromStr};
+use std::{convert::TryFrom, marker::PhantomData, str::FromStr, time::Duration};
 use tokio::runtime::Runtime;
 
 use crate::{
@@ -129,15 +129,45 @@ impl<T: Task> TaskQueue<T> for AwsSqsTaskQueue<T> {
             task.acknowledgment_id, self.queue_url
         );
 
+        Ok(self
+            .change_message_visibility(&task, &Duration::from_secs(0))
+            .context("failed to nacknowledge task")?)
+    }
+
+    fn extend_task_deadline(&mut self, task: &TaskHandle<T>, increment: &Duration) -> Result<()> {
+        info!(
+            "extending deadline on task {} in queue {} by 10 minutes",
+            task.acknowledgment_id, self.queue_url
+        );
+
+        Ok(self
+            .change_message_visibility(task, increment)
+            .context("failed to extend deadline on task")?)
+    }
+}
+
+impl<T: Task> AwsSqsTaskQueue<T> {
+    /// Changes the message visibility of the SQS message described by the TaskHandle, resetting it
+    /// to the specified visibility timeout.
+    fn change_message_visibility(
+        &mut self,
+        task: &TaskHandle<T>,
+        visibility_timeout: &Duration,
+    ) -> Result<()> {
+        let timeout = i64::try_from(visibility_timeout.as_secs()).context(format!(
+            "timeout value {:?} cannot be encoded into ChangeMessageVisibilityRequest",
+            visibility_timeout
+        ))?;
+
         let request = ChangeMessageVisibilityRequest {
             queue_url: self.queue_url.clone(),
             receipt_handle: task.acknowledgment_id.clone(),
-            visibility_timeout: 0,
+            visibility_timeout: timeout,
         };
 
         Ok(self
             .runtime
             .block_on(self.client.change_message_visibility(request))
-            .context("failed to change message visibility/nacknowledge message in SQS")?)
+            .context("failed to change message visibility message in SQS")?)
     }
 }
