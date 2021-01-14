@@ -1,13 +1,19 @@
 package monitor
 
-type CounterMonitor interface {
+type GaugeMonitor interface {
 	Inc()
+	Set(float64)
+	SetToCurrentTime()
 }
 
-type NoopCounter struct {
+type NoopGauge struct {
 	counted int
 }
 
-func (c *NoopCounter) Inc() {
+func (c *NoopGauge) Inc() {
 	c.counted = c.counted + 1
 }
+
+func (c *NoopGauge) Set(value float64) {}
+
+func (c *NoopGauge) SetToCurrentTime() {}

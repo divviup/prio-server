@@ -187,7 +187,7 @@ func TestScheduleIntakeTasks(t *testing.T) {
 			aggregateTaskEnqueuer := mockEnqueuer{enqueuedTasks: []task.Task{}}
 			ownValidationBucket := mockBucket{writtenObjectKeys: []string{}}
 
-			scheduleTasks(scheduleTasksConfig{
+			err := scheduleTasks(scheduleTasksConfig{
 				isFirst: false,
 				clock:   clock,
 				intakeFiles: []string{
@@ -205,6 +205,9 @@ func TestScheduleIntakeTasks(t *testing.T) {
 				aggregationPeriod:       aggregationPeriod,
 				gracePeriod:             gracePeriod,
 			})
+			if err != nil {
+				t.Errorf("unexpected error %q", err)
+			}
 
 			if testCase.expectedIntakeTask == nil {
 				if len(intakeTaskEnqueuer.enqueuedTasks) != 0 {
@@ -470,7 +473,7 @@ func TestScheduleAggregationTasks(t *testing.T) {
 			aggregateTaskEnqueuer := mockEnqueuer{enqueuedTasks: []task.Task{}}
 			ownValidationBucket := mockBucket{writtenObjectKeys: []string{}}
 
-			scheduleTasks(scheduleTasksConfig{
+			err := scheduleTasks(scheduleTasksConfig{
 				isFirst: false,
 				clock:   clock,
 				intakeFiles: []string{
@@ -488,6 +491,9 @@ func TestScheduleAggregationTasks(t *testing.T) {
 				aggregationPeriod:       aggregationPeriod,
 				gracePeriod:             gracePeriod,
 			})
+			if err != nil {
+				t.Errorf("unexpected error: %q", err)
+			}
 
 			if len(intakeTaskEnqueuer.enqueuedTasks) != 0 {
 				t.Errorf("unexpected intake tasks scheduled: %q", intakeTaskEnqueuer.enqueuedTasks)
