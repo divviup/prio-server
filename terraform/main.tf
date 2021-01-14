@@ -143,9 +143,9 @@ variable "facilitator_version" {
 
 variable "cluster_settings" {
   type = object({
-    initial_node_count: number
-    min_node_count: number
-    max_node_count: number
+    initial_node_count : number
+    min_node_count : number
+    max_node_count : number
   })
 }
 
@@ -258,14 +258,14 @@ module "manifest" {
 }
 
 module "gke" {
-  source          = "./modules/gke"
-  environment     = var.environment
-  resource_prefix = "prio-${var.environment}"
-  gcp_region      = var.gcp_region
-  gcp_project     = var.gcp_project
-  machine_type    = var.machine_type
-  network         = google_compute_network.network.self_link
-  base_subnet     = local.cluster_subnet_block
+  source           = "./modules/gke"
+  environment      = var.environment
+  resource_prefix  = "prio-${var.environment}"
+  gcp_region       = var.gcp_region
+  gcp_project      = var.gcp_project
+  machine_type     = var.machine_type
+  network          = google_compute_network.network.self_link
+  base_subnet      = local.cluster_subnet_block
   cluster_settings = var.cluster_settings
 
   depends_on = [
@@ -327,15 +327,22 @@ locals {
   locality_ingestor_pairs = {
     for pair in setproduct(toset(var.localities), keys(var.ingestors)) :
     "${pair[0]}-${pair[1]}" => {
-      ingestor                                = pair[1]
-      kubernetes_namespace                    = kubernetes_namespace.namespaces[pair[0]].metadata[0].name
-      packet_decryption_key_kubernetes_secret = kubernetes_secret.ingestion_packet_decryption_keys[pair[0]].metadata[0].name
-      ingestor_manifest_base_url              = var.ingestors[pair[1]].manifest_base_url
-      intake_worker_count                     = var.ingestors[pair[1]].localities[pair[0]].intake_worker_count
-      aggregate_worker_count                  = var.ingestors[pair[1]].localities[pair[0]].aggregate_worker_count
-    }
+      ingestor                              = pair[1]
+    kubernetes_namespace                    = kubernetes_namespace.namespaces[pair[0]].metadata[0].name
+    packet_decryption_key_kubernetes_secret = kubernetes_secret.ingestion_packet_decryption_keys[pair[0]].metadata[0].name
+    ingestor_manifest_base_url              = var.ingestors[pair[1]].manifest_base_url
+    intake_worker_count                     = var.ingestors[pair[1]].localities[pair[0]].intake_worker_count
+    aggregate_worker_count                  = var.ingestors[pair[1]].localities[pair[0]].aggregate_worker_count
+  }
   }
   peer_share_processor_server_identity = jsondecode(data.http.peer_share_processor_global_manifest.body).server-identity
+}
+
+locals {
+  // Does this series of deployment have a fake ingestor (integration-tester)
+  deployment_has_ingestor = lookup(var.test_peer_environment, "env_with_ingestor", "") == "" ? false : true
+  // Does this specific environment home the ingestor
+  is_env_with_ingestor    = local.deployment_has_ingestor && lookup(var.test_peer_environment, "env_with_ingestor", "") == var.environment ? true : false
 }
 
 # Call the locality_kubernetes module per
@@ -407,13 +414,16 @@ resource "google_service_account_iam_binding" "data_share_processors_to_sum_part
 }
 
 module "fake_server_resources" {
-  count                        = lookup(var.test_peer_environment, "env_with_ingestor", "") == "" ? 0 : 1
+  count                        = local.is_env_with_ingestor ? 1 : 0
   source                       = "./modules/fake_server_resources"
   manifest_bucket              = module.manifest.bucket
   gcp_region                   = var.gcp_region
   environment                  = var.environment
   sum_part_bucket_writer_email = google_service_account.sum_part_bucket_writer.email
-  ingestors                    = keys(var.ingestors)
+  gcp_project                  = var.gcp_project
+
+  depends_on = [
+    module.gke]
 }
 
 module "monitoring" {
@@ -431,13 +441,22 @@ output "gke_kubeconfig" {
 }
 
 output "specific_manifests" {
-  value = { for v in module.data_share_processors : v.data_share_processor_name => {
+  value = {for v in module.data_share_processors : v.data_share_processor_name => {
     ingestor-name        = v.ingestor_name
     kubernetes-namespace = v.kubernetes_namespace
     certificate-fqdn     = v.certificate_fqdn
     specific-manifest    = v.specific_manifest
-    }
   }
+  }
+}
+
+output "singleton_ingestor" {
+  value = local.is_env_with_ingestor ? {
+    aws_iam_entity              = module.fake_server_resources[0].aws_iam_entity
+    gcp_service_account_id      = module.fake_server_resources[0].gcp_service_account_id
+    gcp_service_account_email   = module.fake_server_resources[0].gcp_service_account_email
+    tester_kubernetes_namespace = module.fake_server_resources[0].tester_kubernetes_namespace
+  } : {}
 }
 
 output "own_manifest_base_url" {

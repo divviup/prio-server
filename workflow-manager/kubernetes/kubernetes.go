@@ -68,7 +68,6 @@ func (c *Client) ListJobs(options metav1.ListOptions) (map[string]batchv1.Job, e
 	for {
 		// Don't pull this in from utils - this module is being used by the integration-tester
 		// and go's build system needs this to not pull in dependencies from other workflow-manager modules
-		// e.g. it's perfectly fine for this to pull external dependencies, just nothing directly from workflow-manager
 		ctx, cancel := 	context.WithTimeout(context.Background(), 30*time.Second)
 
 		defer cancel()

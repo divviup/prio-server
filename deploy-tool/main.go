@@ -128,6 +128,17 @@ type TerraformOutput struct {
 	HasTestEnvironment struct {
 		Value bool
 	} `json:"has_test_environment"`
+	SingletonIngestor struct {
+		Value *SingletonIngestor
+	} `json:"singleton_ingestor"`
+}
+
+// GlobalIngestor defines the structure for the global fake ingestor (apple-like ingestor) to create a manifest for
+type SingletonIngestor struct {
+	AwsIamEntity              string `json:"aws_iam_entity"`
+	GcpServiceAccountEmail    string `json:"gcp_service_account_email"`
+	GcpServiceAccountId       string `json:"gcp_service_account_id"`
+	TesterKubernetesNamespace string `json:"tester_kubernetes_namespace"`
 }
 
 type privateKeyMarshaler func(*ecdsa.PrivateKey) ([]byte, error)
@@ -245,23 +256,23 @@ func manifestExists(fqdn, dsp string) bool {
 	return resp.StatusCode == 200
 }
 
-func setupTestEnvironment(kubernetesNamespace, ingestorName, manifestBucket string) {
-	name := "sample-maker-signing-key"
-	batchSigningPublicKey := createBatchSigningPublicKey(kubernetesNamespace, name, ingestorName)
+func setupTestEnvironment(ingestor *SingletonIngestor, manifestBucket string) {
+	name := "integration-tester-signing-key"
+	batchSigningPublicKey := createBatchSigningPublicKey(ingestor.TesterKubernetesNamespace, name, "")
 
 	manifest := IngestorGlobalManifest{
 		Format: 1,
 		ServerIdentity: ServerIdentity{
-			AwsIamEntity:           "irrelevant in test environment",
-			GcpServiceAccountId:    "irrelevant in test environment",
-			GcpServiceAccountEmail: "0",
+			AwsIamEntity:           ingestor.AwsIamEntity,
+			GcpServiceAccountId:    ingestor.GcpServiceAccountId,
+			GcpServiceAccountEmail: ingestor.GcpServiceAccountEmail,
 		},
 		BatchSigningPublicKeys: map[string]BatchSigningPublicKey{
 			name: batchSigningPublicKey,
 		},
 	}
 
-	destination := fmt.Sprintf("gs://%s/%s/global-manifest.json", manifestBucket, ingestorName)
+	destination := fmt.Sprintf("gs://%s/singleton-ingestor/global-manifest.json", manifestBucket)
 
 	log.Printf("uploading specific manifest %s", destination)
 	gsutil := exec.Command("gsutil",
@@ -333,11 +344,11 @@ func main() {
 
 	certificatesByNamespace := map[string]PacketEncryptionKey{}
 
-	for dataShareProcessorName, manifestWrapper := range terraformOutput.SpecificManifests.Value {
-		if terraformOutput.HasTestEnvironment.Value {
-			setupTestEnvironment(manifestWrapper.KubernetesNamespace, manifestWrapper.IngestorName, terraformOutput.ManifestBucket.Value)
-		}
+	if terraformOutput.SingletonIngestor.Value != nil {
+		setupTestEnvironment(terraformOutput.SingletonIngestor.Value, terraformOutput.ManifestBucket.Value)
+	}
 
+	for dataShareProcessorName, manifestWrapper := range terraformOutput.SpecificManifests.Value {
 		if manifestExists(terraformOutput.OwnManifestBaseURL.Value, dataShareProcessorName) {
 			log.Printf("manifest for %s exists - ignoring", dataShareProcessorName)
 			// continue

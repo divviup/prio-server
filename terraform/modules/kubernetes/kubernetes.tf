@@ -614,15 +614,15 @@ resource "kubernetes_role" "workflow_manager_role" {
     api_groups = [""]
     // workflow-manager needs to be able to list and get secrets
     // this is how the integration tester works as they share roles
-    resources  = ["secrets"]
-    verbs      = ["list", "get"]
+    resources = ["secrets"]
+    verbs     = ["list", "get"]
   }
 
   rule {
     api_groups = ["batch"]
     // integration-tester needs to make jobs
-    resources  = ["jobs"]
-    verbs      = ["get", "list", "watch", "create"]
+    resources = ["jobs"]
+    verbs     = ["get", "list", "watch", "create"]
   }
 }
 
