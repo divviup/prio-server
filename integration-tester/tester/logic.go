@@ -228,12 +228,15 @@ func getBase64PublicKeyFromCSR(pemCsr string) (string, error) {
 }
 
 func (t *Tester) getValidBatchSigningKey(manifest manifest.IngestorGlobalManifest) (*corev1.Secret, error) {
-	labelSelector := fmt.Sprintf("type=batch-signing-key,ingestor=%s", t.name)
+	labelSelector := "type=batch-signing-key"
 	secrets, err := t.kubeClient.GetSortedSecrets(labelSelector)
 	if err != nil {
 		return nil, err
 	}
 	secretMap := indexSecretsByName(secrets)
+	for key, _ := range secretMap {
+		log.Printf("Secret found: %s\n", key)
+	}
 	for name := range manifest.BatchSigningPublicKeys {
 		val, ok := secretMap[name]
 

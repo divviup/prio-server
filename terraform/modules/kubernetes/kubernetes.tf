@@ -467,7 +467,7 @@ resource "kubernetes_cron_job" "integration-tester" {
   count = var.is_env_with_ingestor ? 1 : 0
   metadata {
     name      = "integration-tester-${var.ingestor}-${var.environment}"
-    namespace = var.kubernetes_namespace
+    namespace = "tester"
 
     annotations = {
       environment = var.environment
@@ -485,18 +485,18 @@ resource "kubernetes_cron_job" "integration-tester" {
           metadata {}
           spec {
             restart_policy                  = "Never"
-            service_account_name            = module.account_mapping.kubernetes_account_name
+            service_account_name            = "ingestion-identity"
             automount_service_account_token = true
             container {
               name  = "integration-tester"
               image = "us.gcr.io/prio-bringup-290620/integration-tester:latest"
               args = [
                 "--name", var.ingestor,
-                "--namespace", var.kubernetes_namespace,
-                "--own-manifest-url", "https://${var.own_manifest_base_url}/${var.ingestor}/global-manifest.json",
+                "--namespace", "tester",
+                "--own-manifest-url", "https://${var.ingestor_manifest_base_url}/global-manifest.json",
                 "--pha-manifest-url", "https://${var.peer_manifest_base_url}/${var.data_share_processor_name}-manifest.json",
                 "--facil-manifest-url", "https://${var.own_manifest_base_url}/${var.data_share_processor_name}-manifest.json",
-                "--service-account-name", module.account_mapping.kubernetes_account_name,
+                "--service-account-name", "ingestion-identity",
                 "--facilitator-image", "us.gcr.io/prio-bringup-290620/facilitator:latest",
                 "--push-gateway", var.pushgateway,
                 "--aws-account-id", data.aws_caller_identity.current.account_id,
