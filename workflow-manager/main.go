@@ -78,8 +78,8 @@ var (
 )
 
 func fail(format string, args ...interface{}) {
-	log.Printf(format, args...)
 	workflowManagerLastFailure.SetToCurrentTime()
+	log.Fatalf(format, args...)
 }
 
 func main() {
