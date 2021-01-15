@@ -361,9 +361,9 @@ impl<'a, 'b> AppArgumentAdder for App<'a, 'b> {
                 .help("API endpoint for GCP PubSub. Optional."),
         )
         .arg(
-            Arg::with_name("sqs-region")
-                .long("sqs-region")
-                .env("SQS_REGION")
+            Arg::with_name("aws-sqs-region")
+                .long("aws-sqs-region")
+                .env("AWS_SQS_REGION")
                 .help("AWS region in which to use SQS"),
         )
     }
