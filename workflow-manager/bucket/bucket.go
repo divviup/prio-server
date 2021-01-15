@@ -199,6 +199,12 @@ func (b *Bucket) listFilesGS() ([]string, error) {
 
 	bkt := client.Bucket(b.bucketName)
 	query := &storage.Query{Prefix: ""}
+	// https://pkg.go.dev/cloud.google.com/go/storage#Query.SetAttrSelection
+	// Performance optimization, since we only need the name
+	err = query.SetAttrSelection([]string{"Name"})
+	if err != nil {
+		return nil, fmt.Errorf("query.SetAttrSelection: %w", err)
+	}
 
 	log.Printf("looking for ready batches in gs://%s as (ambient service account)", b.bucketName)
 	var output []string
