@@ -1,10 +1,12 @@
 package bucket
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"log"
 	"strings"
+	"time"
 
 	leaws "github.com/letsencrypt/prio-server/workflow-manager/aws"
 	"github.com/letsencrypt/prio-server/workflow-manager/utils"
@@ -173,8 +175,9 @@ func (b *Bucket) writeTaskMarkerS3(marker string) error {
 }
 
 func (b *Bucket) gcsClient() (*storage.Client, error) {
-	ctx, cancel := utils.ContextWithTimeout()
-	defer cancel()
+	// Google documentation advises against timeouts on client creation
+	// https://godoc.org/cloud.google.com/go#hdr-Timeouts_and_Cancellation
+	ctx := context.Background()
 
 	if b.identity != "" {
 		return nil, fmt.Errorf("workflow-manager doesn't support non-default identity %q for GS Bucket %q", b.identity, b.bucketName)
@@ -189,7 +192,9 @@ func (b *Bucket) gcsClient() (*storage.Client, error) {
 }
 
 func (b *Bucket) listFilesGS() ([]string, error) {
-	ctx, cancel := utils.ContextWithTimeout()
+	// This timeout has to cover potentially numerous roundtrips to the
+	// paginated API for listing objects, so we use a longer timeout than usual.
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
 	defer cancel()
 
 	client, err := b.gcsClient()
