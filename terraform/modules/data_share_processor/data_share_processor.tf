@@ -116,6 +116,14 @@ variable "aggregate_worker_count" {
   type = number
 }
 
+variable "deployment_has_ingestor" {
+  type = bool
+}
+
+variable "is_env_with_ingestor" {
+  type = bool
+}
+
 # We need the ingestion server's manifest so that we can discover the GCP
 # service account it will use to upload ingestion batches. Some ingestors
 # (Apple) are singletons, and advertise a single global manifest which contains
@@ -154,47 +162,25 @@ locals {
     ) : (
     jsondecode(data.http.ingestor_specific_manifest[0].body).server-identity.gcp-service-account-email
   )
-  resource_prefix         = "prio-${var.environment}-${var.data_share_processor_name}"
-  is_env_with_ingestor    = lookup(var.test_peer_environment, "env_with_ingestor", "") == var.environment
-  is_env_without_ingestor = lookup(var.test_peer_environment, "env_without_ingestor", "") == var.environment
+  ingestor_aws_iam_entity = local.ingestor_global_manifest_exists ? (
+    jsondecode(data.http.ingestor_global_manifest[0].body).server-identity.aws-iam-entity
+  ) : ("")
+  resource_prefix = "prio-${var.environment}-${var.data_share_processor_name}"
   # There are three cases for who is accessing this data share processor's
   # storage buckets, listed in the order we check for them:
   #
-  # 1 - This is a test environment that creates fake ingestors and whose storage
-  #     is exclusively in GCS.
-  # 2 - This is a test environment that does _not_ create fake ingestors and
-  #     whose storage is partially in S3.
-  # 3 - This is a non-test environment whose storage is exclusively in GCS and
-  #     for an ingestor that advertises a GCP service account email.
+  # 1 - This is a test environment that does _not_ create fake ingestors and
+  #     whose storage is partially in s3.
+  # 2 - This is either a test, or non-test environment whose storage is
+  #     exclusively in GCS and for an ingestor that advertises a GCP service account email.
   #
   # The case we no longer support is a non-test environment for an ingestor that
   # advertises an AWS role.
-  bucket_access_identities = local.is_env_with_ingestor ? (
-    {
-      # Our sample-maker jobs write to our own ingestion bucket in GCS, so no
-      # special auth is needed
-      ingestion_bucket_writer = module.kubernetes.service_account_email
-      # No special auth is needed to read from the ingestion bucket in GCS
-      ingestion_bucket_reader = module.kubernetes.service_account_email
-      # The identity that GKE jobs should assume or impersonate to access the
-      # ingestion bucket.
-      ingestion_identity = ""
-      # We assume this AWS IAM role to write our validations to the peer DSP's
-      # bucket
-      remote_validation_bucket_writer = aws_iam_role.bucket_role.arn
-      # We permit the peer's GCP service account to write their validations to
-      # our bucket
-      peer_validation_bucket_writer = var.peer_share_processor_gcp_service_account_email
-      peer_validation_bucket_reader = module.kubernetes.service_account_email
-      # The identity that GKE jobs should assume or impersonate to access the
-      # local peer validation bucket
-      peer_validation_identity = ""
-    }
-    ) : local.is_env_without_ingestor ? (
+  bucket_access_identities = !var.is_env_with_ingestor && var.deployment_has_ingestor ? (
     {
       # In the test setup, the peer env hosts the sample-makers, so allow
       # entities in the peer's AWS account to write to our ingeston bucket
-      ingestion_bucket_writer = var.peer_share_processor_aws_account_id
+      ingestion_bucket_writer = local.ingestor_aws_iam_entity
       # We must assume this AWS role to read our ingestion bucket
       ingestion_bucket_reader = aws_iam_role.bucket_role.arn
       # The identity that GKE jobs should assume or impersonate to access the
@@ -252,7 +238,7 @@ locals {
   # ingestors can write ingestion batches to them. This assumes that the
   # other test environment follows our naming convention and that they are in
   # the same AWS region as we are.
-  test_peer_ingestion_bucket = local.is_env_with_ingestor ? (
+  test_peer_ingestion_bucket = var.is_env_with_ingestor ? (
     "s3://${var.aws_region}/prio-${var.test_peer_environment.env_without_ingestor}-${var.data_share_processor_name}-ingestion"
   ) : ""
   own_validation_bucket_name = "${local.resource_prefix}-own-validation"
@@ -428,7 +414,7 @@ module "kubernetes" {
   own_manifest_base_url                   = var.own_manifest_base_url
   sum_part_bucket_service_account_email   = var.remote_bucket_writer_gcp_service_account_email
   portal_server_manifest_base_url         = var.portal_server_manifest_base_url
-  is_env_with_ingestor                    = local.is_env_with_ingestor
+  is_env_with_ingestor                    = var.is_env_with_ingestor
   test_peer_ingestion_bucket              = local.test_peer_ingestion_bucket
   is_first                                = var.is_first
   aggregation_period                      = var.aggregation_period

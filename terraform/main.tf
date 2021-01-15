@@ -327,13 +327,13 @@ locals {
   locality_ingestor_pairs = {
     for pair in setproduct(toset(var.localities), keys(var.ingestors)) :
     "${pair[0]}-${pair[1]}" => {
-      ingestor                              = pair[1]
-    kubernetes_namespace                    = kubernetes_namespace.namespaces[pair[0]].metadata[0].name
-    packet_decryption_key_kubernetes_secret = kubernetes_secret.ingestion_packet_decryption_keys[pair[0]].metadata[0].name
-    ingestor_manifest_base_url              = var.ingestors[pair[1]].manifest_base_url
-    intake_worker_count                     = var.ingestors[pair[1]].localities[pair[0]].intake_worker_count
-    aggregate_worker_count                  = var.ingestors[pair[1]].localities[pair[0]].aggregate_worker_count
-  }
+      ingestor                                = pair[1]
+      kubernetes_namespace                    = kubernetes_namespace.namespaces[pair[0]].metadata[0].name
+      packet_decryption_key_kubernetes_secret = kubernetes_secret.ingestion_packet_decryption_keys[pair[0]].metadata[0].name
+      ingestor_manifest_base_url              = var.ingestors[pair[1]].manifest_base_url
+      intake_worker_count                     = var.ingestors[pair[1]].localities[pair[0]].intake_worker_count
+      aggregate_worker_count                  = var.ingestors[pair[1]].localities[pair[0]].aggregate_worker_count
+    }
   }
   peer_share_processor_server_identity = jsondecode(data.http.peer_share_processor_global_manifest.body).server-identity
 }
@@ -342,7 +342,7 @@ locals {
   // Does this series of deployment have a fake ingestor (integration-tester)
   deployment_has_ingestor = lookup(var.test_peer_environment, "env_with_ingestor", "") == "" ? false : true
   // Does this specific environment home the ingestor
-  is_env_with_ingestor    = local.deployment_has_ingestor && lookup(var.test_peer_environment, "env_with_ingestor", "") == var.environment ? true : false
+  is_env_with_ingestor = local.deployment_has_ingestor && lookup(var.test_peer_environment, "env_with_ingestor", "") == var.environment ? true : false
 }
 
 # Call the locality_kubernetes module per
@@ -394,6 +394,9 @@ module "data_share_processors" {
   container_registry                             = var.container_registry
   intake_worker_count                            = each.value.intake_worker_count
   aggregate_worker_count                         = each.value.aggregate_worker_count
+
+  deployment_has_ingestor = local.deployment_has_ingestor
+  is_env_with_ingestor    = local.is_env_with_ingestor
 }
 
 # The portal owns two sum part buckets (one for each data share processor) and
@@ -423,7 +426,7 @@ module "fake_server_resources" {
   gcp_project                  = var.gcp_project
 
   depends_on = [
-    module.gke]
+  module.gke]
 }
 
 module "monitoring" {
@@ -441,12 +444,12 @@ output "gke_kubeconfig" {
 }
 
 output "specific_manifests" {
-  value = {for v in module.data_share_processors : v.data_share_processor_name => {
+  value = { for v in module.data_share_processors : v.data_share_processor_name => {
     ingestor-name        = v.ingestor_name
     kubernetes-namespace = v.kubernetes_namespace
     certificate-fqdn     = v.certificate_fqdn
     specific-manifest    = v.specific_manifest
-  }
+    }
   }
 }
 
