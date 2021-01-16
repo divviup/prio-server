@@ -516,6 +516,9 @@ func enqueueAggregationTasks(
 		return nil
 	}
 
+	limiter := make(chan interface{}, 10000)
+	defer close(limiter)
+
 	skippedDueToMarker := 0
 	skippedDueToExistingJob := 0
 	scheduled := 0
@@ -573,7 +576,9 @@ func enqueueAggregationTasks(
 		log.Printf("scheduling aggregation task %s (interval %s) for aggregation ID %s over %d batches",
 			taskName, inter, aggregationID, batchCount)
 		scheduled++
+		limiter <- ""
 		enqueuer.Enqueue(aggregationTask, func(err error) {
+			<-limiter
 			if err != nil {
 				log.Printf("failed to enqueue aggregation task: %s", err)
 				return
