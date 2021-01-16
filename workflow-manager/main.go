@@ -604,6 +604,9 @@ func enqueueIntakeTasks(
 	ownValidationBucket bucket.TaskMarkerWriter,
 	enqueuer task.Enqueuer,
 ) error {
+	limiter := make(chan interface{}, 10000)
+	defer close(limiter)
+
 	skippedDueToAge := 0
 	skippedDueToMarker := 0
 	skippedDueToExistingJob := 0
@@ -646,7 +649,9 @@ func enqueueIntakeTasks(
 
 		log.Printf("scheduling intake task for batch %s", batch)
 		scheduled++
+		limiter <- ""
 		enqueuer.Enqueue(intakeTask, func(err error) {
+			<-limiter
 			if err != nil {
 				log.Printf("failed to enqueue intake task: %s", err)
 				return
