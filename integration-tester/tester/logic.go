@@ -94,7 +94,9 @@ func (t *Tester) createJob(
 	facilManifest manifest.DataShareProcessorSpecificManifest,
 	phaPacketEncryptionPublicKey, facilPacketEncryptionPublicKey string,
 	bsk *corev1.Secret) *batchv1.Job {
+
 	trueP := true
+	backOffLimit := int32(1)
 	env := []corev1.EnvVar{
 
 		{Name: "BATCH_SIGNING_PRIVATE_KEY",
@@ -121,6 +123,7 @@ func (t *Tester) createJob(
 			},
 		},
 		Spec: batchv1.JobSpec{
+			BackoffLimit: &backOffLimit,
 			Template: corev1.PodTemplateSpec{
 				Spec: corev1.PodSpec{
 					RestartPolicy:                "Never",

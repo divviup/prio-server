@@ -104,6 +104,26 @@ ROLE
   }
 }
 
+resource "aws_iam_role_policy" "bucket_role_policy" {
+  name = "prio-${var.environment}-integration-tester-policy"
+  role = aws_iam_role.tester_role.id
+
+  policy = <<POLICY
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Action": [
+        "s3:*"
+      ],
+      "Effect": "Allow",
+      "Resource": "*"
+    }
+  ]
+}
+POLICY
+}
+
 module "account_mapping" {
   source      = "../account_mapping"
   environment = var.environment

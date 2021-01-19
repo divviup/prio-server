@@ -452,6 +452,7 @@ output "service_account_email" {
 output "specific_manifest" {
   value = {
     format                 = 1
+    ingestion-identity = local.ingestor_aws_iam_entity
     ingestion-bucket       = local.ingestion_bucket_url,
     peer-validation-bucket = local.peer_validation_bucket_url,
     batch-signing-public-keys = {
