@@ -34,6 +34,7 @@ func NewClient(namespace string, kubeconfigPath string, dryRun bool) (*Client, e
 	// only for inCluster config
 	host, port := os.Getenv("KUBERNETES_SERVICE_HOST"), os.Getenv("KUBERNETES_SERVICE_PORT")
 	if kubeconfigPath == "" && host != "" && port != "" {
+		available := false
 		strategy := retry.LimitTime(60*time.Second,
 			retry.Exponential{
 				Initial: 500 * time.Millisecond,
@@ -43,8 +44,12 @@ func NewClient(namespace string, kubeconfigPath string, dryRun bool) (*Client, e
 		timeout := time.Duration(1 * time.Second)
 		for a := retry.Start(strategy, nil); a.Next(); {
 			if _, err := net.DialTimeout("tcp", host+":"+port, timeout); err == nil {
+				available = true
 				break
 			}
+		}
+		if !available {
+			panic("InCluster k8s api endpoint not available")
 		}
 	}
 
