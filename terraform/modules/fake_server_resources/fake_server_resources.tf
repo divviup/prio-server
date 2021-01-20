@@ -37,6 +37,10 @@ variable "ingestor_pairs" {
   }))
 }
 
+variable "pushgateway" {
+  type = string
+}
+
 # For our purposes, a fake portal server is simply a bucket where we can write
 # sum parts, as well as a correctly formed global manifest advertising that
 # bucket's name.
@@ -234,7 +238,7 @@ resource "kubernetes_cron_job" "integration-tester" {
                 "--facil-manifest-url", "https://${var.own_manifest_base_url}/${each.key}-manifest.json",
                 "--service-account-name", "ingestion-identity",
                 "--facilitator-image", "us.gcr.io/prio-bringup-290620/facilitator:latest",
-                //                "--push-gateway", var.pushgateway,
+                "--push-gateway", var.pushgateway,
                 "--aws-account-id", data.aws_caller_identity.current.account_id,
                 "--dry-run=false"
               ]
