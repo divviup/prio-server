@@ -7,7 +7,7 @@ use crate::{
 use anyhow::{anyhow, Context, Result};
 use log::info;
 use serde::Deserialize;
-use std::{io::Cursor, marker::PhantomData};
+use std::{io::Cursor, marker::PhantomData, time::Duration};
 
 const PUBSUB_API_BASE_URL: &str = "https://pubsub.googleapis.com";
 
@@ -189,7 +189,42 @@ impl<T: Task> TaskQueue<T> for GcpPubSubTaskQueue<T> {
             self.oauth_token_provider,
         );
 
+        Ok(self
+            .modify_ack_deadline(&handle, &Duration::from_secs(0))
+            .context("failed to nacknowledge task")?)
+    }
+
+    fn extend_task_deadline(&mut self, handle: &TaskHandle<T>, increment: &Duration) -> Result<()> {
+        info!(
+            "extending deadline on task {} in topic {}/{} as {:?}",
+            handle.acknowledgment_id,
+            self.gcp_project_id,
+            self.subscription_id,
+            self.oauth_token_provider,
+        );
+
+        Ok(self
+            .modify_ack_deadline(handle, increment)
+            .context("failed to extend deadline on task")?)
+    }
+}
+
+impl<T: Task> GcpPubSubTaskQueue<T> {
+    /// Changes the ack deadline on the message described by the task handle,
+    /// resetting it to the provided duration.
+    fn modify_ack_deadline(
+        &mut self,
+        handle: &TaskHandle<T>,
+        ack_deadline: &Duration,
+    ) -> Result<()> {
         // API reference: https://cloud.google.com/pubsub/docs/reference/rest/v1/projects.subscriptions/modifyAckDeadline
+        // Per API doc, deadline must be between 0 and 600 seconds.
+        // Duration::as_secs returns u64, which cannot be negative, so we only
+        // check the upper bound.
+        if ack_deadline.as_secs() > 600 {
+            return Err(anyhow!("invalid ack deadline {:?}", ack_deadline));
+        }
+
         let url = format!(
             "{}/v1/projects/{}/subscriptions/{}:modifyAckDeadline",
             self.pubsub_api_endpoint, self.gcp_project_id, self.subscription_id
@@ -200,13 +235,13 @@ impl<T: Task> TaskQueue<T> for GcpPubSubTaskQueue<T> {
             token_provider: Some(&mut self.oauth_token_provider),
             body: ureq::json!({
                 "ackIds": [handle.acknowledgment_id],
-                "ackDeadlineSeconds": 0,
+                "ackDeadlineSeconds": ack_deadline.as_secs(),
             }),
             ..Default::default()
         })?;
         if http_response.error() {
             return Err(anyhow!(
-                "failed to nacknowledge task {:?}: {:?}",
+                "failed to modify ack deadline on task {:?}: {:?}",
                 handle,
                 http_response
             ));

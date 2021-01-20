@@ -8,7 +8,7 @@ use ring::signature::{
     EcdsaKeyPair, KeyPair, UnparsedPublicKey, ECDSA_P256_SHA256_ASN1,
     ECDSA_P256_SHA256_ASN1_SIGNING,
 };
-use std::{collections::HashMap, fs, fs::File, io::Read, str::FromStr};
+use std::{collections::HashMap, fs, fs::File, io::Read, str::FromStr, time::Instant};
 use uuid::Uuid;
 
 use facilitator::{
@@ -361,9 +361,9 @@ impl<'a, 'b> AppArgumentAdder for App<'a, 'b> {
                 .help("API endpoint for GCP PubSub. Optional."),
         )
         .arg(
-            Arg::with_name("sqs-region")
-                .long("sqs-region")
-                .env("SQS_REGION")
+            Arg::with_name("aws-sqs-region")
+                .long("aws-sqs-region")
+                .env("AWS_SQS_REGION")
                 .help("AWS region in which to use SQS"),
         )
     }
@@ -755,11 +755,12 @@ fn generate_sample(sub_matches: &ArgMatches) -> Result<(), anyhow::Error> {
     Ok(())
 }
 
-fn intake_batch(
+fn intake_batch<F: FnMut()>(
     aggregation_id: &str,
     batch_id: &str,
     date: &str,
     sub_matches: &ArgMatches,
+    callback: F,
 ) -> Result<(), anyhow::Error> {
     let mut intake_transport = intake_transport_from_args(sub_matches)?;
 
@@ -805,7 +806,7 @@ fn intake_batch(
         is_first_from_arg(sub_matches),
     )?;
 
-    batch_intaker.generate_validation_share()
+    batch_intaker.generate_validation_share(callback)
 }
 
 fn intake_batch_subcommand(sub_matches: &ArgMatches) -> Result<(), anyhow::Error> {
@@ -814,6 +815,7 @@ fn intake_batch_subcommand(sub_matches: &ArgMatches) -> Result<(), anyhow::Error
         sub_matches.value_of("batch-id").unwrap(),
         sub_matches.value_of("date").unwrap(),
         sub_matches,
+        || {}, // no-op callback
     )
 }
 
@@ -837,11 +839,20 @@ fn intake_batch_worker(sub_matches: &ArgMatches) -> Result<(), anyhow::Error> {
         if let Some(task_handle) = queue.dequeue()? {
             info!("dequeued task: {}", task_handle);
             intake_started.inc();
+            let task_start = Instant::now();
+
             let result = intake_batch(
                 &task_handle.task.aggregation_id,
                 &task_handle.task.batch_id,
                 &task_handle.task.date,
                 sub_matches,
+                || {
+                    if let Err(e) =
+                        queue.maybe_extend_task_deadline(&task_handle, &task_start.elapsed())
+                    {
+                        error!("{}", e);
+                    }
+                },
             );
 
             match result {
@@ -861,12 +872,13 @@ fn intake_batch_worker(sub_matches: &ArgMatches) -> Result<(), anyhow::Error> {
     // unreachable
 }
 
-fn aggregate(
+fn aggregate<F: FnMut()>(
     aggregation_id: &str,
     start: &str,
     end: &str,
     batches: Vec<(&str, &str)>,
     sub_matches: &ArgMatches,
+    callback: F,
 ) -> Result<()> {
     let instance_name = sub_matches.value_of("instance-name").unwrap();
     let is_first = is_first_from_arg(sub_matches);
@@ -994,7 +1006,7 @@ fn aggregate(
         &mut aggregation_transport,
     )?;
 
-    aggregator.generate_sum_part(&parsed_batches)
+    aggregator.generate_sum_part(&parsed_batches, callback)
 }
 
 fn aggregate_subcommand(sub_matches: &ArgMatches) -> Result<(), anyhow::Error> {
@@ -1020,6 +1032,7 @@ fn aggregate_subcommand(sub_matches: &ArgMatches) -> Result<(), anyhow::Error> {
         sub_matches.value_of("aggregation-end").unwrap(),
         batch_info,
         sub_matches,
+        || {}, // no-op callback
     )
 }
 
@@ -1042,6 +1055,7 @@ fn aggregate_worker(sub_matches: &ArgMatches) -> Result<(), anyhow::Error> {
         if let Some(task_handle) = queue.dequeue()? {
             info!("dequeued task: {}", task_handle);
             aggregation_started.inc();
+            let task_start = Instant::now();
 
             let batches: Vec<(&str, &str)> = task_handle
                 .task
@@ -1055,6 +1069,13 @@ fn aggregate_worker(sub_matches: &ArgMatches) -> Result<(), anyhow::Error> {
                 &task_handle.task.aggregation_end,
                 batches,
                 sub_matches,
+                || {
+                    if let Err(e) =
+                        queue.maybe_extend_task_deadline(&task_handle, &task_start.elapsed())
+                    {
+                        error!("{}", e);
+                    }
+                },
             );
 
             match result {

@@ -69,8 +69,13 @@ impl<'a> BatchAggregator<'a> {
     }
 
     /// Compute the sum part for all the provided batch IDs and write it out to
-    /// the aggregation transport.
-    pub fn generate_sum_part(&mut self, batch_ids: &[(Uuid, NaiveDateTime)]) -> Result<()> {
+    /// the aggregation transport. The provided callback is invoked after each
+    /// batch is aggregated.
+    pub fn generate_sum_part<F: FnMut()>(
+        &mut self,
+        batch_ids: &[(Uuid, NaiveDateTime)],
+        mut callback: F,
+    ) -> Result<()> {
         info!(
             "processing intake from {}, own validity from {}, peer validity from {} and saving sum parts to {}",
             self.ingestion_transport.transport.transport.path(),
@@ -96,6 +101,7 @@ impl<'a> BatchAggregator<'a> {
 
         for batch_id in batch_ids {
             self.aggregate_share(&batch_id.0, &batch_id.1, &mut servers, &mut invalid_uuids)?;
+            callback();
         }
 
         // TODO(timg) what exactly do we write out when there are no invalid

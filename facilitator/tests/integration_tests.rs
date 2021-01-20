@@ -79,12 +79,14 @@ fn end_to_end_test(drop_nth_pha: Option<usize>, drop_nth_facilitator: Option<usi
         drop_nth_packet: drop_nth_facilitator,
     };
 
+    let first_batch_packet_count = 16;
+
     let batch_1_reference_sum = generate_ingestion_sample(
         &batch_1_uuid,
         &aggregation_name,
         &date,
         10,
-        16,
+        first_batch_packet_count,
         0.11,
         100,
         100,
@@ -162,7 +164,8 @@ fn end_to_end_test(drop_nth_pha: Option<usize>, drop_nth_facilitator: Option<usi
         batch_signing_key: default_facilitator_signing_private_key(),
     };
 
-    BatchIntaker::new(
+    let mut intake_callback_count = 0;
+    let mut batch_intaker = BatchIntaker::new(
         &aggregation_name,
         &batch_1_uuid,
         &date,
@@ -171,9 +174,16 @@ fn end_to_end_test(drop_nth_pha: Option<usize>, drop_nth_facilitator: Option<usi
         &mut pha_own_validate_signable_transport,
         true,
     )
-    .unwrap()
-    .generate_validation_share()
     .unwrap();
+    batch_intaker.set_callback_cadence(2);
+    batch_intaker
+        .generate_validation_share(|| intake_callback_count += 1)
+        .unwrap();
+
+    assert_eq!(
+        intake_callback_count,
+        (first_batch_packet_count - batch_1_reference_sum.pha_dropped_packets.len()) / 2
+    );
 
     BatchIntaker::new(
         &aggregation_name,
@@ -185,7 +195,7 @@ fn end_to_end_test(drop_nth_pha: Option<usize>, drop_nth_facilitator: Option<usi
         true,
     )
     .unwrap()
-    .generate_validation_share()
+    .generate_validation_share(|| {})
     .unwrap();
 
     BatchIntaker::new(
@@ -198,7 +208,7 @@ fn end_to_end_test(drop_nth_pha: Option<usize>, drop_nth_facilitator: Option<usi
         false,
     )
     .unwrap()
-    .generate_validation_share()
+    .generate_validation_share(|| {})
     .unwrap();
 
     BatchIntaker::new(
@@ -211,7 +221,7 @@ fn end_to_end_test(drop_nth_pha: Option<usize>, drop_nth_facilitator: Option<usi
         false,
     )
     .unwrap()
-    .generate_validation_share()
+    .generate_validation_share(|| {})
     .unwrap();
 
     let batch_ids_and_dates = vec![(batch_1_uuid, date), (batch_2_uuid, date)];
@@ -243,6 +253,8 @@ fn end_to_end_test(drop_nth_pha: Option<usize>, drop_nth_facilitator: Option<usi
         transport: Box::new(LocalFileTransport::new(pha_tempdir.path().to_path_buf())),
         batch_signing_key: default_pha_signing_private_key(),
     };
+
+    let mut aggregation_callback_count = 0;
     BatchAggregator::new(
         instance_name,
         &aggregation_name,
@@ -255,8 +267,10 @@ fn end_to_end_test(drop_nth_pha: Option<usize>, drop_nth_facilitator: Option<usi
         &mut pha_aggregation_transport,
     )
     .unwrap()
-    .generate_sum_part(&batch_ids_and_dates)
+    .generate_sum_part(&batch_ids_and_dates, || aggregation_callback_count += 1)
     .unwrap();
+
+    assert_eq!(aggregation_callback_count, 2);
 
     let mut facilitator_aggregation_transport = SignableTransport {
         transport: Box::new(LocalFileTransport::new(
@@ -264,6 +278,8 @@ fn end_to_end_test(drop_nth_pha: Option<usize>, drop_nth_facilitator: Option<usi
         )),
         batch_signing_key: default_facilitator_signing_private_key(),
     };
+
+    let mut aggregation_callback_count = 0;
     BatchAggregator::new(
         instance_name,
         &aggregation_name,
@@ -276,8 +292,10 @@ fn end_to_end_test(drop_nth_pha: Option<usize>, drop_nth_facilitator: Option<usi
         &mut facilitator_aggregation_transport,
     )
     .unwrap()
-    .generate_sum_part(&batch_ids_and_dates)
+    .generate_sum_part(&batch_ids_and_dates, || aggregation_callback_count += 1)
     .unwrap();
+
+    assert_eq!(aggregation_callback_count, 2);
 
     let mut pha_aggregation_batch_reader: BatchReader<'_, SumPart, InvalidPacket> =
         BatchReader::new(

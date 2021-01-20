@@ -24,6 +24,7 @@ pub struct BatchIntaker<'a> {
     own_validation_batch: BatchWriter<'a, ValidationHeader, ValidationPacket>,
     own_validation_batch_signing_key: &'a BatchSigningKey,
     is_first: bool,
+    callback_cadence: u32,
 }
 
 impl<'a> BatchIntaker<'a> {
@@ -54,13 +55,23 @@ impl<'a> BatchIntaker<'a> {
             peer_validation_batch_signing_key: &peer_validation_transport.batch_signing_key,
             own_validation_batch_signing_key: &own_validation_transport.batch_signing_key,
             is_first,
+            callback_cadence: 1000,
         })
+    }
+
+    /// Set the cadence at which the callback passed to
+    /// generate_validation_share is invoked, i.e., after how many processed
+    /// packets. This function is not safe to call while a call to
+    /// generate_validation_share is in flight and is intended only for testing.
+    pub fn set_callback_cadence(&mut self, cadence: u32) {
+        self.callback_cadence = cadence;
     }
 
     /// Fetches the ingestion batch, validates the signatures over its header
     /// and packet file, then computes validation shares and sends them to the
-    /// peer share processor.
-    pub fn generate_validation_share(&mut self) -> Result<()> {
+    /// peer share processor. The provided callback is invoked once for every
+    /// thousand processed packets, unless set_callback_cadence has been called.
+    pub fn generate_validation_share<F: FnMut()>(&mut self, mut callback: F) -> Result<()> {
         info!(
             "processing intake from {} and saving validity to {} and {}",
             self.intake_batch.path(),
@@ -89,6 +100,10 @@ impl<'a> BatchIntaker<'a> {
         // each, and write them to the validation batch.
         let mut ingestion_packet_reader =
             self.intake_batch.packet_file_reader(&ingestion_header)?;
+
+        let mut processed_packets = 0;
+        // Copy of callback_cadence that's safe to use in the closure
+        let callback_cadence = self.callback_cadence;
 
         let packet_file_digest = self.peer_validation_batch.multi_packet_file_writer(
             vec![&mut self.own_validation_batch],
@@ -129,6 +144,10 @@ impl<'a> BatchIntaker<'a> {
                 }
                 if !did_create_validation_packet {
                     return Err(anyhow!("failed to construct validation message"));
+                }
+                processed_packets += 1;
+                if processed_packets % callback_cadence == 0 {
+                    callback();
                 }
             },
         )?;
@@ -291,7 +310,7 @@ mod tests {
         .unwrap();
 
         pha_ingestor
-            .generate_validation_share()
+            .generate_validation_share(|| {})
             .expect("PHA failed to generate validation");
 
         let mut facilitator_ingestor = BatchIntaker::new(
@@ -306,7 +325,7 @@ mod tests {
         .unwrap();
 
         facilitator_ingestor
-            .generate_validation_share()
+            .generate_validation_share(|| {})
             .expect("facilitator failed to generate validation");
     }
 }

@@ -10,6 +10,7 @@ require (
 	golang.org/x/net v0.0.0-20201027133719-8eef5233e2a1 // indirect
 	golang.org/x/text v0.3.4 // indirect
 	google.golang.org/api v0.33.0
+	gopkg.in/retry.v1 v1.0.2
 	k8s.io/api v0.19.3
 	k8s.io/apimachinery v0.19.3
 	k8s.io/client-go v0.19.3

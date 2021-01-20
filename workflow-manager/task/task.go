@@ -5,6 +5,7 @@
 package task
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -112,8 +113,9 @@ type Enqueuer interface {
 // subscription with the same ID that can later be used by a facilitator.
 // Returns error on failure.
 func CreatePubSubTopic(project string, topicID string) error {
-	ctx, cancel := utils.ContextWithTimeout()
-	defer cancel()
+	// Google documentation advises against timeouts on client creation
+	// https://godoc.org/cloud.google.com/go#hdr-Timeouts_and_Cancellation
+	ctx := context.Background()
 
 	client, err := pubsub.NewClient(ctx, project)
 	if err != nil {
@@ -151,8 +153,9 @@ type GCPPubSubEnqueuer struct {
 // should re-use a single instance as much as possible to enable batching of
 // publish requests.
 func NewGCPPubSubEnqueuer(project string, topicID string, dryRun bool) (*GCPPubSubEnqueuer, error) {
-	ctx, cancel := utils.ContextWithTimeout()
-	defer cancel()
+	// Google documentation advises against timeouts on client creation
+	// https://godoc.org/cloud.google.com/go#hdr-Timeouts_and_Cancellation
+	ctx := context.Background()
 
 	client, err := pubsub.NewClient(ctx, project)
 	if err != nil {

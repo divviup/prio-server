@@ -53,6 +53,7 @@ ingestors = {
     }
   }
 }
+
 peer_share_processor_manifest_base_url = "en-analytics.cancer.gov"
 portal_server_manifest_base_url        = "manifest.enpa-pha.io"
 is_first                               = false
@@ -68,3 +69,6 @@ cluster_settings = {
   min_node_count : 4
   max_node_count : 5
 }
+
+prometheus_server_persistent_disk_size_gb = 1000
+

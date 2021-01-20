@@ -2,8 +2,8 @@ package monitor
 
 import "testing"
 
-func TestNoopCounterIncrement(t *testing.T) {
-	c := NoopCounter{}
+func TestNoopGaugeIncrement(t *testing.T) {
+	c := NoopGauge{}
 
 	c.Inc()
 	c.Inc()
