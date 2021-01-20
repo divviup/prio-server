@@ -1,8 +1,20 @@
+variable "environment" {
+  type = string
+}
+
+variable "gcp_region" {
+  type = string
+}
+
 variable "cluster_endpoint" {
   type = string
 }
 
 variable "cluster_ca_certificate" {
+  type = string
+}
+
+variable "prometheus_server_persistent_disk_size_gb" {
   type = string
 }
 
@@ -66,10 +78,65 @@ CONFIG
   }
 }
 
+data "google_compute_zones" "available" {}
+
+# Create a GCP persistent disk for use by prometheus-server, with replicas in
+# multiple zones. The Prometheus Helm chart can create and manage persistent
+# disks on our behalf, but only zonal ones, and we prefer regional disks for
+# durability.
+resource "google_compute_region_disk" "prometheus_server" {
+  name = "${var.environment}-prometheus-server"
+  # GCP regional disks support replication across at most two zones
+  replica_zones = [data.google_compute_zones.available.names[0], data.google_compute_zones.available.names[1]]
+  size          = var.prometheus_server_persistent_disk_size_gb
+  region        = var.gcp_region
+}
+
+# Create a Kubernetes persistent volume representing the GCP disk
+resource "kubernetes_persistent_volume" "prometheus_server" {
+  metadata {
+    # Kubernetes PVs are _not_ namespaced
+    name = "prometheus-server-volume"
+  }
+  spec {
+    access_modes = ["ReadWriteOnce"]
+    capacity = {
+      storage = "${var.prometheus_server_persistent_disk_size_gb}Gi"
+    }
+    storage_class_name = "standard"
+    volume_mode        = "Filesystem"
+    persistent_volume_source {
+      gce_persistent_disk {
+        fs_type = "ext4"
+        pd_name = google_compute_region_disk.prometheus_server.name
+      }
+    }
+  }
+}
+
+# Finally, make a Kubernetes persistent volume claim referencing the persistent
+# volume
+resource "kubernetes_persistent_volume_claim" "prometheus_server" {
+  metadata {
+    name      = "prometheus-server-claim"
+    namespace = kubernetes_namespace.monitoring.metadata[0].name
+  }
+  spec {
+    access_modes       = ["ReadWriteOnce"]
+    storage_class_name = "standard"
+    resources {
+      requests = {
+        storage = "${var.prometheus_server_persistent_disk_size_gb}Gi"
+      }
+    }
+    volume_name = kubernetes_persistent_volume.prometheus_server.metadata[0].name
+  }
+}
+
 resource "helm_release" "prometheus" {
   name       = "prometheus"
   chart      = "prometheus"
-  repository = "https://charts.helm.sh/stable"
+  repository = "https://prometheus-community.github.io/helm-charts"
   namespace  = kubernetes_namespace.monitoring.metadata[0].name
 
   set {
@@ -79,6 +146,18 @@ resource "helm_release" "prometheus" {
   set {
     name  = "alertmanager.configFileName"
     value = "alertmanager.yml"
+  }
+  set {
+    name  = "server.persistentVolume.enabled"
+    value = "true"
+  }
+  set {
+    name  = "server.persistentVolume.existingClaim"
+    value = kubernetes_persistent_volume_claim.prometheus_server.metadata[0].name
+  }
+  set {
+    name  = "server.retention"
+    value = "30d"
   }
 }
 
