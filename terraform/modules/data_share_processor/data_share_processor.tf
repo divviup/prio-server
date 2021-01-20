@@ -124,6 +124,10 @@ variable "is_env_with_ingestor" {
   type = bool
 }
 
+variable "test_kubernetes_namespace" {
+  type = string
+}
+
 # We need the ingestion server's manifest so that we can discover the GCP
 # service account it will use to upload ingestion batches. Some ingestors
 # (Apple) are singletons, and advertise a single global manifest which contains
@@ -452,7 +456,7 @@ output "service_account_email" {
 output "specific_manifest" {
   value = {
     format                 = 1
-    ingestion-identity = local.ingestor_aws_iam_entity
+    ingestion-identity     = local.ingestor_aws_iam_entity
     ingestion-bucket       = local.ingestion_bucket_url,
     peer-validation-bucket = local.peer_validation_bucket_url,
     batch-signing-public-keys = {

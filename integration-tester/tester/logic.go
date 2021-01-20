@@ -37,7 +37,7 @@ func (t *Tester) Start() error {
 		return err
 	}
 
-	bsk, err := t.getValidBatchSigningKey(ownManifest)
+	batchSigningKey, err := t.getValidBatchSigningKey(ownManifest)
 	if err != nil {
 		return err
 	}
@@ -52,13 +52,7 @@ func (t *Tester) Start() error {
 		return err
 	}
 
-	err = t.purgeOldJobs()
-	if err != nil {
-		// Don't stop executing because of this error
-		log.Printf("Error when purging old successful jobs: %v\n", err)
-	}
-
-	job := t.createJob(phaManifest, facilManifest, phaPacketEncryptionKey, facilPacketEncryptionKey, bsk)
+	job := t.createJob(phaManifest, facilManifest, phaPacketEncryptionKey, facilPacketEncryptionKey, batchSigningKey)
 
 	log.Println("Scheduling job...")
 	scheduledJob, err := t.kubeClient.ScheduleJob(job)
@@ -69,13 +63,22 @@ func (t *Tester) Start() error {
 		log.Printf("\tscheduled job: %s\n", scheduledJob.Name)
 	}
 
-	return err
+	err = t.purgeOldJobs()
+	if err != nil {
+		log.Printf("Error when purging old successful jobs: %v\n", err)
+	} else {
+		log.Println("Purging old jobs was successful")
+	}
+
+	return nil
 }
 
 // purgeOldJobs will remove all successful jobs from the kubernetes namespace
 func (t *Tester) purgeOldJobs() error {
 	labelSelector := fmt.Sprintf("%s=%s,ingestor=%s", LabelKey, LabelValue, t.name)
 	fieldSelector := "status.successful=1"
+
+	log.Printf("purging jobs with labelSelector: %s and fieldSelector: %s\n", labelSelector, fieldSelector)
 
 	err := t.kubeClient.RemoveJobCollection(metav1.DeleteOptions{}, metav1.ListOptions{
 		LabelSelector: labelSelector,
@@ -116,7 +119,7 @@ func (t *Tester) createJob(
 
 	return &batchv1.Job{
 		ObjectMeta: metav1.ObjectMeta{
-			GenerateName: "integration-tester-facilitator",
+			GenerateName: "integration-tester-facilitator-",
 			Labels: map[string]string{
 				LabelKey:   LabelValue,
 				"ingestor": t.name,

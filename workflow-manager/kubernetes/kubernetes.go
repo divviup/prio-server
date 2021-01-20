@@ -68,7 +68,7 @@ func (c *Client) ListJobs(options metav1.ListOptions) (map[string]batchv1.Job, e
 	for {
 		// Don't pull this in from utils - this module is being used by the integration-tester
 		// and go's build system needs this to not pull in dependencies from other workflow-manager modules
-		ctx, cancel := 	context.WithTimeout(context.Background(), 30*time.Second)
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 
 		defer cancel()
 
@@ -95,7 +95,12 @@ func (c *Client) ListJobs(options metav1.ListOptions) (map[string]batchv1.Job, e
 
 // ScheduleJob schedules job in the specified namespace and returns the created job
 func (c *Client) ScheduleJob(job *batchv1.Job) (*batchv1.Job, error) {
-	createdJob, err := c.client.BatchV1().Jobs(c.namespace).Create(context.Background(), job, metav1.CreateOptions{})
+	createOptions := metav1.CreateOptions{}
+	if c.dryRun {
+		createOptions.DryRun = []string{"All"}
+	}
+
+	createdJob, err := c.client.BatchV1().Jobs(c.namespace).Create(context.Background(), job, createOptions)
 	if err != nil {
 		return nil, fmt.Errorf("job creation failed: %v", err)
 	}

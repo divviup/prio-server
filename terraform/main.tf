@@ -395,8 +395,9 @@ module "data_share_processors" {
   intake_worker_count                            = each.value.intake_worker_count
   aggregate_worker_count                         = each.value.aggregate_worker_count
 
-  deployment_has_ingestor = local.deployment_has_ingestor
-  is_env_with_ingestor    = local.is_env_with_ingestor
+  deployment_has_ingestor   = local.deployment_has_ingestor
+  is_env_with_ingestor      = local.is_env_with_ingestor
+  test_kubernetes_namespace = module.fake_server_resources[0].test_kubernetes_namespace
 }
 
 # The portal owns two sum part buckets (one for each data share processor) and
@@ -425,8 +426,7 @@ module "fake_server_resources" {
   sum_part_bucket_writer_email = google_service_account.sum_part_bucket_writer.email
   gcp_project                  = var.gcp_project
 
-  depends_on = [
-  module.gke]
+  depends_on = [module.gke]
 }
 
 module "monitoring" {
@@ -458,7 +458,7 @@ output "singleton_ingestor" {
     aws_iam_entity              = module.fake_server_resources[0].aws_iam_entity
     gcp_service_account_id      = module.fake_server_resources[0].gcp_service_account_id
     gcp_service_account_email   = module.fake_server_resources[0].gcp_service_account_email
-    tester_kubernetes_namespace = module.fake_server_resources[0].tester_kubernetes_namespace
+    tester_kubernetes_namespace = module.fake_server_resources[0].test_kubernetes_namespace
   } : {}
 }
 

@@ -152,7 +152,7 @@ resource "kubernetes_role" "workflow_manager_role" {
     api_groups = ["batch"]
     // integration-tester needs to make jobs
     resources = ["jobs"]
-    verbs     = ["get", "list", "watch", "create"]
+    verbs     = ["get", "list", "watch", "create", "delete", "deletecollection"]
   }
 }
 
@@ -188,6 +188,6 @@ output "gcp_service_account_email" {
   value = module.account_mapping.google_service_account_email
 }
 
-output "tester_kubernetes_namespace" {
+output "test_kubernetes_namespace" {
   value = kubernetes_namespace.tester.metadata[0].name
 }
