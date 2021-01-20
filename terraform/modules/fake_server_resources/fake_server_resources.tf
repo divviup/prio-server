@@ -18,6 +18,25 @@ variable "sum_part_bucket_writer_email" {
   type = string
 }
 
+variable "peer_manifest_base_url" {
+  type = string
+}
+
+variable "own_manifest_base_url" {
+  type = string
+}
+
+variable "ingestor_pairs" {
+  type = map(object({
+    ingestor : string
+    kubernetes_namespace : string
+    packet_decryption_key_kubernetes_secret : string
+    ingestor_manifest_base_url : string
+    intake_worker_count : string
+    aggregate_worker_count : string
+  }))
+}
+
 # For our purposes, a fake portal server is simply a bucket where we can write
 # sum parts, as well as a correctly formed global manifest advertising that
 # bucket's name.
@@ -173,6 +192,57 @@ resource "kubernetes_role_binding" "integration_tester_role_binding" {
     kind      = "ServiceAccount"
     name      = module.account_mapping.kubernetes_account_name
     namespace = kubernetes_namespace.tester.metadata[0].name
+  }
+}
+
+resource "kubernetes_cron_job" "integration-tester" {
+  for_each = var.ingestor_pairs
+  metadata {
+    name      = "global-integration-tester-${each.value.ingestor}"
+    namespace = kubernetes_namespace.tester.metadata[0].name
+
+    annotations = {
+      environment = var.environment
+    }
+  }
+  spec {
+    schedule                      = "* * * * *"
+    concurrency_policy            = "Forbid"
+    successful_jobs_history_limit = 5
+    failed_jobs_history_limit     = 3
+    job_template {
+      metadata {}
+      spec {
+        template {
+          metadata {
+            labels = {
+              "type" : "integration-tester-manager"
+            }
+          }
+          spec {
+            restart_policy                  = "Never"
+            service_account_name            = "ingestion-identity"
+            automount_service_account_token = true
+            container {
+              name  = "integration-tester"
+              image = "us.gcr.io/prio-bringup-290620/integration-tester:latest"
+              args = [
+                "--name", each.value.ingestor,
+                "--namespace", "tester",
+                "--own-manifest-url", "https://${each.value.ingestor_manifest_base_url}/global-manifest.json",
+                "--pha-manifest-url", "https://${var.peer_manifest_base_url}/${each.key}-manifest.json",
+                "--facil-manifest-url", "https://${var.own_manifest_base_url}/${each.key}-manifest.json",
+                "--service-account-name", "ingestion-identity",
+                "--facilitator-image", "us.gcr.io/prio-bringup-290620/facilitator:latest",
+                //                "--push-gateway", var.pushgateway,
+                "--aws-account-id", data.aws_caller_identity.current.account_id,
+                "--dry-run=false"
+              ]
+            }
+          }
+        }
+      }
+    }
   }
 }
 

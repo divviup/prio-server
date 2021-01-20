@@ -394,10 +394,8 @@ module "data_share_processors" {
   container_registry                             = var.container_registry
   intake_worker_count                            = each.value.intake_worker_count
   aggregate_worker_count                         = each.value.aggregate_worker_count
-
-  deployment_has_ingestor   = local.deployment_has_ingestor
-  is_env_with_ingestor      = local.is_env_with_ingestor
-  test_kubernetes_namespace = module.fake_server_resources[0].test_kubernetes_namespace
+  deployment_has_ingestor                        = local.deployment_has_ingestor
+  is_env_with_ingestor                           = local.is_env_with_ingestor
 }
 
 # The portal owns two sum part buckets (one for each data share processor) and
@@ -425,6 +423,9 @@ module "fake_server_resources" {
   environment                  = var.environment
   sum_part_bucket_writer_email = google_service_account.sum_part_bucket_writer.email
   gcp_project                  = var.gcp_project
+  ingestor_pairs               = local.locality_ingestor_pairs
+  peer_manifest_base_url       = var.peer_share_processor_manifest_base_url
+  own_manifest_base_url        = module.manifest.base_url
 
   depends_on = [module.gke]
 }
@@ -460,6 +461,10 @@ output "singleton_ingestor" {
     gcp_service_account_email   = module.fake_server_resources[0].gcp_service_account_email
     tester_kubernetes_namespace = module.fake_server_resources[0].test_kubernetes_namespace
   } : {}
+}
+
+output "ingestor_manifest_base_pairs" {
+  value = local.locality_ingestor_pairs
 }
 
 output "own_manifest_base_url" {

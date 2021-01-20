@@ -463,56 +463,6 @@ resource "kubernetes_deployment" "aggregate" {
   }
 }
 
-resource "kubernetes_cron_job" "integration-tester" {
-  count = var.is_env_with_ingestor ? 1 : 0
-  metadata {
-    name      = "global-integration-tester-${var.ingestor}"
-    namespace = "tester"
-
-    annotations = {
-      environment = var.environment
-    }
-  }
-  spec {
-    schedule                      = "* * * * *"
-    concurrency_policy            = "Forbid"
-    successful_jobs_history_limit = 5
-    failed_jobs_history_limit     = 3
-    job_template {
-      metadata {}
-      spec {
-        template {
-          metadata {
-            labels = {
-              "type" : "integration-tester-manager"
-            }
-          }
-          spec {
-            restart_policy                  = "Never"
-            service_account_name            = "ingestion-identity"
-            automount_service_account_token = true
-            container {
-              name  = "integration-tester"
-              image = "us.gcr.io/prio-bringup-290620/integration-tester:latest"
-              args = [
-                "--name", var.ingestor,
-                "--namespace", "tester",
-                "--own-manifest-url", "https://${var.ingestor_manifest_base_url}/global-manifest.json",
-                "--pha-manifest-url", "https://${var.peer_manifest_base_url}/${var.data_share_processor_name}-manifest.json",
-                "--facil-manifest-url", "https://${var.own_manifest_base_url}/${var.data_share_processor_name}-manifest.json",
-                "--service-account-name", "ingestion-identity",
-                "--facilitator-image", "us.gcr.io/prio-bringup-290620/facilitator:latest",
-                "--push-gateway", var.pushgateway,
-                "--aws-account-id", data.aws_caller_identity.current.account_id,
-                "--dry-run=false"
-              ]
-            }
-          }
-        }
-      }
-    }
-  }
-}
 
 resource "kubernetes_role" "workflow_manager_role" {
   metadata {
