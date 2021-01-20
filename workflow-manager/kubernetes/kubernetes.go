@@ -49,7 +49,7 @@ func NewClient(namespace string, kubeconfigPath string, dryRun bool) (*Client, e
 			}
 		}
 		if !available {
-			panic("InCluster k8s api endpoint not available")
+			return nil, fmt.Errorf("InCluster k8s api endpoint not available")
 		}
 	}
 
