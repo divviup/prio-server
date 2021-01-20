@@ -41,6 +41,27 @@ variable "pushgateway" {
   type = string
 }
 
+variable "container_registry" {
+  type = string
+}
+
+variable "facilitator_image" {
+  type = string
+}
+
+variable "facilitator_version" {
+  type = string
+}
+
+variable "integration_tester_image" {
+  type = string
+}
+
+variable "integration_tester_version" {
+  type = string
+}
+
+
 # For our purposes, a fake portal server is simply a bucket where we can write
 # sum parts, as well as a correctly formed global manifest advertising that
 # bucket's name.
@@ -212,8 +233,8 @@ resource "kubernetes_cron_job" "integration-tester" {
   spec {
     schedule                      = "* * * * *"
     concurrency_policy            = "Forbid"
-    successful_jobs_history_limit = 5
-    failed_jobs_history_limit     = 3
+    successful_jobs_history_limit = 1
+    failed_jobs_history_limit     = 2
     job_template {
       metadata {}
       spec {
@@ -229,15 +250,15 @@ resource "kubernetes_cron_job" "integration-tester" {
             automount_service_account_token = true
             container {
               name  = "integration-tester"
-              image = "us.gcr.io/prio-bringup-290620/integration-tester:latest"
+              image = "${var.container_registry}/${var.integration_tester_image}:${var.integration_tester_version}"
               args = [
                 "--name", each.value.ingestor,
-                "--namespace", "tester",
+                "--namespace", kubernetes_namespace.tester.metadata[0].name,
                 "--own-manifest-url", "https://${each.value.ingestor_manifest_base_url}/global-manifest.json",
                 "--pha-manifest-url", "https://${var.peer_manifest_base_url}/${each.key}-manifest.json",
                 "--facil-manifest-url", "https://${var.own_manifest_base_url}/${each.key}-manifest.json",
-                "--service-account-name", "ingestion-identity",
-                "--facilitator-image", "us.gcr.io/prio-bringup-290620/facilitator:latest",
+                "--service-account-name", module.account_mapping.kubernetes_account_name,
+                "--facilitator-image", "${var.container_registry}/${var.facilitator_image}:${var.facilitator_version}",
                 "--push-gateway", var.pushgateway,
                 "--aws-account-id", data.aws_caller_identity.current.account_id,
                 "--dry-run=false"

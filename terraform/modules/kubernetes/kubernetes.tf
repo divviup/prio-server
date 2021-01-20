@@ -15,8 +15,7 @@ variable "container_registry" {
 }
 
 variable "workflow_manager_image" {
-  type    = string
-  default = "prio-workflow-manager"
+  type = string
 }
 
 variable "workflow_manager_version" {
@@ -24,8 +23,7 @@ variable "workflow_manager_version" {
 }
 
 variable "facilitator_image" {
-  type    = string
-  default = "prio-facilitator"
+  type = string
 }
 
 variable "facilitator_version" {

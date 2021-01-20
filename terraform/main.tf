@@ -131,12 +131,32 @@ variable "container_registry" {
   default = "letsencrypt"
 }
 
+variable "workflow_manager_image" {
+  type    = string
+  default = "prio-workflow-manager"
+}
+
 variable "workflow_manager_version" {
   type    = string
   default = "latest"
 }
 
+variable "facilitator_image" {
+  type    = string
+  default = "prio-facilitator"
+}
+
 variable "facilitator_version" {
+  type    = string
+  default = "latest"
+}
+
+variable "integration_tester_image" {
+  type = string
+  default = "prio-integration-tester"
+}
+
+variable "integration_tester_version" {
   type    = string
   default = "latest"
 }
@@ -396,7 +416,9 @@ module "data_share_processors" {
   aggregation_grace_period                       = var.aggregation_grace_period
   kms_keyring                                    = module.gke.kms_keyring
   pushgateway                                    = var.pushgateway
+  workflow_manager_image                         = var.workflow_manager_image
   workflow_manager_version                       = var.workflow_manager_version
+  facilitator_image                              = var.facilitator_image
   facilitator_version                            = var.facilitator_version
   container_registry                             = var.container_registry
   intake_worker_count                            = each.value.intake_worker_count
@@ -434,6 +456,11 @@ module "fake_server_resources" {
   peer_manifest_base_url       = var.peer_share_processor_manifest_base_url
   own_manifest_base_url        = module.manifest.base_url
   pushgateway                  = var.pushgateway
+  container_registry           = var.container_registry
+  facilitator_image            = var.facilitator_image
+  facilitator_version          = var.facilitator_version
+  integration_tester_image = var.integration_tester_image
+  integration_tester_version = var.integration_tester_version
 
   depends_on = [module.gke]
 }

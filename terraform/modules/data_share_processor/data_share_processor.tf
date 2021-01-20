@@ -100,7 +100,15 @@ variable "container_registry" {
   type = string
 }
 
+variable "workflow_manager_image" {
+  type = string
+}
+
 variable "workflow_manager_version" {
+  type = string
+}
+
+variable "facilitator_image" {
   type = string
 }
 
@@ -421,7 +429,9 @@ module "kubernetes" {
   aggregation_grace_period                = var.aggregation_grace_period
   pushgateway                             = var.pushgateway
   container_registry                      = var.container_registry
+  workflow_manager_image                  = var.workflow_manager_image
   workflow_manager_version                = var.workflow_manager_version
+  facilitator_image                       = var.facilitator_image
   facilitator_version                     = var.facilitator_version
   intake_queue                            = module.pubsub["intake"].queue
   aggregate_queue                         = module.pubsub["aggregate"].queue
