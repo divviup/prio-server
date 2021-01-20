@@ -4,15 +4,12 @@ package kubernetes
 import (
 	"context"
 	"fmt"
-	"sort"
-	"time"
 	"net"
 	"os"
+	"sort"
 	"time"
 
 	"gopkg.in/retry.v1"
-
-	"github.com/letsencrypt/prio-server/workflow-manager/utils"
 
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
