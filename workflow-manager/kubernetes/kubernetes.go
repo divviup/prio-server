@@ -3,6 +3,11 @@ package kubernetes
 
 import (
 	"fmt"
+	"net"
+	"os"
+	"time"
+
+	"gopkg.in/retry.v1"
 
 	"github.com/letsencrypt/prio-server/workflow-manager/utils"
 
@@ -25,6 +30,29 @@ type Client struct {
 // it is not empty. If dryRun is true, then any destructive API calls will be
 // made with DryRun: All.
 func NewClient(namespace string, kubeconfigPath string, dryRun bool) (*Client, error) {
+	// Making sure endpoint is available before returning kubernetes client
+	// only for inCluster config
+	host, port := os.Getenv("KUBERNETES_SERVICE_HOST"), os.Getenv("KUBERNETES_SERVICE_PORT")
+	if kubeconfigPath == "" && host != "" && port != "" {
+		available := false
+		strategy := retry.LimitTime(60*time.Second,
+			retry.Exponential{
+				Initial: 500 * time.Millisecond,
+				Factor:  1.2,
+			},
+		)
+		timeout := time.Duration(1 * time.Second)
+		for a := retry.Start(strategy, nil); a.Next(); {
+			if _, err := net.DialTimeout("tcp", host+":"+port, timeout); err == nil {
+				available = true
+				break
+			}
+		}
+		if !available {
+			return nil, fmt.Errorf("InCluster k8s api endpoint not available")
+		}
+	}
+
 	// BuildConfigFromFlags falls back to rest.InClusterConfig if kubeconfigPath
 	// is empty
 	// https://godoc.org/k8s.io/client-go/tools/clientcmd#BuildConfigFromFlags
