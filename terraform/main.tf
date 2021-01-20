@@ -141,6 +141,12 @@ variable "facilitator_version" {
   default = "latest"
 }
 
+variable "prometheus_server_persistent_disk_size_gb" {
+  type = number
+  # This is quite high, but it's the minimum for GCE regional disks
+  default = 200
+}
+
 terraform {
   backend "gcs" {}
 
@@ -409,8 +415,12 @@ module "fake_server_resources" {
 
 module "monitoring" {
   source                 = "./modules/monitoring"
+  environment            = var.environment
+  gcp_region             = var.gcp_region
   cluster_endpoint       = module.gke.cluster_endpoint
   cluster_ca_certificate = base64decode(module.gke.certificate_authority_data)
+
+  prometheus_server_persistent_disk_size_gb = var.prometheus_server_persistent_disk_size_gb
 }
 
 output "manifest_bucket" {
