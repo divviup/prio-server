@@ -8,7 +8,7 @@ use chrono::NaiveDateTime;
 use log::info;
 use prio::{
     client::Client,
-    encrypt::{PublicKey},
+    encrypt::PublicKey,
     finite_field::{Field, MODULUS},
 };
 use rand::{thread_rng, Rng};

@@ -152,7 +152,7 @@ variable "facilitator_version" {
 }
 
 variable "integration_tester_image" {
-  type = string
+  type    = string
   default = "prio-integration-tester"
 }
 
@@ -459,8 +459,8 @@ module "fake_server_resources" {
   container_registry           = var.container_registry
   facilitator_image            = var.facilitator_image
   facilitator_version          = var.facilitator_version
-  integration_tester_image = var.integration_tester_image
-  integration_tester_version = var.integration_tester_version
+  integration_tester_image     = var.integration_tester_image
+  integration_tester_version   = var.integration_tester_version
 
   depends_on = [module.gke]
 }
