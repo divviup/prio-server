@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/abetterinternet/prio-server/manifest-updater/manifest"
+	"github.com/abetterinternet/prio-server/workflow-manager/kubernetes"
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -22,6 +23,43 @@ const (
 	LabelKey   = "type"
 	LabelValue = "integration-tester"
 )
+
+type Tester struct {
+	kubeClient         *kubernetes.Client
+	namespace          string
+	ingestorLabel      string
+	ownManifestUrl     string
+	phaManifestUrl     string
+	facilManifestUrl   string
+	serviceAccountName string
+
+	facilitatorImage string
+	pushGateway      string
+	awsAccountId     string
+}
+
+func New(
+	kubeConfigPath,
+	namespace, ingestorLabel,
+	ownManifestUrl, phaManifestUrl, facilManifestUrl,
+	serviceAccountName, facilitatorImage,
+	pushGateway, awsAccountId string,
+	dryRun bool) *Tester {
+
+	kubeClient, err := kubernetes.NewClient(namespace, kubeConfigPath, dryRun)
+
+	if err != nil {
+		log.Fatalf("error creating a new kubernetes client: %v", err)
+	}
+
+	return &Tester{
+		kubeClient,
+		namespace, ingestorLabel,
+		ownManifestUrl, phaManifestUrl, facilManifestUrl,
+		serviceAccountName, facilitatorImage,
+		pushGateway, awsAccountId,
+	}
+}
 
 func (t *Tester) Start() error {
 	ownManifest, err := ReadIngestorGlobalManifests(t.ownManifestUrl)
@@ -75,7 +113,7 @@ func (t *Tester) Start() error {
 
 // purgeOldJobs will remove all successful jobs from the kubernetes namespace
 func (t *Tester) purgeOldJobs() error {
-	labelSelector := fmt.Sprintf("%s=%s,ingestor=%s", LabelKey, LabelValue, t.name)
+	labelSelector := fmt.Sprintf("%s=%s,ingestor=%s", LabelKey, LabelValue, t.ingestorLabel)
 	fieldSelector := "status.successful=1"
 
 	log.Printf("purging jobs with labelSelector: %s and fieldSelector: %s\n", labelSelector, fieldSelector)
@@ -122,7 +160,7 @@ func (t *Tester) createJob(
 			GenerateName: "integration-tester-facilitator-",
 			Labels: map[string]string{
 				LabelKey:   LabelValue,
-				"ingestor": t.name,
+				"ingestor": t.ingestorLabel,
 			},
 		},
 		Spec: batchv1.JobSpec{
@@ -163,38 +201,38 @@ func (t *Tester) createJob(
 
 // ReadDataShareProcessorSpecificManifest retrieves a manifest.DataShareProcessorSpecificManifest from the given url
 func ReadDataShareProcessorSpecificManifest(url string) (manifest.DataShareProcessorSpecificManifest, error) {
-	manifest := manifest.DataShareProcessorSpecificManifest{}
+	specificManifest := manifest.DataShareProcessorSpecificManifest{}
 	client := http.Client{Timeout: 10 * time.Second}
 
 	r, err := client.Get(url)
 	if err != nil {
-		return manifest, fmt.Errorf("unable to get %s: %v", url, err)
+		return specificManifest, fmt.Errorf("unable to get %s: %v", url, err)
 	}
 	defer r.Body.Close()
 
-	err = json.NewDecoder(r.Body).Decode(&manifest)
+	err = json.NewDecoder(r.Body).Decode(&specificManifest)
 	if err != nil {
-		return manifest, fmt.Errorf("unable to decode body %s: %v", r.Body, err)
+		return specificManifest, fmt.Errorf("unable to decode body %s: %v", r.Body, err)
 	}
-	return manifest, err
+	return specificManifest, err
 }
 
 // ReadDataShareProcessorSpecificManifest retrieves a manifest.IngestorGlobalManifest from the given url
 func ReadIngestorGlobalManifests(url string) (manifest.IngestorGlobalManifest, error) {
-	m := manifest.IngestorGlobalManifest{}
+	ingestorGlobalManifest := manifest.IngestorGlobalManifest{}
 	client := http.Client{Timeout: 10 * time.Second}
 
 	r, err := client.Get(url)
 	if err != nil {
-		return m, fmt.Errorf("unable to get %s: %v", url, err)
+		return ingestorGlobalManifest, fmt.Errorf("unable to get %s: %v", url, err)
 	}
 	defer r.Body.Close()
 
-	err = json.NewDecoder(r.Body).Decode(&m)
+	err = json.NewDecoder(r.Body).Decode(&ingestorGlobalManifest)
 	if err != nil {
-		return m, fmt.Errorf("unable to decode body %s: %v", r.Body, err)
+		return ingestorGlobalManifest, fmt.Errorf("unable to decode body %s: %v", r.Body, err)
 	}
-	return m, err
+	return ingestorGlobalManifest, err
 }
 
 func (t *Tester) getValidPacketEncryptionKey(manifest manifest.DataShareProcessorSpecificManifest) (string, error) {

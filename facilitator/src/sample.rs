@@ -8,9 +8,8 @@ use chrono::NaiveDateTime;
 use log::info;
 use prio::{
     client::Client,
-    encrypt::{PrivateKey, PublicKey},
+    encrypt::{PublicKey},
     finite_field::{Field, MODULUS},
-    server::Server,
 };
 use rand::{thread_rng, Rng};
 use uuid::Uuid;

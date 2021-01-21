@@ -14,7 +14,7 @@ import (
 var (
 	kubeConfigPath = ""
 	namespace      = ""
-	name           = ""
+	ingestorLabel  = ""
 
 	ownManifestUrl   = ""
 	phaManifestUrl   = ""
@@ -64,7 +64,7 @@ func handleDashes(cmd *cobra.Command, v *viper.Viper) {
 func init() {
 	rootCmd.PersistentFlags().StringVar(&kubeConfigPath, "kube-config-path", "", "Path to the kubeconfig file to be used to authenticate to Kubernetes API")
 
-	rootCmd.PersistentFlags().StringVar(&name, "name", "", "The name of this ingestor")
+	rootCmd.PersistentFlags().StringVar(&ingestorLabel, "ingestor-label", "", "Label of the ingestor this tester will target")
 	rootCmd.PersistentFlags().StringVar(&namespace, "namespace", "", "The namespace this will run in")
 
 	rootCmd.PersistentFlags().StringVar(&ownManifestUrl, "own-manifest-url", "", "The URL where the manifest for the ingestor (integration-tester) can be accessed")
