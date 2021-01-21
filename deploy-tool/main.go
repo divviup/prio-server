@@ -21,14 +21,6 @@ import (
 	"github.com/abetterinternet/prio-server/deploy-tool/key"
 )
 
-// TestPHADecryptionKey is a libprio-rs encoded ECIES private key. It MUST match
-// the constant DEFAULT_PHA_ECIES_PRIVATE_KEY in facilitator/src/test_utils.rs.
-// It is present here so that a test environment can be configured to use
-// predictable keys for packet decryption.
-const TestPHADecryptionKey = "BIl6j+J6dYttxALdjISDv6ZI4/VWVEhUzaS05Lg" +
-	"rsfswmbLOgNt9HUC2E0w+9RqZx3XMkdEHBHfNuCSMpOwofVSq3TfyKwn0NrftKisKKVSaTOt5" +
-	"seJ67P5QL4hxgPWvxw=="
-
 // This tool consumes the output of `terraform apply`, generating keys and then
 // populating specific manifests and Kubernetes secrets with appropriate values.
 // We do this in this tool because if we generated secrets via Terraform
@@ -96,8 +88,8 @@ type IngestorGlobalManifest struct {
 type ServerIdentity struct {
 	// AwsIamEntity is ARN of user or role - apple only
 	AwsIamEntity string `json:"aws-iam-entity"`
-	// GcpServiceAccountId is the numeric unique service account ID
-	GcpServiceAccountId string `json:"gcp-service-account-id"`
+	// GcpServiceAccountID is the numeric unique service account ID
+	GcpServiceAccountID string `json:"gcp-service-account-id"`
 	// GcpServiceAccountEmail is the email address of the gcp service account
 	GcpServiceAccountEmail string `json:"gcp-service-account-email"`
 }
@@ -137,7 +129,7 @@ type TerraformOutput struct {
 type SingletonIngestor struct {
 	AwsIamEntity              string `json:"aws_iam_entity"`
 	GcpServiceAccountEmail    string `json:"gcp_service_account_email"`
-	GcpServiceAccountId       string `json:"gcp_service_account_id"`
+	GcpServiceAccountID       string `json:"gcp_service_account_id"`
 	TesterKubernetesNamespace string `json:"tester_kubernetes_namespace"`
 }
 
@@ -156,14 +148,6 @@ func marshalX962UncompressedPrivateKey(ecdsaKey *ecdsa.PrivateKey) ([]byte, erro
 // type.
 func marshalPKCS8PrivateKey(ecdsaKey *ecdsa.PrivateKey) ([]byte, error) {
 	return x509.MarshalPKCS8PrivateKey(ecdsaKey)
-}
-
-// marshalTestPHADecryptionKey ignores the provided key and returns the
-// default PHA decryption key in the same format as
-// marshalX962UncompressedPrivateKey. This is intended for test environments so
-// they can use predictable keys.
-func marshalTestPHADecryptionKey(ecdsaKey *ecdsa.PrivateKey) ([]byte, error) {
-	return base64.StdEncoding.DecodeString(TestPHADecryptionKey)
 }
 
 // generateAndDeployKeyPair generates a P-256 key pair and stores the base64
@@ -264,7 +248,7 @@ func setupTestEnvironment(ingestor *SingletonIngestor, manifestBucket string) {
 		Format: 1,
 		ServerIdentity: ServerIdentity{
 			AwsIamEntity:           ingestor.AwsIamEntity,
-			GcpServiceAccountId:    ingestor.GcpServiceAccountId,
+			GcpServiceAccountID:    ingestor.GcpServiceAccountID,
 			GcpServiceAccountEmail: ingestor.GcpServiceAccountEmail,
 		},
 		BatchSigningPublicKeys: map[string]BatchSigningPublicKey{
@@ -303,7 +287,6 @@ func setupTestEnvironment(ingestor *SingletonIngestor, manifestBucket string) {
 		log.Fatalf("gsutil failed: %v\noutput: %s", err, output)
 	}
 	wg.Wait()
-
 }
 
 func createBatchSigningPublicKey(kubernetesNamespace, name, ingestorName string) BatchSigningPublicKey {
