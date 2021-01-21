@@ -291,6 +291,7 @@ resource "kubernetes_cron_job" "workflow_manager" {
                 "--intake-max-age", "24h",
                 "--is-first=${var.is_first ? "true" : "false"}",
                 "--k8s-namespace", var.kubernetes_namespace,
+                "--ingestor-label", var.ingestor,
                 "--ingestor-input", var.ingestion_bucket,
                 "--ingestor-identity", var.ingestion_bucket_identity,
                 "--own-validation-input", var.own_validation_bucket,

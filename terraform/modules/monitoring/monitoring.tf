@@ -159,6 +159,18 @@ resource "helm_release" "prometheus" {
     name  = "server.retention"
     value = "30d"
   }
+  # Because we use a persistent volume to store metrics, we cannot use the
+  # default RollingUpdate strategy, or we would encounter a deadlock: containers
+  # from the new revision cannot become healthy until they mount their volumes,
+  # but the volumes are not available until the old revision is terminated, but
+  # the old revision can't be terminated until the new revision is healthy. So
+  # instead we use the Recreate strategy, which destroys the existing revision
+  # before spinning up the new one.
+  # https://kubernetes.io/docs/concepts/workloads/controllers/deployment/#strategy
+  set {
+    name  = "server.strategy.type"
+    value = "Recreate"
+  }
 }
 
 # Configures Grafana to get data from Prometheus. The label on this config map
