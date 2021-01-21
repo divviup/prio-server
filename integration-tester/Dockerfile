@@ -22,4 +22,3 @@ COPY --from=builder /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certifi
 COPY --from=builder /workspace/integration-tester/integration-tester .
 
 ENTRYPOINT ["/integration-tester"]
-

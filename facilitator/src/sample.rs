@@ -9,6 +9,7 @@ use log::info;
 use prio::{
     client::Client,
     encrypt::PublicKey,
+    encrypt::PrivateKey,
     finite_field::{Field, MODULUS},
 };
 use rand::{thread_rng, Rng};
