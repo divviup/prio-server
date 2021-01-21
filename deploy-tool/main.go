@@ -327,7 +327,7 @@ func main() {
 
 	certificatesByNamespace := map[string]PacketEncryptionKey{}
 
-	if terraformOutput.SingletonIngestor.Value != nil {
+	if terraformOutput.HasTestEnvironment.Value && terraformOutput.SingletonIngestor.Value != nil {
 		setupTestEnvironment(terraformOutput.SingletonIngestor.Value, terraformOutput.ManifestBucket.Value)
 		// it's fine if this overrides the previous data
 	}
