@@ -346,12 +346,13 @@ func main() {
 
 	if terraformOutput.SingletonIngestor.Value != nil {
 		setupTestEnvironment(terraformOutput.SingletonIngestor.Value, terraformOutput.ManifestBucket.Value)
+		// it's fine if this overrides the previous data
 	}
 
 	for dataShareProcessorName, manifestWrapper := range terraformOutput.SpecificManifests.Value {
 		if manifestExists(terraformOutput.OwnManifestBaseURL.Value, dataShareProcessorName) {
 			log.Printf("manifest for %s exists - ignoring", dataShareProcessorName)
-			// continue
+			continue
 		}
 		newBatchSigningPublicKeys := map[string]BatchSigningPublicKey{}
 		for name, batchSigningPublicKey := range manifestWrapper.SpecificManifest.BatchSigningPublicKeys {
