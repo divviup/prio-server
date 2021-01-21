@@ -86,14 +86,6 @@ variable "sum_part_bucket_service_account_email" {
   type = string
 }
 
-variable "is_env_with_ingestor" {
-  type = bool
-}
-
-variable "test_peer_ingestion_bucket" {
-  type = string
-}
-
 variable "is_first" {
   type = bool
 }
