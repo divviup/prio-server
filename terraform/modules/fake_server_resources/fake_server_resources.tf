@@ -252,7 +252,7 @@ resource "kubernetes_cron_job" "integration-tester" {
               name  = "integration-tester"
               image = "${var.container_registry}/${var.integration_tester_image}:${var.integration_tester_version}"
               args = [
-                "--name", each.value.ingestor,
+                "--ingestor-label", each.value.ingestor,
                 "--namespace", kubernetes_namespace.tester.metadata[0].name,
                 "--own-manifest-url", "https://${each.value.ingestor_manifest_base_url}/global-manifest.json",
                 "--pha-manifest-url", "https://${var.peer_manifest_base_url}/${each.key}-manifest.json",
