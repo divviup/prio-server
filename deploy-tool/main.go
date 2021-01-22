@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"github.com/abetterinternet/prio-server/deploy-tool/key"
+	. "github.com/abetterinternet/prio-server/manifest-updater/manifest"
 )
 
 // This tool consumes the output of `terraform apply`, generating keys and then
@@ -29,74 +30,6 @@ import (
 // terraform/modules/facilitator/facilitator.tf and the corresponding structs in
 // facilitator/src/manifest.rs.
 
-// BatchSigningPublicKey represents a public key used for batch signing.
-type BatchSigningPublicKey struct {
-	// PublicKey is the PEM armored base64 encoding of the ASN.1 encoding of the
-	// PKIX SubjectPublicKeyInfo structure. It must be a P-256 key.
-	PublicKey string `json:"public-key"`
-	// Expiration is the ISO 8601 encoded UTC date at which this key expires.
-	Expiration string `json:"expiration"`
-}
-
-// PacketEncryptionCertificate represents a certificate containing a public key
-// used for packet encryption.
-type PacketEncryptionKey struct {
-	// Certificate is the PEM armored X.509 certificate.
-	CertificateSigningRequest string `json:"certificate-signing-request"`
-}
-
-// SpecificManifest represents the manifest file advertised by a data share
-// processor. See the design document for the full specification.
-// https://docs.google.com/document/d/1MdfM3QT63ISU70l63bwzTrxr93Z7Tv7EDjLfammzo6Q/edit#heading=h.3j8dgxqo5h68
-type SpecificManifest struct {
-	// Format is the version of the manifest.
-	Format int64 `json:"format"`
-	// IngestionBucket is the region+name of the bucket that the data share
-	// processor which owns the manifest reads ingestion batches from.
-	IngestionBucket string `json:"ingestion-bucket"`
-	// IngestionIdentity is the ARN of the AWS IAM role that should be assumed
-	// by an ingestion server to write to this data share processor's ingestion
-	// bucket, if the ingestor does not have an AWS account of their own.
-	IngestionIdentity string `json:"ingestion-identity,omitempty"`
-	// PeerValidationBucket is the region+name of the bucket that the data share
-	// processor which owns the manifest reads peer validation batches from.
-	PeerValidationBucket string `json:"peer-validation-bucket"`
-	// BatchSigningPublicKeys maps key identifiers to batch signing public keys.
-	// These are the keys that peers reading batches emitted by this data share
-	// processor use to verify signatures.
-	BatchSigningPublicKeys BatchSigningPublicKeys `json:"batch-signing-public-keys"`
-	// PacketEncryptionCertificates maps key identifiers to packet encryption
-	// certificates. The values are PEM encoded X.509 certificates, which
-	// contain the public key corresponding to the private key that the data
-	// share processor which owns the manifest uses to decrypt ingestion share
-	// packets.
-	PacketEncryptionKeys PacketEncryptionKeyCSRs `json:"packet-encryption-keys"`
-}
-
-// IngestorGlobalManifest represents the global manifest file for an ingestor
-type IngestorGlobalManifest struct {
-	// Format is the version of the manifest.
-	Format int64 `json:"format"`
-	// ServerIdentity represents the server identity for the advertising party of the manifest
-	ServerIdentity ServerIdentity `json:"server-identity"`
-	// BatchSigningPublicKeys maps key identifiers to batch signing public keys.
-	// These are the keys that will be used to sign batches coming from this service
-	BatchSigningPublicKeys BatchSigningPublicKeys `json:"batch-signing-public-keys"`
-}
-
-// ServerIdentity represents the server identity for the advertising party of the manifest
-type ServerIdentity struct {
-	// AwsIamEntity is ARN of user or role - apple only
-	AwsIamEntity string `json:"aws-iam-entity"`
-	// GcpServiceAccountID is the numeric unique service account ID
-	GcpServiceAccountID string `json:"gcp-service-account-id"`
-	// GcpServiceAccountEmail is the email address of the gcp service account
-	GcpServiceAccountEmail string `json:"gcp-service-account-email"`
-}
-
-type BatchSigningPublicKeys = map[string]BatchSigningPublicKey
-type PacketEncryptionKeyCSRs = map[string]PacketEncryptionKey
-
 // TerraformOutput represents the JSON output from `terraform apply` or
 // `terraform output --json`. This struct must match the output variables
 // defined in terraform/main.tf, though it only need describe the output
@@ -105,16 +38,17 @@ type TerraformOutput struct {
 	ManifestBucket struct {
 		Value string
 	} `json:"manifest_bucket"`
-	// OwnManifestBaseURL is a URL without a scheme (https), that manifests can be found in
+	// OwnManifestBaseURL is a URL without a scheme (https), that manifests can
+	// be found in
 	OwnManifestBaseURL struct {
 		Value string
 	} `json:"own_manifest_base_url"`
 	SpecificManifests struct {
 		Value map[string]struct {
-			IngestorName        string           `json:"ingestor-name"`
-			KubernetesNamespace string           `json:"kubernetes-namespace"`
-			CertificateFQDN     string           `json:"certificate-fqdn"`
-			SpecificManifest    SpecificManifest `json:"specific-manifest"`
+			IngestorName        string                             `json:"ingestor-name"`
+			KubernetesNamespace string                             `json:"kubernetes-namespace"`
+			CertificateFQDN     string                             `json:"certificate-fqdn"`
+			SpecificManifest    DataShareProcessorSpecificManifest `json:"specific-manifest"`
 		}
 	} `json:"specific_manifests"`
 	HasTestEnvironment struct {
@@ -125,7 +59,8 @@ type TerraformOutput struct {
 	} `json:"singleton_ingestor"`
 }
 
-// GlobalIngestor defines the structure for the global fake ingestor (apple-like ingestor) to create a manifest for
+// GlobalIngestor defines the structure for the global fake ingestor (apple-like
+// ingestor) to create a manifest for
 type SingletonIngestor struct {
 	AwsIamEntity              string `json:"aws_iam_entity"`
 	GcpServiceAccountEmail    string `json:"gcp_service_account_email"`
@@ -240,9 +175,12 @@ func manifestExists(fqdn, dsp string) bool {
 	return resp.StatusCode == 200
 }
 
-func setupTestEnvironment(ingestor *SingletonIngestor, manifestBucket string) {
+func setupTestEnvironment(ingestor *SingletonIngestor, manifestBucket string) error {
 	name := "integration-tester-signing-key"
-	batchSigningPublicKey := createBatchSigningPublicKey(ingestor.TesterKubernetesNamespace, name, "")
+	batchSigningPublicKey, err := createBatchSigningPublicKey(ingestor.TesterKubernetesNamespace, name, "")
+	if err != nil {
+		return fmt.Errorf("error when creating the batch signing public key for the test environment")
+	}
 
 	manifest := IngestorGlobalManifest{
 		Format: 1,
@@ -252,7 +190,7 @@ func setupTestEnvironment(ingestor *SingletonIngestor, manifestBucket string) {
 			GcpServiceAccountEmail: ingestor.GcpServiceAccountEmail,
 		},
 		BatchSigningPublicKeys: map[string]BatchSigningPublicKey{
-			name: batchSigningPublicKey,
+			name: *batchSigningPublicKey,
 		},
 	}
 
@@ -265,7 +203,7 @@ func setupTestEnvironment(ingestor *SingletonIngestor, manifestBucket string) {
 		"cp", "-", destination)
 	stdin, err := gsutil.StdinPipe()
 	if err != nil {
-		log.Fatalf("could not get pipe to gsutil stdin: %v", err)
+		return fmt.Errorf("could not get pipe to gsutil stdin: %v", err)
 	}
 	wg := sync.WaitGroup{}
 	// We're going to need to sync once the goroutine below is complete
@@ -284,20 +222,21 @@ func setupTestEnvironment(ingestor *SingletonIngestor, manifestBucket string) {
 	}()
 
 	if output, err := gsutil.CombinedOutput(); err != nil {
-		log.Fatalf("gsutil failed: %v\noutput: %s", err, output)
+		return fmt.Errorf("gsutil failed: %v\noutput: %s", err, output)
 	}
 	wg.Wait()
+	return nil
 }
 
-func createBatchSigningPublicKey(kubernetesNamespace, name, ingestorName string) BatchSigningPublicKey {
+func createBatchSigningPublicKey(kubernetesNamespace, name, ingestorName string) (*BatchSigningPublicKey, error) {
 	privateKey, err := generateAndDeployKeyPair(kubernetesNamespace, name, ingestorName, "batch-signing-key", marshalPKCS8PrivateKey)
 	if err != nil {
-		log.Fatalf("%s", err)
+		return nil, fmt.Errorf("error generating and deploying key pair: %v", err)
 	}
 
 	pkixPublic, err := x509.MarshalPKIXPublicKey(privateKey.Public())
 	if err != nil {
-		log.Fatalf("failed to marshal ECDSA public key to PKIX: %v", err)
+		return nil, fmt.Errorf("failed to marshal ECDSA public key to PKIX: %v", err)
 	}
 
 	block := pem.Block{
@@ -311,10 +250,10 @@ func createBatchSigningPublicKey(kubernetesNamespace, name, ingestorName string)
 		UTC().
 		Format(time.RFC3339)
 
-	return BatchSigningPublicKey{
+	return &BatchSigningPublicKey{
 		PublicKey:  string(pem.EncodeToMemory(&block)),
 		Expiration: expiration,
-	}
+	}, nil
 }
 
 func main() {
@@ -325,11 +264,17 @@ func main() {
 		log.Fatalf("failed to parse specific manifests: %v", err)
 	}
 
-	certificatesByNamespace := map[string]PacketEncryptionKey{}
+	certificatesByNamespace := PacketEncryptionKeyCSRs{}
 
 	if terraformOutput.HasTestEnvironment.Value && terraformOutput.SingletonIngestor.Value != nil {
-		setupTestEnvironment(terraformOutput.SingletonIngestor.Value, terraformOutput.ManifestBucket.Value)
-		// it's fine if this overrides the previous data
+		if manifestExists(terraformOutput.OwnManifestBaseURL.Value, "singleton-ingestor/global") {
+			log.Println("global ingestor manifest exists - ignoring")
+		} else {
+			err := setupTestEnvironment(terraformOutput.SingletonIngestor.Value, terraformOutput.ManifestBucket.Value)
+			if err != nil {
+				log.Fatalf("%s", err)
+			}
+		}
 	}
 
 	for dataShareProcessorName, manifestWrapper := range terraformOutput.SpecificManifests.Value {
@@ -345,13 +290,17 @@ func main() {
 			}
 			log.Printf("generating ECDSA P256 key %s", name)
 
-			newBatchSigningPublicKeys[name] = createBatchSigningPublicKey(manifestWrapper.KubernetesNamespace, name, manifestWrapper.IngestorName)
+			batchSigningPublicKey, err := createBatchSigningPublicKey(manifestWrapper.KubernetesNamespace, name, manifestWrapper.IngestorName)
+			if err != nil {
+				log.Fatalf("Error when creating and signing public key: %v", batchSigningPublicKey)
+			}
+			newBatchSigningPublicKeys[name] = *batchSigningPublicKey
 		}
 
 		manifestWrapper.SpecificManifest.BatchSigningPublicKeys = newBatchSigningPublicKeys
 
-		newCertificates := map[string]PacketEncryptionKey{}
-		for name, packetEncryptionCertificate := range manifestWrapper.SpecificManifest.PacketEncryptionKeys {
+		newCertificates := map[string]PacketEncryptionCertificate{}
+		for name, packetEncryptionCertificate := range manifestWrapper.SpecificManifest.PacketEncryptionKeyCSRs {
 			if packetEncryptionCertificate.CertificateSigningRequest != "" {
 				newCertificates[name] = packetEncryptionCertificate
 				continue
@@ -379,13 +328,13 @@ func main() {
 				log.Fatalf("%s", err)
 			}
 
-			packetEncryptionCertificate := PacketEncryptionKey{CertificateSigningRequest: pemCSR}
+			packetEncryptionCertificate := PacketEncryptionCertificate{CertificateSigningRequest: pemCSR}
 
 			certificatesByNamespace[manifestWrapper.KubernetesNamespace] = packetEncryptionCertificate
 			newCertificates[name] = packetEncryptionCertificate
 		}
 
-		manifestWrapper.SpecificManifest.PacketEncryptionKeys = newCertificates
+		manifestWrapper.SpecificManifest.PacketEncryptionKeyCSRs = newCertificates
 
 		// Put the specific manifests into the manifest bucket. Users of this
 		// tool already need to have gsutil and valid Google Cloud credentials

@@ -42,8 +42,8 @@ type IngestorGlobalManifest struct {
 type ServerIdentity struct {
 	// AwsIamEntity is ARN of user or role - apple only
 	AwsIamEntity string `json:"aws-iam-entity"`
-	// GcpServiceAccountId is the numeric unique service account ID
-	GcpServiceAccountId string `json:"gcp-service-account-id"`
+	// GcpServiceAccountID is the numeric unique service account ID
+	GcpServiceAccountID string `json:"gcp-service-account-id"`
 	// GcpServiceAccountEmail is the email address of the gcp service account
 	GcpServiceAccountEmail string `json:"gcp-service-account-email"`
 }
