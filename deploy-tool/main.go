@@ -185,9 +185,9 @@ func setupTestEnvironment(ingestor *SingletonIngestor, manifestBucket string) er
 	manifest := manifest.IngestorGlobalManifest{
 		Format: 1,
 		ServerIdentity: manifest.ServerIdentity{
-			AwsIamEntity:           ingestor.AwsIamEntity,
-			GcpServiceAccountID:    ingestor.GcpServiceAccountID,
-			GcpServiceAccountEmail: ingestor.GcpServiceAccountEmail,
+			AWSIamEntity:           ingestor.AwsIamEntity,
+			GCPServiceAccountID:    ingestor.GcpServiceAccountID,
+			GCPServiceAccountEmail: ingestor.GcpServiceAccountEmail,
 		},
 		BatchSigningPublicKeys: manifest.BatchSigningPublicKeys{
 			name: *batchSigningPublicKey,

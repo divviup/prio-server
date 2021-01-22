@@ -1,7 +1,7 @@
 package manifest
 
-// DataShareProcessorSpecificManifest represents the manifest file advertised by a data share
-// processor. See the design document for the full specification.
+// DataShareProcessorSpecificManifest represents the manifest file advertised by
+// a data share processor. See the design document for the full specification.
 // https://docs.google.com/document/d/1MdfM3QT63ISU70l63bwzTrxr93Z7Tv7EDjLfammzo6Q/edit#heading=h.3j8dgxqo5h68
 type DataShareProcessorSpecificManifest struct {
 	// Format is the version of the manifest.
@@ -19,33 +19,36 @@ type DataShareProcessorSpecificManifest struct {
 	// These are the keys that peers reading batches emitted by this data share
 	// processor use to verify signatures.
 	BatchSigningPublicKeys BatchSigningPublicKeys `json:"batch-signing-public-keys"`
-	// PacketEncryptionKeyCSRs maps key identifiers to packet encryption
-	// CSRs. The values are PEM encoded PKCS#10 self signed certificate signing request,
-	// which contain the public key corresponding to the ECDSA P256 private key
-	// that the data share processor which owns the manifest uses to decrypt
-	// ingestion share packets.
+	// PacketEncryptionKeyCSRs maps key identifiers to packet encryption CSRs.
+	// The values are PEM encoded PKCS#10 self signed certificate signing
+	// request, which contain the public key corresponding to the ECDSA P256
+	// private key that the data share processor which owns the manifest uses to
+	// decrypt ingestion share packets.
 	PacketEncryptionKeyCSRs PacketEncryptionKeyCSRs `json:"packet-encryption-keys"`
 }
 
-// IngestorGlobalManifest represents the global manifest file for an ingestor
+// IngestorGlobalManifest represents the global manifest file for an ingestor.
 type IngestorGlobalManifest struct {
 	// Format is the version of the manifest.
 	Format int64 `json:"format"`
-	// ServerIdentity represents the server identity for the advertising party of the manifest
+	// ServerIdentity represents the server identity for the advertising party
+	// of the manifest.
 	ServerIdentity ServerIdentity `json:"server-identity"`
 	// BatchSigningPublicKeys maps key identifiers to batch signing public keys.
-	// These are the keys that will be used to sign batches coming from this service
+	// These are the keys that will be used by the ingestion server advertising
+	// this manifest to sign ingestion batches.
 	BatchSigningPublicKeys BatchSigningPublicKeys `json:"batch-signing-public-keys"`
 }
 
-// ServerIdentity represents the server identity for the advertising party of the manifest
+// ServerIdentity represents the server identity for the advertising party of
+// the manifest.
 type ServerIdentity struct {
-	// AwsIamEntity is ARN of user or role - apple only
-	AwsIamEntity string `json:"aws-iam-entity"`
-	// GcpServiceAccountID is the numeric unique service account ID
-	GcpServiceAccountID string `json:"gcp-service-account-id"`
-	// GcpServiceAccountEmail is the email address of the gcp service account
-	GcpServiceAccountEmail string `json:"gcp-service-account-email"`
+	// AWSIamEntity is ARN of user or role - apple only
+	AWSIamEntity string `json:"aws-iam-entity"`
+	// GCPServiceAccountID is the numeric unique service account ID
+	GCPServiceAccountID string `json:"gcp-service-account-id"`
+	// GCPServiceAccountEmail is the email address of the gcp service account
+	GCPServiceAccountEmail string `json:"gcp-service-account-email"`
 }
 
 type BatchSigningPublicKeys = map[string]BatchSigningPublicKey
