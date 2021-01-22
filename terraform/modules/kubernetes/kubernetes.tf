@@ -462,27 +462,12 @@ resource "kubernetes_role" "workflow_manager_role" {
 
   rule {
     // API group "" means the core API group.
-    api_groups = [""]
+    api_groups = ["batch", ""]
     // Workflow manager can list pods and jobs.
     // Note: Some of these permissions will probably wind up not being needed.
     // Starting with a moderately generous demonstration set.
-    resources = ["namespaces", "pods"]
+    resources = ["namespaces", "pods", "jobs"]
     verbs     = ["get", "list", "watch"]
-  }
-
-  rule {
-    api_groups = [""]
-    // workflow-manager needs to be able to list and get secrets
-    // this is how the integration tester works as they share roles
-    resources = ["secrets"]
-    verbs     = ["list", "get"]
-  }
-
-  rule {
-    api_groups = ["batch"]
-    // integration-tester needs to make jobs
-    resources = ["jobs"]
-    verbs     = ["get", "list", "watch", "create"]
   }
 }
 
