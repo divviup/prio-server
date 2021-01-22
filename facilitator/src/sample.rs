@@ -8,7 +8,6 @@ use chrono::NaiveDateTime;
 use log::info;
 use prio::{
     client::Client,
-    encrypt::PrivateKey,
     encrypt::PublicKey,
     finite_field::{Field, MODULUS},
 };
@@ -241,6 +240,7 @@ mod tests {
         transport::{LocalFileTransport, Transport},
     };
     use chrono::NaiveDate;
+    use prio::encrypt::PrivateKey;
 
     #[test]
     #[allow(clippy::float_cmp)] // No arithmetic done on floats

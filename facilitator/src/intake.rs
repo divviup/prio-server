@@ -7,7 +7,7 @@ use crate::{
 use anyhow::{anyhow, ensure, Context, Result};
 use chrono::NaiveDateTime;
 use log::info;
-use prio::{encrypt::PrivateKey, encrypt::PublicKey, finite_field::Field, server::Server};
+use prio::{encrypt::PrivateKey, finite_field::Field, server::Server};
 use ring::signature::UnparsedPublicKey;
 use std::{collections::HashMap, convert::TryFrom, iter::Iterator};
 use uuid::Uuid;
@@ -194,6 +194,7 @@ mod tests {
         },
         transport::{LocalFileTransport, SignableTransport, VerifiableTransport},
     };
+    use prio::encrypt::PublicKey;
 
     #[test]
     fn share_validator() {

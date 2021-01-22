@@ -19,7 +19,7 @@ import (
 	"time"
 
 	"github.com/abetterinternet/prio-server/deploy-tool/key"
-	. "github.com/abetterinternet/prio-server/manifest-updater/manifest"
+	"github.com/abetterinternet/prio-server/manifest-updater/manifest"
 )
 
 // This tool consumes the output of `terraform apply`, generating keys and then
@@ -45,10 +45,10 @@ type TerraformOutput struct {
 	} `json:"own_manifest_base_url"`
 	SpecificManifests struct {
 		Value map[string]struct {
-			IngestorName        string                             `json:"ingestor-name"`
-			KubernetesNamespace string                             `json:"kubernetes-namespace"`
-			CertificateFQDN     string                             `json:"certificate-fqdn"`
-			SpecificManifest    DataShareProcessorSpecificManifest `json:"specific-manifest"`
+			IngestorName        string                                      `json:"ingestor-name"`
+			KubernetesNamespace string                                      `json:"kubernetes-namespace"`
+			CertificateFQDN     string                                      `json:"certificate-fqdn"`
+			SpecificManifest    manifest.DataShareProcessorSpecificManifest `json:"specific-manifest"`
 		}
 	} `json:"specific_manifests"`
 	HasTestEnvironment struct {
@@ -182,14 +182,14 @@ func setupTestEnvironment(ingestor *SingletonIngestor, manifestBucket string) er
 		return fmt.Errorf("error when creating the batch signing public key for the test environment")
 	}
 
-	manifest := IngestorGlobalManifest{
+	manifest := manifest.IngestorGlobalManifest{
 		Format: 1,
-		ServerIdentity: ServerIdentity{
+		ServerIdentity: manifest.ServerIdentity{
 			AwsIamEntity:           ingestor.AwsIamEntity,
 			GcpServiceAccountID:    ingestor.GcpServiceAccountID,
 			GcpServiceAccountEmail: ingestor.GcpServiceAccountEmail,
 		},
-		BatchSigningPublicKeys: map[string]BatchSigningPublicKey{
+		BatchSigningPublicKeys: manifest.BatchSigningPublicKeys{
 			name: *batchSigningPublicKey,
 		},
 	}
@@ -228,7 +228,7 @@ func setupTestEnvironment(ingestor *SingletonIngestor, manifestBucket string) er
 	return nil
 }
 
-func createBatchSigningPublicKey(kubernetesNamespace, name, ingestorName string) (*BatchSigningPublicKey, error) {
+func createBatchSigningPublicKey(kubernetesNamespace, name, ingestorName string) (*manifest.BatchSigningPublicKey, error) {
 	privateKey, err := generateAndDeployKeyPair(kubernetesNamespace, name, ingestorName, "batch-signing-key", marshalPKCS8PrivateKey)
 	if err != nil {
 		return nil, fmt.Errorf("error generating and deploying key pair: %v", err)
@@ -250,7 +250,7 @@ func createBatchSigningPublicKey(kubernetesNamespace, name, ingestorName string)
 		UTC().
 		Format(time.RFC3339)
 
-	return &BatchSigningPublicKey{
+	return &manifest.BatchSigningPublicKey{
 		PublicKey:  string(pem.EncodeToMemory(&block)),
 		Expiration: expiration,
 	}, nil
@@ -264,7 +264,7 @@ func main() {
 		log.Fatalf("failed to parse specific manifests: %v", err)
 	}
 
-	certificatesByNamespace := PacketEncryptionKeyCSRs{}
+	certificatesByNamespace := manifest.PacketEncryptionKeyCSRs{}
 
 	if terraformOutput.HasTestEnvironment.Value && terraformOutput.SingletonIngestor.Value != nil {
 		if manifestExists(terraformOutput.OwnManifestBaseURL.Value, "singleton-ingestor/global") {
@@ -282,7 +282,7 @@ func main() {
 			log.Printf("manifest for %s exists - ignoring", dataShareProcessorName)
 			continue
 		}
-		newBatchSigningPublicKeys := map[string]BatchSigningPublicKey{}
+		newBatchSigningPublicKeys := manifest.BatchSigningPublicKeys{}
 		for name, batchSigningPublicKey := range manifestWrapper.SpecificManifest.BatchSigningPublicKeys {
 			if batchSigningPublicKey.PublicKey != "" {
 				newBatchSigningPublicKeys[name] = batchSigningPublicKey
@@ -299,7 +299,7 @@ func main() {
 
 		manifestWrapper.SpecificManifest.BatchSigningPublicKeys = newBatchSigningPublicKeys
 
-		newCertificates := map[string]PacketEncryptionCertificate{}
+		newCertificates := manifest.PacketEncryptionKeyCSRs{}
 		for name, packetEncryptionCertificate := range manifestWrapper.SpecificManifest.PacketEncryptionKeyCSRs {
 			if packetEncryptionCertificate.CertificateSigningRequest != "" {
 				newCertificates[name] = packetEncryptionCertificate
@@ -328,7 +328,7 @@ func main() {
 				log.Fatalf("%s", err)
 			}
 
-			packetEncryptionCertificate := PacketEncryptionCertificate{CertificateSigningRequest: pemCSR}
+			packetEncryptionCertificate := manifest.PacketEncryptionCertificate{CertificateSigningRequest: pemCSR}
 
 			certificatesByNamespace[manifestWrapper.KubernetesNamespace] = packetEncryptionCertificate
 			newCertificates[name] = packetEncryptionCertificate
