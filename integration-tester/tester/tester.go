@@ -44,12 +44,12 @@ func New(
 	ownManifestUrl, phaManifestUrl, facilManifestUrl,
 	serviceAccountName, facilitatorImage,
 	pushGateway, awsAccountId string,
-	dryRun bool) *Tester {
+	dryRun bool) (*Tester, error) {
 
 	kubeClient, err := kubernetes.NewClient(namespace, kubeConfigPath, dryRun)
 
 	if err != nil {
-		log.Fatalf("error creating a new kubernetes client: %v", err)
+		return nil, fmt.Errorf("error creating a new kubernetes client: %v", err)
 	}
 
 	return &Tester{
@@ -58,19 +58,19 @@ func New(
 		ownManifestUrl, phaManifestUrl, facilManifestUrl,
 		serviceAccountName, facilitatorImage,
 		pushGateway, awsAccountId,
-	}
+	}, nil
 }
 
 func (t *Tester) Start() error {
-	ownManifest, err := ReadIngestorGlobalManifests(t.ownManifestUrl)
+	ownManifest, err := readIngestorGlobalManifests(t.ownManifestUrl)
 	if err != nil {
 		return err
 	}
-	phaManifest, err := ReadDataShareProcessorSpecificManifest(t.phaManifestUrl)
+	phaManifest, err := readDataShareProcessorSpecificManifest(t.phaManifestUrl)
 	if err != nil {
 		return err
 	}
-	facilManifest, err := ReadDataShareProcessorSpecificManifest(t.facilManifestUrl)
+	facilManifest, err := readDataShareProcessorSpecificManifest(t.facilManifestUrl)
 	if err != nil {
 		return err
 	}
@@ -80,12 +80,12 @@ func (t *Tester) Start() error {
 		return err
 	}
 
-	phaPacketEncryptionKey, err := t.getValidPacketEncryptionKey(phaManifest)
+	phaPacketEncryptionKey, err := getValidPacketEncryptionKey(phaManifest)
 	if err != nil {
 		return err
 	}
 
-	facilPacketEncryptionKey, err := t.getValidPacketEncryptionKey(facilManifest)
+	facilPacketEncryptionKey, err := getValidPacketEncryptionKey(facilManifest)
 	if err != nil {
 		return err
 	}
@@ -134,7 +134,7 @@ func (t *Tester) createJob(
 	phaManifest manifest.DataShareProcessorSpecificManifest,
 	facilManifest manifest.DataShareProcessorSpecificManifest,
 	phaPacketEncryptionPublicKey, facilPacketEncryptionPublicKey string,
-	bsk *corev1.Secret) *batchv1.Job {
+	batchSigningKey *corev1.Secret) *batchv1.Job {
 
 	trueP := true
 	backOffLimit := int32(1)
@@ -142,15 +142,15 @@ func (t *Tester) createJob(
 
 		{Name: "BATCH_SIGNING_PRIVATE_KEY",
 			ValueFrom: &corev1.EnvVarSource{SecretKeyRef: &corev1.SecretKeySelector{
-				LocalObjectReference: corev1.LocalObjectReference{Name: bsk.Name},
+				LocalObjectReference: corev1.LocalObjectReference{Name: batchSigningKey.Name},
 				Key:                  "secret_key",
 			}}},
-		{Name: "BATCH_SIGNING_PRIVATE_KEY_IDENTIFIER", Value: bsk.Name},
+		{Name: "BATCH_SIGNING_PRIVATE_KEY_IDENTIFIER", Value: batchSigningKey.Name},
 
 		{Name: "PHA_ECIES_PUBLIC_KEY", Value: phaPacketEncryptionPublicKey},
 		{Name: "FACILITATOR_ECIES_PUBLIC_KEY", Value: facilPacketEncryptionPublicKey},
 
-		{Name: "RUST_LOG", Value: "debug"},
+		{Name: "RUST_LOG", Value: "info"},
 		{Name: "RUST_BACKTRACE", Value: "1"},
 		{Name: "AWS_ACCOUNT_ID", Value: t.awsAccountId},
 	}
@@ -199,8 +199,8 @@ func (t *Tester) createJob(
 	}
 }
 
-// ReadDataShareProcessorSpecificManifest retrieves a manifest.DataShareProcessorSpecificManifest from the given url
-func ReadDataShareProcessorSpecificManifest(url string) (manifest.DataShareProcessorSpecificManifest, error) {
+// readDataShareProcessorSpecificManifest retrieves a manifest.DataShareProcessorSpecificManifest from the given url
+func readDataShareProcessorSpecificManifest(url string) (manifest.DataShareProcessorSpecificManifest, error) {
 	specificManifest := manifest.DataShareProcessorSpecificManifest{}
 	client := http.Client{Timeout: 10 * time.Second}
 
@@ -217,8 +217,8 @@ func ReadDataShareProcessorSpecificManifest(url string) (manifest.DataShareProce
 	return specificManifest, err
 }
 
-// ReadDataShareProcessorSpecificManifest retrieves a manifest.IngestorGlobalManifest from the given url
-func ReadIngestorGlobalManifests(url string) (manifest.IngestorGlobalManifest, error) {
+// readDataShareProcessorSpecificManifest retrieves a manifest.IngestorGlobalManifest from the given url
+func readIngestorGlobalManifests(url string) (manifest.IngestorGlobalManifest, error) {
 	ingestorGlobalManifest := manifest.IngestorGlobalManifest{}
 	client := http.Client{Timeout: 10 * time.Second}
 
@@ -235,7 +235,7 @@ func ReadIngestorGlobalManifests(url string) (manifest.IngestorGlobalManifest, e
 	return ingestorGlobalManifest, err
 }
 
-func (t *Tester) getValidPacketEncryptionKey(manifest manifest.DataShareProcessorSpecificManifest) (string, error) {
+func getValidPacketEncryptionKey(manifest manifest.DataShareProcessorSpecificManifest) (string, error) {
 	for _, value := range manifest.PacketEncryptionKeyCSRs {
 		publicKey, err := getBase64PublicKeyFromCSR(value.CertificateSigningRequest)
 		if err != nil {
@@ -278,9 +278,6 @@ func (t *Tester) getValidBatchSigningKey(manifest manifest.IngestorGlobalManifes
 		return nil, err
 	}
 	secretMap := indexSecretsByName(secrets)
-	for key, _ := range secretMap {
-		log.Printf("Secret found: %s\n", key)
-	}
 	for name := range manifest.BatchSigningPublicKeys {
 		val, ok := secretMap[name]
 

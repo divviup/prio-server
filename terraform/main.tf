@@ -161,7 +161,6 @@ variable "integration_tester_version" {
   default = "latest"
 }
 
-
 variable "cluster_settings" {
   type = object({
     initial_node_count : number

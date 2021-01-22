@@ -9,12 +9,17 @@ var runCmd = &cobra.Command{
 	Use:   "run",
 	Short: "Run the integration-tester",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		t := tester.New(kubeConfigPath,
+		t, err := tester.New(kubeConfigPath,
 			namespace, ingestorLabel,
 			ownManifestUrl, phaManifestUrl, facilManifestUrl,
 			serviceAccountName, facilitatorImage,
 			pushGateway, awsAccountId,
 			dryRun)
+
+		if err != nil {
+			return err
+		}
+
 		return t.Start()
 	},
 }
