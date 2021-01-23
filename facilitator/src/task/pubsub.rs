@@ -1,13 +1,14 @@
 use crate::{
     config::Identity,
     gcp_oauth::OauthTokenProvider,
-    http::{send_json_request, JsonRequestParameters},
+    http::{send_json_request, RequestParameters, HTTP},
     task::{Task, TaskHandle, TaskQueue},
 };
 use anyhow::{anyhow, Context, Result};
 use log::info;
 use serde::Deserialize;
 use std::{io::Cursor, marker::PhantomData, time::Duration};
+use url::Url;
 
 const PUBSUB_API_BASE_URL: &str = "https://pubsub.googleapis.com";
 
@@ -90,29 +91,24 @@ impl<T: Task> TaskQueue<T> for GcpPubSubTaskQueue<T> {
             self.pubsub_api_endpoint, self.gcp_project_id, self.subscription_id
         );
 
-        let http_response = send_json_request(JsonRequestParameters {
-            request: ureq::post(&url),
+        let request = HTTP.prepare_request(RequestParameters {
+            url: &Url::parse(&url)?,
+            method: "POST",
             token_provider: Some(&mut self.oauth_token_provider),
-            // Empirically, if there are no messages available in the
-            // subscription, the PubSub API will wait about 90 seconds to send
-            // an HTTP 200 with an empty JSON body. We set higher timeouts than
-            // usual to allow for this.
-            connect_timeout_millis: Some(180_000), // three minutes
-            read_timeout_millis: Some(180_000),    // three minutes
-            body: ureq::json!({
+            ..Default::default()
+        });
+
+        let http_response = send_json_request(
+            request,
+            ureq::json!({
                 // Dequeue one task at a time
                 "maxMessages": 1
             }),
-        })?;
-        if http_response.error() {
-            return Err(anyhow!(
-                "failed to pull messages from PubSub topic: {:?}",
-                http_response
-            ));
-        }
+        )
+        .context("failed to pull messages from PubSub topic")?;
 
         let response = http_response
-            .into_json_deserialize::<PullResponse>()
+            .into_json::<PullResponse>()
             .context("failed to deserialize response from PubSub API")?;
 
         let received_messages = match response.received_messages {
@@ -161,21 +157,20 @@ impl<T: Task> TaskQueue<T> for GcpPubSubTaskQueue<T> {
             self.pubsub_api_endpoint, self.gcp_project_id, self.subscription_id
         );
 
-        let http_response = send_json_request(JsonRequestParameters {
-            request: ureq::post(&url),
+        let request = HTTP.prepare_request(RequestParameters {
+            url: &Url::parse(&url)?,
+            method: "POST",
             token_provider: Some(&mut self.oauth_token_provider),
-            body: ureq::json!({
+            ..Default::default()
+        });
+
+        send_json_request(
+            request,
+            ureq::json!({
                 "ackIds": [handle.acknowledgment_id]
             }),
-            ..Default::default()
-        })?;
-        if http_response.error() {
-            return Err(anyhow!(
-                "failed to acknowledge task {:?}: {:?}",
-                handle,
-                http_response
-            ));
-        }
+        )
+        .context(anyhow!("failed to acknowledge task {:?}", handle,))?;
 
         Ok(())
     }
@@ -230,22 +225,24 @@ impl<T: Task> GcpPubSubTaskQueue<T> {
             self.pubsub_api_endpoint, self.gcp_project_id, self.subscription_id
         );
 
-        let http_response = send_json_request(JsonRequestParameters {
-            request: ureq::post(&url),
+        let request = HTTP.prepare_request(RequestParameters {
+            url: &Url::parse(&url)?,
+            method: "POST",
             token_provider: Some(&mut self.oauth_token_provider),
-            body: ureq::json!({
+            ..Default::default()
+        });
+
+        send_json_request(
+            request,
+            ureq::json!({
                 "ackIds": [handle.acknowledgment_id],
                 "ackDeadlineSeconds": ack_deadline.as_secs(),
             }),
-            ..Default::default()
-        })?;
-        if http_response.error() {
-            return Err(anyhow!(
-                "failed to modify ack deadline on task {:?}: {:?}",
-                handle,
-                http_response
-            ));
-        }
+        )
+        .context(anyhow!(
+            "failed to modify ack deadline on task {:?}",
+            handle,
+        ))?;
 
         Ok(())
     }
