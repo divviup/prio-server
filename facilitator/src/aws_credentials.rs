@@ -12,7 +12,7 @@ use tokio::runtime::{Builder, Runtime};
 
 /// Constructs a basic runtime suitable for use in our single threaded context
 pub(crate) fn basic_runtime() -> Result<Runtime> {
-    Ok(Builder::new().basic_scheduler().enable_all().build()?)
+    Ok(Builder::new_current_thread().enable_all().build()?)
 }
 
 // ------------- Everything below here was copied from rusoto/credential/src/lib.rs in the rusoto repo ---------------------------
