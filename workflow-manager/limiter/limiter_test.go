@@ -69,6 +69,7 @@ func TestLimiterBehavior(t *testing.T) {
 	go func() {
 		l.Execute(func(ticket *Ticket) {
 			go func() {
+				defer l.Done(ticket)
 				// Indicate that this job has started
 				messageChannel <- "third job"
 				t.Log("third job done")
