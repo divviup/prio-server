@@ -100,6 +100,10 @@ variable "is_first" {
   type = bool
 }
 
+variable "intake_max_age" {
+  type = string
+}
+
 variable "aggregation_period" {
   type = string
 }
@@ -287,7 +291,7 @@ resource "kubernetes_cron_job" "workflow_manager" {
               args = [
                 "--aggregation-period", var.aggregation_period,
                 "--grace-period", var.aggregation_grace_period,
-                "--intake-max-age", "24h",
+                "--intake-max-age", var.intake_max_age,
                 "--is-first=${var.is_first ? "true" : "false"}",
                 "--k8s-namespace", var.kubernetes_namespace,
                 "--ingestor-label", var.ingestor,
