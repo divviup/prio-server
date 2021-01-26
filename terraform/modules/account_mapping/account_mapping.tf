@@ -61,7 +61,7 @@ resource "kubernetes_service_account" "account" {
 # account in GCP-level policies, below. See step 5 in
 # https://cloud.google.com/kubernetes-engine/docs/how-to/workload-identity#authenticating_to
 locals {
-  service_account = "serviceAccount:${data.google_project.current.name}.svc.id.goog[${var.kubernetes_namespace}/${kubernetes_service_account.account.metadata[0].name}]"
+  service_account = "serviceAccount:${data.google_project.current.project_id}.svc.id.goog[${var.kubernetes_namespace}/${kubernetes_service_account.account.metadata[0].name}]"
 }
 
 # Allows the Kubernetes service account to impersonate the GCP service account.
