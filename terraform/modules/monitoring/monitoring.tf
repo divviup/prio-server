@@ -233,7 +233,7 @@ resource "helm_release" "stackdriver_exporter" {
 
   set {
     name  = "stackdriver.projectId"
-    value = data.google_project.current.name
+    value = data.google_project.current.project_id
   }
 
   set {
