@@ -40,7 +40,6 @@ module "account_mapping" {
   kubernetes_account_name = "manifest-updater"
   kubernetes_namespace    = var.kubernetes_namespace
   environment             = var.environment
-  gcp_project             = var.gcp_project
 }
 
 # Create a new manifest_updater role that is authorized to work with k8s secrets

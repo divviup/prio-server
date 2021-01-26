@@ -1,6 +1,7 @@
 use crate::{
     batch::{Batch, BatchReader, BatchWriter},
     idl::{IngestionDataSharePacket, IngestionHeader, Packet, ValidationHeader, ValidationPacket},
+    metrics::IntakeMetricsCollector,
     transport::{SignableTransport, VerifiableAndDecryptableTransport},
     BatchSigningKey, Error,
 };
@@ -25,6 +26,7 @@ pub struct BatchIntaker<'a> {
     own_validation_batch_signing_key: &'a BatchSigningKey,
     is_first: bool,
     callback_cadence: u32,
+    metrics_collector: Option<&'a IntakeMetricsCollector>,
 }
 
 impl<'a> BatchIntaker<'a> {
@@ -56,6 +58,7 @@ impl<'a> BatchIntaker<'a> {
             own_validation_batch_signing_key: &own_validation_transport.batch_signing_key,
             is_first,
             callback_cadence: 1000,
+            metrics_collector: None,
         })
     }
 
@@ -65,6 +68,12 @@ impl<'a> BatchIntaker<'a> {
     /// generate_validation_share is in flight and is intended only for testing.
     pub fn set_callback_cadence(&mut self, cadence: u32) {
         self.callback_cadence = cadence;
+    }
+
+    /// Provide a collector in which metrics about this intake task will be
+    /// recorded.
+    pub fn set_metrics_collector(&mut self, collector: &'a IntakeMetricsCollector) {
+        self.metrics_collector = Some(collector);
     }
 
     /// Fetches the ingestion batch, validates the signatures over its header
@@ -78,6 +87,7 @@ impl<'a> BatchIntaker<'a> {
             self.own_validation_batch.path(),
             self.peer_validation_batch.path()
         );
+
         let ingestion_header = self.intake_batch.header(self.intake_public_keys)?;
         ensure!(
             ingestion_header.bins > 0,

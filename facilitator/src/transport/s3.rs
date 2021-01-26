@@ -118,7 +118,7 @@ impl S3Transport {
                 // [3]: https://github.com/rusoto/rusoto/issues/1686
                 let mut builder = hyper::Client::builder();
                 builder.pool_idle_timeout(Duration::from_secs(10));
-                let connector = HttpsConnector::new();
+                let connector = HttpsConnector::with_native_roots();
                 let http_client = rusoto_core::HttpClient::from_builder(builder, connector);
 
                 if let Some(iam_role) = iam_role {
@@ -236,7 +236,7 @@ impl Transport for S3Transport {
 
     fn get(&mut self, key: &str) -> Result<Box<dyn Read>> {
         info!("get {}/{} as {:?}", self.path, key, self.iam_role);
-        let mut runtime = basic_runtime()?;
+        let runtime = basic_runtime()?;
         let client = (self.client_provider)(&self.path.region, self.iam_role.clone())?;
 
         let get_output = retry_request("get s3 object", || {
@@ -324,7 +324,7 @@ impl MultipartUploadWriter {
         minimum_upload_part_size: usize,
         client: S3Client,
     ) -> Result<MultipartUploadWriter> {
-        let mut runtime = basic_runtime()?;
+        let runtime = basic_runtime()?;
 
         // We use the "bucket-owner-full-control" canned ACL to ensure that
         // objects we send to peers will be owned by them.
