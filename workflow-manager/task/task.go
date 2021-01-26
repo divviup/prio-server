@@ -5,6 +5,7 @@
 package task
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -12,6 +13,7 @@ import (
 	"time"
 
 	leaws "github.com/letsencrypt/prio-server/workflow-manager/aws"
+	"github.com/letsencrypt/prio-server/workflow-manager/limiter"
 	"github.com/letsencrypt/prio-server/workflow-manager/utils"
 
 	"cloud.google.com/go/pubsub"
@@ -112,8 +114,9 @@ type Enqueuer interface {
 // subscription with the same ID that can later be used by a facilitator.
 // Returns error on failure.
 func CreatePubSubTopic(project string, topicID string) error {
-	ctx, cancel := utils.ContextWithTimeout()
-	defer cancel()
+	// Google documentation advises against timeouts on client creation
+	// https://godoc.org/cloud.google.com/go#hdr-Timeouts_and_Cancellation
+	ctx := context.Background()
 
 	client, err := pubsub.NewClient(ctx, project)
 	if err != nil {
@@ -144,15 +147,17 @@ type GCPPubSubEnqueuer struct {
 	topic     *pubsub.Topic
 	waitGroup sync.WaitGroup
 	dryRun    bool
+	limiter   *limiter.Limiter
 }
 
 // NewGCPPubSubEnqueuer creates a task enqueuer for a given project and topic
 // in GCP PubSub. If dryRun is true, no tasks will actually be enqueued. Clients
 // should re-use a single instance as much as possible to enable batching of
 // publish requests.
-func NewGCPPubSubEnqueuer(project string, topicID string, dryRun bool) (*GCPPubSubEnqueuer, error) {
-	ctx, cancel := utils.ContextWithTimeout()
-	defer cancel()
+func NewGCPPubSubEnqueuer(project string, topicID string, dryRun bool, maxWorkers int32) (*GCPPubSubEnqueuer, error) {
+	// Google documentation advises against timeouts on client creation
+	// https://godoc.org/cloud.google.com/go#hdr-Timeouts_and_Cancellation
+	ctx := context.Background()
 
 	client, err := pubsub.NewClient(ctx, project)
 	if err != nil {
@@ -160,41 +165,45 @@ func NewGCPPubSubEnqueuer(project string, topicID string, dryRun bool) (*GCPPubS
 	}
 
 	return &GCPPubSubEnqueuer{
-		topic:  client.Topic(topicID),
-		dryRun: dryRun,
+		topic:   client.Topic(topicID),
+		dryRun:  dryRun,
+		limiter: limiter.New(maxWorkers),
 	}, nil
 }
 
 func (e *GCPPubSubEnqueuer) Enqueue(task Task, completion func(error)) {
-	e.waitGroup.Add(1)
-	go func(task Task) {
-		defer e.waitGroup.Done()
-		jsonTask, err := json.Marshal(task)
-		if err != nil {
-			completion(fmt.Errorf("marshaling task to JSON: %w", err))
-			return
-		}
+	e.limiter.Execute(func(ticket *limiter.Ticket) {
+		e.waitGroup.Add(1)
+		go func() {
+			defer e.waitGroup.Done()
+			defer e.limiter.Done(ticket)
+			jsonTask, err := json.Marshal(task)
+			if err != nil {
+				completion(fmt.Errorf("marshaling task to JSON: %w", err))
+				return
+			}
 
-		if e.dryRun {
-			log.Printf("dry run, not enqueuing task")
+			if e.dryRun {
+				log.Printf("dry run, not enqueuing task")
+				completion(nil)
+				return
+			}
+
+			// Publish() returns immediately, giving us a handle to the result that we
+			// can block on to see if publishing succeeded. The PubSub client
+			// automatically retries for us, so we just keep the handle so the caller
+			// can do whatever they need to after successful publication and we can
+			// block in Stop() until all tasks have been enqueued
+			ctx, cancel := utils.ContextWithTimeout()
+			defer cancel()
+			res := e.topic.Publish(ctx, &pubsub.Message{Data: jsonTask})
+			if _, err := res.Get(ctx); err != nil {
+				completion(fmt.Errorf("failed to publish task %+v: %w", task, err))
+				return
+			}
 			completion(nil)
-			return
-		}
-
-		// Publish() returns immediately, giving us a handle to the result that we
-		// can block on to see if publishing succeeded. The PubSub client
-		// automatically retries for us, so we just keep the handle so the caller
-		// can do whatever they need to after successful publication and we can
-		// block in Stop() until all tasks have been enqueued
-		ctx, cancel := utils.ContextWithTimeout()
-		defer cancel()
-		res := e.topic.Publish(ctx, &pubsub.Message{Data: jsonTask})
-		if _, err := res.Get(ctx); err != nil {
-			completion(fmt.Errorf("Failed to publish task %+v: %w", task, err))
-		}
-
-		completion(nil)
-	}(task)
+		}()
+	})
 }
 
 func (e *GCPPubSubEnqueuer) Stop() {

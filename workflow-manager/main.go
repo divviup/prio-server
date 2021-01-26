@@ -48,6 +48,7 @@ var dryRun = flag.Bool("dry-run", false, "If set, no operations with side effect
 var taskQueueKind = flag.String("task-queue-kind", "", "Which task queue kind to use.")
 var intakeTasksTopic = flag.String("intake-tasks-topic", "", "Name of the topic to which intake-batch tasks should be published")
 var aggregateTasksTopic = flag.String("aggregate-tasks-topic", "", "Name of the topic to which aggregate tasks should be published")
+var maxEnqueueWorkers = flag.Int("max-enqueue-workers", 100, "Max number of workers that can be used to enqueue jobs")
 
 // Arguments for gcp-pubsub task queue
 var gcpPubSubCreatePubSubTopics = flag.Bool("gcp-pubsub-create-topics", false, "Whether to create the GCP PubSub topics used for intake and aggregation tasks.")
@@ -78,8 +79,8 @@ var (
 )
 
 func fail(format string, args ...interface{}) {
-	log.Printf(format, args...)
 	workflowManagerLastFailure.SetToCurrentTime()
+	log.Fatalf(format, args...)
 }
 
 func main() {
@@ -209,6 +210,7 @@ func main() {
 			*gcpProjectID,
 			*intakeTasksTopic,
 			*dryRun,
+			int32(*maxEnqueueWorkers),
 		)
 		if err != nil {
 			fail("%s", err)
@@ -219,6 +221,7 @@ func main() {
 			*gcpProjectID,
 			*aggregateTasksTopic,
 			*dryRun,
+			int32(*maxEnqueueWorkers),
 		)
 		if err != nil {
 			fail("%s", err)
