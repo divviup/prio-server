@@ -133,6 +133,8 @@ resource "kubernetes_persistent_volume_claim" "prometheus_server" {
   }
 }
 
+# Metrics are stored in Prometheus. Documentation and config reference:
+# https://artifacthub.io/packages/helm/prometheus-community/prometheus
 resource "helm_release" "prometheus" {
   name       = "prometheus"
   chart      = "prometheus"
@@ -196,6 +198,8 @@ DATASOURCE
   }
 }
 
+# We use Grafana as a frontend to Prometheus for dashboards. Documentation and
+# config reference: https://artifacthub.io/packages/helm/grafana/grafana
 resource "helm_release" "grafana" {
   name       = "grafana"
   chart      = "grafana"
@@ -211,4 +215,74 @@ resource "helm_release" "grafana" {
     name  = "sidecar.datasources.label"
     value = "grafana-datasources"
   }
+}
+
+data "google_project" "current" {}
+
+# The Stackdriver Prometheus exporter forwards metrics from Google Cloud
+# Monitoring (aka Stackdriver) into Prometheus. Documentation and config
+# reference:
+# https://github.com/prometheus-community/stackdriver_exporter
+# https://artifacthub.io/packages/helm/prometheus-community/prometheus-stackdriver-exporter
+# https://github.com/prometheus-community/helm-charts/tree/main/charts/prometheus-stackdriver-exporter
+resource "helm_release" "stackdriver_exporter" {
+  name       = "stackdriver-exporter"
+  chart      = "prometheus-stackdriver-exporter"
+  repository = "https://prometheus-community.github.io/helm-charts"
+  namespace  = kubernetes_namespace.monitoring.metadata[0].name
+
+  set {
+    name  = "stackdriver.projectId"
+    value = data.google_project.current.name
+  }
+
+  set {
+    name  = "serviceAccount.name"
+    value = module.account_mapping.kubernetes_account_name
+  }
+
+  set {
+    name = "stackdriver.metrics.typePrefixes"
+    # The metrics to be forwarded from Stackdriver to Prometheus. The prefix
+    # list is comma separated, and we have to escape the comma to avoid
+    # confusing Helm:
+    # https://github.com/hashicorp/terraform-provider-helm/issues/226
+    value = join("\\,", [
+      # PubSub metrics
+      # https://cloud.google.com/monitoring/api/metrics_gcp#gcp-pubsub
+      "pubsub.googleapis.com/subscription/",
+      "pubsub.googleapis.com/topic/",
+    ])
+  }
+
+  # We must annotate the stackdriver exporter Kubernetes service to be
+  # discovered by Prometheus as a scrape target. It is surprisingly hard to get
+  # this represented just right so that the transformation from Terraform value
+  # to Helm argument to Kubernetes annotation comes out right, hence the YAML
+  # literal heredoc.
+  # https://github.com/hashicorp/terraform-provider-helm/issues/64
+  values = [
+    <<VALUE
+service:
+  annotations:
+    prometheus.io/scrape: "true"
+VALUE
+  ]
+}
+
+# stackdriver-exporter needs some GCP level permissions to access the
+# Stackdriver API, so we make it a GCP service account and map it to a
+# Kubernetes service account
+# https://github.com/prometheus-community/stackdriver_exporter#credentials-and-permissions
+module "account_mapping" {
+  source                  = "../account_mapping"
+  google_account_name     = "${var.environment}-stackdriver-exporter"
+  kubernetes_account_name = "stackdriver-exporter"
+  kubernetes_namespace    = kubernetes_namespace.monitoring.metadata[0].name
+  environment             = var.environment
+}
+
+resource "google_project_iam_member" "stackdriver_exporter" {
+  role   = "roles/monitoring.viewer"
+  member = "serviceAccount:${module.account_mapping.google_service_account_email}"
 }

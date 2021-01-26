@@ -146,7 +146,6 @@ module "account_mapping" {
   kubernetes_account_name = "${var.data_share_processor_name}-workflow-manager"
   kubernetes_namespace    = var.kubernetes_namespace
   environment             = var.environment
-  gcp_project             = var.gcp_project
 }
 
 # Allows the Kubernetes service account to request auth tokens for the GCP
