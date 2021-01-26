@@ -17,8 +17,7 @@ use crate::{
 #[derive(Derivative)]
 #[derivative(Debug)]
 pub struct AwsSqsTaskQueue<T: Task> {
-    #[derivative(Debug = "ignore")]
-    client: SqsClient,
+    region: Region,
     queue_url: String,
     runtime: Runtime,
     phantom_task: PhantomData<*const T>,
@@ -29,18 +28,10 @@ impl<T: Task> AwsSqsTaskQueue<T> {
         let region = Region::from_str(region).context("invalid AWS region")?;
         let runtime = basic_runtime()?;
 
-        // Credentials for authenticating to AWS are automatically
-        // sourced from environment variables or ~/.aws/credentials.
-        // https://github.com/rusoto/rusoto/blob/master/AWS-CREDENTIALS.md
-        let credentials_provider =
-            DefaultCredentialsProvider::new().context("failed to create credentials provider")?;
-
-        let http_client = rusoto_core::HttpClient::new().context("failed to create HTTP client")?;
-
         Ok(AwsSqsTaskQueue {
-            client: SqsClient::new_with(http_client, credentials_provider, region),
+            region,
             queue_url: queue_url.to_owned(),
-            runtime: runtime,
+            runtime,
             phantom_task: PhantomData,
         })
     }
@@ -49,6 +40,8 @@ impl<T: Task> AwsSqsTaskQueue<T> {
 impl<T: Task> TaskQueue<T> for AwsSqsTaskQueue<T> {
     fn dequeue(&mut self) -> Result<Option<TaskHandle<T>>> {
         info!("pull task from {}", self.queue_url);
+
+        let client = self.sqs_client()?;
 
         let request = ReceiveMessageRequest {
             // Dequeue one task at a time
@@ -66,7 +59,7 @@ impl<T: Task> TaskQueue<T> for AwsSqsTaskQueue<T> {
 
         let response = self
             .runtime
-            .block_on(self.client.receive_message(request))
+            .block_on(client.receive_message(request))
             .context("failed to dequeue message from SQS")?;
 
         let received_messages = match response.messages {
@@ -109,6 +102,8 @@ impl<T: Task> TaskQueue<T> for AwsSqsTaskQueue<T> {
             task.acknowledgment_id, self.queue_url
         );
 
+        let client = self.sqs_client()?;
+
         let request = DeleteMessageRequest {
             queue_url: self.queue_url.clone(),
             receipt_handle: task.acknowledgment_id.clone(),
@@ -116,7 +111,7 @@ impl<T: Task> TaskQueue<T> for AwsSqsTaskQueue<T> {
 
         Ok(self
             .runtime
-            .block_on(self.client.delete_message(request))
+            .block_on(client.delete_message(request))
             .context("failed to delete/acknowledge message in SQS")?)
     }
 
@@ -147,6 +142,29 @@ impl<T: Task> TaskQueue<T> for AwsSqsTaskQueue<T> {
 }
 
 impl<T: Task> AwsSqsTaskQueue<T> {
+    /// Returns a configured SqsClient, or an error on failure.
+    fn sqs_client(&self) -> Result<SqsClient> {
+        // Rusoto has outstanding issues where either the remote end or the
+        // underlying connection pool can close idle connections under us,
+        // causing API requests to fail if they are made at the wrong time. In
+        // order to avoid having to carefully juggle idle connection timeouts,
+        // we create a new SqsClient for each request.
+        // https://github.com/rusoto/rusoto/issues/1686
+        let http_client = rusoto_core::HttpClient::new().context("failed to create HTTP client")?;
+
+        // Credentials for authenticating to AWS are automatically
+        // sourced from environment variables or ~/.aws/credentials.
+        // https://github.com/rusoto/rusoto/blob/master/AWS-CREDENTIALS.md
+        let credentials_provider =
+            DefaultCredentialsProvider::new().context("failed to create credentials provider")?;
+
+        Ok(SqsClient::new_with(
+            http_client,
+            credentials_provider,
+            self.region.clone(),
+        ))
+    }
+
     /// Changes the message visibility of the SQS message described by the TaskHandle, resetting it
     /// to the specified visibility timeout.
     fn change_message_visibility(
@@ -154,6 +172,8 @@ impl<T: Task> AwsSqsTaskQueue<T> {
         task: &TaskHandle<T>,
         visibility_timeout: &Duration,
     ) -> Result<()> {
+        let client = self.sqs_client()?;
+
         let timeout = i64::try_from(visibility_timeout.as_secs()).context(format!(
             "timeout value {:?} cannot be encoded into ChangeMessageVisibilityRequest",
             visibility_timeout
@@ -167,7 +187,7 @@ impl<T: Task> AwsSqsTaskQueue<T> {
 
         Ok(self
             .runtime
-            .block_on(self.client.change_message_visibility(request))
+            .block_on(client.change_message_visibility(request))
             .context("failed to change message visibility message in SQS")?)
     }
 }
