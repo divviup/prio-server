@@ -11,6 +11,7 @@ pub mod http;
 pub mod idl;
 pub mod intake;
 pub mod manifest;
+pub mod metrics;
 pub mod sample;
 pub mod task;
 pub mod test_utils;

@@ -32,6 +32,7 @@ import (
 var BuildInfo string
 
 var k8sNS = flag.String("k8s-namespace", "", "Kubernetes namespace")
+var ingestorLabel = flag.String("ingestor-label", "", "Label of ingestion server")
 var isFirst = flag.Bool("is-first", false, "Whether this set of servers is \"first\", aka PHA servers")
 var maxAge = flag.String("intake-max-age", "1h", "Max age (in Go duration format) for intake batches to be worth processing.")
 var ingestorInput = flag.String("ingestor-input", "", "Bucket for input from ingestor (s3:// or gs://) (Required)")
@@ -91,7 +92,8 @@ func main() {
 	if *pushGateway != "" {
 		pusher := push.New(*pushGateway, "workflow-manager").
 			Gatherer(prometheus.DefaultGatherer).
-			Grouping("locality", *k8sNS)
+			Grouping("locality", *k8sNS).
+			Grouping("ingestor", *ingestorLabel)
 
 		defer pusher.Push()
 		intakesStarted = promauto.NewGauge(prometheus.GaugeOpts{

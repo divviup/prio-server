@@ -78,6 +78,15 @@ variable "is_first" {
   description = "Whether the data share processors created by this environment are \"first\" or \"PHA servers\""
 }
 
+variable "intake_max_age" {
+  type        = string
+  default     = "6h"
+  description = <<DESCRIPTION
+Maximum age of ingestion batches for workflow-manager to schedule intake tasks
+for. The value should be a string parseable by Go's time.ParseDuration.
+DESCRIPTION
+}
+
 variable "aggregation_period" {
   type        = string
   default     = "3h"
@@ -139,6 +148,12 @@ variable "workflow_manager_version" {
 variable "facilitator_version" {
   type    = string
   default = "latest"
+}
+
+variable "prometheus_server_persistent_disk_size_gb" {
+  type = number
+  # This is quite high, but it's the minimum for GCE regional disks
+  default = 200
 }
 
 terraform {
@@ -369,6 +384,7 @@ module "data_share_processors" {
   own_manifest_base_url                          = module.manifest.base_url
   test_peer_environment                          = var.test_peer_environment
   is_first                                       = var.is_first
+  intake_max_age                                 = var.intake_max_age
   aggregation_period                             = var.aggregation_period
   aggregation_grace_period                       = var.aggregation_grace_period
   kms_keyring                                    = module.gke.kms_keyring
@@ -409,8 +425,12 @@ module "fake_server_resources" {
 
 module "monitoring" {
   source                 = "./modules/monitoring"
+  environment            = var.environment
+  gcp_region             = var.gcp_region
   cluster_endpoint       = module.gke.cluster_endpoint
   cluster_ca_certificate = base64decode(module.gke.certificate_authority_data)
+
+  prometheus_server_persistent_disk_size_gb = var.prometheus_server_persistent_disk_size_gb
 }
 
 output "manifest_bucket" {

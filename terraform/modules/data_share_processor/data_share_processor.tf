@@ -80,6 +80,10 @@ variable "is_first" {
   type = bool
 }
 
+variable "intake_max_age" {
+  type = string
+}
+
 variable "aggregation_period" {
   type = string
 }
@@ -431,6 +435,7 @@ module "kubernetes" {
   is_env_with_ingestor                    = local.is_env_with_ingestor
   test_peer_ingestion_bucket              = local.test_peer_ingestion_bucket
   is_first                                = var.is_first
+  intake_max_age                          = var.intake_max_age
   aggregation_period                      = var.aggregation_period
   aggregation_grace_period                = var.aggregation_grace_period
   pushgateway                             = var.pushgateway
