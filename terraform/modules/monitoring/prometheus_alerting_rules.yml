@@ -1,0 +1,54 @@
+groups:
+- name: default
+  rules:
+  - alert: workflow_manager_heartbeat
+    expr: (time() - workflow_manager_last_success_seconds) > 1800
+    for: 5m
+    labels:
+      severity: page
+    annotations:
+      summary: "Workflow manager {{ $labels.locality }}-{{ $labels.ingestor }}
+        not running"
+      description: "workflow-manager instance {{ $labels.locality }}-{{ $labels.ingestor }}
+        has not run successfully for 30 minutes"
+  - alert: facilitator_intake_failure_rate
+    expr: rate(facilitator_intake_tasks_finished{status="success"}[1h]) / rate(facilitator_intake_tasks_finished[1h]) < 0.95
+    for: 5m
+    labels:
+      severity: page
+    annotations:
+      summary: "High failure rate for intake worker
+        {{ $labels.kubernetes_namespace }}-{{ $labels.kubernetes_name }}"
+      description: "intake worker instance {{ $labels.kubernetes_namespace }}-
+        {{ $labels.kubernetes_name }} is failing more than 95% of the time in
+        the last hour"
+  - alert: facilitator_aggregate_failure_rate
+    # aggregations run much less often than intake so use a larger window of time
+    expr: rate(facilitator_aggregate_tasks_finished{status="success"}[8h]) / rate(facilitator_aggregate_tasks_finished[8h]) < 0.95
+    for: 5m
+    labels:
+      severity: page
+    annotations:
+      summary: "High failure rate for aggregate worker
+        {{ $labels.kubernetes_namespace }}-{{ $labels.kubernetes_name }}"
+      description: "aggregate worker instance {{ $labels.kubernetes_namespace}}-
+        {{ $labels.kubernetes_name }} in environment ${environment} is failing
+        more than 95% of the time in the last 8 hours"
+  - alert: task_queue_growth
+    expr: stackdriver_pubsub_subscription_pubsub_googleapis_com_subscription_num_undelivered_messages{subscription_id!~".*-dead-letter"} > 0
+    for: 2h
+    labels:
+      severity: page
+    annotations:
+      summary: "PubSub subscription {{ $labels.subscription_id }} not emptying"
+      description: "PubSub subscription {{ $labels.subscription_id }} has had
+        undelivered messages for 2 hours"
+  - alert: dead_letter_queue
+    expr: stackdriver_pubsub_subscription_pubsub_googleapis_com_subscription_num_undelivered_messages{subscription_id=~".*-dead-letter"} > 0
+    for: 5m
+    labels:
+      severity: page
+    annotations:
+      summary: "Undelivered messages in dead letter queue {{ $labels.subscription_id }}"
+      description: "There are undelivered messages in the dead letter queue for
+        PubSub subscription {{ $labels.subscription_id }}."

@@ -61,6 +61,8 @@ route:
   group_wait: 10s
   group_interval: 5m
   repeat_interval: 3h
+  match:
+    severity: page
 receivers:
 - name: victorops-receiver
   victorops_configs:
@@ -173,6 +175,21 @@ resource "helm_release" "prometheus" {
     name  = "server.strategy.type"
     value = "Recreate"
   }
+
+  # Alerting rules are defined in their own YAML file. We then need to provide
+  # them to the Helm chart, under the key serverFiles."alerting_rules.yml".
+  # To ensure we get a properly nested and indented YAML structure and that
+  # "alerting_rules.yml" doesn't get expanded into a map "alerting_rules"
+  # containing the key "yml", we decode the alerting rules into a Terraform map
+  # and then encode the entire map back into YAML, then stick that into the
+  # chart.
+  values = [
+    yamlencode({
+      serverFiles = {
+        "alerting_rules.yml" = yamldecode(file("${path.module}/prometheus_alerting_rules.yml"))
+      }
+    })
+  ]
 }
 
 # Configures Grafana to get data from Prometheus. The label on this config map

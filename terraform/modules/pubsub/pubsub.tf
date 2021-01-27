@@ -79,6 +79,18 @@ resource "google_pubsub_topic_iam_binding" "dead_letter" {
   ]
 }
 
+# Subscription on the dead letter topic enabling us to alert on dead letter
+# delivery and examine undelivered messages
+resource "google_pubsub_subscription" "dead_letter" {
+  name                 = google_pubsub_topic.dead_letter.name
+  topic                = google_pubsub_topic.dead_letter.name
+  ack_deadline_seconds = 600
+  # Subscription should never expire
+  expiration_policy {
+    ttl = ""
+  }
+}
+
 output "queue" {
   value = google_pubsub_topic.task.name
 }
