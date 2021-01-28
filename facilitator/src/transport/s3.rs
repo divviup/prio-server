@@ -1,14 +1,13 @@
 use crate::{
     aws_credentials::{basic_runtime, DefaultCredentialsProvider},
     config::{Identity, S3Path},
-    http::{RequestParameters, HTTP},
+    http::{prepare_request, Method, RequestParameters},
     transport::{Transport, TransportWriter},
     Error,
 };
 use anyhow::{Context, Result};
 use derivative::Derivative;
 use hyper_rustls::HttpsConnector;
-use lazy_static::lazy_static;
 use log::{debug, info};
 use rusoto_core::{
     credential::{AutoRefreshingProvider, CredentialsError, Secret, Variable},
@@ -32,17 +31,17 @@ use tokio::{
     runtime::Runtime,
 };
 use url::Url;
-
-lazy_static! {
-    static ref METADATA_SERVICE_TOKEN_URL: Url = Url::parse("http://metadata.google.internal:80/computeMetadata/v1/instance/service-accounts/default/identity").expect("could not parse token metadata url");
-}
-
 // We use workload identity to map GCP service accounts to Kubernetes service
 // accounts and make an auth token for the GCP account available to containers
 // in the GKE metadata service. Sadly we can't use the Kubernetes feature to
 // automount a service account token, because that would provide the token for
 // the *Kubernetes* service account, not the GCP one.
 // See terraform/modules/gke/gke.tf and terraform/modules/kuberenetes/kubernetes.tf
+
+fn metadata_service_token_url() -> Url {
+    Url::parse("http://metadata.google.internal:80/computeMetadata/v1/instance/service-accounts/default/identity")
+    .expect("could not parse token metadata api url")
+}
 
 // When running in GCP, we are provided the AWS account ID that owns our buckets
 // via environment variable.
@@ -143,32 +142,35 @@ impl S3Transport {
                         // invoked, but because the closure is not declared
                         // async, we cannot use .await to work with Futures.
 
-                        let mut url = METADATA_SERVICE_TOKEN_URL.clone();
+                        let mut url = metadata_service_token_url();
 
-                        let url = url
-                            .query_pairs_mut()
+                        url.query_pairs_mut()
                             .append_pair(
                                 "audience",
-                                format!("sts.amazonaws.com/{}", aws_account_id).as_ref(),
+                                &format!("sts.amazonaws.com/{}", aws_account_id),
                             )
                             .finish();
 
-                        let mut request = HTTP.prepare_request(RequestParameters {
-                            url,
-                            method: "GET",
-                            ..Default::default()
-                        });
+                        let mut request = prepare_request(
+                            None,
+                            RequestParameters {
+                                url,
+                                method: Method::Get,
+                                ..Default::default()
+                            },
+                        )
+                        .map_err(|e| {
+                            CredentialsError::new(format!("failed to create request: {:?}", e))
+                        })?;
+
                         request = request.set("Metadata-Flavor", "Google");
 
-                        let response = request.call();
-
-                        let response = match response {
-                            Ok(response) => Ok(response),
-                            Err(error) => Err(CredentialsError::new(format!(
+                        let response = request.call().map_err(|e| {
+                            CredentialsError::new(format!(
                                 "failed to fetch auth token from metadata service: {:?}",
-                                error
-                            ))),
-                        }?;
+                                e
+                            ))
+                        })?;
 
                         let token = response.into_string().map_err(|e| {
                             CredentialsError::new(format!(

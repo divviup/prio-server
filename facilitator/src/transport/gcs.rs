@@ -1,22 +1,23 @@
 use crate::{
     config::{GCSPath, Identity},
-    gcp_oauth::OauthTokenProvider,
-    http::{RequestParameters, HTTP},
+    gcp_oauth::GcpOauthTokenProvider,
+    http::{
+        prepare_request, Method, OauthTokenProvider, RequestParameters, StaticOauthTokenProvider,
+    },
     transport::{Transport, TransportWriter},
     Error,
 };
 use anyhow::{anyhow, Context, Result};
-use lazy_static::lazy_static;
 use log::info;
 use std::{
     io,
     io::{Read, Write},
 };
+use ureq::{Agent, AgentBuilder};
 use url::Url;
 
-lazy_static! {
-    static ref STORAGE_API_BASE_URL: Url =
-        Url::parse("https://storage.googleapis.com/").expect("unable to parse storage url");
+fn storage_api_base_url() -> Url {
+    Url::parse("https://storage.googleapis.com/").expect("unable to parse storage API url")
 }
 
 /// GCSTransport manages reading and writing from GCS buckets, with
@@ -27,7 +28,8 @@ lazy_static! {
 #[derive(Debug)]
 pub struct GCSTransport {
     path: GCSPath,
-    oauth_token_provider: OauthTokenProvider,
+    oauth_token_provider: GcpOauthTokenProvider,
+    agent: Agent,
 }
 
 impl GCSTransport {
@@ -43,13 +45,16 @@ impl GCSTransport {
     ) -> Result<GCSTransport> {
         Ok(GCSTransport {
             path: path.ensure_directory_prefix(),
-            oauth_token_provider: OauthTokenProvider::new(
+            oauth_token_provider: GcpOauthTokenProvider::new(
                 // This token is used to access GCS storage
                 // https://developers.google.com/identity/protocols/oauth2/scopes#storage
                 "https://www.googleapis.com/auth/devstorage.read_write",
                 identity.map(|x| x.to_string()),
                 key_file_reader,
             )?,
+            agent: AgentBuilder::new()
+                .timeout(std::time::Duration::from_secs(10))
+                .build(),
         })
     }
 }
@@ -68,25 +73,33 @@ impl Transport for GCSTransport {
         // API reference: https://cloud.google.com/storage/docs/json_api/v1/objects/get
         let encoded_key = urlencoding::encode(&[&self.path.key, key].concat());
 
-        let mut url = STORAGE_API_BASE_URL
-            .clone()
-            .join("upload/storage/v1/b/")?
-            .join(self.path.bucket.as_str())?
-            .join("/o/")?
-            .join(encoded_key.as_str())?;
+        let formatted_url = &format!(
+            "{}storage/v1/b/{}/o/{}",
+            storage_api_base_url().to_string(),
+            self.path.bucket,
+            encoded_key
+        );
+        let mut url = Url::parse(&formatted_url).context(format!(
+            "failed to parse get object url for gcp: {}",
+            formatted_url
+        ))?;
 
-        let url = url.query_pairs_mut().append_pair("alt", "media").finish();
+        // Ensures response body will be content and not JSON metadata.
+        // https://cloud.google.com/storage/docs/json_api/v1/objects/get#parameters
+        url.query_pairs_mut().append_pair("alt", "media").finish();
 
-        let request = HTTP.prepare_request(RequestParameters {
-            url: &url,
-            method: "GET",
-            token_provider: Some(&mut self.oauth_token_provider),
-            token: None,
-        });
+        let request = prepare_request(
+            Some(self.agent.clone()),
+            RequestParameters {
+                url: url.clone(),
+                method: Method::Get,
+                token_provider: Some(&mut self.oauth_token_provider),
+            },
+        )?;
 
         let response = request
             .call()
-            .context(anyhow!("failed to fetch object {} from GCS", url))?;
+            .context(format!("failed to fetch object {} from GCS", url))?;
 
         Ok(Box::new(response.into_reader()))
     }
@@ -140,6 +153,7 @@ struct StreamingTransferWriter {
     minimum_upload_chunk_size: usize,
     object_upload_position: usize,
     buffer: Vec<u8>,
+    agent: Agent,
 }
 
 impl StreamingTransferWriter {
@@ -155,7 +169,7 @@ impl StreamingTransferWriter {
             // GCP documentation recommends setting upload part size to 8 MiB.
             // https://cloud.google.com/storage/docs/performing-resumable-uploads#chunked-upload
             8_388_608,
-            STORAGE_API_BASE_URL.clone(),
+            storage_api_base_url(),
         )
     }
 
@@ -169,10 +183,16 @@ impl StreamingTransferWriter {
         // Initiate the resumable, streaming upload.
         // https://cloud.google.com/storage/docs/performing-resumable-uploads#initiate-session
         let encoded_object = urlencoding::encode(&object);
-        let mut upload_url = storage_api_base_url
-            .join("upload/storage/v1/b/")?
-            .join(bucket.as_str())?
-            .join("/o/")?;
+
+        let formatted_url = format!(
+            "{}upload/storage/v1/b/{}/o/",
+            storage_api_base_url.to_string(),
+            bucket
+        );
+        let mut upload_url = Url::parse(&formatted_url).context(format!(
+            "failed to parse upload to bucket gcp url: {}",
+            formatted_url
+        ))?;
 
         upload_url
             .query_pairs_mut()
@@ -180,16 +200,18 @@ impl StreamingTransferWriter {
             .append_pair("name", &encoded_object)
             .finish();
 
-        let request = HTTP.prepare_request(RequestParameters {
-            url: &upload_url,
-            method: "POST",
-            token_provider: None,
-            token: Some(oauth_token.as_str()),
-        });
+        let request = prepare_request(
+            None,
+            RequestParameters {
+                url: upload_url,
+                method: Method::Post,
+                token_provider: Some(&mut StaticOauthTokenProvider::from(oauth_token)),
+            },
+        )?;
 
         let http_response = request
             .send_bytes(&[])
-            .context(anyhow!("uploading to gs://{} failed", bucket))?;
+            .context(format!("uploading to gs://{} failed", bucket))?;
 
         // The upload session URI authenticates subsequent upload requests for
         // this upload, so we no longer need the impersonated service account's
@@ -204,7 +226,13 @@ impl StreamingTransferWriter {
             minimum_upload_chunk_size,
             buffer: Vec::with_capacity(minimum_upload_chunk_size * 2),
             object_upload_position: 0,
-            upload_session_uri: Url::parse(&upload_session_uri)?,
+            upload_session_uri: Url::parse(&upload_session_uri).context(format!(
+                "failed to parse upload_session_uri url: {}",
+                &upload_session_uri
+            ))?,
+            agent: AgentBuilder::new()
+                .timeout(std::time::Duration::from_secs(10))
+                .build(),
         })
     }
 
@@ -243,15 +271,20 @@ impl StreamingTransferWriter {
             content_range_header_total_length_field
         );
 
-        let mut request = HTTP.prepare_request(RequestParameters {
-            url: &self.upload_session_uri,
-            method: "PUT",
-            token: None,
-            token_provider: None,
-        });
+        let mut request = prepare_request(
+            Some(self.agent.clone()),
+            RequestParameters {
+                url: self.upload_session_uri.clone(),
+                method: Method::Put,
+                ..Default::default()
+            },
+        )?;
         request = request.set("Content-Range", &content_range);
 
-        let http_response = request.send_bytes(body)?;
+        let http_response = request.send_bytes(body).context(format!(
+            "failed in sending bytes to gcs upload session: {}",
+            &self.upload_session_uri
+        ))?;
 
         // On success we expect HTTP 308 Resume Incomplete and a Range: header,
         // unless this is the last part and the server accepts the entire
@@ -302,9 +335,9 @@ impl StreamingTransferWriter {
                 self.object_upload_position = end + 1;
                 Ok(())
             }
-            _ => Err(anyhow!(
+            status => Err(anyhow!(
                 "failed to upload part to GCS: {} \n{:?}",
-                http_response.status(),
+                status,
                 http_response.into_string()
             )),
         }
@@ -343,12 +376,14 @@ impl TransportWriter for StreamingTransferWriter {
 
     fn cancel_upload(&mut self) -> Result<()> {
         // https://cloud.google.com/storage/docs/performing-resumable-uploads#cancel-upload
-        let mut request = HTTP.prepare_request(RequestParameters {
-            url: &self.upload_session_uri,
-            method: "DELETE",
-            token: None,
-            token_provider: None,
-        });
+        let mut request = prepare_request(
+            Some(self.agent.clone()),
+            RequestParameters {
+                url: self.upload_session_uri.clone(),
+                method: Method::Delete,
+                ..Default::default()
+            },
+        )?;
 
         request = request.set("Content-Length", "0");
 
@@ -386,6 +421,12 @@ mod tests {
             .with_header("Location", &fake_upload_session_uri)
             .expect_at_most(1)
             .create();
+
+        println!(
+            "TEST {} {}",
+            mockito::server_url(),
+            Url::parse(&mockito::server_url()).expect("hello")
+        );
 
         let mut writer = StreamingTransferWriter::new_with_api_url(
             "fake-bucket".to_string(),

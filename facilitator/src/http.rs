@@ -1,29 +1,60 @@
 use anyhow::{Context, Result};
-use lazy_static::lazy_static;
+use std::fmt::Debug;
 use std::time::Duration;
-use ureq::{Agent, AgentBuilder, Error, Request, Response, SerdeValue};
-use url::{ParseError, Url};
+use ureq::{Agent, AgentBuilder, Request, Response, SerdeValue};
+use url::Url;
 
-use crate::gcp_oauth::OauthTokenProvider;
-lazy_static! {
-    pub(crate) static ref HTTP: Http = Http::new();
-    static ref EXAMPLE_URL: Url =
-        Url::parse("https://example.com").expect("example url did not parse");
-}
-pub(crate) struct Http {
-    agent: Agent,
+#[derive(Debug)]
+pub(crate) enum Method {
+    Get,
+    Post,
+    Put,
+    Delete,
 }
 
-impl Http {
-    pub fn new() -> Self {
-        Http {
-            agent: AgentBuilder::new().timeout(Duration::from_secs(10)).build(),
+impl Method {
+    fn to_primitive_string(&self) -> &str {
+        match self {
+            Method::Get => "GET",
+            Method::Post => "POST",
+            Method::Put => "PUT",
+            Method::Delete => "DELETE",
         }
     }
+}
 
-    pub(crate) fn prepare_request(&self, mut parameters: RequestParameters) -> Request {
-        let request = self.agent.request_url(parameters.method, parameters.url);
-        parameters.get_authenticated_request(request)
+fn create_agent() -> Agent {
+    AgentBuilder::new().timeout(Duration::from_secs(10)).build()
+}
+
+pub(crate) fn prepare_request(
+    agent: Option<Agent>,
+    parameters: RequestParameters<'_>,
+) -> Result<Request> {
+    let agent = agent.unwrap_or(create_agent());
+
+    let request = agent.request_url(parameters.method.to_primitive_string(), &parameters.url);
+    parameters.authenticated_request(request)
+}
+
+pub(crate) trait OauthTokenProvider: Debug {
+    fn ensure_oauth_token(&mut self) -> Result<String>;
+}
+
+#[derive(Debug)]
+pub(crate) struct StaticOauthTokenProvider {
+    pub token: String,
+}
+
+impl OauthTokenProvider for StaticOauthTokenProvider {
+    fn ensure_oauth_token(&mut self) -> Result<String> {
+        Ok(self.token.clone())
+    }
+}
+
+impl std::convert::From<String> for StaticOauthTokenProvider {
+    fn from(token: String) -> Self {
+        StaticOauthTokenProvider { token }
     }
 }
 
@@ -31,79 +62,66 @@ impl Http {
 #[derive(Debug)]
 pub(crate) struct RequestParameters<'a> {
     /// The url to request
-    pub url: &'a Url,
+    pub url: Url,
     /// The method of the request (GET, POST, etc)
-    pub method: &'a str,
+    pub method: Method,
     /// If this field is set, the request with be sent with an "Authorization"
     /// header containing a bearer token obtained from the OauthTokenProvider.
-    /// If unset, the request is sent unauthenticated if the token field is also not set.
-    pub token_provider: Option<&'a mut OauthTokenProvider>,
-    /// If the token_provider field isn't set, and this field is set, the request will
-    /// be sent with an "Authorization" header containing a bearer token obtained from
-    /// the OauthTokenProvider.
-    pub token: Option<&'a str>,
+    /// If unset, the request is sent unauthenticated.
+    pub token_provider: Option<&'a mut dyn OauthTokenProvider>,
 }
 
 impl std::default::Default for RequestParameters<'_> {
     fn default() -> Self {
-        return RequestParameters {
-            url: &EXAMPLE_URL,
-            method: "",
+        let default_url = Url::parse("https://example.com").expect("example url did not parse");
+
+        RequestParameters {
+            url: default_url,
+            method: Method::Get,
             token_provider: None,
-            token: None,
-        };
+        }
     }
 }
 
 impl RequestParameters<'_> {
-    fn get_authenticated_request(&mut self, request: Request) -> Request {
-        let token = match &mut self.token_provider {
+    fn authenticated_request(self, request: Request) -> Result<Request> {
+        let token = match self.token_provider {
             Some(token_provider) => match token_provider.ensure_oauth_token() {
-                Ok(token) => Some(token),
-                Err(_err) => None,
+                Ok(token) => Ok(Some(token)),
+                Err(err) => Err(err),
             },
-            None => match self.token {
-                Some(token) => Some(String::from(token)),
-                None => None,
-            },
-        };
-        let authenticated_request = match token {
-            Some(token) => request.set("Authorization", &format!("Bearer {}", token)),
-            None => request,
-        };
+            None => Ok(None),
+        }?;
 
-        authenticated_request
+        match token {
+            Some(token) => Ok(request.set("Authorization", &format!("Bearer {}", token))),
+            None => Ok(request),
+        }
     }
 }
 
 /// Send the provided request with the provided JSON body. See
 /// JsonRequestParameters for more details.
-pub(crate) fn send_json_request(request: Request, body: SerdeValue) -> Result<Response, Error> {
-    request.send_json(body)
+pub(crate) fn send_json_request(request: Request, body: SerdeValue) -> Result<Response> {
+    request
+        .send_json(body)
+        .context("failed to send json request")
 }
 
-pub(crate) fn simple_get_request(url: &Url) -> Result<String> {
-    get_request(HTTP.prepare_request(RequestParameters {
-        url: url,
-        method: "GET",
-        ..Default::default()
-    }))
-}
+pub(crate) fn simple_get_request(url: Url) -> Result<String> {
+    let request = prepare_request(
+        None,
+        RequestParameters {
+            url: url.clone(),
+            method: Method::Get,
+            ..Default::default()
+        },
+    )
+    .context("creating simple_get_request failed")?;
 
-pub(crate) fn get_request(request: Request) -> Result<String> {
-    let response = request.call();
-    Ok(match response {
-        Err(error) => format!("{}", error),
-        Ok(response) => response.into_string().context("reading body failed")?,
-    })
-}
-
-pub(crate) fn construct_url(base: &str, pieces: &[&str]) -> Result<Url, ParseError> {
-    let mut url = Url::parse(base)?;
-
-    for piece in pieces {
-        url = url.join(&piece)?;
-    }
-
-    Ok(url)
+    request
+        .call()
+        .context("Failed to GET resource")?
+        .into_string()
+        .context("failed to convert GET response body into string")
 }

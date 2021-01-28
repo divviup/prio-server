@@ -325,7 +325,10 @@ fn fetch_manifest(manifest_url: &str) -> Result<String> {
     if !manifest_url.starts_with("https://") {
         return Err(anyhow!("Manifest must be fetched over HTTPS"));
     }
-    http::simple_get_request(&url::Url::parse(manifest_url)?)
+    http::simple_get_request(
+        url::Url::parse(manifest_url)
+            .context(format!("failed to parse manifest url: {}", manifest_url))?,
+    )
 }
 
 /// Attempts to parse the provided string as a PEM encoded PKIX
@@ -381,9 +384,10 @@ mod tests {
     };
     use ring::rand::SystemRandom;
     use rusoto_core::Region;
+    use url::Url;
 
-    fn url_fetcher(str: &str) -> Result<String> {
-        http::simple_get_request(&url::Url::parse(str)?)
+    fn url_fetcher(url: &str) -> Result<String> {
+        http::simple_get_request(Url::parse(url)?)
     }
 
     #[test]

@@ -1,13 +1,14 @@
 use crate::{
     config::Identity,
-    gcp_oauth::OauthTokenProvider,
-    http::{send_json_request, RequestParameters, HTTP},
+    gcp_oauth::GcpOauthTokenProvider,
+    http::{prepare_request, send_json_request, Method, RequestParameters},
     task::{Task, TaskHandle, TaskQueue},
 };
 use anyhow::{anyhow, Context, Result};
 use log::info;
 use serde::Deserialize;
 use std::{io::Cursor, marker::PhantomData, time::Duration};
+use ureq::{Agent, AgentBuilder};
 use url::Url;
 
 const PUBSUB_API_BASE_URL: &str = "https://pubsub.googleapis.com";
@@ -49,8 +50,9 @@ pub struct GcpPubSubTaskQueue<T: Task> {
     pubsub_api_endpoint: String,
     gcp_project_id: String,
     subscription_id: String,
-    oauth_token_provider: OauthTokenProvider,
+    oauth_token_provider: GcpOauthTokenProvider,
     phantom_task: PhantomData<*const T>,
+    agent: Agent,
 }
 
 impl<T: Task> GcpPubSubTaskQueue<T> {
@@ -66,7 +68,7 @@ impl<T: Task> GcpPubSubTaskQueue<T> {
                 .to_owned(),
             gcp_project_id: gcp_project_id.to_string(),
             subscription_id: subscription_id.to_string(),
-            oauth_token_provider: OauthTokenProvider::new(
+            oauth_token_provider: GcpOauthTokenProvider::new(
                 // This token is used to access PubSub API
                 // https://developers.google.com/identity/protocols/oauth2/scopes
                 "https://www.googleapis.com/auth/pubsub",
@@ -74,6 +76,9 @@ impl<T: Task> GcpPubSubTaskQueue<T> {
                 None, // GCP key file; never used
             )?,
             phantom_task: PhantomData,
+            agent: AgentBuilder::new()
+                .timeout(std::time::Duration::from_secs(180))
+                .build(),
         })
     }
 }
@@ -91,12 +96,18 @@ impl<T: Task> TaskQueue<T> for GcpPubSubTaskQueue<T> {
             self.pubsub_api_endpoint, self.gcp_project_id, self.subscription_id
         );
 
-        let request = HTTP.prepare_request(RequestParameters {
-            url: &Url::parse(&url)?,
-            method: "POST",
-            token_provider: Some(&mut self.oauth_token_provider),
-            ..Default::default()
-        });
+        let request = prepare_request(
+            Some(self.agent.clone()),
+            RequestParameters {
+                url: Url::parse(&url).context(format!(
+                    "failed to parse pubsub pull url for GcpPubSubTaskQueue: {}",
+                    &url
+                ))?,
+                method: Method::Post,
+                token_provider: Some(&mut self.oauth_token_provider),
+                ..Default::default()
+            },
+        )?;
 
         let http_response = send_json_request(
             request,
@@ -157,12 +168,18 @@ impl<T: Task> TaskQueue<T> for GcpPubSubTaskQueue<T> {
             self.pubsub_api_endpoint, self.gcp_project_id, self.subscription_id
         );
 
-        let request = HTTP.prepare_request(RequestParameters {
-            url: &Url::parse(&url)?,
-            method: "POST",
-            token_provider: Some(&mut self.oauth_token_provider),
-            ..Default::default()
-        });
+        let request = prepare_request(
+            Some(self.agent.clone()),
+            RequestParameters {
+                url: Url::parse(&url).context(format!(
+                    "failed to parse URL for gcp pubsub acknowledge: {}",
+                    &url
+                ))?,
+                method: Method::Post,
+                token_provider: Some(&mut self.oauth_token_provider),
+                ..Default::default()
+            },
+        )?;
 
         send_json_request(
             request,
@@ -170,7 +187,7 @@ impl<T: Task> TaskQueue<T> for GcpPubSubTaskQueue<T> {
                 "ackIds": [handle.acknowledgment_id]
             }),
         )
-        .context(anyhow!("failed to acknowledge task {:?}", handle,))?;
+        .context(format!("failed to acknowledge task {:?}", handle,))?;
 
         Ok(())
     }
@@ -225,12 +242,18 @@ impl<T: Task> GcpPubSubTaskQueue<T> {
             self.pubsub_api_endpoint, self.gcp_project_id, self.subscription_id
         );
 
-        let request = HTTP.prepare_request(RequestParameters {
-            url: &Url::parse(&url)?,
-            method: "POST",
-            token_provider: Some(&mut self.oauth_token_provider),
-            ..Default::default()
-        });
+        let request = prepare_request(
+            Some(self.agent.clone()),
+            RequestParameters {
+                url: Url::parse(&url).context(format!(
+                    "failed to parse URL for gcp modifyAckDeadline: {}",
+                    &url
+                ))?,
+                method: Method::Post,
+                token_provider: Some(&mut self.oauth_token_provider),
+                ..Default::default()
+            },
+        )?;
 
         send_json_request(
             request,
@@ -239,7 +262,7 @@ impl<T: Task> GcpPubSubTaskQueue<T> {
                 "ackDeadlineSeconds": ack_deadline.as_secs(),
             }),
         )
-        .context(anyhow!(
+        .context(format!(
             "failed to modify ack deadline on task {:?}",
             handle,
         ))?;
