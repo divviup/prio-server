@@ -1,6 +1,6 @@
 use anyhow::{anyhow, Context, Result};
 use chrono::{prelude::Utc, NaiveDateTime};
-use clap::{value_t, App, Arg, ArgMatches, SubCommand};
+use clap::{value_t, App, Arg, ArgGroup, ArgMatches, SubCommand};
 use log::{error, info};
 use prio::encrypt::{PrivateKey, PublicKey};
 use prometheus::{register_counter, register_counter_vec, Counter};
@@ -452,7 +452,20 @@ fn main() -> Result<(), anyhow::Error> {
                             "Base64 encoded X9.62 uncompressed public key for the PHA \
                             server",
                         )
-                        .required(true),
+                )
+                .arg(
+                    Arg::with_name("pha-manifest-url")
+                    .long("pha-manifest-url")
+                    .env("PHA_MANIFEST_URL")
+                    .value_name("URL")
+                    .help(
+                        "URL of the Public Health Authority manifest"
+                    )
+                )
+                .group(
+                    ArgGroup::with_name("public_health_authority_information")
+                    .args(&["pha-ecies-public-key", "pha-manifest-url"])
+                    .required(true)
                 )
                 .arg(
                     Arg::with_name("facilitator-ecies-public-key")
@@ -463,7 +476,20 @@ fn main() -> Result<(), anyhow::Error> {
                             "Base64 encoded X9.62 uncompressed public key for the \
                             facilitator server",
                         )
-                        .required(true),
+                )
+                .arg(
+                    Arg::with_name("facilitator-manifest-url")
+                    .long("facilitator-manifest-url")
+                    .env("FACILITATOR_MANIFEST_URL")
+                    .value_name("URL")
+                    .help(
+                        "URL of the Facilitator manifest"
+                    )
+                )
+                .group(
+                    ArgGroup::with_name("facilitator_information")
+                    .args(&["facilitator-ecies-public-key", "facilitator-manifest-url"])
+                    .required(true)
                 )
                 .add_batch_signing_key_arguments()
                 .arg(

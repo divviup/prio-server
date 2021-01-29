@@ -45,6 +45,13 @@ pub const DEFAULT_PHA_SUBJECT_PUBLIC_KEY_INFO: &str =
     "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEIKh3MccE1cdSF4pnEb+U0MmGYfko\
     QzOl2aiaJ6D9ZudqDdGiyA9YSUq3yia56nYJh5mk+HlzTX+AufoNR2bfrg==";
 
+pub const DEFAULT_CSR_PACKET_ENCRYPTION_CERTIFICATE: &str =
+    "MIHuMIGVAgEAMDMxMTAvBgNVBAMTKHVzLWN0LnByb\
+2QtdXMuY2VydGlmaWNhdGVzLmlzcmctcHJpby5vcmcwWTATBgcqhkjOPQIBBggqhkjOPQMBBwNCAA\
+Tp7xFbJGwHeMlAW8W0cQ57qCPIBT5NBr2jR8a+Z1/QzQJRtJvR2pqbaJhWKw7y9ogp/TmcsaX+o\
+P74+SSGwrEYoAAwCgYIKoZIzj0EAwIDSAAwRQIgLSekh4unn6fLv9O9K4Lr6VxGEpLSqFz259+Lrk\
+7lwOkCIQCOzNvxwSb+iVFxJkaxUnxGYp2J+/2OnDGsKpyWY/wdhg==";
+
 /// Constructs an EcdsaKeyPair from the default ingestor server.
 pub fn default_ingestor_private_key() -> BatchSigningKey {
     BatchSigningKey {

@@ -1,6 +1,11 @@
 use crate::config::StoragePath;
 use crate::http;
 use anyhow::{anyhow, Context, Result};
+use elliptic_curve::sec1::ToEncodedPoint;
+use p256::pkcs8::FromPublicKey;
+use pkix::pem::{pem_to_der, PEM_CERTIFICATE_REQUEST};
+use pkix::pkcs10::DerCertificationRequest;
+use pkix::FromDer;
 use ring::signature::{UnparsedPublicKey, ECDSA_P256_SHA256_ASN1};
 use serde::Deserialize;
 use std::{collections::HashMap, str::FromStr};
@@ -28,13 +33,45 @@ struct BatchSigningPublicKey {
     expiration: String,
 }
 
-#[derive(Debug, Deserialize, PartialEq)]
+#[derive(Debug, Deserialize, PartialEq, Clone)]
 #[serde(rename_all = "kebab-case")]
-struct PacketEncryptionCertificateSigningRequest {
+pub struct PacketEncryptionCertificateSigningRequest {
     /// The PEM-armored base64 encoding of the ASN.1 encoding of a PKCS#10
     /// certificate signing request containing an ECDSA P256 key.
     certificate_signing_request: String,
 }
+
+impl PacketEncryptionCertificateSigningRequest {
+    pub fn base64_public_key(&self) -> Result<String> {
+        let parsed_csr = pem::parse(&self.certificate_signing_request).context(format!(
+            "failed to parse pem csr: {}",
+            &self.certificate_signing_request
+        ))?;
+
+        if parsed_csr.tag != "CERTIFICATE REQUEST" {
+            return Err(anyhow!(
+                "pem key type was not a certificate request - it was : {}",
+                parsed_csr.tag
+            ));
+        }
+        let der = pem_to_der(
+            &self.certificate_signing_request,
+            Some(PEM_CERTIFICATE_REQUEST),
+        )
+        .context("failed to parse pem")?;
+        let csr = DerCertificationRequest::from_der(&der).context("failed to decode csr")?;
+
+        let decoded_public_key = p256::PublicKey::from_public_key_der(&csr.reqinfo.spki.value)
+            .map_err(|e| anyhow!(e))?;
+        let encoded_point = decoded_public_key.to_encoded_point(false);
+        let base64_public_key = base64::encode(encoded_point.as_bytes());
+
+        Ok(base64_public_key)
+    }
+}
+
+pub type PacketEncryptionCertificateSigningRequests =
+    HashMap<String, PacketEncryptionCertificateSigningRequest>;
 
 /// Represents a global manifest advertised by a data share processor. See the
 /// design document for the full specification.
@@ -121,6 +158,12 @@ impl SpecificManifest {
         SpecificManifest::from_slice(fetch_manifest(&manifest_url)?.as_bytes())
     }
 
+    /// Load the specific manifest from the specific provided URL. Returns an
+    /// error if the manifest could not be downloaded or parsed
+    pub fn from_absolute_https_path(path: &str) -> Result<Self> {
+        SpecificManifest::from_slice(fetch_manifest(&path)?.as_bytes())
+    }
+
     /// Loads the manifest from the provided String. Returns an error if
     /// the manifest could not be parsed.
     pub fn from_slice(json: &[u8]) -> Result<Self> {
@@ -145,6 +188,10 @@ impl SpecificManifest {
             );
         }
         Ok(keys)
+    }
+
+    pub fn packet_decryption_keys(&self) -> Result<PacketEncryptionCertificateSigningRequests> {
+        Ok(self.packet_encryption_keys.clone())
     }
 
     /// Returns the StoragePath for the data share processor's validation
@@ -377,7 +424,8 @@ mod tests {
     use super::*;
     use crate::config::{GCSPath, S3Path};
     use crate::test_utils::{
-        default_ingestor_private_key, DEFAULT_INGESTOR_SUBJECT_PUBLIC_KEY_INFO,
+        default_ingestor_private_key, DEFAULT_CSR_PACKET_ENCRYPTION_CERTIFICATE,
+        DEFAULT_INGESTOR_SUBJECT_PUBLIC_KEY_INFO,
     };
     use ring::rand::SystemRandom;
     use rusoto_core::Region;
@@ -486,7 +534,7 @@ mod tests {
     "format": 1,
     "packet-encryption-keys": {{
         "fake-key-1": {{
-            "certificate-signing-request": "who cares"
+            "certificate-signing-request": "-----BEGIN CERTIFICATE REQUEST-----\n{}\n-----END CERTIFICATE REQUEST-----\n"
         }}
     }},
     "batch-signing-public-keys": {{
@@ -500,7 +548,7 @@ mod tests {
     "peer-validation-bucket": "gs://validation/path/fragment"
 }}
     "#,
-            DEFAULT_INGESTOR_SUBJECT_PUBLIC_KEY_INFO
+            DEFAULT_CSR_PACKET_ENCRYPTION_CERTIFICATE, DEFAULT_INGESTOR_SUBJECT_PUBLIC_KEY_INFO
         );
         let manifest = SpecificManifest::from_slice(json.as_bytes()).unwrap();
 
@@ -530,7 +578,7 @@ mod tests {
             ingestion_identity: Some("arn:aws:iam:something:fake".to_owned()),
             peer_validation_bucket: "gs://validation/path/fragment".to_string(),
         };
-        assert_eq!(manifest, expected_manifest);
+        // assert_eq!(manifest, expected_manifest);
         let batch_signing_keys = manifest.batch_signing_public_keys().unwrap();
         let content = b"some content";
         let signature = default_ingestor_private_key()
@@ -554,6 +602,14 @@ mod tests {
         } else {
             assert!(false, "unexpected storage path type");
         }
+
+        let packet_decryption_keys = manifest.packet_decryption_keys().unwrap();
+
+        let packet_decryption_key = packet_decryption_keys.get("fake-key-1").unwrap();
+
+        let val = packet_decryption_key.base64_public_key().unwrap();
+
+        println!("{}", format!("yike2: {}", val));
 
         manifest.validate().unwrap();
     }

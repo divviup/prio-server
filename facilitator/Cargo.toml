@@ -12,12 +12,15 @@ base64 = "0.12.3"
 chrono = { version ="0.4", features = ["serde"] }
 clap = "2.33.3"
 derivative = "2.1.1"
+elliptic-curve = {version = "0.8.4", features = ["pem"]}
 hyper = "0.13.8"
 hyper-rustls = "0.21.0"
 jsonwebtoken = "7"
 log = "0.4.11"
 once_cell = "1.4"
+p256 = "0.7.2"
 pem = "0.8"
+pkix = "0.1.1"
 prio = "0.2"
 prometheus = { version = "0.10", features = [ "push" ] }
 rand = "0.7"
