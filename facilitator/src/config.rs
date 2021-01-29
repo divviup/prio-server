@@ -44,7 +44,7 @@ impl S3Path {
 }
 
 impl Display for S3Path {
-    fn fmt(&self, f: &mut std::fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
         write!(
             f,
             "s3://{}/{}/{}",

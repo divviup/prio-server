@@ -4,6 +4,7 @@ use std::time::Duration;
 use ureq::{Agent, AgentBuilder, Request, Response, SerdeValue};
 use url::Url;
 
+/// Method contains the HTTP methods supported by this crate.
 #[derive(Debug)]
 pub(crate) enum Method {
     Get,
@@ -13,6 +14,7 @@ pub(crate) enum Method {
 }
 
 impl Method {
+    /// Converts the enum to a primitive string to be used by the ureq::Agent
     fn to_primitive_string(&self) -> &str {
         match self {
             Method::Get => "GET",
@@ -23,24 +25,34 @@ impl Method {
     }
 }
 
+/// Creates an agent with a timeout of 10 seconds
 fn create_agent() -> Agent {
     AgentBuilder::new().timeout(Duration::from_secs(10)).build()
 }
 
-pub(crate) fn prepare_request(
-    agent: Option<Agent>,
-    parameters: RequestParameters<'_>,
-) -> Result<Request> {
-    let agent = agent.unwrap_or(create_agent());
-
+/// Prepares a request by taking in an agent and the RequestParameters. Could
+/// return an Error if the OauthTokenProvider returns an error when supplying
+/// the request with an Oauth token.
+pub(crate) fn prepare_request(agent: &Agent, parameters: RequestParameters<'_>) -> Result<Request> {
     let request = agent.request_url(parameters.method.to_primitive_string(), &parameters.url);
     parameters.authenticated_request(request)
 }
 
+/// Prepares a request and wraps it with an agent that has a timeout of 10
+/// seconds. Read prepare_request for more information.
+pub(crate) fn prepare_request_without_agent(parameters: RequestParameters<'_>) -> Result<Request> {
+    prepare_request(&create_agent(), parameters)
+}
+
+/// Defines a behavior responsible for produing bearer authorization tokens
 pub(crate) trait OauthTokenProvider: Debug {
+    /// Returns a valid bearer authroization token
     fn ensure_oauth_token(&mut self) -> Result<String>;
 }
 
+/// StaticOauthTokenProvider is an OauthTokenProvider that contains a String
+/// as the token. This structure implements the OauthTokenProvider trait and can
+/// be used in RequestParameters.
 #[derive(Debug)]
 pub(crate) struct StaticOauthTokenProvider {
     pub token: String,
@@ -101,22 +113,21 @@ impl RequestParameters<'_> {
 }
 
 /// Send the provided request with the provided JSON body. See
-/// JsonRequestParameters for more details.
+/// prepare_request for more details.
 pub(crate) fn send_json_request(request: Request, body: SerdeValue) -> Result<Response> {
     request
         .send_json(body)
         .context("failed to send json request")
 }
 
+/// simple_get_request does a HTTP request to a URL and returns the body as a
+// string.
 pub(crate) fn simple_get_request(url: Url) -> Result<String> {
-    let request = prepare_request(
-        None,
-        RequestParameters {
-            url: url.clone(),
-            method: Method::Get,
-            ..Default::default()
-        },
-    )
+    let request = prepare_request_without_agent(RequestParameters {
+        url: url,
+        method: Method::Get,
+        ..Default::default()
+    })
     .context("creating simple_get_request failed")?;
 
     request

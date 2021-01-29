@@ -1,7 +1,7 @@
 use crate::{
     aws_credentials::{basic_runtime, DefaultCredentialsProvider},
     config::{Identity, S3Path},
-    http::{prepare_request, Method, RequestParameters},
+    http::{prepare_request_without_agent, Method, RequestParameters},
     transport::{Transport, TransportWriter},
     Error,
 };
@@ -151,14 +151,11 @@ impl S3Transport {
                             )
                             .finish();
 
-                        let mut request = prepare_request(
-                            None,
-                            RequestParameters {
-                                url,
-                                method: Method::Get,
-                                ..Default::default()
-                            },
-                        )
+                        let mut request = prepare_request_without_agent(RequestParameters {
+                            url,
+                            method: Method::Get,
+                            ..Default::default()
+                        })
                         .map_err(|e| {
                             CredentialsError::new(format!("failed to create request: {:?}", e))
                         })?;

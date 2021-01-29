@@ -7,12 +7,22 @@ use ureq::{Agent, AgentBuilder, Response};
 
 use crate::http::{
     prepare_request, send_json_request, Method, OauthTokenProvider, RequestParameters,
+    StaticOauthTokenProvider,
 };
 use url::Url;
 
 fn default_oauth_token_url() -> Url {
     Url::parse("http://metadata.google.internal:80/computeMetadata/v1/instance/service-accounts/default/token",)
     .expect("unable to parse metadata.google.internal url")
+}
+
+// API reference:
+// https://cloud.google.com/iam/docs/reference/credentials/rest/v1/projects.serviceAccounts/generateAccessToken
+fn generate_access_token_for_service_account(service_account_to_impersonate: &str) -> Result<Url> {
+    let request_url = format!("https://iamcredentials.googleapis.com/v1/projects/-/serviceAccounts/{}:generateAccessToken",
+            service_account_to_impersonate);
+
+    Url::parse(&request_url).context(format!("failed to parse: {}", request_url))
 }
 
 /// Represents the claims encoded into JWTs when using a service account key
@@ -74,7 +84,7 @@ struct ServiceAccountKeyFile {
     token_uri: String,
 }
 
-/// OauthTokenProvider manages a default service account Oauth token (i.e. the
+/// GcpOauthTokenProvider manages a default service account Oauth token (i.e. the
 /// one for a GCP service account mapped to a Kubernetes service account, or the
 /// one found in a JSON key file) and an Oauth token used to impersonate another
 /// service account.
@@ -86,7 +96,7 @@ pub(crate) struct GcpOauthTokenProvider {
     /// the GKE metadata service is consulted.
     default_service_account_key_file: Option<ServiceAccountKeyFile>,
     /// Holds the service account email to impersonate, if one was provided to
-    /// OauthTokenProvider::new.
+    /// GcpOauthTokenProvider::new.
     account_to_impersonate: Option<String>,
     /// This field is None after instantiation and is Some after the first
     /// successful request for a token for the default service account, though
@@ -97,9 +107,8 @@ pub(crate) struct GcpOauthTokenProvider {
     /// though the contained token may be expired. This will always be None if
     /// account_to_impersonate is None.
     impersonated_account_token: Option<OauthToken>,
-    /// The Agent will be used for all HTTP calls to the google internal token
-    /// API. The agent  allows controlling timeouts and connection pools for
-    // GcpOauthTokenProvider.
+    /// The Agent will be used when making HTTP  requests to GCP APIs to fetch
+    /// Oauth tokens.
     agent: Agent,
 }
 
@@ -182,9 +191,7 @@ impl GcpOauthTokenProvider {
 
         let http_response = match &self.default_service_account_key_file {
             Some(key_file) => self.account_token_with_key_file(&key_file)?,
-            None => {
-                GcpOauthTokenProvider::account_token_from_gke_metadata_service(self.agent.clone())?
-            }
+            None => self.account_token_from_gke_metadata_service()?,
         };
 
         let response = http_response
@@ -206,9 +213,9 @@ impl GcpOauthTokenProvider {
     /// Fetches default account token from GKE metadata service. Returns the
     /// ureq::Response, whose body will be an OauthTokenResponse if the HTTP
     /// call was successful.
-    fn account_token_from_gke_metadata_service(agent: Agent) -> Result<Response> {
+    fn account_token_from_gke_metadata_service(&self) -> Result<Response> {
         let mut request = prepare_request(
-            Some(agent),
+            &self.agent,
             RequestParameters {
                 url: default_oauth_token_url(),
                 method: Method::Get,
@@ -257,7 +264,7 @@ impl GcpOauthTokenProvider {
         );
 
         let request = prepare_request(
-            Some(self.agent.clone()),
+            &self.agent,
             RequestParameters {
                 url: Url::parse(&key_file.token_uri).context(format!(
                     "failed to parse key_file.token_uri: {}",
@@ -288,20 +295,14 @@ impl GcpOauthTokenProvider {
         }
 
         let service_account_to_impersonate = self.account_to_impersonate.clone().unwrap();
-        // API reference:
-        // https://cloud.google.com/iam/docs/reference/credentials/rest/v1/projects.serviceAccounts/generateAccessToken
-        let request_url = format!("https://iamcredentials.googleapis.com/v1/projects/-/serviceAccounts/{}:generateAccessToken",
-            service_account_to_impersonate);
 
+        let default_token = self.ensure_default_account_token()?;
         let request = prepare_request(
-            Some(self.agent.clone()),
+            &self.agent,
             RequestParameters {
-                url: Url::parse(&request_url).context(format!(
-                    "failed to parse request_url to generate access token: {}",
-                    &request_url
-                ))?,
+                url: generate_access_token_for_service_account(&service_account_to_impersonate)?,
                 method: Method::Post,
-                token_provider: Some(self),
+                token_provider: Some(&mut StaticOauthTokenProvider::from(default_token)),
             },
         )?;
 

@@ -2,7 +2,8 @@ use crate::{
     config::{GCSPath, Identity},
     gcp_oauth::GcpOauthTokenProvider,
     http::{
-        prepare_request, Method, OauthTokenProvider, RequestParameters, StaticOauthTokenProvider,
+        prepare_request, prepare_request_without_agent, Method, OauthTokenProvider,
+        RequestParameters, StaticOauthTokenProvider,
     },
     transport::{Transport, TransportWriter},
     Error,
@@ -12,12 +13,30 @@ use log::info;
 use std::{
     io,
     io::{Read, Write},
+    time::Duration,
 };
 use ureq::{Agent, AgentBuilder};
 use url::Url;
 
 fn storage_api_base_url() -> Url {
     Url::parse("https://storage.googleapis.com/").expect("unable to parse storage API url")
+}
+
+fn gcp_object_url(bucket: &str, encoded_key: &str) -> Result<Url> {
+    let request_url = &format!(
+        "{}storage/v1/b/{}/o/{}",
+        storage_api_base_url().to_string(),
+        bucket,
+        encoded_key
+    );
+
+    Url::parse(&request_url).context(format!("failed to parse: {}", request_url))
+}
+
+fn gcp_upload_object_url(storage_api_url: &str, bucket: &str) -> Result<Url> {
+    let request_url = &format!("{}upload/storage/v1/b/{}/o/", storage_api_url, bucket);
+
+    Url::parse(&request_url).context(format!("failed to parse: {}", request_url))
 }
 
 /// GCSTransport manages reading and writing from GCS buckets, with
@@ -52,9 +71,7 @@ impl GCSTransport {
                 identity.map(|x| x.to_string()),
                 key_file_reader,
             )?,
-            agent: AgentBuilder::new()
-                .timeout(std::time::Duration::from_secs(10))
-                .build(),
+            agent: AgentBuilder::new().timeout(Duration::from_secs(10)).build(),
         })
     }
 }
@@ -73,23 +90,14 @@ impl Transport for GCSTransport {
         // API reference: https://cloud.google.com/storage/docs/json_api/v1/objects/get
         let encoded_key = urlencoding::encode(&[&self.path.key, key].concat());
 
-        let formatted_url = &format!(
-            "{}storage/v1/b/{}/o/{}",
-            storage_api_base_url().to_string(),
-            self.path.bucket,
-            encoded_key
-        );
-        let mut url = Url::parse(&formatted_url).context(format!(
-            "failed to parse get object url for gcp: {}",
-            formatted_url
-        ))?;
+        let mut url = gcp_object_url(&self.path.bucket, &encoded_key)?;
 
         // Ensures response body will be content and not JSON metadata.
         // https://cloud.google.com/storage/docs/json_api/v1/objects/get#parameters
         url.query_pairs_mut().append_pair("alt", "media").finish();
 
         let request = prepare_request(
-            Some(self.agent.clone()),
+            &self.agent,
             RequestParameters {
                 url: url.clone(),
                 method: Method::Get,
@@ -184,30 +192,18 @@ impl StreamingTransferWriter {
         // https://cloud.google.com/storage/docs/performing-resumable-uploads#initiate-session
         let encoded_object = urlencoding::encode(&object);
 
-        let formatted_url = format!(
-            "{}upload/storage/v1/b/{}/o/",
-            storage_api_base_url.to_string(),
-            bucket
-        );
-        let mut upload_url = Url::parse(&formatted_url).context(format!(
-            "failed to parse upload to bucket gcp url: {}",
-            formatted_url
-        ))?;
-
+        let mut upload_url = gcp_upload_object_url(&storage_api_base_url.to_string(), &bucket)?;
         upload_url
             .query_pairs_mut()
             .append_pair("uploadType", "resumable")
             .append_pair("name", &encoded_object)
             .finish();
 
-        let request = prepare_request(
-            None,
-            RequestParameters {
-                url: upload_url,
-                method: Method::Post,
-                token_provider: Some(&mut StaticOauthTokenProvider::from(oauth_token)),
-            },
-        )?;
+        let request = prepare_request_without_agent(RequestParameters {
+            url: upload_url,
+            method: Method::Post,
+            token_provider: Some(&mut StaticOauthTokenProvider::from(oauth_token)),
+        })?;
 
         let http_response = request
             .send_bytes(&[])
@@ -230,9 +226,7 @@ impl StreamingTransferWriter {
                 "failed to parse upload_session_uri url: {}",
                 &upload_session_uri
             ))?,
-            agent: AgentBuilder::new()
-                .timeout(std::time::Duration::from_secs(10))
-                .build(),
+            agent: AgentBuilder::new().timeout(Duration::from_secs(10)).build(),
         })
     }
 
@@ -272,7 +266,7 @@ impl StreamingTransferWriter {
         );
 
         let mut request = prepare_request(
-            Some(self.agent.clone()),
+            &self.agent,
             RequestParameters {
                 url: self.upload_session_uri.clone(),
                 method: Method::Put,
@@ -377,7 +371,7 @@ impl TransportWriter for StreamingTransferWriter {
     fn cancel_upload(&mut self) -> Result<()> {
         // https://cloud.google.com/storage/docs/performing-resumable-uploads#cancel-upload
         let mut request = prepare_request(
-            Some(self.agent.clone()),
+            &self.agent,
             RequestParameters {
                 url: self.upload_session_uri.clone(),
                 method: Method::Delete,
@@ -421,12 +415,6 @@ mod tests {
             .with_header("Location", &fake_upload_session_uri)
             .expect_at_most(1)
             .create();
-
-        println!(
-            "TEST {} {}",
-            mockito::server_url(),
-            Url::parse(&mockito::server_url()).expect("hello")
-        );
 
         let mut writer = StreamingTransferWriter::new_with_api_url(
             "fake-bucket".to_string(),
