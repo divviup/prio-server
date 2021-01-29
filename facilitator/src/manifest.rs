@@ -43,17 +43,6 @@ pub struct PacketEncryptionCertificateSigningRequest {
 
 impl PacketEncryptionCertificateSigningRequest {
     pub fn base64_public_key(&self) -> Result<String> {
-        let parsed_csr = pem::parse(&self.certificate_signing_request).context(format!(
-            "failed to parse pem csr: {}",
-            &self.certificate_signing_request
-        ))?;
-
-        if parsed_csr.tag != "CERTIFICATE REQUEST" {
-            return Err(anyhow!(
-                "pem key type was not a certificate request - it was : {}",
-                parsed_csr.tag
-            ));
-        }
         let der = pem_to_der(
             &self.certificate_signing_request,
             Some(PEM_CERTIFICATE_REQUEST),
@@ -62,7 +51,7 @@ impl PacketEncryptionCertificateSigningRequest {
         let csr = DerCertificationRequest::from_der(&der).context("failed to decode csr")?;
 
         let decoded_public_key = p256::PublicKey::from_public_key_der(&csr.reqinfo.spki.value)
-            .map_err(|e| anyhow!(e))?;
+            .map_err(|e| anyhow!("error when getting public key from der: {:?}", e))?;
         let encoded_point = decoded_public_key.to_encoded_point(false);
         let base64_public_key = base64::encode(encoded_point.as_bytes());
 
@@ -567,7 +556,7 @@ mod tests {
         expected_packet_encryption_csrs.insert(
             "fake-key-1".to_owned(),
             PacketEncryptionCertificateSigningRequest {
-                certificate_signing_request: "who cares".to_owned(),
+                certificate_signing_request: DEFAULT_CSR_PACKET_ENCRYPTION_CERTIFICATE.to_owned(),
             },
         );
         let expected_manifest = SpecificManifest {
@@ -578,7 +567,7 @@ mod tests {
             ingestion_identity: Some("arn:aws:iam:something:fake".to_owned()),
             peer_validation_bucket: "gs://validation/path/fragment".to_string(),
         };
-        // assert_eq!(manifest, expected_manifest);
+        assert_eq!(manifest, expected_manifest);
         let batch_signing_keys = manifest.batch_signing_public_keys().unwrap();
         let content = b"some content";
         let signature = default_ingestor_private_key()
@@ -607,9 +596,8 @@ mod tests {
 
         let packet_decryption_key = packet_decryption_keys.get("fake-key-1").unwrap();
 
-        let val = packet_decryption_key.base64_public_key().unwrap();
-
-        println!("{}", format!("yike2: {}", val));
+        // Just checks that getting the base64'd public key doesn't error
+        packet_decryption_key.base64_public_key().unwrap(); 
 
         manifest.validate().unwrap();
     }
