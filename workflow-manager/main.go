@@ -11,13 +11,11 @@ import (
 	"fmt"
 	"log"
 	"os"
-	"regexp"
 	"strings"
 	"time"
 
 	"github.com/letsencrypt/prio-server/workflow-manager/batchpath"
 	"github.com/letsencrypt/prio-server/workflow-manager/bucket"
-	wfkubernetes "github.com/letsencrypt/prio-server/workflow-manager/kubernetes"
 	"github.com/letsencrypt/prio-server/workflow-manager/monitor"
 	"github.com/letsencrypt/prio-server/workflow-manager/task"
 	"github.com/letsencrypt/prio-server/workflow-manager/utils"
@@ -25,7 +23,6 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
 	"github.com/prometheus/client_golang/prometheus/push"
-	batchv1 "k8s.io/api/batch/v1"
 )
 
 // BuildInfo is generated at build time - see the Dockerfile.
@@ -65,14 +62,12 @@ var awsSNSIdentity = flag.String("aws-sns-identity", "", "AWS IAM ARN of the rol
 
 // monitoring things
 var (
-	intakesStarted                   monitor.GaugeMonitor = &monitor.NoopGauge{}
-	intakesSkippedDueToAge           monitor.GaugeMonitor = &monitor.NoopGauge{}
-	intakesSkippedDueToMarker        monitor.GaugeMonitor = &monitor.NoopGauge{}
-	intakesSkippedDueToKubernetesJob monitor.GaugeMonitor = &monitor.NoopGauge{}
+	intakesStarted            monitor.GaugeMonitor = &monitor.NoopGauge{}
+	intakesSkippedDueToAge    monitor.GaugeMonitor = &monitor.NoopGauge{}
+	intakesSkippedDueToMarker monitor.GaugeMonitor = &monitor.NoopGauge{}
 
-	aggregationsStarted                   monitor.GaugeMonitor = &monitor.NoopGauge{}
-	aggregationsSkippedDueToMarker        monitor.GaugeMonitor = &monitor.NoopGauge{}
-	aggregationsSkippedDueToKubernetesJob monitor.GaugeMonitor = &monitor.NoopGauge{}
+	aggregationsStarted            monitor.GaugeMonitor = &monitor.NoopGauge{}
+	aggregationsSkippedDueToMarker monitor.GaugeMonitor = &monitor.NoopGauge{}
 
 	workflowManagerLastSuccess monitor.GaugeMonitor = &monitor.NoopGauge{}
 	workflowManagerLastFailure monitor.GaugeMonitor = &monitor.NoopGauge{}
@@ -108,10 +103,6 @@ func main() {
 			Name: "workflow_manager_intake_tasks_skipped_due_to_marker",
 			Help: "The number of intake-batch tasks not scheduled because a task marker was found",
 		})
-		intakesSkippedDueToKubernetesJob = promauto.NewGauge(prometheus.GaugeOpts{
-			Name: "workflow_manager_intake_tasks_skipped_due_to_kubernetes_job",
-			Help: "The number of intake-batch tasks not scheduled because a corresponding Kubernetes job was found",
-		})
 
 		aggregationsStarted = promauto.NewGauge(prometheus.GaugeOpts{
 			Name: "workflow_manager_aggregation_tasks_scheduled",
@@ -120,10 +111,6 @@ func main() {
 		aggregationsSkippedDueToMarker = promauto.NewGauge(prometheus.GaugeOpts{
 			Name: "workflow_manager_aggregation_tasks_skipped_due_to_marker",
 			Help: "The number of aggregate tasks not scheduled because a task marker was found",
-		})
-		aggregationsSkippedDueToKubernetesJob = promauto.NewGauge(prometheus.GaugeOpts{
-			Name: "workflow_manager_aggregation_tasks_skipped_due_to_kubernetes_job",
-			Help: "The number of aggregate tasks not scheduled because a corresponding Kubernetes job was found",
 		})
 
 		workflowManagerLastSuccess = promauto.NewGauge(prometheus.GaugeOpts{
@@ -263,20 +250,6 @@ func main() {
 		return
 	}
 
-	kubernetesClient, err := wfkubernetes.NewClient(*k8sNS, *kubeconfigPath, *dryRun)
-	if err != nil {
-		fail("%s", err)
-		return
-	}
-
-	// Get a listing of all jobs in the namespace so the finished ones can be
-	// reaped later on, and to avoid scheduling redudant work.
-	existingJobs, err := kubernetesClient.ListJobs()
-	if err != nil {
-		fail("%s", err)
-		return
-	}
-
 	intakeFiles, err := intakeBucket.ListFiles()
 	if err != nil {
 		fail("%s", err)
@@ -301,7 +274,6 @@ func main() {
 		intakeFiles:             intakeFiles,
 		ownValidationFiles:      ownValidationFiles,
 		peerValidationFiles:     peerValidationFiles,
-		existingJobs:            existingJobs,
 		intakeTaskEnqueuer:      intakeTaskEnqueuer,
 		aggregationTaskEnqueuer: aggregationTaskEnqueuer,
 		ownValidationBucket:     ownValidationBucket,
@@ -322,7 +294,6 @@ type scheduleTasksConfig struct {
 	isFirst                                              bool
 	clock                                                utils.Clock
 	intakeFiles, ownValidationFiles, peerValidationFiles []string
-	existingJobs                                         map[string]batchv1.Job
 	intakeTaskEnqueuer, aggregationTaskEnqueuer          task.Enqueuer
 	ownValidationBucket                                  bucket.TaskMarkerWriter
 	maxAge, aggregationPeriod, gracePeriod               time.Duration
@@ -357,7 +328,6 @@ func scheduleTasks(config scheduleTasksConfig) error {
 		currentIntakeBatches,
 		config.maxAge,
 		taskMarkers,
-		config.existingJobs,
 		config.ownValidationBucket,
 		config.intakeTaskEnqueuer,
 	)
@@ -406,7 +376,6 @@ func scheduleTasks(config scheduleTasksConfig) error {
 		aggregationMap,
 		interval,
 		taskMarkers,
-		config.existingJobs,
 		config.ownValidationBucket,
 		config.aggregationTaskEnqueuer,
 	)
@@ -437,41 +406,6 @@ func (inter interval) String() string {
 // currently "%Y/%m/%d/%H/%M"
 func fmtTime(t time.Time) string {
 	return t.Format("2006/01/02/15/04")
-}
-
-// jobNameForBatchPath generates a name for the Kubernetes job that will intake
-// the provided batch. The name will incorporate the aggregation ID, batch UUID
-// and batch timestamp while being a legal Kubernetes job name.
-func intakeJobNameForBatchPath(path *batchpath.BatchPath) string {
-	// Kubernetes job names must be valid DNS identifiers, which means they are
-	// limited to 63 characters in length and also what characters they may
-	// contain. Intake job names are like:
-	// i-<aggregation name fragment>-<batch UUID fragment>-<batch timestamp>
-	// The batch timestamp is 16 characters, and the 'i' and '-'es take up
-	// another 4, leaving 43. We take the '-'es out of the UUID and use half of
-	// it, hoping that this plus the date will provide enough entropy to avoid
-	// collisions. Half a UUID is 16 characters, leaving 27 for the aggregation
-	// ID fragment.
-	// For example, we might get:
-	// i-com-apple-EN-verylongnameth-0f0f0f0f0f0f0f0f-2006-01-02-15-04
-	return fmt.Sprintf("i-%s-%s-%s",
-		aggregationJobNameFragment(path.AggregationID, 27),
-		strings.ReplaceAll(path.ID, "-", "")[:16],
-		strings.ReplaceAll(fmtTime(path.Time), "/", "-"))
-}
-
-// aggregationJobNameFragment generates a job name-safe string from an
-// aggregationID.
-// Remove characters that aren't valid in DNS names, and also restrict
-// the length so we don't go over the specified limit of characters.
-func aggregationJobNameFragment(aggregationID string, maxLength int) string {
-	re := regexp.MustCompile("[^A-Za-z0-9-]")
-	idForJobName := re.ReplaceAllLiteralString(aggregationID, "-")
-	if len(idForJobName) > maxLength {
-		idForJobName = idForJobName[:maxLength]
-	}
-	idForJobName = strings.ToLower(idForJobName)
-	return idForJobName
 }
 
 // aggregationInterval calculates the interval we want to run an aggregation for, if any.
@@ -512,7 +446,6 @@ func enqueueAggregationTasks(
 	batchesByID aggregationMap,
 	inter interval,
 	taskMarkers map[string]struct{},
-	existingJobs map[string]batchv1.Job,
 	ownValidationBucket bucket.TaskMarkerWriter,
 	enqueuer task.Enqueuer,
 ) error {
@@ -522,7 +455,6 @@ func enqueueAggregationTasks(
 	}
 
 	skippedDueToMarker := 0
-	skippedDueToExistingJob := 0
 	scheduled := 0
 
 	for _, readyBatches := range batchesByID {
@@ -556,27 +488,8 @@ func enqueueAggregationTasks(
 			continue
 		}
 
-		taskName := fmt.Sprintf(
-			"a-%s-%s",
-			aggregationJobNameFragment(aggregationID, 30),
-			strings.ReplaceAll(fmtTime(inter.begin), "/", "-"),
-		)
-		if _, ok := existingJobs[taskName]; ok {
-			skippedDueToExistingJob++
-			aggregationsSkippedDueToKubernetesJob.Inc()
-			// If we made it here, a Kubernetes job for this aggregation
-			// existed, but we did not find a marker for the task. The job was
-			// most likely created by an older workflow-manager, so write out a
-			// marker for this task, which makes it safe to reap the job when it
-			// finishes.
-			if err := ownValidationBucket.WriteTaskMarker(aggregationTask.Marker()); err != nil {
-				return err
-			}
-			continue
-		}
-
-		log.Printf("scheduling aggregation task %s (interval %s) for aggregation ID %s over %d batches",
-			taskName, inter, aggregationID, batchCount)
+		log.Printf("scheduling aggregation task over interval %s for aggregation ID %s over %d batches",
+			inter, aggregationID, batchCount)
 		scheduled++
 		enqueuer.Enqueue(aggregationTask, func(err error) {
 			if err != nil {
@@ -594,8 +507,8 @@ func enqueueAggregationTasks(
 		})
 	}
 
-	log.Printf("skipped %d aggregation tasks due to markers, skipped %d due to existing Kubernetes jobs. Scheduled %d new aggregation tasks.",
-		skippedDueToMarker, skippedDueToExistingJob, scheduled)
+	log.Printf("skipped %d aggregation tasks due to markers. Scheduled %d new aggregation tasks.",
+		skippedDueToMarker, scheduled)
 
 	return nil
 }
@@ -605,14 +518,13 @@ func enqueueIntakeTasks(
 	readyBatches batchpath.List,
 	ageLimit time.Duration,
 	taskMarkers map[string]struct{},
-	existingJobs map[string]batchv1.Job,
 	ownValidationBucket bucket.TaskMarkerWriter,
 	enqueuer task.Enqueuer,
 ) error {
 	skippedDueToAge := 0
 	skippedDueToMarker := 0
-	skippedDueToExistingJob := 0
 	scheduled := 0
+
 	for _, batch := range readyBatches {
 		age := clock.Now().Sub(batch.Time)
 		if age > ageLimit {
@@ -630,22 +542,6 @@ func enqueueIntakeTasks(
 		if _, ok := taskMarkers[intakeTask.Marker()]; ok {
 			skippedDueToMarker++
 			intakesSkippedDueToMarker.Inc()
-			continue
-		}
-
-		taskName := intakeJobNameForBatchPath(batch)
-		if _, ok := existingJobs[taskName]; ok {
-			skippedDueToExistingJob++
-			intakesSkippedDueToKubernetesJob.Inc()
-			// If we made it here, a Kubernetes job for this intake task
-			// existed, but we did not find a marker for the task. The job was
-			// most likely created by an older workflow-manager, so write out a
-			// marker for this task, which makes it safe to reap the job when it
-			// finishes.
-			if err := ownValidationBucket.WriteTaskMarker(intakeTask.Marker()); err != nil {
-				return err
-			}
-
 			continue
 		}
 
@@ -667,8 +563,8 @@ func enqueueIntakeTasks(
 		})
 	}
 
-	log.Printf("skipped %d batches as too old, %d with existing tasks, %d with existing k8s jobs. Scheduled %d new intake tasks.",
-		skippedDueToAge, skippedDueToMarker, skippedDueToExistingJob, scheduled)
+	log.Printf("skipped %d batches as too old, %d with existing tasks. Scheduled %d new intake tasks.",
+		skippedDueToAge, skippedDueToMarker, scheduled)
 
 	return nil
 }

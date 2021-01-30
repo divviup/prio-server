@@ -612,42 +612,6 @@ resource "kubernetes_cron_job" "sample_maker" {
   }
 }
 
-resource "kubernetes_role" "workflow_manager_role" {
-  metadata {
-    name      = "${var.environment}-${var.data_share_processor_name}-wfm-role"
-    namespace = var.kubernetes_namespace
-  }
-
-  rule {
-    // API group "" means the core API group.
-    api_groups = ["batch", ""]
-    // Workflow manager can list pods and jobs.
-    // Note: Some of these permissions will probably wind up not being needed.
-    // Starting with a moderately generous demonstration set.
-    resources = ["namespaces", "pods", "jobs"]
-    verbs     = ["get", "list", "watch"]
-  }
-}
-
-resource "kubernetes_role_binding" "workflow_manager_rolebinding" {
-  metadata {
-    name      = "${var.environment}-${var.data_share_processor_name}-workflow-manager-can-admin"
-    namespace = var.kubernetes_namespace
-  }
-
-  role_ref {
-    kind      = "Role"
-    name      = "${var.environment}-${var.data_share_processor_name}-wfm-role"
-    api_group = "rbac.authorization.k8s.io"
-  }
-
-  subject {
-    kind      = "ServiceAccount"
-    name      = module.account_mapping.kubernetes_account_name
-    namespace = var.kubernetes_namespace
-  }
-}
-
 output "service_account_unique_id" {
   value = module.account_mapping.google_service_account_unique_id
 }

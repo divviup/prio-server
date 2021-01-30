@@ -6,58 +6,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/letsencrypt/prio-server/workflow-manager/batchpath"
 	"github.com/letsencrypt/prio-server/workflow-manager/task"
 	"github.com/letsencrypt/prio-server/workflow-manager/utils"
-
-	batchv1 "k8s.io/api/batch/v1"
-	_ "k8s.io/api/core/v1"
 )
-
-func TestIntakeJobNameForBatchPath(t *testing.T) {
-	var testCases = []struct {
-		name     string
-		input    string
-		expected string
-	}{
-		{
-			name:     "short-aggregation-name",
-			input:    "kittens-seen/2020/10/31/20/29/b8a5579a-f984-460a-a42d-2813cbf57771",
-			expected: "i-kittens-seen-b8a5579af984460a-2020-10-31-20-29",
-		},
-		{
-			name:     "long-aggregation-name",
-			input:    "a-very-long-aggregation-name-that-will-get-truncated/2020/10/31/20/29/b8a5579a-f984-460a-a42d-2813cbf57771",
-			expected: "i-a-very-long-aggregation-nam-b8a5579af984460a-2020-10-31-20-29",
-		},
-	}
-	for _, testCase := range testCases {
-		t.Run(testCase.name, func(t *testing.T) {
-			batchPath, err := batchpath.New(testCase.input)
-			if err != nil {
-				t.Fatalf("unexpected batch path parse failure: %s", err)
-			}
-
-			jobName := intakeJobNameForBatchPath(batchPath)
-			if jobName != testCase.expected {
-				t.Errorf("expected %q, encountered %q", testCase.expected, jobName)
-			}
-
-			if len(jobName) > 63 {
-				t.Errorf("job name is too long")
-			}
-		})
-	}
-}
-
-func TestAggregationJobNameFragment(t *testing.T) {
-	input := "FooBar%012345678901234567890123456789"
-	id := aggregationJobNameFragment(input, 30)
-	expected := "foobar-01234567890123456789012"
-	if id != expected {
-		t.Errorf("expected id %q, got %q", expected, id)
-	}
-}
 
 type mockEnqueuer struct {
 	enqueuedTasks []task.Task
@@ -87,51 +38,30 @@ func TestScheduleIntakeTasks(t *testing.T) {
 	aggregationPeriod, _ := time.ParseDuration("8h")
 	gracePeriod, _ := time.ParseDuration("4h")
 	intakeMarker := "task-markers/intake-kittens-seen-2020-10-31-20-29-b8a5579a-f984-460a-a42d-2813cbf57771"
-	existingJob := "i-kittens-seen-b8a5579af984460a-2020-10-31-20-29"
 
 	var testCases = []struct {
 		name               string
-		jobExists          bool
 		taskMarkerExists   bool
 		now                time.Time
 		expectedIntakeTask *task.IntakeBatch
 		expectedTaskMarker string
 	}{
 		{
-			name:               "old-batch-no-job-no-marker",
-			jobExists:          false,
+			name:               "old-batch-no-marker",
 			taskMarkerExists:   false,
 			now:                tooLate,
 			expectedIntakeTask: nil,
 			expectedTaskMarker: "",
 		},
 		{
-			name:               "old-batch-no-job-has-marker",
-			jobExists:          false,
+			name:               "old-batch-has-marker",
 			taskMarkerExists:   true,
 			now:                tooLate,
 			expectedIntakeTask: nil,
 			expectedTaskMarker: "",
 		},
 		{
-			name:               "old-batch-has-job-no-marker",
-			jobExists:          true,
-			taskMarkerExists:   false,
-			now:                tooLate,
-			expectedIntakeTask: nil,
-			expectedTaskMarker: "",
-		},
-		{
-			name:               "old-batch-has-job-has-marker",
-			jobExists:          true,
-			taskMarkerExists:   false,
-			now:                tooLate,
-			expectedIntakeTask: nil,
-			expectedTaskMarker: "",
-		},
-		{
-			name:             "current-batch-no-job-no-marker",
-			jobExists:        false,
+			name:             "current-batch-no-marker",
 			taskMarkerExists: false,
 			now:              within24Hours,
 			expectedIntakeTask: &task.IntakeBatch{
@@ -142,24 +72,7 @@ func TestScheduleIntakeTasks(t *testing.T) {
 			expectedTaskMarker: intakeMarker,
 		},
 		{
-			name:               "current-batch-no-job-has-marker",
-			jobExists:          false,
-			taskMarkerExists:   true,
-			now:                within24Hours,
-			expectedIntakeTask: nil,
-			expectedTaskMarker: "",
-		},
-		{
-			name:               "current-batch-has-job-no-marker",
-			jobExists:          true,
-			taskMarkerExists:   false,
-			now:                within24Hours,
-			expectedIntakeTask: nil,
-			expectedTaskMarker: intakeMarker,
-		},
-		{
-			name:               "current-batch-has-job-has-marker",
-			jobExists:          true,
+			name:               "current-batch-has-marker",
 			taskMarkerExists:   true,
 			now:                within24Hours,
 			expectedIntakeTask: nil,
@@ -178,11 +91,6 @@ func TestScheduleIntakeTasks(t *testing.T) {
 
 			peerValidationFiles := []string{}
 
-			existingJobs := map[string]batchv1.Job{}
-			if testCase.jobExists {
-				existingJobs[existingJob] = batchv1.Job{}
-			}
-
 			intakeTaskEnqueuer := mockEnqueuer{enqueuedTasks: []task.Task{}}
 			aggregateTaskEnqueuer := mockEnqueuer{enqueuedTasks: []task.Task{}}
 			ownValidationBucket := mockBucket{writtenObjectKeys: []string{}}
@@ -197,7 +105,6 @@ func TestScheduleIntakeTasks(t *testing.T) {
 				},
 				ownValidationFiles:      ownValidationFiles,
 				peerValidationFiles:     peerValidationFiles,
-				existingJobs:            existingJobs,
 				intakeTaskEnqueuer:      &intakeTaskEnqueuer,
 				aggregationTaskEnqueuer: &aggregateTaskEnqueuer,
 				ownValidationBucket:     &ownValidationBucket,
@@ -261,7 +168,6 @@ func TestScheduleAggregationTasks(t *testing.T) {
 	aggregationPeriod, _ := time.ParseDuration("8h")
 	gracePeriod, _ := time.ParseDuration("4h")
 	aggregationMarker := "task-markers/aggregate-kittens-seen-2020-10-31-16-00-2020-11-01-00-00"
-	existingJob := "a-kittens-seen-2020-10-31-16-00"
 	expectedAggregationTask := &task.Aggregation{
 		AggregationID:    "kittens-seen",
 		AggregationStart: task.Timestamp(aggregationStart),
@@ -278,87 +184,42 @@ func TestScheduleAggregationTasks(t *testing.T) {
 		name                    string
 		hasOwnValidation        bool
 		hasPeerValidation       bool
-		jobExists               bool
 		taskMarkerExists        bool
 		now                     time.Time
 		expectedAggregationTask *task.Aggregation
 		expectedTaskMarker      string
 	}{
 		{
-			name:                    "too-soon-no-job-no-marker",
+			name:                    "too-soon-no-marker",
 			hasOwnValidation:        true,
 			hasPeerValidation:       true,
-			jobExists:               false,
 			taskMarkerExists:        false,
 			now:                     tooSoon,
 			expectedAggregationTask: nil,
 			expectedTaskMarker:      "",
 		},
 		{
-			name:                    "too-soon-no-job-has-marker",
+			name:                    "too-soon-has-marker",
 			hasOwnValidation:        true,
 			hasPeerValidation:       true,
-			jobExists:               false,
 			taskMarkerExists:        true,
 			now:                     tooSoon,
 			expectedAggregationTask: nil,
 			expectedTaskMarker:      "",
 		},
 		{
-			name:                    "too-soon-has-job-no-marker",
+			name:                    "too-late-no-marker",
 			hasOwnValidation:        true,
 			hasPeerValidation:       true,
-			jobExists:               true,
-			taskMarkerExists:        false,
-			now:                     tooSoon,
-			expectedAggregationTask: nil,
-			expectedTaskMarker:      "",
-		},
-		{
-			name:                    "too-soon-has-job-has-marker",
-			hasOwnValidation:        true,
-			hasPeerValidation:       true,
-			jobExists:               true,
-			taskMarkerExists:        true,
-			now:                     tooSoon,
-			expectedAggregationTask: nil,
-			expectedTaskMarker:      "",
-		},
-		{
-			name:                    "too-late-no-job-no-marker",
-			hasOwnValidation:        true,
-			hasPeerValidation:       true,
-			jobExists:               false,
 			taskMarkerExists:        false,
 			now:                     tooLate,
 			expectedAggregationTask: nil,
 			expectedTaskMarker:      "",
 		},
 		{
-			name:                    "too-late-no-job-has-marker",
+			name:                    "too-late-has-marker",
 			hasOwnValidation:        true,
 			hasPeerValidation:       true,
-			jobExists:               false,
-			taskMarkerExists:        true,
-			now:                     tooLate,
-			expectedAggregationTask: nil,
-			expectedTaskMarker:      "",
-		},
-		{
-			name:                    "too-late-has-job-no-marker",
-			hasOwnValidation:        true,
-			hasPeerValidation:       true,
-			jobExists:               true,
-			taskMarkerExists:        false,
-			now:                     tooLate,
-			expectedAggregationTask: nil,
-			expectedTaskMarker:      "",
-		},
-		{
-			name:                    "too-late-has-job-has-marker",
-			hasOwnValidation:        true,
-			hasPeerValidation:       true,
-			jobExists:               true,
 			taskMarkerExists:        true,
 			now:                     tooLate,
 			expectedAggregationTask: nil,
@@ -368,7 +229,6 @@ func TestScheduleAggregationTasks(t *testing.T) {
 			name:                    "within-window-no-own-no-peer",
 			hasOwnValidation:        false,
 			hasPeerValidation:       false,
-			jobExists:               false,
 			taskMarkerExists:        false,
 			now:                     withinWindow,
 			expectedAggregationTask: nil,
@@ -378,7 +238,6 @@ func TestScheduleAggregationTasks(t *testing.T) {
 			name:                    "within-window-no-own-has-peer",
 			hasOwnValidation:        false,
 			hasPeerValidation:       true,
-			jobExists:               false,
 			taskMarkerExists:        false,
 			now:                     withinWindow,
 			expectedAggregationTask: nil,
@@ -388,47 +247,24 @@ func TestScheduleAggregationTasks(t *testing.T) {
 			name:                    "within-window-has-own-no-peer",
 			hasOwnValidation:        true,
 			hasPeerValidation:       false,
-			jobExists:               false,
 			taskMarkerExists:        false,
 			now:                     withinWindow,
 			expectedAggregationTask: nil,
 			expectedTaskMarker:      "",
 		},
 		{
-			name:                    "within-window-no-job-no-marker",
+			name:                    "within-window-no-marker",
 			hasOwnValidation:        true,
 			hasPeerValidation:       true,
-			jobExists:               false,
 			taskMarkerExists:        false,
 			now:                     withinWindow,
 			expectedAggregationTask: expectedAggregationTask,
 			expectedTaskMarker:      aggregationMarker,
 		},
 		{
-			name:                    "within-window-no-job-has-marker",
+			name:                    "within-window-has-marker",
 			hasOwnValidation:        true,
 			hasPeerValidation:       true,
-			jobExists:               false,
-			taskMarkerExists:        true,
-			now:                     withinWindow,
-			expectedAggregationTask: nil,
-			expectedTaskMarker:      "",
-		},
-		{
-			name:                    "within-window-has-job-no-marker",
-			hasOwnValidation:        true,
-			hasPeerValidation:       true,
-			jobExists:               true,
-			taskMarkerExists:        false,
-			now:                     withinWindow,
-			expectedAggregationTask: nil,
-			expectedTaskMarker:      aggregationMarker,
-		},
-		{
-			name:                    "within-window-has-job-has-marker",
-			hasOwnValidation:        true,
-			hasPeerValidation:       true,
-			jobExists:               true,
 			taskMarkerExists:        true,
 			now:                     withinWindow,
 			expectedAggregationTask: nil,
@@ -464,11 +300,6 @@ func TestScheduleAggregationTasks(t *testing.T) {
 				}
 			}
 
-			existingJobs := map[string]batchv1.Job{}
-			if testCase.jobExists {
-				existingJobs[existingJob] = batchv1.Job{}
-			}
-
 			intakeTaskEnqueuer := mockEnqueuer{enqueuedTasks: []task.Task{}}
 			aggregateTaskEnqueuer := mockEnqueuer{enqueuedTasks: []task.Task{}}
 			ownValidationBucket := mockBucket{writtenObjectKeys: []string{}}
@@ -483,7 +314,6 @@ func TestScheduleAggregationTasks(t *testing.T) {
 				},
 				ownValidationFiles:      ownValidationFiles,
 				peerValidationFiles:     peerValidationFiles,
-				existingJobs:            existingJobs,
 				intakeTaskEnqueuer:      &intakeTaskEnqueuer,
 				aggregationTaskEnqueuer: &aggregateTaskEnqueuer,
 				ownValidationBucket:     &ownValidationBucket,
