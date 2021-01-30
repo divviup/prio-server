@@ -6,28 +6,34 @@ groups:
     for: 5m
     labels:
       severity: page
+      environment: ${environment}
     annotations:
       summary: "Workflow manager {{ $labels.locality }}-{{ $labels.ingestor }}
         not running"
-      description: "workflow-manager instance {{ $labels.locality }}-{{ $labels.ingestor }}
-        has not run successfully for 30 minutes"
+      description: "At least 30 minutes have passed since workflow-manager
+        instance {{ $labels.locality }}-{{ $labels.ingestor }} in environment
+        ${environment} last ran successfully"
   - alert: facilitator_intake_failure_rate
-    expr: rate(facilitator_intake_tasks_finished{status="success"}[1h]) / rate(facilitator_intake_tasks_finished[1h]) < 0.95
+    expr: rate(facilitator_intake_tasks_finished{status="success"}[1h])
+      / rate(facilitator_intake_tasks_finished[1h]) < 0.95
     for: 5m
     labels:
       severity: page
+      environment: ${environment}
     annotations:
       summary: "High failure rate for intake worker
         {{ $labels.kubernetes_namespace }}-{{ $labels.kubernetes_name }}"
       description: "intake worker instance {{ $labels.kubernetes_namespace }}-
-        {{ $labels.kubernetes_name }} is failing more than 95% of the time in
-        the last hour"
+        {{ $labels.kubernetes_name }} in environment ${environment} is failing
+        more than 95% of the time in the last hour"
   - alert: facilitator_aggregate_failure_rate
     # aggregations run much less often than intake so use a larger window of time
-    expr: rate(facilitator_aggregate_tasks_finished{status="success"}[8h]) / rate(facilitator_aggregate_tasks_finished[8h]) < 0.95
+    expr: rate(facilitator_aggregate_tasks_finished{status="success"}[${aggregation_period}])
+      / rate(facilitator_aggregate_tasks_finished[${aggregation_period}]) < 0.95
     for: 5m
     labels:
       severity: page
+      environment: ${environment}
     annotations:
       summary: "High failure rate for aggregate worker
         {{ $labels.kubernetes_namespace }}-{{ $labels.kubernetes_name }}"
@@ -39,10 +45,11 @@ groups:
     for: 2h
     labels:
       severity: page
+      environment: ${environment}
     annotations:
       summary: "PubSub subscription {{ $labels.subscription_id }} not emptying"
-      description: "PubSub subscription {{ $labels.subscription_id }} has had
-        undelivered messages for 2 hours"
+      description: "PubSub subscription {{ $labels.subscription_id }} in
+      environment ${environment} has had undelivered messages for 2 hours"
   - alert: dead_letter_queue
     expr: stackdriver_pubsub_subscription_pubsub_googleapis_com_subscription_num_undelivered_messages{subscription_id=~".*-dead-letter"} > 0
     for: 5m
@@ -51,4 +58,5 @@ groups:
     annotations:
       summary: "Undelivered messages in dead letter queue {{ $labels.subscription_id }}"
       description: "There are undelivered messages in the dead letter queue for
-        PubSub subscription {{ $labels.subscription_id }}."
+        PubSub subscription {{ $labels.subscription_id }} in environment
+        ${environment}."

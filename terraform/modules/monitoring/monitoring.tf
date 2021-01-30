@@ -18,6 +18,14 @@ variable "prometheus_server_persistent_disk_size_gb" {
   type = string
 }
 
+variable "victorops_routing_key" {
+  type = string
+}
+
+variable "aggregation_period" {
+  type = string
+}
+
 data "google_client_config" "current" {}
 
 provider "helm" {
@@ -61,13 +69,11 @@ route:
   group_wait: 10s
   group_interval: 5m
   repeat_interval: 3h
-  match:
-    severity: page
 receivers:
 - name: victorops-receiver
   victorops_configs:
-  - api_key: "not-a-real-key"
-    routing_key: "not-a-real-routing-key"
+  - api_key: "not-a-real-api-key"
+    routing_key: "${var.victorops_routing_key}"
     state_message: 'Alert: {{ .CommonLabels.alertname }}. Summary:{{ .CommonAnnotations.summary }}. RawData: {{ .CommonLabels }}'
 templates: []
 CONFIG
@@ -186,7 +192,12 @@ resource "helm_release" "prometheus" {
   values = [
     yamlencode({
       serverFiles = {
-        "alerting_rules.yml" = yamldecode(file("${path.module}/prometheus_alerting_rules.yml"))
+        "alerting_rules.yml" = yamldecode(
+          templatefile("${path.module}/prometheus_alerting_rules.yml", {
+            environment        = var.environment
+            aggregation_period = var.aggregation_period
+          })
+        )
       }
     })
   ]

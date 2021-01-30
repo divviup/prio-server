@@ -63,3 +63,4 @@ workflow_manager_version                  = "0.6.3"
 facilitator_version                       = "0.6.3"
 pushgateway                               = "prometheus-pushgateway.monitoring:9091"
 prometheus_server_persistent_disk_size_gb = 1000
+victorops_routing_key                     = "prio-prod-us"
