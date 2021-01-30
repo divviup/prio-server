@@ -7,7 +7,7 @@ import (
 	"time"
 
 	"github.com/letsencrypt/prio-server/workflow-manager/task"
-	"github.com/letsencrypt/prio-server/workflow-manager/utils"
+	wftime "github.com/letsencrypt/prio-server/workflow-manager/time"
 )
 
 type mockEnqueuer struct {
@@ -22,7 +22,27 @@ func (e *mockEnqueuer) Enqueue(task task.Task, completion func(error)) {
 func (e *mockEnqueuer) Stop() {}
 
 type mockBucket struct {
-	writtenObjectKeys []string
+	aggregationIDs       []string
+	batchFiles           []string
+	intakeTaskMarkers    []string
+	aggregateTaskMarkers []string
+	writtenObjectKeys    []string
+}
+
+func (b *mockBucket) ListAggregationIDs() ([]string, error) {
+	return b.aggregationIDs, nil
+}
+
+func (b *mockBucket) ListBatchFiles(aggregationID string, interval wftime.Interval) ([]string, error) {
+	return b.batchFiles, nil
+}
+
+func (b *mockBucket) ListIntakeTaskMarkers(aggregationID string, interval wftime.Interval) ([]string, error) {
+	return b.intakeTaskMarkers, nil
+}
+
+func (b *mockBucket) ListAggregateTaskMarkers(aggregationID string) ([]string, error) {
+	return b.aggregateTaskMarkers, nil
 }
 
 func (b *mockBucket) WriteTaskMarker(marker string) error {
@@ -33,48 +53,30 @@ func (b *mockBucket) WriteTaskMarker(marker string) error {
 func TestScheduleIntakeTasks(t *testing.T) {
 	batchTime, _ := time.Parse("2006/01/02/15/04", "2020/10/31/20/29")
 	within24Hours, _ := time.Parse("2006/01/02/15/04", "2020/10/31/23/29")
-	tooLate, _ := time.Parse("2006/01/02/15/04", "2020/11/02/20/29")
 	maxAge, _ := time.ParseDuration("24h")
 	aggregationPeriod, _ := time.ParseDuration("8h")
 	gracePeriod, _ := time.ParseDuration("4h")
-	intakeMarker := "task-markers/intake-kittens-seen-2020-10-31-20-29-b8a5579a-f984-460a-a42d-2813cbf57771"
+	intakeMarker := "intake-kittens-seen-2020-10-31-20-29-b8a5579a-f984-460a-a42d-2813cbf57771"
 
 	var testCases = []struct {
 		name               string
 		taskMarkerExists   bool
-		now                time.Time
 		expectedIntakeTask *task.IntakeBatch
 		expectedTaskMarker string
 	}{
 		{
-			name:               "old-batch-no-marker",
-			taskMarkerExists:   false,
-			now:                tooLate,
-			expectedIntakeTask: nil,
-			expectedTaskMarker: "",
-		},
-		{
-			name:               "old-batch-has-marker",
-			taskMarkerExists:   true,
-			now:                tooLate,
-			expectedIntakeTask: nil,
-			expectedTaskMarker: "",
-		},
-		{
 			name:             "current-batch-no-marker",
 			taskMarkerExists: false,
-			now:              within24Hours,
 			expectedIntakeTask: &task.IntakeBatch{
 				AggregationID: "kittens-seen",
 				BatchID:       "b8a5579a-f984-460a-a42d-2813cbf57771",
-				Date:          task.Timestamp(batchTime),
+				Date:          wftime.Timestamp(batchTime),
 			},
 			expectedTaskMarker: intakeMarker,
 		},
 		{
 			name:               "current-batch-has-marker",
 			taskMarkerExists:   true,
-			now:                within24Hours,
 			expectedIntakeTask: nil,
 			expectedTaskMarker: "",
 		},
@@ -82,32 +84,41 @@ func TestScheduleIntakeTasks(t *testing.T) {
 
 	for _, testCase := range testCases {
 		t.Run(testCase.name, func(t *testing.T) {
-			clock := utils.ClockWithFixedNow(testCase.now)
+			clock := wftime.ClockWithFixedNow(within24Hours)
 
-			ownValidationFiles := []string{}
-			if testCase.taskMarkerExists {
-				ownValidationFiles = append(ownValidationFiles, intakeMarker)
-			}
-
-			peerValidationFiles := []string{}
-
-			intakeTaskEnqueuer := mockEnqueuer{enqueuedTasks: []task.Task{}}
-			aggregateTaskEnqueuer := mockEnqueuer{enqueuedTasks: []task.Task{}}
-			ownValidationBucket := mockBucket{writtenObjectKeys: []string{}}
-
-			err := scheduleTasks(scheduleTasksConfig{
-				isFirst: false,
-				clock:   clock,
-				intakeFiles: []string{
+			intakeBucket := mockBucket{
+				aggregationIDs: []string{"kittens-seen"},
+				batchFiles: []string{
 					"kittens-seen/2020/10/31/20/29/b8a5579a-f984-460a-a42d-2813cbf57771.batch",
 					"kittens-seen/2020/10/31/20/29/b8a5579a-f984-460a-a42d-2813cbf57771.batch.avro",
 					"kittens-seen/2020/10/31/20/29/b8a5579a-f984-460a-a42d-2813cbf57771.batch.sig",
 				},
-				ownValidationFiles:      ownValidationFiles,
-				peerValidationFiles:     peerValidationFiles,
+			}
+
+			ownValidationBucket := mockBucket{
+				aggregationIDs: []string{"kittens-seen"},
+			}
+
+			if testCase.taskMarkerExists {
+				ownValidationBucket.intakeTaskMarkers = []string{intakeMarker}
+			}
+
+			peerValidationBucket := mockBucket{
+				aggregationIDs: []string{"kittens-seen"},
+			}
+
+			intakeTaskEnqueuer := mockEnqueuer{enqueuedTasks: []task.Task{}}
+			aggregateTaskEnqueuer := mockEnqueuer{enqueuedTasks: []task.Task{}}
+
+			err := scheduleTasks(scheduleTasksConfig{
+				aggregationID:           "kittens-seen",
+				isFirst:                 false,
+				clock:                   clock,
+				intakeBucket:            &intakeBucket,
+				ownValidationBucket:     &ownValidationBucket,
+				peerValidationBucket:    &peerValidationBucket,
 				intakeTaskEnqueuer:      &intakeTaskEnqueuer,
 				aggregationTaskEnqueuer: &aggregateTaskEnqueuer,
-				ownValidationBucket:     &ownValidationBucket,
 				maxAge:                  maxAge,
 				aggregationPeriod:       aggregationPeriod,
 				gracePeriod:             gracePeriod,
@@ -144,7 +155,7 @@ func TestScheduleIntakeTasks(t *testing.T) {
 			} else {
 				foundExpectedMarker := false
 				for _, object := range ownValidationBucket.writtenObjectKeys {
-					if object == testCase.expectedTaskMarker {
+					if object == "task-markers/"+testCase.expectedTaskMarker {
 						foundExpectedMarker = true
 						break
 					}
@@ -161,21 +172,19 @@ func TestScheduleAggregationTasks(t *testing.T) {
 	batchTime, _ := time.Parse("2006/01/02/15/04", "2020/10/31/20/29")
 	aggregationStart, _ := time.Parse("2006/01/02/15/04", "2020/10/31/16/00")
 	aggregationEnd, _ := time.Parse("2006/01/02/15/04", "2020/11/01/00/00")
-	tooSoon, _ := time.Parse("2006/01/02/15/04", "2020/10/31/20/29")
-	tooLate, _ := time.Parse("2006/01/02/15/04", "2020/11/02/20/29")
 	withinWindow, _ := time.Parse("2006/01/02/15/04", "2020/11/01/04/01")
 	maxAge, _ := time.ParseDuration("24h")
 	aggregationPeriod, _ := time.ParseDuration("8h")
 	gracePeriod, _ := time.ParseDuration("4h")
-	aggregationMarker := "task-markers/aggregate-kittens-seen-2020-10-31-16-00-2020-11-01-00-00"
+	aggregationMarker := "aggregate-kittens-seen-2020-10-31-16-00-2020-11-01-00-00"
 	expectedAggregationTask := &task.Aggregation{
 		AggregationID:    "kittens-seen",
-		AggregationStart: task.Timestamp(aggregationStart),
-		AggregationEnd:   task.Timestamp(aggregationEnd),
+		AggregationStart: wftime.Timestamp(aggregationStart),
+		AggregationEnd:   wftime.Timestamp(aggregationEnd),
 		Batches: []task.Batch{
 			task.Batch{
 				ID:   "b8a5579a-f984-460a-a42d-2813cbf57771",
-				Time: task.Timestamp(batchTime),
+				Time: wftime.Timestamp(batchTime),
 			},
 		},
 	}
@@ -185,52 +194,14 @@ func TestScheduleAggregationTasks(t *testing.T) {
 		hasOwnValidation        bool
 		hasPeerValidation       bool
 		taskMarkerExists        bool
-		now                     time.Time
 		expectedAggregationTask *task.Aggregation
 		expectedTaskMarker      string
 	}{
-		{
-			name:                    "too-soon-no-marker",
-			hasOwnValidation:        true,
-			hasPeerValidation:       true,
-			taskMarkerExists:        false,
-			now:                     tooSoon,
-			expectedAggregationTask: nil,
-			expectedTaskMarker:      "",
-		},
-		{
-			name:                    "too-soon-has-marker",
-			hasOwnValidation:        true,
-			hasPeerValidation:       true,
-			taskMarkerExists:        true,
-			now:                     tooSoon,
-			expectedAggregationTask: nil,
-			expectedTaskMarker:      "",
-		},
-		{
-			name:                    "too-late-no-marker",
-			hasOwnValidation:        true,
-			hasPeerValidation:       true,
-			taskMarkerExists:        false,
-			now:                     tooLate,
-			expectedAggregationTask: nil,
-			expectedTaskMarker:      "",
-		},
-		{
-			name:                    "too-late-has-marker",
-			hasOwnValidation:        true,
-			hasPeerValidation:       true,
-			taskMarkerExists:        true,
-			now:                     tooLate,
-			expectedAggregationTask: nil,
-			expectedTaskMarker:      "",
-		},
 		{
 			name:                    "within-window-no-own-no-peer",
 			hasOwnValidation:        false,
 			hasPeerValidation:       false,
 			taskMarkerExists:        false,
-			now:                     withinWindow,
 			expectedAggregationTask: nil,
 			expectedTaskMarker:      "",
 		},
@@ -239,7 +210,6 @@ func TestScheduleAggregationTasks(t *testing.T) {
 			hasOwnValidation:        false,
 			hasPeerValidation:       true,
 			taskMarkerExists:        false,
-			now:                     withinWindow,
 			expectedAggregationTask: nil,
 			expectedTaskMarker:      "",
 		},
@@ -248,7 +218,6 @@ func TestScheduleAggregationTasks(t *testing.T) {
 			hasOwnValidation:        true,
 			hasPeerValidation:       false,
 			taskMarkerExists:        false,
-			now:                     withinWindow,
 			expectedAggregationTask: nil,
 			expectedTaskMarker:      "",
 		},
@@ -257,7 +226,6 @@ func TestScheduleAggregationTasks(t *testing.T) {
 			hasOwnValidation:        true,
 			hasPeerValidation:       true,
 			taskMarkerExists:        false,
-			now:                     withinWindow,
 			expectedAggregationTask: expectedAggregationTask,
 			expectedTaskMarker:      aggregationMarker,
 		},
@@ -266,7 +234,6 @@ func TestScheduleAggregationTasks(t *testing.T) {
 			hasOwnValidation:        true,
 			hasPeerValidation:       true,
 			taskMarkerExists:        true,
-			now:                     withinWindow,
 			expectedAggregationTask: nil,
 			expectedTaskMarker:      "",
 		},
@@ -274,26 +241,40 @@ func TestScheduleAggregationTasks(t *testing.T) {
 
 	for _, testCase := range testCases {
 		t.Run(testCase.name, func(t *testing.T) {
-			clock := utils.ClockWithFixedNow(testCase.now)
+			clock := wftime.ClockWithFixedNow(withinWindow)
 
-			ownValidationFiles := []string{
-				"task-markers/intake-kittens-seen-2020-10-31-20-29-b8a5579a-f984-460a-a42d-2813cbf57771",
+			intakeBucket := mockBucket{
+				aggregationIDs: []string{"kittens-seen"},
+				batchFiles: []string{
+					"kittens-seen/2020/10/31/20/29/b8a5579a-f984-460a-a42d-2813cbf57771.batch",
+					"kittens-seen/2020/10/31/20/29/b8a5579a-f984-460a-a42d-2813cbf57771.batch.avro",
+					"kittens-seen/2020/10/31/20/29/b8a5579a-f984-460a-a42d-2813cbf57771.batch.sig",
+				},
 			}
+
+			ownValidationBucket := mockBucket{
+				aggregationIDs:    []string{"kittens-seen"},
+				intakeTaskMarkers: []string{"intake-kittens-seen-2020-10-31-20-29-b8a5579a-f984-460a-a42d-2813cbf57771"},
+			}
+
 			if testCase.hasOwnValidation {
-				ownValidationFiles = append(ownValidationFiles, []string{
+				ownValidationBucket.batchFiles = []string{
 					"kittens-seen/2020/10/31/20/29/b8a5579a-f984-460a-a42d-2813cbf57771.validity_1",
 					"kittens-seen/2020/10/31/20/29/b8a5579a-f984-460a-a42d-2813cbf57771.validity_1.avro",
 					"kittens-seen/2020/10/31/20/29/b8a5579a-f984-460a-a42d-2813cbf57771.validity_1.sig",
-				}...)
+				}
 			}
 
 			if testCase.taskMarkerExists {
-				ownValidationFiles = append(ownValidationFiles, aggregationMarker)
+				ownValidationBucket.aggregateTaskMarkers = []string{aggregationMarker}
 			}
 
-			peerValidationFiles := []string{}
+			peerValidationBucket := mockBucket{
+				aggregationIDs: []string{"kittens-seen"},
+			}
+
 			if testCase.hasPeerValidation {
-				peerValidationFiles = []string{
+				peerValidationBucket.batchFiles = []string{
 					"kittens-seen/2020/10/31/20/29/b8a5579a-f984-460a-a42d-2813cbf57771.validity_0",
 					"kittens-seen/2020/10/31/20/29/b8a5579a-f984-460a-a42d-2813cbf57771.validity_0.avro",
 					"kittens-seen/2020/10/31/20/29/b8a5579a-f984-460a-a42d-2813cbf57771.validity_0.sig",
@@ -302,21 +283,16 @@ func TestScheduleAggregationTasks(t *testing.T) {
 
 			intakeTaskEnqueuer := mockEnqueuer{enqueuedTasks: []task.Task{}}
 			aggregateTaskEnqueuer := mockEnqueuer{enqueuedTasks: []task.Task{}}
-			ownValidationBucket := mockBucket{writtenObjectKeys: []string{}}
 
 			err := scheduleTasks(scheduleTasksConfig{
-				isFirst: false,
-				clock:   clock,
-				intakeFiles: []string{
-					"kittens-seen/2020/10/31/20/29/b8a5579a-f984-460a-a42d-2813cbf57771.batch",
-					"kittens-seen/2020/10/31/20/29/b8a5579a-f984-460a-a42d-2813cbf57771.batch.avro",
-					"kittens-seen/2020/10/31/20/29/b8a5579a-f984-460a-a42d-2813cbf57771.batch.sig",
-				},
-				ownValidationFiles:      ownValidationFiles,
-				peerValidationFiles:     peerValidationFiles,
+				aggregationID:           "kittens-seen",
+				isFirst:                 false,
+				clock:                   clock,
+				intakeBucket:            &intakeBucket,
+				ownValidationBucket:     &ownValidationBucket,
+				peerValidationBucket:    &peerValidationBucket,
 				intakeTaskEnqueuer:      &intakeTaskEnqueuer,
 				aggregationTaskEnqueuer: &aggregateTaskEnqueuer,
-				ownValidationBucket:     &ownValidationBucket,
 				maxAge:                  maxAge,
 				aggregationPeriod:       aggregationPeriod,
 				gracePeriod:             gracePeriod,
@@ -353,7 +329,7 @@ func TestScheduleAggregationTasks(t *testing.T) {
 			} else {
 				foundExpectedMarker := false
 				for _, object := range ownValidationBucket.writtenObjectKeys {
-					if object == testCase.expectedTaskMarker {
+					if object == "task-markers/"+testCase.expectedTaskMarker {
 						foundExpectedMarker = true
 						break
 					}

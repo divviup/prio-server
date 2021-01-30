@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	wftime "github.com/letsencrypt/prio-server/workflow-manager/time"
 	"github.com/letsencrypt/prio-server/workflow-manager/utils"
 )
 
@@ -25,6 +26,20 @@ type BatchPath struct {
 // List is a type alias for a slice of BatchPath pointers
 type List []*BatchPath
 
+// NewList creates a List from a slice of strings
+func NewList(batchNames []string) (List, error) {
+	list := List{}
+	for _, batchName := range batchNames {
+		batchPath, err := New(batchName)
+		if err != nil {
+			return nil, err
+		}
+		list = append(list, batchPath)
+	}
+
+	return list, nil
+}
+
 // Len returns the size of the slice representing the BatchPaths
 func (bpl List) Len() int {
 	return len(bpl)
@@ -38,6 +53,19 @@ func (bpl List) Less(i, j int) bool {
 // Swap swaps the ith element in List with the jth element
 func (bpl List) Swap(i, j int) {
 	bpl[i], bpl[j] = bpl[j], bpl[i]
+}
+
+// WithinInterval returns the subset of the batches in the receiver that are
+// within the given Interval.
+func (bpl List) WithinInterval(interval wftime.Interval) []string {
+	output := []string{}
+	for _, bp := range bpl {
+		if interval.Includes(bp.Time) {
+			output = append(output, bp.path())
+		}
+	}
+
+	return output
 }
 
 // New creates a new BatchPath from a batchName

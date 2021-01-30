@@ -9,7 +9,7 @@ import (
 
 	"gopkg.in/retry.v1"
 
-	"github.com/letsencrypt/prio-server/workflow-manager/utils"
+	wftime "github.com/letsencrypt/prio-server/workflow-manager/time"
 
 	batchv1 "k8s.io/api/batch/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -84,7 +84,7 @@ func (c *Client) ListJobs() (map[string]batchv1.Job, error) {
 	// provide on subsequent requests.
 	continueToken := ""
 	for {
-		ctx, cancel := utils.ContextWithTimeout()
+		ctx, cancel := wftime.ContextWithTimeout()
 		defer cancel()
 		jobsList, err := c.client.BatchV1().Jobs(c.namespace).List(ctx, metav1.ListOptions{
 			Limit:    1000,
