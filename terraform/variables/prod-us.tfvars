@@ -2,7 +2,7 @@ environment     = "prod-us"
 gcp_region      = "us-west1"
 gcp_project     = "prio-prod-us"
 machine_type    = "e2-standard-8"
-localities      = ["aq-aq", "ta-ta", "us-ct", "us-md"]
+localities      = ["aq-aq", "ta-ta", "us-ct", "us-md", "us-va"]
 aws_region      = "us-west-1"
 manifest_domain = "isrg-prio.org"
 managed_dns_zone = {
@@ -29,6 +29,10 @@ ingestors = {
         intake_worker_count    = 5
         aggregate_worker_count = 3
       }
+      us-va = {
+        intake_worker_count    = 5
+        aggregate_worker_count = 3
+      }
     }
   }
   g-enpa = {
@@ -47,6 +51,10 @@ ingestors = {
         aggregate_worker_count = 3
       }
       us-md = {
+        intake_worker_count    = 3
+        aggregate_worker_count = 3
+      }
+      us-va = {
         intake_worker_count    = 3
         aggregate_worker_count = 3
       }
