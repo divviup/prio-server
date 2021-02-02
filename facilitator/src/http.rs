@@ -26,7 +26,7 @@ impl Method {
 }
 
 /// Creates an agent with a timeout of 10 seconds
-fn create_agent() -> Agent {
+pub(crate) fn create_agent() -> Agent {
     AgentBuilder::new().timeout(Duration::from_secs(10)).build()
 }
 

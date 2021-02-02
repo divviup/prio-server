@@ -3,11 +3,11 @@ use chrono::{prelude::Utc, DateTime, Duration};
 use jsonwebtoken::{encode, Algorithm, EncodingKey, Header};
 use serde::{Deserialize, Serialize};
 use std::{fmt, io::Read};
-use ureq::{Agent, AgentBuilder, Response};
+use ureq::{Agent, Response};
 
 use crate::http::{
-    prepare_request, send_json_request, Method, OauthTokenProvider, RequestParameters,
-    StaticOauthTokenProvider,
+    create_agent, prepare_request, send_json_request, Method, OauthTokenProvider,
+    RequestParameters, StaticOauthTokenProvider,
 };
 use url::Url;
 
@@ -18,7 +18,7 @@ fn default_oauth_token_url() -> Url {
 
 // API reference:
 // https://cloud.google.com/iam/docs/reference/credentials/rest/v1/projects.serviceAccounts/generateAccessToken
-fn generate_access_token_for_service_account(service_account_to_impersonate: &str) -> Result<Url> {
+fn access_token_url_for_service_account(service_account_to_impersonate: &str) -> Result<Url> {
     let request_url = format!("https://iamcredentials.googleapis.com/v1/projects/-/serviceAccounts/{}:generateAccessToken",
             service_account_to_impersonate);
 
@@ -107,7 +107,7 @@ pub(crate) struct GcpOauthTokenProvider {
     /// though the contained token may be expired. This will always be None if
     /// account_to_impersonate is None.
     impersonated_account_token: Option<OauthToken>,
-    /// The Agent will be used when making HTTP  requests to GCP APIs to fetch
+    /// The Agent will be used when making HTTP requests to GCP APIs to fetch
     /// Oauth tokens.
     agent: Agent,
 }
@@ -164,9 +164,7 @@ impl GcpOauthTokenProvider {
             }
             None => None,
         };
-        let agent = AgentBuilder::new()
-            .timeout(std::time::Duration::from_secs(10))
-            .build();
+        let agent = create_agent();
 
         Ok(GcpOauthTokenProvider {
             scope: scope.to_owned(),
@@ -300,7 +298,7 @@ impl GcpOauthTokenProvider {
         let request = prepare_request(
             &self.agent,
             RequestParameters {
-                url: generate_access_token_for_service_account(&service_account_to_impersonate)?,
+                url: access_token_url_for_service_account(&service_account_to_impersonate)?,
                 method: Method::Post,
                 token_provider: Some(&mut StaticOauthTokenProvider::from(default_token)),
             },
