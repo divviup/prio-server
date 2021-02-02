@@ -18,6 +18,14 @@ variable "prometheus_server_persistent_disk_size_gb" {
   type = string
 }
 
+variable "victorops_routing_key" {
+  type = string
+}
+
+variable "aggregation_period" {
+  type = string
+}
+
 data "google_client_config" "current" {}
 
 provider "helm" {
@@ -64,8 +72,8 @@ route:
 receivers:
 - name: victorops-receiver
   victorops_configs:
-  - api_key: "not-a-real-key"
-    routing_key: "not-a-real-routing-key"
+  - api_key: "not-a-real-api-key"
+    routing_key: "${var.victorops_routing_key}"
     state_message: 'Alert: {{ .CommonLabels.alertname }}. Summary:{{ .CommonAnnotations.summary }}. RawData: {{ .CommonLabels }}'
 templates: []
 CONFIG
@@ -173,6 +181,26 @@ resource "helm_release" "prometheus" {
     name  = "server.strategy.type"
     value = "Recreate"
   }
+
+  # Alerting rules are defined in their own YAML file. We then need to provide
+  # them to the Helm chart, under the key serverFiles."alerting_rules.yml".
+  # To ensure we get a properly nested and indented YAML structure and that
+  # "alerting_rules.yml" doesn't get expanded into a map "alerting_rules"
+  # containing the key "yml", we decode the alerting rules into a Terraform map
+  # and then encode the entire map back into YAML, then stick that into the
+  # chart.
+  values = [
+    yamlencode({
+      serverFiles = {
+        "alerting_rules.yml" = yamldecode(
+          templatefile("${path.module}/prometheus_alerting_rules.yml", {
+            environment        = var.environment
+            aggregation_period = var.aggregation_period
+          })
+        )
+      }
+    })
+  ]
 }
 
 # Configures Grafana to get data from Prometheus. The label on this config map
