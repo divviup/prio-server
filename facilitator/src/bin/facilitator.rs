@@ -731,15 +731,47 @@ fn main() -> Result<(), anyhow::Error> {
     result
 }
 
+fn get_ecies_public_key(
+    key_option: Option<&str>,
+    manifest_option: Option<&str>,
+) -> Result<PublicKey> {
+    match key_option {
+        Some(key) => PublicKey::from_base64(key)
+            .map_err(|e| anyhow!("unable to create public key from base64 ecies key: {}", e)),
+        None => match manifest_option {
+            Some(manifest_url) => {
+                let manifest = SpecificManifest::from_absolute_https_path(manifest_url).context(
+                    format!("unable to read SpecificManifest from {}", manifest_url),
+                )?;
+                let packet_decryption_keys = manifest
+                    .packet_decryption_keys()
+                    .context("unable to get packet decryption keys from the SpecificManifest")?;
+                let packet_decryption_key = packet_decryption_keys
+                    .values()
+                    .next()
+                    .context("No packet decryption keys in manifest")?;
+
+                PublicKey::from_base64(&packet_decryption_key.base64_public_key()?).map_err(|e| {
+                    anyhow!("unable to create public key from base64 ecies key: {}", e)
+                })
+            }
+            None => panic!(
+                "either manifest_option or key_option were specified. This error shouldn't happen."
+            ),
+        },
+    }
+}
+
 fn generate_sample(sub_matches: &ArgMatches) -> Result<(), anyhow::Error> {
     let peer_output_path = StoragePath::from_str(sub_matches.value_of("peer-output").unwrap())?;
     let peer_identity = sub_matches.value_of("peer-identity");
-    let packet_encryption_public_key = PublicKey::from_base64(
-        sub_matches
-            .value_of("facilitator-ecies-public-key")
-            .unwrap(),
+
+    let packet_encryption_public_key = get_ecies_public_key(
+        sub_matches.value_of("facilitator-ecies-public-key"),
+        sub_matches.value_of("facilitator-manifest-url"),
     )
     .unwrap();
+
     let mut peer_transport = SampleOutput {
         transport: SignableTransport {
             transport: transport_for_path(peer_output_path, peer_identity, sub_matches)?,
@@ -751,15 +783,19 @@ fn generate_sample(sub_matches: &ArgMatches) -> Result<(), anyhow::Error> {
 
     let own_output_path = StoragePath::from_str(sub_matches.value_of("own-output").unwrap())?;
     let own_identity = sub_matches.value_of("own-identity");
+
+    let packet_encryption_public_key = get_ecies_public_key(
+        sub_matches.value_of("pha-ecies-public-key"),
+        sub_matches.value_of("pha-manifest-url"),
+    )
+    .unwrap();
+
     let mut own_transport = SampleOutput {
         transport: SignableTransport {
             transport: transport_for_path(own_output_path, own_identity, sub_matches)?,
             batch_signing_key: batch_signing_key_from_arg(sub_matches)?,
         },
-        packet_encryption_public_key: PublicKey::from_base64(
-            sub_matches.value_of("pha-ecies-public-key").unwrap(),
-        )
-        .unwrap(),
+        packet_encryption_public_key: packet_encryption_public_key,
         drop_nth_packet: None,
     };
 

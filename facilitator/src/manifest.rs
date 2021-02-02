@@ -47,7 +47,7 @@ impl PacketEncryptionCertificateSigningRequest {
             &self.certificate_signing_request,
             Some(PEM_CERTIFICATE_REQUEST),
         )
-        .context("failed to parse pem")?;
+        .context("failed to parse pem for packet encryption certificate signing request")?;
         let csr = DerCertificationRequest::from_der(&der).context("failed to decode csr")?;
 
         let decoded_public_key = p256::PublicKey::from_public_key_der(&csr.reqinfo.spki.value)
@@ -135,7 +135,7 @@ pub struct SpecificManifest {
     /// Certificate signing requests containing public keys that should be used
     /// to encrypt ingestion share packets intended for this data share
     /// processor.
-    packet_encryption_keys: HashMap<String, PacketEncryptionCertificateSigningRequest>,
+    packet_encryption_keys: PacketEncryptionCertificateSigningRequests,
 }
 
 impl SpecificManifest {
@@ -556,7 +556,10 @@ mod tests {
         expected_packet_encryption_csrs.insert(
             "fake-key-1".to_owned(),
             PacketEncryptionCertificateSigningRequest {
-                certificate_signing_request: DEFAULT_CSR_PACKET_ENCRYPTION_CERTIFICATE.to_owned(),
+                certificate_signing_request: format!(
+                    "-----BEGIN CERTIFICATE REQUEST-----\n{}\n-----END CERTIFICATE REQUEST-----\n",
+                    DEFAULT_CSR_PACKET_ENCRYPTION_CERTIFICATE
+                ),
             },
         );
         let expected_manifest = SpecificManifest {
@@ -597,7 +600,7 @@ mod tests {
         let packet_decryption_key = packet_decryption_keys.get("fake-key-1").unwrap();
 
         // Just checks that getting the base64'd public key doesn't error
-        packet_decryption_key.base64_public_key().unwrap(); 
+        packet_decryption_key.base64_public_key().unwrap();
 
         manifest.validate().unwrap();
     }
