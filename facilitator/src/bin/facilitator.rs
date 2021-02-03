@@ -19,6 +19,7 @@ use facilitator::{
         DataShareProcessorGlobalManifest, IngestionServerManifest, PortalServerGlobalManifest,
         SpecificManifest,
     },
+    metrics::{start_metrics_scrape_endpoint, AggregateMetricsCollector, IntakeMetricsCollector},
     sample::{generate_ingestion_sample, SampleOutput},
     task::{AggregationTask, AwsSqsTaskQueue, GcpPubSubTaskQueue, IntakeBatchTask, TaskQueue},
     transport::{
@@ -70,6 +71,8 @@ trait AppArgumentAdder {
     fn add_gcp_service_account_key_file_argument(self: Self) -> Self;
 
     fn add_task_queue_arguments(self: Self) -> Self;
+
+    fn add_metrics_scrape_port_argument(self: Self) -> Self;
 }
 
 const SHARED_HELP: &str = "Storage arguments: Any flag ending in -input or -output can take an \
@@ -365,6 +368,17 @@ impl<'a, 'b> AppArgumentAdder for App<'a, 'b> {
                 .long("aws-sqs-region")
                 .env("AWS_SQS_REGION")
                 .help("AWS region in which to use SQS"),
+        )
+    }
+
+    fn add_metrics_scrape_port_argument(self: App<'a, 'b>) -> App<'a, 'b> {
+        self.arg(
+            Arg::with_name("metrics-scrape-port")
+                .long("metrics-scrape-port")
+                .env("METRICS_SCRAPE_PORT")
+                .help("TCP port on which to expose Prometheus /metrics endpoint")
+                .default_value("8080")
+                .validator(num_validator::<u16>),
         )
     }
 }
@@ -692,6 +706,7 @@ fn main() -> Result<(), anyhow::Error> {
                 .add_storage_arguments(Entity::Peer, InOut::Output)
                 .add_storage_arguments(Entity::Own, InOut::Output)
                 .add_task_queue_arguments()
+                .add_metrics_scrape_port_argument()
         )
         .subcommand(
             SubCommand::with_name("aggregate-worker")
@@ -712,6 +727,7 @@ fn main() -> Result<(), anyhow::Error> {
                 .add_packet_decryption_key_argument()
                 .add_batch_signing_key_arguments()
                 .add_task_queue_arguments()
+                .add_metrics_scrape_port_argument()
         )
         .get_matches();
 
@@ -822,6 +838,7 @@ fn intake_batch<F: FnMut()>(
     batch_id: &str,
     date: &str,
     sub_matches: &ArgMatches,
+    metrics_collector: Option<&IntakeMetricsCollector>,
     callback: F,
 ) -> Result<(), anyhow::Error> {
     let mut intake_transport = intake_transport_from_args(sub_matches)?;
@@ -868,7 +885,27 @@ fn intake_batch<F: FnMut()>(
         is_first_from_arg(sub_matches),
     )?;
 
-    batch_intaker.generate_validation_share(callback)
+    if let Some(collector) = metrics_collector {
+        batch_intaker.set_metrics_collector(collector);
+        collector.intake_tasks_started.inc();
+    }
+
+    let result = batch_intaker.generate_validation_share(callback);
+
+    if let Some(collector) = metrics_collector {
+        match result {
+            Ok(()) => collector
+                .intake_tasks_finished
+                .with_label_values(&["success"])
+                .inc(),
+            Err(_) => collector
+                .intake_tasks_finished
+                .with_label_values(&["error"])
+                .inc(),
+        }
+    }
+
+    result
 }
 
 fn intake_batch_subcommand(sub_matches: &ArgMatches) -> Result<(), anyhow::Error> {
@@ -877,30 +914,20 @@ fn intake_batch_subcommand(sub_matches: &ArgMatches) -> Result<(), anyhow::Error
         sub_matches.value_of("batch-id").unwrap(),
         sub_matches.value_of("date").unwrap(),
         sub_matches,
+        None,
         || {}, // no-op callback
     )
 }
 
 fn intake_batch_worker(sub_matches: &ArgMatches) -> Result<(), anyhow::Error> {
-    let intake_started: Counter = register_counter!(
-        "intake_jobs_begun",
-        "Number of intake-batch jobs that started (on the facilitator side)"
-    )
-    .context("failed to register metrics counter for started intakes")?;
-
-    let intake_finished = register_counter_vec!(
-        "intake_jobs_finished",
-        "Number of intake-batch jobs that finished (on the facilitator side)",
-        &["status"]
-    )
-    .context("failed to register metrics counter for finished intakes")?;
-
+    let metrics_collector = IntakeMetricsCollector::new()?;
+    let scrape_port = value_t!(sub_matches.value_of("metrics-scrape-port"), u16)?;
+    let _runtime = start_metrics_scrape_endpoint(scrape_port)?;
     let mut queue = intake_task_queue_from_args(sub_matches)?;
 
     loop {
         if let Some(task_handle) = queue.dequeue()? {
             info!("dequeued task: {}", task_handle);
-            intake_started.inc();
             let task_start = Instant::now();
 
             let result = intake_batch(
@@ -908,6 +935,7 @@ fn intake_batch_worker(sub_matches: &ArgMatches) -> Result<(), anyhow::Error> {
                 &task_handle.task.batch_id,
                 &task_handle.task.date,
                 sub_matches,
+                Some(&metrics_collector),
                 || {
                     if let Err(e) =
                         queue.maybe_extend_task_deadline(&task_handle, &task_start.elapsed())
@@ -918,13 +946,9 @@ fn intake_batch_worker(sub_matches: &ArgMatches) -> Result<(), anyhow::Error> {
             );
 
             match result {
-                Ok(_) => {
-                    intake_finished.with_label_values(&["success"]).inc();
-                    queue.acknowledge_task(task_handle)?;
-                }
+                Ok(_) => queue.acknowledge_task(task_handle)?,
                 Err(err) => {
                     error!("error while processing task {}: {:?}", task_handle, err);
-                    intake_finished.with_label_values(&["error"]).inc();
                     queue.nacknowledge_task(task_handle)?;
                 }
             }
@@ -940,6 +964,7 @@ fn aggregate<F: FnMut()>(
     end: &str,
     batches: Vec<(&str, &str)>,
     sub_matches: &ArgMatches,
+    metrics_collector: Option<&AggregateMetricsCollector>,
     callback: F,
 ) -> Result<()> {
     let instance_name = sub_matches.value_of("instance-name").unwrap();
@@ -1068,7 +1093,27 @@ fn aggregate<F: FnMut()>(
         &mut aggregation_transport,
     )?;
 
-    aggregator.generate_sum_part(&parsed_batches, callback)
+    if let Some(collector) = metrics_collector {
+        aggregator.set_metrics_collector(collector);
+        collector.aggregate_tasks_started.inc();
+    }
+
+    let result = aggregator.generate_sum_part(&parsed_batches, callback);
+
+    if let Some(collector) = metrics_collector {
+        match result {
+            Ok(()) => collector
+                .aggregate_tasks_finished
+                .with_label_values(&["success"])
+                .inc(),
+            Err(_) => collector
+                .aggregate_tasks_finished
+                .with_label_values(&["error"])
+                .inc(),
+        }
+    }
+
+    result
 }
 
 fn aggregate_subcommand(sub_matches: &ArgMatches) -> Result<(), anyhow::Error> {
@@ -1094,29 +1139,20 @@ fn aggregate_subcommand(sub_matches: &ArgMatches) -> Result<(), anyhow::Error> {
         sub_matches.value_of("aggregation-end").unwrap(),
         batch_info,
         sub_matches,
+        None,
         || {}, // no-op callback
     )
 }
 
 fn aggregate_worker(sub_matches: &ArgMatches) -> Result<(), anyhow::Error> {
-    let aggregation_started: Counter = register_counter!(
-        "aggregation_jobs_begun",
-        "Number of aggregation jobs that started (on the facilitator side)"
-    )
-    .context("failed to register counter for started aggregations")?;
-    let aggregation_finished = register_counter_vec!(
-        "aggregation_jobs_finished",
-        "Number of aggregation jobs that finished (on the facilitator side)",
-        &["status"]
-    )
-    .context("failed to register counter for finished aggregations")?;
-
     let mut queue = aggregation_task_queue_from_args(sub_matches)?;
+    let metrics_collector = AggregateMetricsCollector::new()?;
+    let scrape_port = value_t!(sub_matches.value_of("metrics-scrape-port"), u16)?;
+    let _runtime = start_metrics_scrape_endpoint(scrape_port)?;
 
     loop {
         if let Some(task_handle) = queue.dequeue()? {
             info!("dequeued task: {}", task_handle);
-            aggregation_started.inc();
             let task_start = Instant::now();
 
             let batches: Vec<(&str, &str)> = task_handle
@@ -1131,6 +1167,7 @@ fn aggregate_worker(sub_matches: &ArgMatches) -> Result<(), anyhow::Error> {
                 &task_handle.task.aggregation_end,
                 batches,
                 sub_matches,
+                Some(&metrics_collector),
                 || {
                     if let Err(e) =
                         queue.maybe_extend_task_deadline(&task_handle, &task_start.elapsed())
@@ -1141,13 +1178,9 @@ fn aggregate_worker(sub_matches: &ArgMatches) -> Result<(), anyhow::Error> {
             );
 
             match result {
-                Ok(_) => {
-                    aggregation_finished.with_label_values(&["success"]).inc();
-                    queue.acknowledge_task(task_handle)?;
-                }
+                Ok(_) => queue.acknowledge_task(task_handle)?,
                 Err(err) => {
                     error!("error while processing task {}: {:?}", task_handle, err);
-                    aggregation_finished.with_label_values(&["error"]).inc();
                     queue.nacknowledge_task(task_handle)?;
                 }
             }

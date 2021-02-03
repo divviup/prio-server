@@ -4,6 +4,7 @@ use crate::{
         IngestionDataSharePacket, IngestionHeader, InvalidPacket, Packet, SumPart,
         ValidationHeader, ValidationPacket,
     },
+    metrics::AggregateMetricsCollector,
     transport::{SignableTransport, VerifiableAndDecryptableTransport, VerifiableTransport},
     BatchSigningKey, Error,
 };
@@ -30,6 +31,7 @@ pub struct BatchAggregator<'a> {
     aggregation_batch: BatchWriter<'a, SumPart, InvalidPacket>,
     share_processor_signing_key: &'a BatchSigningKey,
     total_individual_clients: i64,
+    metrics_collector: Option<&'a AggregateMetricsCollector>,
 }
 
 impl<'a> BatchAggregator<'a> {
@@ -65,7 +67,12 @@ impl<'a> BatchAggregator<'a> {
             ),
             share_processor_signing_key: &aggregation_transport.batch_signing_key,
             total_individual_clients: 0,
+            metrics_collector: None,
         })
+    }
+
+    pub fn set_metrics_collector(&mut self, collector: &'a AggregateMetricsCollector) {
+        self.metrics_collector = Some(collector);
     }
 
     /// Compute the sum part for all the provided batch IDs and write it out to

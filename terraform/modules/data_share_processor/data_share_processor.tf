@@ -80,6 +80,10 @@ variable "is_first" {
   type = bool
 }
 
+variable "intake_max_age" {
+  type = string
+}
+
 variable "aggregation_period" {
   type = string
 }
@@ -415,6 +419,7 @@ module "kubernetes" {
   sum_part_bucket_service_account_email   = var.remote_bucket_writer_gcp_service_account_email
   portal_server_manifest_base_url         = var.portal_server_manifest_base_url
   is_first                                = var.is_first
+  intake_max_age                          = var.intake_max_age
   aggregation_period                      = var.aggregation_period
   aggregation_grace_period                = var.aggregation_grace_period
   pushgateway                             = var.pushgateway
