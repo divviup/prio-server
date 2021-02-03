@@ -90,6 +90,10 @@ variable "is_first" {
   type = bool
 }
 
+variable "intake_max_age" {
+  type = string
+}
+
 variable "aggregation_period" {
   type = string
 }
@@ -136,7 +140,6 @@ module "account_mapping" {
   kubernetes_account_name = "${var.data_share_processor_name}-workflow-manager"
   kubernetes_namespace    = var.kubernetes_namespace
   environment             = var.environment
-  gcp_project             = var.gcp_project
 }
 
 # Allows the Kubernetes service account to request auth tokens for the GCP
@@ -278,9 +281,10 @@ resource "kubernetes_cron_job" "workflow_manager" {
               args = [
                 "--aggregation-period", var.aggregation_period,
                 "--grace-period", var.aggregation_grace_period,
-                "--intake-max-age", "24h",
+                "--intake-max-age", var.intake_max_age,
                 "--is-first=${var.is_first ? "true" : "false"}",
                 "--k8s-namespace", var.kubernetes_namespace,
+                "--ingestor-label", var.ingestor,
                 "--ingestor-input", var.ingestion_bucket,
                 "--ingestor-identity", var.ingestion_bucket_identity,
                 "--own-validation-input", var.own_validation_bucket,
@@ -311,23 +315,48 @@ resource "kubernetes_cron_job" "workflow_manager" {
   }
 }
 
+resource "kubernetes_service" "intake_batch" {
+  metadata {
+    name      = "intake-batch-${var.ingestor}"
+    namespace = var.kubernetes_namespace
+    annotations = {
+      # Needed for discovery by Prometheus
+      "prometheus.io/scrape" = "true"
+    }
+  }
+  spec {
+    port {
+      name     = "metrics"
+      port     = 8080
+      protocol = "TCP"
+    }
+    type = "ClusterIP"
+    # Selector must match the label(s) on kubernetes_deployment.intake_batch
+    selector = {
+      app      = "intake-batch-worker"
+      ingestor = var.ingestor
+    }
+  }
+}
+
 resource "kubernetes_deployment" "intake_batch" {
   metadata {
     name      = "intake-batch-${var.ingestor}"
     namespace = var.kubernetes_namespace
   }
-
   spec {
     replicas = var.intake_worker_count
     selector {
       match_labels = {
-        name = "intake-batch-${var.ingestor}"
+        app      = "intake-batch-worker"
+        ingestor = var.ingestor
       }
     }
     template {
       metadata {
         labels = {
-          name = "intake-batch-${var.ingestor}"
+          app      = "intake-batch-worker"
+          ingestor = var.ingestor
         }
       }
       spec {
@@ -336,6 +365,11 @@ resource "kubernetes_deployment" "intake_batch" {
           name  = "facile-container"
           image = "${var.container_registry}/${var.facilitator_image}:${var.facilitator_version}"
           args  = ["intake-batch-worker"]
+          # Prometheus metrics scrape endpoint
+          port {
+            container_port = 8080
+            protocol       = "TCP"
+          }
           resources {
             # Batch intake is single threaded, and we never expect to see
             # batches larger than 3-400 MB, so set the limits such that we can
@@ -384,6 +418,30 @@ resource "kubernetes_deployment" "intake_batch" {
   }
 }
 
+resource "kubernetes_service" "aggregate" {
+  metadata {
+    name      = "aggregate-${var.ingestor}"
+    namespace = var.kubernetes_namespace
+    annotations = {
+      # Needed for discovery by Prometheus
+      "prometheus.io/scrape" = "true"
+    }
+  }
+  spec {
+    port {
+      name     = "metrics"
+      port     = 8080
+      protocol = "TCP"
+    }
+    type = "ClusterIP"
+    # Selector must match the label(s) on kubernetes_deployment.aggregate
+    selector = {
+      app      = "aggregate-worker"
+      ingestor = var.ingestor
+    }
+  }
+}
+
 resource "kubernetes_deployment" "aggregate" {
   metadata {
     name      = "aggregate-${var.ingestor}"
@@ -394,13 +452,15 @@ resource "kubernetes_deployment" "aggregate" {
     replicas = var.aggregate_worker_count
     selector {
       match_labels = {
-        name = "aggregate-${var.ingestor}"
+        app      = "aggregate-worker"
+        ingestor = var.ingestor
       }
     }
     template {
       metadata {
         labels = {
-          name = "aggregate-${var.ingestor}"
+          app      = "aggregate-worker"
+          ingestor = var.ingestor
         }
       }
       spec {
@@ -409,6 +469,11 @@ resource "kubernetes_deployment" "aggregate" {
           name  = "facile-container"
           image = "${var.container_registry}/${var.facilitator_image}:${var.facilitator_version}"
           args  = ["aggregate-worker"]
+          # Prometheus metrics scrape endpoint
+          port {
+            container_port = 8080
+            protocol       = "TCP"
+          }
           resources {
             # As in the intake-batch case, aggregate jobs are single threaded
             # and need to fit whole ingestion batches into memory.

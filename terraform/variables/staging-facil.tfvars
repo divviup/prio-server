@@ -53,6 +53,7 @@ test_peer_environment = {
 }
 is_first                 = false
 use_aws                  = false
-workflow_manager_version = "0.6.1"
-facilitator_version      = "0.6.1"
+workflow_manager_version = "0.6.3"
+facilitator_version      = "0.6.3"
 pushgateway              = "prometheus-pushgateway.monitoring:9091"
+victorops_routing_key    = "prio-staging"

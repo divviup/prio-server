@@ -325,7 +325,10 @@ fn fetch_manifest(manifest_url: &str) -> Result<String> {
     if !manifest_url.starts_with("https://") {
         return Err(anyhow!("Manifest must be fetched over HTTPS"));
     }
-    http::get_url(manifest_url)
+    http::simple_get_request(
+        url::Url::parse(manifest_url)
+            .context(format!("failed to parse manifest url: {}", manifest_url))?,
+    )
 }
 
 /// Attempts to parse the provided string as a PEM encoded PKIX
@@ -381,6 +384,11 @@ mod tests {
     };
     use ring::rand::SystemRandom;
     use rusoto_core::Region;
+    use url::Url;
+
+    fn url_fetcher(url: &str) -> Result<String> {
+        http::simple_get_request(Url::parse(url)?)
+    }
 
     #[test]
     fn load_data_share_processor_global_manifest() {
@@ -953,7 +961,7 @@ mod tests {
             .expect(1)
             .create();
 
-        IngestionServerManifest::from_http(&mockito::server_url(), None, http::get_url).unwrap();
+        IngestionServerManifest::from_http(&mockito::server_url(), None, url_fetcher).unwrap();
 
         mocked_get.assert();
     }
@@ -966,8 +974,7 @@ mod tests {
             .expect(1)
             .create();
 
-        IngestionServerManifest::from_http(&mockito::server_url(), None, http::get_url)
-            .unwrap_err();
+        IngestionServerManifest::from_http(&mockito::server_url(), None, url_fetcher).unwrap_err();
 
         mocked_get.assert();
     }
@@ -1003,7 +1010,7 @@ mod tests {
         IngestionServerManifest::from_http(
             &mockito::server_url(),
             Some("instance-name"),
-            http::get_url,
+            url_fetcher,
         )
         .unwrap();
 
@@ -1027,7 +1034,7 @@ mod tests {
         IngestionServerManifest::from_http(
             &mockito::server_url(),
             Some("instance-name"),
-            http::get_url,
+            url_fetcher,
         )
         .unwrap_err();
 
@@ -1050,7 +1057,7 @@ mod tests {
         IngestionServerManifest::from_http(
             &mockito::server_url(),
             Some("instance-name"),
-            http::get_url,
+            url_fetcher,
         )
         .unwrap_err();
 
