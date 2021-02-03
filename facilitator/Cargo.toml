@@ -12,9 +12,7 @@ base64 = "0.12.3"
 chrono = { version = "0.4", features = ["serde"] }
 clap = "2.33.3"
 derivative = "2.1.1"
-elliptic-curve = {version = "0.8.4", features = ["pem"]}
-hyper = "0.13.8"
-hyper-rustls = "0.21.0"
+elliptic-curve = { version = "0.8.4", features = ["pem"] }
 env_logger = "0.8.1"
 http = "^0.2"
 hyper = "^0.14"
