@@ -1,6 +1,7 @@
 use crate::{
     aws_credentials::{basic_runtime, DefaultCredentialsProvider},
     config::{Identity, S3Path},
+    http::{prepare_request_without_agent, Method, RequestParameters},
     transport::{Transport, TransportWriter},
     Error,
 };
@@ -29,14 +30,18 @@ use tokio::{
     io::{AsyncRead, AsyncReadExt},
     runtime::Runtime,
 };
-
+use url::Url;
 // We use workload identity to map GCP service accounts to Kubernetes service
 // accounts and make an auth token for the GCP account available to containers
 // in the GKE metadata service. Sadly we can't use the Kubernetes feature to
 // automount a service account token, because that would provide the token for
 // the *Kubernetes* service account, not the GCP one.
 // See terraform/modules/gke/gke.tf and terraform/modules/kuberenetes/kubernetes.tf
-const METADATA_SERVICE_TOKEN_URL: &str = "http://metadata.google.internal:80/computeMetadata/v1/instance/service-accounts/default/identity";
+
+fn metadata_service_token_url() -> Url {
+    Url::parse("http://metadata.google.internal:80/computeMetadata/v1/instance/service-accounts/default/identity")
+    .expect("could not parse token metadata api url")
+}
 
 // When running in GCP, we are provided the AWS account ID that owns our buckets
 // via environment variable.
@@ -136,23 +141,34 @@ impl S3Transport {
                         // the context of an async runtime when this callback is
                         // invoked, but because the closure is not declared
                         // async, we cannot use .await to work with Futures.
-                        let response = ureq::get(METADATA_SERVICE_TOKEN_URL)
-                            .query(
+
+                        let mut url = metadata_service_token_url();
+
+                        url.query_pairs_mut()
+                            .append_pair(
                                 "audience",
-                                format!("sts.amazonaws.com/{}", aws_account_id).as_ref(),
+                                &format!("sts.amazonaws.com/{}", aws_account_id),
                             )
-                            .set("Metadata-Flavor", "Google")
-                            // By default, ureq will wait forever to connect or
-                            // read.
-                            .timeout_connect(10_000) // ten seconds
-                            .timeout_read(10_000) // ten seconds
-                            .call();
-                        if response.error() {
-                            return Err(CredentialsError::new(format!(
+                            .finish();
+
+                        let mut request = prepare_request_without_agent(RequestParameters {
+                            url,
+                            method: Method::Get,
+                            ..Default::default()
+                        })
+                        .map_err(|e| {
+                            CredentialsError::new(format!("failed to create request: {:?}", e))
+                        })?;
+
+                        request = request.set("Metadata-Flavor", "Google");
+
+                        let response = request.call().map_err(|e| {
+                            CredentialsError::new(format!(
                                 "failed to fetch auth token from metadata service: {:?}",
-                                response
-                            )));
-                        }
+                                e
+                            ))
+                        })?;
+
                         let token = response.into_string().map_err(|e| {
                             CredentialsError::new(format!(
                                 "failed to fetch auth token from metadata service: {}",

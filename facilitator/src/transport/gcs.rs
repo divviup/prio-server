@@ -1,6 +1,10 @@
 use crate::{
     config::{GCSPath, Identity},
-    gcp_oauth::OauthTokenProvider,
+    gcp_oauth::GcpOauthTokenProvider,
+    http::{
+        prepare_request, prepare_request_without_agent, Method, OauthTokenProvider,
+        RequestParameters, StaticOauthTokenProvider,
+    },
     transport::{Transport, TransportWriter},
     Error,
 };
@@ -9,9 +13,31 @@ use log::info;
 use std::{
     io,
     io::{Read, Write},
+    time::Duration,
 };
+use ureq::{Agent, AgentBuilder};
+use url::Url;
 
-const STORAGE_API_BASE_URL: &str = "https://storage.googleapis.com";
+fn storage_api_base_url() -> Url {
+    Url::parse("https://storage.googleapis.com/").expect("unable to parse storage API url")
+}
+
+fn gcp_object_url(bucket: &str, encoded_key: &str) -> Result<Url> {
+    let request_url = &format!(
+        "{}storage/v1/b/{}/o/{}",
+        storage_api_base_url().to_string(),
+        bucket,
+        encoded_key
+    );
+
+    Url::parse(&request_url).context(format!("failed to parse: {}", request_url))
+}
+
+fn gcp_upload_object_url(storage_api_url: &str, bucket: &str) -> Result<Url> {
+    let request_url = &format!("{}upload/storage/v1/b/{}/o/", storage_api_url, bucket);
+
+    Url::parse(&request_url).context(format!("failed to parse: {}", request_url))
+}
 
 /// GCSTransport manages reading and writing from GCS buckets, with
 /// authenticatiom to the API by Oauth token in an Authorization header. This
@@ -21,7 +47,8 @@ const STORAGE_API_BASE_URL: &str = "https://storage.googleapis.com";
 #[derive(Debug)]
 pub struct GCSTransport {
     path: GCSPath,
-    oauth_token_provider: OauthTokenProvider,
+    oauth_token_provider: GcpOauthTokenProvider,
+    agent: Agent,
 }
 
 impl GCSTransport {
@@ -37,13 +64,14 @@ impl GCSTransport {
     ) -> Result<GCSTransport> {
         Ok(GCSTransport {
             path: path.ensure_directory_prefix(),
-            oauth_token_provider: OauthTokenProvider::new(
+            oauth_token_provider: GcpOauthTokenProvider::new(
                 // This token is used to access GCS storage
                 // https://developers.google.com/identity/protocols/oauth2/scopes#storage
                 "https://www.googleapis.com/auth/devstorage.read_write",
                 identity.map(|x| x.to_string()),
                 key_file_reader,
             )?,
+            agent: AgentBuilder::new().timeout(Duration::from_secs(10)).build(),
         })
     }
 }
@@ -61,30 +89,26 @@ impl Transport for GCSTransport {
         // Per API reference, the object key must be URL encoded.
         // API reference: https://cloud.google.com/storage/docs/json_api/v1/objects/get
         let encoded_key = urlencoding::encode(&[&self.path.key, key].concat());
-        let url = format!(
-            "{}/storage/v1/b/{}/o/{}",
-            STORAGE_API_BASE_URL, self.path.bucket, encoded_key
-        );
 
-        let response = ureq::get(&url)
-            // Ensures response body will be content and not JSON metadata.
-            // https://cloud.google.com/storage/docs/json_api/v1/objects/get#parameters
-            .query("alt", "media")
-            .set(
-                "Authorization",
-                &format!("Bearer {}", self.oauth_token_provider.ensure_oauth_token()?),
-            )
-            // By default, ureq will wait forever to connect or read
-            .timeout_connect(10_000) // ten seconds
-            .timeout_read(10_000) // ten seconds
-            .call();
-        if response.error() {
-            return Err(anyhow!(
-                "failed to fetch object {} from GCS: {:?}",
-                url,
-                response
-            ));
-        }
+        let mut url = gcp_object_url(&self.path.bucket, &encoded_key)?;
+
+        // Ensures response body will be content and not JSON metadata.
+        // https://cloud.google.com/storage/docs/json_api/v1/objects/get#parameters
+        url.query_pairs_mut().append_pair("alt", "media").finish();
+
+        let request = prepare_request(
+            &self.agent,
+            RequestParameters {
+                url: url.clone(),
+                method: Method::Get,
+                token_provider: Some(&mut self.oauth_token_provider),
+            },
+        )?;
+
+        let response = request
+            .call()
+            .context(format!("failed to fetch object {} from GCS", url))?;
+
         Ok(Box::new(response.into_reader()))
     }
 
@@ -133,10 +157,11 @@ impl Transport for GCSTransport {
 // upload_chunk when we know it's the last chunk: (1) we construct the Content-
 // Range header without any asterisks (2) we drain self.buffer.
 struct StreamingTransferWriter {
-    upload_session_uri: String,
+    upload_session_uri: Url,
     minimum_upload_chunk_size: usize,
     object_upload_position: usize,
     buffer: Vec<u8>,
+    agent: Agent,
 }
 
 impl StreamingTransferWriter {
@@ -152,7 +177,7 @@ impl StreamingTransferWriter {
             // GCP documentation recommends setting upload part size to 8 MiB.
             // https://cloud.google.com/storage/docs/performing-resumable-uploads#chunked-upload
             8_388_608,
-            STORAGE_API_BASE_URL,
+            storage_api_base_url(),
         )
     }
 
@@ -161,23 +186,28 @@ impl StreamingTransferWriter {
         object: String,
         oauth_token: String,
         minimum_upload_chunk_size: usize,
-        storage_api_base_url: &str,
+        storage_api_base_url: Url,
     ) -> Result<StreamingTransferWriter> {
         // Initiate the resumable, streaming upload.
         // https://cloud.google.com/storage/docs/performing-resumable-uploads#initiate-session
         let encoded_object = urlencoding::encode(&object);
-        let upload_url = format!("{}/upload/storage/v1/b/{}/o/", storage_api_base_url, bucket);
-        let http_response = ureq::post(&upload_url)
-            .set("Authorization", &format!("Bearer {}", oauth_token))
-            .query("uploadType", "resumable")
-            .query("name", &encoded_object)
-            // By default, ureq will wait forever to connect or read
-            .timeout_connect(10_000) // ten seconds
-            .timeout_read(10_000) // ten seconds
-            .send_bytes(&[]);
-        if http_response.error() {
-            return Err(anyhow!("uploading to gs://{}: {:?}", bucket, http_response));
-        }
+
+        let mut upload_url = gcp_upload_object_url(&storage_api_base_url.to_string(), &bucket)?;
+        upload_url
+            .query_pairs_mut()
+            .append_pair("uploadType", "resumable")
+            .append_pair("name", &encoded_object)
+            .finish();
+
+        let request = prepare_request_without_agent(RequestParameters {
+            url: upload_url,
+            method: Method::Post,
+            token_provider: Some(&mut StaticOauthTokenProvider::from(oauth_token)),
+        })?;
+
+        let http_response = request
+            .send_bytes(&[])
+            .context(format!("uploading to gs://{} failed", bucket))?;
 
         // The upload session URI authenticates subsequent upload requests for
         // this upload, so we no longer need the impersonated service account's
@@ -192,7 +222,11 @@ impl StreamingTransferWriter {
             minimum_upload_chunk_size,
             buffer: Vec::with_capacity(minimum_upload_chunk_size * 2),
             object_upload_position: 0,
-            upload_session_uri: upload_session_uri.to_owned(),
+            upload_session_uri: Url::parse(&upload_session_uri).context(format!(
+                "failed to parse upload_session_uri url: {}",
+                &upload_session_uri
+            ))?,
+            agent: AgentBuilder::new().timeout(Duration::from_secs(10)).build(),
         })
     }
 
@@ -231,12 +265,20 @@ impl StreamingTransferWriter {
             content_range_header_total_length_field
         );
 
-        let http_response = ureq::put(&self.upload_session_uri)
-            .set("Content-Range", &content_range)
-            // By default, ureq will wait forever to connect or read
-            .timeout_connect(10_000) // ten seconds
-            .timeout_read(10_000) // ten seconds
-            .send_bytes(body);
+        let mut request = prepare_request(
+            &self.agent,
+            RequestParameters {
+                url: self.upload_session_uri.clone(),
+                method: Method::Put,
+                ..Default::default()
+            },
+        )?;
+        request = request.set("Content-Range", &content_range);
+
+        let http_response = request.send_bytes(body).context(format!(
+            "failed in sending bytes to gcs upload session: {}",
+            &self.upload_session_uri
+        ))?;
 
         // On success we expect HTTP 308 Resume Incomplete and a Range: header,
         // unless this is the last part and the server accepts the entire
@@ -287,10 +329,9 @@ impl StreamingTransferWriter {
                 self.object_upload_position = end + 1;
                 Ok(())
             }
-            _ => Err(anyhow!(
-                "failed to upload part to GCS: {} synthetic: {}\n{:?}",
-                http_response.status(),
-                http_response.synthetic(),
+            status => Err(anyhow!(
+                "failed to upload part to GCS: {} \n{:?}",
+                status,
                 http_response.into_string()
             )),
         }
@@ -329,12 +370,18 @@ impl TransportWriter for StreamingTransferWriter {
 
     fn cancel_upload(&mut self) -> Result<()> {
         // https://cloud.google.com/storage/docs/performing-resumable-uploads#cancel-upload
-        let http_response = ureq::delete(&self.upload_session_uri)
-            .set("Content-Length", "0")
-            // By default, ureq will wait forever to connect or read
-            .timeout_connect(10_000) // ten seconds
-            .timeout_read(10_000) // ten seconds
-            .call();
+        let mut request = prepare_request(
+            &self.agent,
+            RequestParameters {
+                url: self.upload_session_uri.clone(),
+                method: Method::Delete,
+                ..Default::default()
+            },
+        )?;
+
+        request = request.set("Content-Length", "0");
+
+        let http_response = request.call()?;
         match http_response.status() {
             499 => Ok(()),
             _ => Err(anyhow!(
@@ -374,7 +421,7 @@ mod tests {
             "fake-object".to_string(),
             "fake-token".to_string(),
             10,
-            &mockito::server_url(),
+            Url::parse(&mockito::server_url()).expect("unable to parse mockito server url"),
         )
         .unwrap();
 
@@ -418,7 +465,7 @@ mod tests {
             "fake-object".to_string(),
             "fake-token".to_string(),
             4,
-            &mockito::server_url(),
+            Url::parse(&mockito::server_url()).expect("unable to parse mockito server url"),
         )
         .unwrap();
 
