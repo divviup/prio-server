@@ -3,9 +3,9 @@ use chrono::Duration;
 use once_cell::sync::Lazy;
 use regex::Regex;
 use rusoto_core::{region::ParseRegionError, Region};
-use serde::{de, Deserialize, Deserializer, Serialize, Serializer};
+use serde::{de, export::Formatter, Deserialize, Deserializer, Serialize, Serializer};
 use std::{
-    fmt::{self, Display, Formatter},
+    fmt::{self, Display},
     path::PathBuf,
     str::FromStr,
 };
@@ -44,7 +44,7 @@ impl S3Path {
 }
 
 impl Display for S3Path {
-    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         write!(
             f,
             "s3://{}/{}/{}",
@@ -108,7 +108,7 @@ impl GCSPath {
 }
 
 impl Display for GCSPath {
-    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         write!(f, "gs://{}/{}", self.bucket, self.key)
     }
 }
@@ -190,7 +190,7 @@ impl FromStr for ManifestKind {
 }
 
 impl Display for ManifestKind {
-    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         match self {
             ManifestKind::IngestorGlobal => write!(f, "ingestor-global"),
             ManifestKind::IngestorSpecific => write!(f, "ingestor-specific"),
@@ -220,7 +220,7 @@ impl FromStr for TaskQueueKind {
 }
 
 impl Display for TaskQueueKind {
-    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         match self {
             TaskQueueKind::GcpPubSub => write!(f, "gcp-pubsub"),
             TaskQueueKind::AwsSqs => write!(f, "aws-sqs"),

@@ -3,27 +3,12 @@ use chrono::{prelude::Utc, DateTime, Duration};
 use jsonwebtoken::{encode, Algorithm, EncodingKey, Header};
 use serde::{Deserialize, Serialize};
 use std::{fmt, io::Read};
-use ureq::{Agent, Response};
+use ureq::Response;
 
-use crate::http::{
-    create_agent, prepare_request, send_json_request, Method, OauthTokenProvider,
-    RequestParameters, StaticOauthTokenProvider,
-};
-use url::Url;
+use crate::http::{send_json_request, JsonRequestParameters};
 
-fn default_oauth_token_url() -> Url {
-    Url::parse("http://metadata.google.internal:80/computeMetadata/v1/instance/service-accounts/default/token",)
-    .expect("unable to parse metadata.google.internal url")
-}
-
-// API reference:
-// https://cloud.google.com/iam/docs/reference/credentials/rest/v1/projects.serviceAccounts/generateAccessToken
-fn access_token_url_for_service_account(service_account_to_impersonate: &str) -> Result<Url> {
-    let request_url = format!("https://iamcredentials.googleapis.com/v1/projects/-/serviceAccounts/{}:generateAccessToken",
-            service_account_to_impersonate);
-
-    Url::parse(&request_url).context(format!("failed to parse: {}", request_url))
-}
+const DEFAULT_OAUTH_TOKEN_URL: &str =
+    "http://metadata.google.internal:80/computeMetadata/v1/instance/service-accounts/default/token";
 
 /// Represents the claims encoded into JWTs when using a service account key
 /// file to authenticate as the default GCP service account.
@@ -84,11 +69,11 @@ struct ServiceAccountKeyFile {
     token_uri: String,
 }
 
-/// GcpOauthTokenProvider manages a default service account Oauth token (i.e. the
+/// OauthTokenProvider manages a default service account Oauth token (i.e. the
 /// one for a GCP service account mapped to a Kubernetes service account, or the
 /// one found in a JSON key file) and an Oauth token used to impersonate another
 /// service account.
-pub(crate) struct GcpOauthTokenProvider {
+pub(crate) struct OauthTokenProvider {
     /// The Oauth scope for which tokens should be requested.
     scope: String,
     /// The parsed key file for the default GCP service account. If present,
@@ -96,7 +81,7 @@ pub(crate) struct GcpOauthTokenProvider {
     /// the GKE metadata service is consulted.
     default_service_account_key_file: Option<ServiceAccountKeyFile>,
     /// Holds the service account email to impersonate, if one was provided to
-    /// GcpOauthTokenProvider::new.
+    /// OauthTokenProvider::new.
     account_to_impersonate: Option<String>,
     /// This field is None after instantiation and is Some after the first
     /// successful request for a token for the default service account, though
@@ -107,12 +92,9 @@ pub(crate) struct GcpOauthTokenProvider {
     /// though the contained token may be expired. This will always be None if
     /// account_to_impersonate is None.
     impersonated_account_token: Option<OauthToken>,
-    /// The Agent will be used when making HTTP requests to GCP APIs to fetch
-    /// Oauth tokens.
-    agent: Agent,
 }
 
-impl fmt::Debug for GcpOauthTokenProvider {
+impl fmt::Debug for OauthTokenProvider {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("OauthTokenProvider")
             .field("account_to_impersonate", &self.account_to_impersonate)
@@ -135,45 +117,40 @@ impl fmt::Debug for GcpOauthTokenProvider {
     }
 }
 
-impl OauthTokenProvider for GcpOauthTokenProvider {
-    /// Returns the Oauth token to use with GCP API in an Authorization header,
-    /// fetching it or renewing it if necessary. If a service account to
-    /// impersonate was provided, the default service account is used to
-    /// authenticate to the GCP IAM API to retrieve an Oauth token. If no
-    /// impersonation is taking place, provides the default service account
-    /// Oauth token.
-    fn ensure_oauth_token(&mut self) -> Result<String> {
-        match self.account_to_impersonate {
-            Some(_) => self.ensure_impersonated_service_account_oauth_token(),
-            None => self.ensure_default_account_token(),
-        }
-    }
-}
-
-impl GcpOauthTokenProvider {
+impl OauthTokenProvider {
     /// Creates a token provider which can impersonate the specified service
     /// account.
     pub(crate) fn new(
         scope: &str,
         account_to_impersonate: Option<String>,
         key_file_reader: Option<Box<dyn Read>>,
-    ) -> Result<GcpOauthTokenProvider> {
+    ) -> Result<OauthTokenProvider> {
         let key_file: Option<ServiceAccountKeyFile> = match key_file_reader {
             Some(reader) => {
                 serde_json::from_reader(reader).context("failed to deserialize JSON key file")?
             }
             None => None,
         };
-        let agent = create_agent();
-
-        Ok(GcpOauthTokenProvider {
+        Ok(OauthTokenProvider {
             scope: scope.to_owned(),
             default_service_account_key_file: key_file,
             account_to_impersonate,
             default_account_token: None,
             impersonated_account_token: None,
-            agent,
         })
+    }
+
+    /// Returns the Oauth token to use with GCP API in an Authorization header,
+    /// fetching it or renewing it if necessary. If a service account to
+    /// impersonate was provided, the default service account is used to
+    /// authenticate to the GCP IAM API to retrieve an Oauth token. If no
+    /// impersonation is taking place, provides the default service account
+    /// Oauth token.
+    pub(crate) fn ensure_oauth_token(&mut self) -> Result<String> {
+        match self.account_to_impersonate {
+            Some(_) => self.ensure_impersonated_service_account_oauth_token(),
+            None => self.ensure_default_account_token(),
+        }
     }
 
     /// Returns the current OAuth token for the default service account, if it
@@ -189,11 +166,17 @@ impl GcpOauthTokenProvider {
 
         let http_response = match &self.default_service_account_key_file {
             Some(key_file) => self.account_token_with_key_file(&key_file)?,
-            None => self.account_token_from_gke_metadata_service()?,
+            None => OauthTokenProvider::account_token_from_gke_metadata_service(),
         };
+        if http_response.error() {
+            return Err(anyhow!(
+                "failed to query GKE metadata service: {:?}",
+                http_response
+            ));
+        }
 
         let response = http_response
-            .into_json::<OauthTokenResponse>()
+            .into_json_deserialize::<OauthTokenResponse>()
             .context("failed to deserialize response from GKE metadata service")?;
 
         if response.token_type != "Bearer" {
@@ -210,22 +193,14 @@ impl GcpOauthTokenProvider {
 
     /// Fetches default account token from GKE metadata service. Returns the
     /// ureq::Response, whose body will be an OauthTokenResponse if the HTTP
-    /// call was successful.
-    fn account_token_from_gke_metadata_service(&self) -> Result<Response> {
-        let mut request = prepare_request(
-            &self.agent,
-            RequestParameters {
-                url: default_oauth_token_url(),
-                method: Method::Get,
-                ..Default::default()
-            },
-        )?;
-
-        request = request.set("Metadata-Flavor", "Google");
-
-        request
+    /// call was successful, but may be an error.
+    fn account_token_from_gke_metadata_service() -> Response {
+        ureq::get(DEFAULT_OAUTH_TOKEN_URL)
+            .set("Metadata-Flavor", "Google")
+            // By default, ureq will wait forever to connect or read.
+            .timeout_connect(10_000) // ten seconds
+            .timeout_read(10_000) // ten seconds
             .call()
-            .context("failed to query GKE metadata service")
     }
 
     /// Fetches the default account token from Google OAuth API using a JWT
@@ -261,22 +236,12 @@ impl GcpOauthTokenProvider {
             token
         );
 
-        let request = prepare_request(
-            &self.agent,
-            RequestParameters {
-                url: Url::parse(&key_file.token_uri).context(format!(
-                    "failed to parse key_file.token_uri: {}",
-                    &key_file.token_uri
-                ))?,
-                method: Method::Post,
-                ..Default::default()
-            },
-        )?;
-
-        request
+        Ok(ureq::post(&key_file.token_uri)
             .set("Content-Type", "application/x-www-form-urlencoded")
-            .send_string(&request_body)
-            .context("failed to get account token with key file")
+            // By default, ureq will wait forever to connect or read.
+            .timeout_connect(10_000) // ten seconds
+            .timeout_read(10_000) // ten seconds
+            .send_string(&request_body))
     }
 
     /// Returns the current OAuth token for the impersonated service account, if
@@ -293,30 +258,33 @@ impl GcpOauthTokenProvider {
         }
 
         let service_account_to_impersonate = self.account_to_impersonate.clone().unwrap();
-
-        let default_token = self.ensure_default_account_token()?;
-        let request = prepare_request(
-            &self.agent,
-            RequestParameters {
-                url: access_token_url_for_service_account(&service_account_to_impersonate)?,
-                method: Method::Post,
-                token_provider: Some(&mut StaticOauthTokenProvider::from(default_token)),
-            },
-        )?;
-
-        let http_response = send_json_request(
-            request,
-            ureq::json!({
+        // API reference:
+        // https://cloud.google.com/iam/docs/reference/credentials/rest/v1/projects.serviceAccounts/generateAccessToken
+        let request_url = format!("https://iamcredentials.googleapis.com/v1/projects/-/serviceAccounts/{}:generateAccessToken",
+            service_account_to_impersonate);
+        let request = ureq::post(&request_url)
+            .set(
+                "Authorization",
+                &format!("Bearer {}", self.ensure_default_account_token()?),
+            )
+            .build();
+        let http_response = send_json_request(JsonRequestParameters {
+            request: request,
+            body: ureq::json!({
                 "scope": [self.scope]
             }),
-        )
-        .context(format!(
-            "failed to get Oauth token to impersonate service account {}",
-            service_account_to_impersonate
-        ))?;
+            ..Default::default()
+        })?;
+        if http_response.error() {
+            return Err(anyhow!(
+                "failed to get Oauth token to impersonate service account {}: {:?}",
+                service_account_to_impersonate,
+                http_response
+            ));
+        }
 
         let response = http_response
-            .into_json::<GenerateAccessTokenResponse>()
+            .into_json_deserialize::<GenerateAccessTokenResponse>()
             .context("failed to deserialize response from IAM API")?;
         self.impersonated_account_token = Some(OauthToken {
             token: response.access_token.clone(),
