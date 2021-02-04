@@ -1,6 +1,9 @@
 use anyhow::{anyhow, Context, Result};
 use chrono::{prelude::Utc, NaiveDateTime};
 use clap::{value_t, App, Arg, ArgGroup, ArgMatches, SubCommand};
+use k8s_openapi::api::core::v1::Secret as KubernetesSecret;
+
+use kube::api::Meta;
 use log::{error, info};
 use prio::encrypt::{PrivateKey, PublicKey};
 use prometheus::{register_counter, register_counter_vec, Counter};
@@ -15,6 +18,7 @@ use facilitator::{
     aggregation::BatchAggregator,
     config::{Identity, ManifestKind, StoragePath, TaskQueueKind},
     intake::BatchIntaker,
+    kubernetes::Kubernetes,
     manifest::{
         DataShareProcessorGlobalManifest, IngestionServerManifest, PortalServerGlobalManifest,
         SpecificManifest,
@@ -468,17 +472,17 @@ fn main() -> Result<(), anyhow::Error> {
                         )
                 )
                 .arg(
-                    Arg::with_name("pha-manifest-url")
-                    .long("pha-manifest-url")
-                    .env("PHA_MANIFEST_URL")
+                    Arg::with_name("pha-manifest-base-url")
+                    .long("pha-manifest-base-url")
+                    .env("PHA_MANIFEST_BASE_URL")
                     .value_name("URL")
                     .help(
-                        "URL of the Public Health Authority manifest"
+                        "Base URL of the Public Health Authority manifest"
                     )
                 )
                 .group(
                     ArgGroup::with_name("public_health_authority_information")
-                    .args(&["pha-ecies-public-key", "pha-manifest-url"])
+                    .args(&["pha-ecies-public-key", "pha-manifest-base-url"])
                     .required(true)
                 )
                 .arg(
@@ -492,17 +496,17 @@ fn main() -> Result<(), anyhow::Error> {
                         )
                 )
                 .arg(
-                    Arg::with_name("facilitator-manifest-url")
-                    .long("facilitator-manifest-url")
-                    .env("FACILITATOR_MANIFEST_URL")
+                    Arg::with_name("facilitator-manifest-base-url")
+                    .long("facilitator-manifest-base-url")
+                    .env("FACILITATOR_MANIFEST_BASE_URL")
                     .value_name("URL")
                     .help(
-                        "URL of the Facilitator manifest"
+                        "Base URL of the Facilitator manifest"
                     )
                 )
                 .group(
                     ArgGroup::with_name("facilitator_information")
-                    .args(&["facilitator-ecies-public-key", "facilitator-manifest-url"])
+                    .args(&["facilitator-ecies-public-key", "facilitator-manifest-base-url"])
                     .required(true)
                 )
                 .add_batch_signing_key_arguments()
@@ -532,7 +536,21 @@ fn main() -> Result<(), anyhow::Error> {
                         .help("End of timespan covered by the batch, in milliseconds since epoch")
                         .required(true)
                         .validator(num_validator::<i64>),
-                ),
+                )
+                .arg(
+                    Arg::with_name("locality-name")
+                        .long("locality-name")
+                        .value_name("STRING")
+                        .help("Name of the locality this ingestor is targetting")
+                        .required(true),
+                )
+                .arg(
+                    Arg::with_name("ingestor-name")
+                        .long("ingestor-name")
+                        .value_name("STRING")
+                        .help("Name of this ingestor")
+                        .required(true),
+                )
         )
         .subcommand(
             SubCommand::with_name("intake-batch")
@@ -750,13 +768,16 @@ fn main() -> Result<(), anyhow::Error> {
 fn get_ecies_public_key(
     key_option: Option<&str>,
     manifest_option: Option<&str>,
+    ingestor_name: &str,
+    locality_name: &str,
 ) -> Result<PublicKey> {
+    let peer_name = &format!("{}-{}", locality_name, ingestor_name);
     match key_option {
         Some(key) => PublicKey::from_base64(key)
             .map_err(|e| anyhow!("unable to create public key from base64 ecies key: {}", e)),
         None => match manifest_option {
             Some(manifest_url) => {
-                let manifest = SpecificManifest::from_absolute_https_path(manifest_url).context(
+                let manifest = SpecificManifest::from_https(manifest_url, peer_name).context(
                     format!("unable to read SpecificManifest from {}", manifest_url),
                 )?;
                 let packet_decryption_keys = manifest
@@ -778,13 +799,52 @@ fn get_ecies_public_key(
     }
 }
 
+fn get_valid_batch_signing_key(namespace: &str, own_manifest_url: &str) -> Result<BatchSigningKey> {
+    let manifest = IngestionServerManifest::from_https(own_manifest_url, None).context(format!(
+        "unable to get ingestion server manifest from url: {}",
+        own_manifest_url
+    ))?;
+
+    let kubernetes = Kubernetes::new(false, String::from(namespace));
+    let secrets = kubernetes.get_sorted_secrets("type=batch-signing-key")?;
+
+    let batch_signing_keys = manifest.batch_signing_public_keys().unwrap();
+
+    let secret = secrets
+        .into_iter()
+        .find(|secret| batch_signing_keys.contains_key(&secret.name()));
+
+    match secret {
+        None => Err(anyhow!(
+            "unable to find a batch signing key from the manifest and kubernetes secret store"
+        )),
+        Some(secret) => {
+            let secret_name = secret.name();
+            let secret_data = secret.data.unwrap().remove("secret_key").unwrap().0;
+
+            let key = EcdsaKeyPair::from_pkcs8(&ECDSA_P256_SHA256_ASN1_SIGNING, &secret_data)
+                .map_err(|e| anyhow!("decoding secret key rejected: {}", e))?;
+
+            Ok(BatchSigningKey {
+                identifier: secret_name,
+                key,
+            })
+        }
+    }
+}
+
 fn generate_sample(sub_matches: &ArgMatches) -> Result<(), anyhow::Error> {
+    let ingestor_name = sub_matches.value_of("ingestor-name").unwrap();
+    let locality_name = sub_matches.value_of("locality-name").unwrap();
+
     let peer_output_path = StoragePath::from_str(sub_matches.value_of("peer-output").unwrap())?;
     let peer_identity = sub_matches.value_of("peer-identity");
 
     let packet_encryption_public_key = get_ecies_public_key(
         sub_matches.value_of("facilitator-ecies-public-key"),
         sub_matches.value_of("facilitator-manifest-url"),
+        ingestor_name,
+        locality_name,
     )
     .unwrap();
 
@@ -803,6 +863,8 @@ fn generate_sample(sub_matches: &ArgMatches) -> Result<(), anyhow::Error> {
     let packet_encryption_public_key = get_ecies_public_key(
         sub_matches.value_of("pha-ecies-public-key"),
         sub_matches.value_of("pha-manifest-url"),
+        ingestor_name,
+        locality_name,
     )
     .unwrap();
 

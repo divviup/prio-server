@@ -9,30 +9,31 @@ use k8s_openapi::{api::core::v1::Secret, Metadata};
 
 use tokio::runtime::Runtime;
 
-pub(crate) struct Kubernetes {
+pub struct Kubernetes {
     dry_run: bool,
     namespace: String,
 }
 
 impl Kubernetes {
-    pub(crate) fn new(dry_run: bool, namespace: String) -> Self {
+    pub fn new(dry_run: bool, namespace: String) -> Self {
         Kubernetes { dry_run, namespace }
     }
 
     /// Gets a vector of decending secrets from the kubernetes API. Newer secrets are first.
-    pub(crate) fn get_sorted_secrets(&self, label_selector: String) -> Result<Vec<Secret>> {
-        let runtime = Runtime::new().expect("failed to create runtime for kubernetes sorted_secrets");
+    pub fn get_sorted_secrets(&self, label_selector: &str) -> Result<Vec<Secret>> {
+        let runtime =
+            Runtime::new().expect("failed to create runtime for kubernetes sorted_secrets");
         runtime.block_on(self.get_sorted_secrets_impl(label_selector))
     }
 
-    async fn get_sorted_secrets_impl(&self, label_selector: String) -> Result<Vec<Secret>> {
+    async fn get_sorted_secrets_impl(&self, label_selector: &str) -> Result<Vec<Secret>> {
         let client = Self::create_client().await?;
 
         let secrets: Api<Secret> = Api::namespaced(client, &self.namespace);
 
         let mut listed_secrets = secrets
             .list(&ListParams {
-                label_selector: Some(label_selector.clone()),
+                label_selector: Some(String::from(label_selector)),
                 ..Default::default()
             })
             .await
@@ -69,5 +70,4 @@ impl Kubernetes {
             .await
             .map_err(|e| anyhow!("error when getting kubernetes client: {:?}", e))
     }
-
 }

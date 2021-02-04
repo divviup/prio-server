@@ -147,12 +147,6 @@ impl SpecificManifest {
         SpecificManifest::from_slice(fetch_manifest(&manifest_url)?.as_bytes())
     }
 
-    /// Load the specific manifest from the specific provided URL. Returns an
-    /// error if the manifest could not be downloaded or parsed
-    pub fn from_absolute_https_path(path: &str) -> Result<Self> {
-        SpecificManifest::from_slice(fetch_manifest(&path)?.as_bytes())
-    }
-
     /// Loads the manifest from the provided String. Returns an error if
     /// the manifest could not be parsed.
     pub fn from_slice(json: &[u8]) -> Result<Self> {
