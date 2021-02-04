@@ -27,6 +27,7 @@ pub struct BatchIntaker<'a> {
     is_first: bool,
     callback_cadence: u32,
     metrics_collector: Option<&'a IntakeMetricsCollector>,
+    use_bogus_packet_file_digest: bool,
 }
 
 impl<'a> BatchIntaker<'a> {
@@ -59,6 +60,7 @@ impl<'a> BatchIntaker<'a> {
             is_first,
             callback_cadence: 1000,
             metrics_collector: None,
+            use_bogus_packet_file_digest: false,
         })
     }
 
@@ -74,6 +76,13 @@ impl<'a> BatchIntaker<'a> {
     /// recorded.
     pub fn set_metrics_collector(&mut self, collector: &'a IntakeMetricsCollector) {
         self.metrics_collector = Some(collector);
+    }
+
+    /// Sets whether this BatchIntaker will use a bogus value for the packet
+    /// file digest when constructing the header of a validation batch. This is
+    /// intended only for testing.
+    pub fn set_use_bogus_packet_file_digest(&mut self, bogus: bool) {
+        self.use_bogus_packet_file_digest = bogus;
     }
 
     /// Fetches the ingestion batch, validates the signatures over its header
@@ -162,6 +171,17 @@ impl<'a> BatchIntaker<'a> {
             },
         )?;
 
+        // If the caller requested it, we insert a bogus packet file digest into
+        // the own and peer validaton batch headers instead of the real computed
+        // digest. This is meant to simulate a buggy peer data share processor,
+        // so that we can test how the aggregation step behaves.
+        let packet_file_digest = if self.use_bogus_packet_file_digest {
+            info!("using bogus packet file digest");
+            vec![0u8, 1u8, 2u8, 3u8, 4u8, 5u8, 6u8, 7u8, 8u8]
+        } else {
+            packet_file_digest.as_ref().to_vec()
+        };
+
         // Construct validation header and write it out
         let header = ValidationHeader {
             batch_uuid: ingestion_header.batch_uuid,
@@ -171,7 +191,7 @@ impl<'a> BatchIntaker<'a> {
             prime: ingestion_header.prime,
             number_of_servers: ingestion_header.number_of_servers,
             hamming_weight: ingestion_header.hamming_weight,
-            packet_file_digest: packet_file_digest.as_ref().to_vec(),
+            packet_file_digest,
         };
         let peer_header_signature = self
             .peer_validation_batch
