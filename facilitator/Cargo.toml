@@ -1,17 +1,18 @@
 [package]
-name = "facilitator"
-version = "0.1.0"
 authors = ["Internet Security Research Group"]
 edition = "2018"
+name = "facilitator"
+version = "0.1.0"
 
 [dependencies]
-async-trait = "0.1"
 anyhow = "1.0"
+async-trait = "0.1"
 avro-rs = { version = "0.11.0", features = ["snappy"] }
 base64 = "0.12.3"
-chrono = { version ="0.4", features = ["serde"] }
+chrono = { version = "0.4", features = ["serde"] }
 clap = "2.33.3"
 derivative = "2.1.1"
+env_logger = "0.8.1"
 http = "^0.2"
 hyper = "^0.14"
 hyper-rustls = "^0.22"
@@ -28,14 +29,14 @@ rusoto_core = { version = "^0.46", default_features = false, features = ["rustls
 rusoto_s3 = { version = "^0.46", default_features = false, features = ["rustls"] }
 rusoto_sqs = { version = "^0.46", default_features = false, features = ["rustls"] }
 rusoto_sts = { version = "^0.46", default_features = false, features = ["rustls"] }
-serde = { version = "1.0", features = ["derive"] }
+serde = { version = "^1.0", features = ["derive"] }
 serde_json = "1.0"
-env_logger = "0.8.1"
 structopt = "0.3"
 tempfile = "3.1.0"
 thiserror = "1.0"
 tokio = { version = "^1.0", features = ["full"] }
-ureq = { version = "1.5.2", features = ["json"] }
+ureq = { version = "^2.0", features = ["json"] }
+url = "2.2.0"
 urlencoding = "1.1.1"
 uuid = { version = "0.8", features = ["serde", "v4"] }
 warp = "^0.3"
