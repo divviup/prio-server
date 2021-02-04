@@ -30,13 +30,13 @@ fn gcp_object_url(bucket: &str, encoded_key: &str) -> Result<Url> {
         encoded_key
     );
 
-    Url::parse(&request_url).context(format!("failed to parse: {}", request_url))
+    Url::parse(request_url).context(format!("failed to parse: {}", request_url))
 }
 
 fn gcp_upload_object_url(storage_api_url: &str, bucket: &str) -> Result<Url> {
     let request_url = &format!("{}upload/storage/v1/b/{}/o/", storage_api_url, bucket);
 
-    Url::parse(&request_url).context(format!("failed to parse: {}", request_url))
+    Url::parse(request_url).context(format!("failed to parse: {}", request_url))
 }
 
 /// GCSTransport manages reading and writing from GCS buckets, with
@@ -190,13 +190,11 @@ impl StreamingTransferWriter {
     ) -> Result<StreamingTransferWriter> {
         // Initiate the resumable, streaming upload.
         // https://cloud.google.com/storage/docs/performing-resumable-uploads#initiate-session
-        let encoded_object = urlencoding::encode(&object);
-
         let mut upload_url = gcp_upload_object_url(&storage_api_base_url.to_string(), &bucket)?;
         upload_url
             .query_pairs_mut()
             .append_pair("uploadType", "resumable")
-            .append_pair("name", &encoded_object)
+            .append_pair("name", &object)
             .finish();
 
         let request = prepare_request_without_agent(RequestParameters {
