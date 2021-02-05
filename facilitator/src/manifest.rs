@@ -40,7 +40,7 @@ struct PacketEncryptionCertificateSigningRequest {
 /// design document for the full specification.
 /// https://docs.google.com/document/d/1MdfM3QT63ISU70l63bwzTrxr93Z7Tv7EDjLfammzo6Q/edit#heading=h.3j8dgxqo5h68
 #[derive(Debug, Deserialize, PartialEq)]
-#[serde(rename_all = "kebab-case")]
+#[serde(deny_unknown_fields, rename_all = "kebab-case")]
 pub struct DataShareProcessorGlobalManifest {
     /// Format version of the manifest. Versions besides the currently supported
     /// one are rejected.
@@ -477,6 +477,17 @@ mod tests {
         "aws-account-id": 12345678901234567,
         "gcp-service-account-email": 14
     }
+}
+        "#,
+            // unexpected field
+            r#"
+{
+    "format": 0,
+    "server-identity": {
+        "aws-account-id": 12345678901234567,
+        "gcp-service-account-email": "service-account@project-name.iam.gserviceaccount.com"
+    },
+    "unexpected": "some value"
 }
         "#,
         ];
