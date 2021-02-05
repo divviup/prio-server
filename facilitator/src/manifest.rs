@@ -479,7 +479,7 @@ mod tests {
     }
 }
         "#,
-            // unexpected field
+            // unexpected top-level field
             r#"
 {
     "format": 0,
@@ -672,7 +672,7 @@ mod tests {
     "peer-validation-bucket": "us-west-1/validation"
 }
 "#,
-            // Unexpected field
+            // Unexpected top-level field
             r#"
 {
     "format": 1,
@@ -936,7 +936,7 @@ mod tests {
     }
 }
     "#,
-            // Unexpected field
+            // Unexpected top-level field
             r#"
 {
     "format": 1,
@@ -1048,7 +1048,7 @@ mod tests {
     "facilitator-sum-part-bucket": "gs://facilitator-bucket"
 }
     "#,
-            // Unexpected field
+            // Unexpected top-level field
             r#"
 {
     "format": 1,
