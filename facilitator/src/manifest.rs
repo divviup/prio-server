@@ -19,7 +19,7 @@ pub type BatchSigningPublicKeys = HashMap<String, UnparsedPublicKey<Vec<u8>>>;
 /// Represents the description of a batch signing public key in a specific
 /// manifest.
 #[derive(Debug, Deserialize, PartialEq)]
-#[serde(rename_all = "kebab-case")]
+#[serde(deny_unknown_fields, rename_all = "kebab-case")]
 struct BatchSigningPublicKey {
     /// The PEM-armored base64 encoding of the ASN.1 encoding of the PKIX
     /// SubjectPublicKeyInfo structure of an ECDSA P256 key.
@@ -648,6 +648,27 @@ mod tests {
     "ingestion-bucket": "us-west-1/ingestion",
     "ingestion-identity": 1,
     "peer-validation-bucket": "us-west-1/validation"
+}
+"#,
+            // Unexpected BatchSigningPublicKey field
+            r#"
+{
+    "format": 1,
+    "packet-encryption-keys": {
+        "fake-key-1": {
+            "certificate-signing-request": "who cares"
+        }
+    },
+    "batch-signing-public-keys": {
+        "fake-key-2": {
+        "expiration": "",
+        "public-key": "-----BEGIN PUBLIC KEY-----\nfoo\n-----END PUBLIC KEY-----",
+        "unexpected": "some value"
+      }
+    },
+    "ingestion-bucket": "s3://us-west-1/ingestion",
+    "ingestion-identity": "arn:aws:iam:something:fake",
+    "peer-validation-bucket": "gs://validation"
 }
 "#,
         ];
