@@ -263,7 +263,7 @@ impl IngestionServerManifest {
 
 /// Represents the global manifest for a portal server.
 #[derive(Debug, Deserialize, PartialEq)]
-#[serde(rename_all = "kebab-case")]
+#[serde(deny_unknown_fields, rename_all = "kebab-case")]
 pub struct PortalServerGlobalManifest {
     /// Format version of the manifest. Versions besides the currently supported
     /// one are rejected.
@@ -1044,8 +1044,17 @@ mod tests {
             // Missing field
             r#"
 {
-    "format": 0,
+    "format": 1,
+    "facilitator-sum-part-bucket": "gs://facilitator-bucket"
+}
+    "#,
+            // Unexpected field
+            r#"
+{
+    "format": 1,
     "facilitator-sum-part-bucket": "gs://facilitator-bucket",
+    "pha-sum-part-bucket": "gs://pha-bucket",
+    "unexpected": "some value"
 }
     "#,
         ];
