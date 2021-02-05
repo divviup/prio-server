@@ -893,7 +893,7 @@ mod tests {
             r#"
 {
     "server-identity": {
-        "aws-iam-entity": "arn:aws:iam::338276578713:role/ingestor-1-role"
+        "aws-iam-entity": "arn:aws:iam::338276578713:role/ingestor-1-role",
         "gcp-service-account-email": "foo@bar.com"
     },
     "batch-signing-public-keys": {
@@ -909,7 +909,7 @@ mod tests {
 {
     "format": 2,
     "server-identity": {
-        "aws-iam-entity": "arn:aws:iam::338276578713:role/ingestor-1-role"
+        "aws-iam-entity": "arn:aws:iam::338276578713:role/ingestor-1-role",
         "gcp-service-account-email": "foo@bar.com"
     },
     "batch-signing-public-keys": {
@@ -925,7 +925,7 @@ mod tests {
 {
     "format": "zero",
     "server-identity": {
-        "aws-iam-entity": "arn:aws:iam::338276578713:role/ingestor-1-role"
+        "aws-iam-entity": "arn:aws:iam::338276578713:role/ingestor-1-role",
         "gcp-service-account-email": "foo@bar.com"
     },
     "batch-signing-public-keys": {
