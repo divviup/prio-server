@@ -169,7 +169,7 @@ impl SpecificManifest {
 /// Represents the server-identity structure within an ingestion server global
 /// manifest. One of aws_iam_entity or google_service_account should be Some.
 #[derive(Debug, Deserialize, PartialEq)]
-#[serde(rename_all = "kebab-case")]
+#[serde(deny_unknown_fields, rename_all = "kebab-case")]
 struct IngestionServerIdentity {
     /// The ARN of the AWS IAM entity that this ingestion server uses to access
     /// ingestion buckets,
@@ -927,6 +927,23 @@ mod tests {
     "server-identity": {
         "aws-iam-entity": "arn:aws:iam::338276578713:role/ingestor-1-role",
         "gcp-service-account-email": "foo@bar.com"
+    },
+    "batch-signing-public-keys": {
+        "key-identifier-1": {
+            "public-key": "----BEGIN PUBLIC KEY----\nMFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEI3MQm+HzXvaYa2mVlhB4zknbtAT8cSxakmBoJcBKGqGw\nYS0bhxSpuvABM1kdBTDpQhXnVdcq+LSiukXJRpGHVg==\n----END PUBLIC KEY----",
+            "expiration": "2021-01-15T18:53:20Z"
+        }
+    }
+}
+    "#,
+            // Unexpected server-identity field
+            r#"
+{
+    "format": 1,
+    "server-identity": {
+        "aws-iam-entity": "arn:aws:iam::338276578713:role/ingestor-1-role",
+        "gcp-service-account-email": "foo@bar.com",
+        "unexpected": "some value"
     },
     "batch-signing-public-keys": {
         "key-identifier-1": {
