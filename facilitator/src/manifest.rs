@@ -29,7 +29,7 @@ struct BatchSigningPublicKey {
 }
 
 #[derive(Debug, Deserialize, PartialEq)]
-#[serde(rename_all = "kebab-case")]
+#[serde(deny_unknown_fields, rename_all = "kebab-case")]
 struct PacketEncryptionCertificateSigningRequest {
     /// The PEM-armored base64 encoding of the ASN.1 encoding of a PKCS#10
     /// certificate signing request containing an ECDSA P256 key.
@@ -664,6 +664,27 @@ mod tests {
         "expiration": "",
         "public-key": "-----BEGIN PUBLIC KEY-----\nfoo\n-----END PUBLIC KEY-----",
         "unexpected": "some value"
+      }
+    },
+    "ingestion-bucket": "s3://us-west-1/ingestion",
+    "ingestion-identity": "arn:aws:iam:something:fake",
+    "peer-validation-bucket": "gs://validation"
+}
+"#,
+            // Unexpected PacketEncryptionCertificateSigningRequest field
+            r#"
+{
+    "format": 1,
+    "packet-encryption-keys": {
+        "fake-key-1": {
+            "certificate-signing-request": "who cares",
+            "unexpected": "some value"
+        }
+    },
+    "batch-signing-public-keys": {
+        "fake-key-2": {
+        "expiration": "",
+        "public-key": "-----BEGIN PUBLIC KEY-----\nfoo\n-----END PUBLIC KEY-----"
       }
     },
     "ingestion-bucket": "s3://us-west-1/ingestion",
