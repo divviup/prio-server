@@ -53,7 +53,7 @@ pub struct DataShareProcessorGlobalManifest {
 /// Represents the server-identity map inside a data share processor global
 /// manifest.
 #[derive(Debug, Deserialize, PartialEq)]
-#[serde(rename_all = "kebab-case")]
+#[serde(deny_unknown_fields, rename_all = "kebab-case")]
 pub struct DataShareProcessorServerIdentity {
     /// The numeric account ID of the AWS account this data share processor will
     /// use to access peer cloud resources.
@@ -488,6 +488,17 @@ mod tests {
         "gcp-service-account-email": "service-account@project-name.iam.gserviceaccount.com"
     },
     "unexpected": "some value"
+}
+        "#,
+            // unexpected server-identity field
+            r#"
+{
+    "format": 0,
+    "server-identity": {
+        "aws-account-id": 12345678901234567,
+        "gcp-service-account-email": "service-account@project-name.iam.gserviceaccount.com",
+        "unexpected": "some value"
+    }
 }
         "#,
         ];
