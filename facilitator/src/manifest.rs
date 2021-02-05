@@ -88,7 +88,7 @@ impl DataShareProcessorGlobalManifest {
 /// specification.
 /// https://docs.google.com/document/d/1MdfM3QT63ISU70l63bwzTrxr93Z7Tv7EDjLfammzo6Q/edit#heading=h.3j8dgxqo5h68
 #[derive(Debug, Deserialize, PartialEq)]
-#[serde(rename_all = "kebab-case")]
+#[serde(deny_unknown_fields, rename_all = "kebab-case")]
 pub struct SpecificManifest {
     /// Format version of the manifest. Versions besides the currently supported
     /// one are rejected.
@@ -670,6 +670,27 @@ mod tests {
     "ingestion-bucket": "us-west-1/ingestion",
     "ingestion-identity": 1,
     "peer-validation-bucket": "us-west-1/validation"
+}
+"#,
+            // Unexpected field
+            r#"
+{
+    "format": 1,
+    "packet-encryption-keys": {
+        "fake-key-1": {
+            "certificate-signing-request": "who cares"
+        }
+    },
+    "batch-signing-public-keys": {
+        "fake-key-2": {
+        "expiration": "",
+        "public-key": "-----BEGIN PUBLIC KEY-----\nfoo\n-----END PUBLIC KEY-----"
+      }
+    },
+    "ingestion-bucket": "s3://us-west-1/ingestion",
+    "ingestion-identity": "arn:aws:iam:something:fake",
+    "peer-validation-bucket": "gs://validation",
+    "unexpected": "some value"
 }
 "#,
             // Unexpected BatchSigningPublicKey field
