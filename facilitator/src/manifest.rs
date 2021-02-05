@@ -187,7 +187,7 @@ struct IngestionServerIdentity {
 /// Represents an ingestion server's manifest. This could be a global manifest
 /// or a locality-specific manifest.
 #[derive(Debug, Deserialize, PartialEq)]
-#[serde(rename_all = "kebab-case")]
+#[serde(deny_unknown_fields, rename_all = "kebab-case")]
 pub struct IngestionServerManifest {
     /// Format version of the manifest. Versions besides the currently supported
     /// one are rejected.
@@ -924,6 +924,23 @@ mod tests {
             r#"
 {
     "format": "zero",
+    "server-identity": {
+        "aws-iam-entity": "arn:aws:iam::338276578713:role/ingestor-1-role",
+        "gcp-service-account-email": "foo@bar.com"
+    },
+    "batch-signing-public-keys": {
+        "key-identifier-1": {
+            "public-key": "----BEGIN PUBLIC KEY----\nMFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEI3MQm+HzXvaYa2mVlhB4zknbtAT8cSxakmBoJcBKGqGw\nYS0bhxSpuvABM1kdBTDpQhXnVdcq+LSiukXJRpGHVg==\n----END PUBLIC KEY----",
+            "expiration": "2021-01-15T18:53:20Z"
+        }
+    }
+}
+    "#,
+            // Unexpected field
+            r#"
+{
+    "format": 1,
+    "unexpected": "some value",
     "server-identity": {
         "aws-iam-entity": "arn:aws:iam::338276578713:role/ingestor-1-role",
         "gcp-service-account-email": "foo@bar.com"
