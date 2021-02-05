@@ -574,9 +574,9 @@ mod tests {
             // No format key
             r#"
 {
-    "packet-encryption-certificates": {
+    "packet-encryption-keys": {
         "fake-key-1": {
-            "certificate": "who cares"
+            "certificate-signing-request": "who cares"
         }
     },
     "batch-signing-public-keys": {
@@ -594,9 +594,9 @@ mod tests {
             r#"
 {
     "format": 0,
-    "packet-encryption-certificates": {
+    "packet-encryption-keys": {
         "fake-key-1": {
-            "certificate": "who cares"
+            "certificate-signing-request": "who cares"
         }
     },
     "batch-signing-public-keys": {
@@ -614,9 +614,9 @@ mod tests {
             r#"
 {
     "format": "zero",
-    "packet-encryption-certificates": {
+    "packet-encryption-keys": {
         "fake-key-1": {
-            "certificate": "who cares"
+            "certificate-signing-request": "who cares"
         }
     },
     "batch-signing-public-keys": {
@@ -633,10 +633,10 @@ mod tests {
             // Role ARN with wrong type
             r#"
 {
-    "format": 0,
-    "packet-encryption-certificates": {
+    "format": 1,
+    "packet-encryption-keys": {
         "fake-key-1": {
-            "certificate": "who cares"
+            "certificate-signing-request": "who cares"
         }
     },
     "batch-signing-public-keys": {
