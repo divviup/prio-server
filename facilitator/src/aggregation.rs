@@ -91,6 +91,7 @@ impl<'a> BatchAggregator<'a> {
             self.aggregation_batch.path(),
         );
         let mut invalid_uuids = Vec::new();
+        let mut included_batch_uuids = Vec::new();
 
         let ingestion_header = self.ingestion_header(&batch_ids[0].0, &batch_ids[0].1)?;
 
@@ -107,7 +108,18 @@ impl<'a> BatchAggregator<'a> {
             .collect::<Vec<Server>>();
 
         for batch_id in batch_ids {
-            self.aggregate_share(&batch_id.0, &batch_id.1, &mut servers, &mut invalid_uuids)?;
+            if let Err(error) =
+                self.aggregate_share(&batch_id.0, &batch_id.1, &mut servers, &mut invalid_uuids)
+            {
+                log::info!(
+                    "ignoring batch {}/{} due to error {:?}",
+                    batch_id.0,
+                    batch_id.1,
+                    error
+                );
+            } else {
+                included_batch_uuids.push(batch_id.0);
+            }
             callback();
         }
 
@@ -145,7 +157,7 @@ impl<'a> BatchAggregator<'a> {
 
         let sum_signature = self.aggregation_batch.put_header(
             &SumPart {
-                batch_uuids: batch_ids.iter().map(|pair| pair.0).collect(),
+                batch_uuids: included_batch_uuids,
                 name: ingestion_header.name,
                 bins: ingestion_header.bins,
                 epsilon: ingestion_header.epsilon,
@@ -207,10 +219,37 @@ impl<'a> BatchAggregator<'a> {
                 Batch::new_validation(self.aggregation_name, batch_id, batch_date, !self.is_first),
                 &mut *self.peer_validation_transport.transport,
             );
-        let peer_validation_header = peer_validation_batch
-            .header(&self.peer_validation_transport.batch_signing_public_keys)?;
-        let own_validation_header = own_validation_batch
-            .header(&self.own_validation_transport.batch_signing_public_keys)?;
+
+        let peer_validation_header = match peer_validation_batch
+            .header(&self.peer_validation_transport.batch_signing_public_keys)
+        {
+            Ok(header) => header,
+            Err(error) => {
+                if let Some(collector) = self.metrics_collector {
+                    collector
+                        .invalid_peer_validation_batches
+                        .with_label_values(&["header"])
+                        .inc();
+                }
+                return Err(error);
+            }
+        };
+
+        let own_validation_header = match own_validation_batch
+            .header(&self.own_validation_transport.batch_signing_public_keys)
+        {
+            Ok(header) => header,
+            Err(error) => {
+                if let Some(collector) = self.metrics_collector {
+                    collector
+                        .invalid_own_validation_batches
+                        .with_label_values(&["header"])
+                        .inc();
+                }
+                return Err(error);
+            }
+        };
+
         let ingestion_header = ingestion_batch
             .header(&self.ingestion_transport.transport.batch_signing_public_keys)?;
 
@@ -239,12 +278,38 @@ impl<'a> BatchAggregator<'a> {
         // iterate over the ingestion packets. For each ingestion packet, if we
         // have the corresponding validation packets and the proofs are good, we
         // accumulate. Otherwise we drop the packet and move on.
-        let peer_validation_packets: HashMap<Uuid, ValidationPacket> = validation_packet_map(
-            &mut peer_validation_batch.packet_file_reader(&peer_validation_header)?,
-        )?;
-        let own_validation_packets: HashMap<Uuid, ValidationPacket> = validation_packet_map(
-            &mut own_validation_batch.packet_file_reader(&own_validation_header)?,
-        )?;
+        let mut peer_validation_packet_file_reader =
+            match peer_validation_batch.packet_file_reader(&peer_validation_header) {
+                Ok(reader) => reader,
+                Err(error) => {
+                    if let Some(collector) = self.metrics_collector {
+                        collector
+                            .invalid_peer_validation_batches
+                            .with_label_values(&["packet_file"])
+                            .inc();
+                    }
+                    return Err(error);
+                }
+            };
+        let peer_validation_packets: HashMap<Uuid, ValidationPacket> =
+            validation_packet_map(&mut peer_validation_packet_file_reader)?;
+
+        let mut own_validation_packet_file_reader =
+            match own_validation_batch.packet_file_reader(&own_validation_header) {
+                Ok(reader) => reader,
+                Err(error) => {
+                    if let Some(collector) = self.metrics_collector {
+                        collector
+                            .invalid_own_validation_batches
+                            .with_label_values(&["packet_file"])
+                            .inc();
+                    }
+                    return Err(error);
+                }
+            };
+
+        let own_validation_packets: HashMap<Uuid, ValidationPacket> =
+            validation_packet_map(&mut own_validation_packet_file_reader)?;
 
         // Keep track of the ingestion packets we have seen so we can reject
         // duplicates.

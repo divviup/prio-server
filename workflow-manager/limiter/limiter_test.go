@@ -1,6 +1,7 @@
 package limiter
 
 import (
+	"sync"
 	"testing"
 	"time"
 )
@@ -25,11 +26,15 @@ func TestTicketDoubleDone(t *testing.T) {
 }
 
 func TestLimiterBehavior(t *testing.T) {
+	wg := sync.WaitGroup{}
+	// We have 3 goroutines we're spinning up
+	wg.Add(3)
 	firstJobChannel := make(chan struct{})
 
 	l := New(1)
 	l.Execute(func(ticket *Ticket) {
 		go func() {
+			defer wg.Done()
 			// Indicate this job is running and thus occupying the Limiter's
 			// single token, then block until instructed to terminate
 			firstJobChannel <- struct{}{}
@@ -56,6 +61,7 @@ func TestLimiterBehavior(t *testing.T) {
 	go func() {
 		l.Execute(func(ticket *Ticket) {
 			go func() {
+				defer wg.Done()
 				defer l.Done(ticket)
 				// Indicate that this job has started. Send a string to make the
 				// switch below more readable
@@ -69,6 +75,7 @@ func TestLimiterBehavior(t *testing.T) {
 	go func() {
 		l.Execute(func(ticket *Ticket) {
 			go func() {
+				defer wg.Done()
 				defer l.Done(ticket)
 				// Indicate that this job has started
 				messageChannel <- "third job"
@@ -98,6 +105,7 @@ func TestLimiterBehavior(t *testing.T) {
 				secondJobRan = true
 				if thirdJobRan {
 					t.Log("second and third jobs ran -- success")
+					wg.Wait()
 					return
 				}
 			case "third job":
@@ -107,6 +115,7 @@ func TestLimiterBehavior(t *testing.T) {
 				thirdJobRan = true
 				if secondJobRan {
 					t.Log("second and third jobs ran -- success")
+					wg.Wait()
 					return
 				}
 			}

@@ -83,6 +83,8 @@ impl IntakeMetricsCollector {
 pub struct AggregateMetricsCollector {
     pub aggregate_tasks_started: IntCounter,
     pub aggregate_tasks_finished: IntCounterVec,
+    pub invalid_own_validation_batches: IntCounterVec,
+    pub invalid_peer_validation_batches: IntCounterVec,
 }
 
 impl AggregateMetricsCollector {
@@ -100,9 +102,25 @@ impl AggregateMetricsCollector {
         )
         .context("failed to register metrics counter for finished aggregations")?;
 
+        let invalid_own_validation_batches = register_int_counter_vec!(
+            "facilitator_invalid_own_validation_batches",
+            "Number of invalid own validation batches encountered during aggregation",
+            &["reason"]
+        )
+        .context("failed to register metrics counter for invalid own validation batches")?;
+
+        let invalid_peer_validation_batches = register_int_counter_vec!(
+            "facilitator_invalid_peer_validation_batches",
+            "Number of invalid peer validation batches encountered during aggregation",
+            &["reason"]
+        )
+        .context("failed to register metrics counter for invalid peer validation batches")?;
+
         Ok(AggregateMetricsCollector {
             aggregate_tasks_started,
             aggregate_tasks_finished,
+            invalid_own_validation_batches,
+            invalid_peer_validation_batches,
         })
     }
 }

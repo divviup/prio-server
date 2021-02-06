@@ -30,13 +30,13 @@ fn gcp_object_url(bucket: &str, encoded_key: &str) -> Result<Url> {
         encoded_key
     );
 
-    Url::parse(&request_url).context(format!("failed to parse: {}", request_url))
+    Url::parse(request_url).context(format!("failed to parse: {}", request_url))
 }
 
 fn gcp_upload_object_url(storage_api_url: &str, bucket: &str) -> Result<Url> {
     let request_url = &format!("{}upload/storage/v1/b/{}/o/", storage_api_url, bucket);
 
-    Url::parse(&request_url).context(format!("failed to parse: {}", request_url))
+    Url::parse(request_url).context(format!("failed to parse: {}", request_url))
 }
 
 /// GCSTransport manages reading and writing from GCS buckets, with

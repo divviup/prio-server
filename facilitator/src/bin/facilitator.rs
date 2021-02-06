@@ -76,6 +76,8 @@ trait AppArgumentAdder {
     fn add_task_queue_arguments(self: Self) -> Self;
 
     fn add_metrics_scrape_port_argument(self: Self) -> Self;
+
+    fn add_use_bogus_packet_file_digest_argument(self: Self) -> Self;
 }
 
 const SHARED_HELP: &str = "Storage arguments: Any flag ending in -input or -output can take an \
@@ -384,6 +386,26 @@ impl<'a, 'b> AppArgumentAdder for App<'a, 'b> {
                 .validator(num_validator::<u16>),
         )
     }
+
+    fn add_use_bogus_packet_file_digest_argument(self: App<'a, 'b>) -> App<'a, 'b> {
+        self.arg(
+            Arg::with_name("use-bogus-packet-file-digest")
+                .long("use-bogus-packet-file-digest")
+                .env("USE_BOGUS_PACKET_FILE_DIGEST")
+                .help("whether to tamper with validation batch headers")
+                .long_help(
+                    "If set, then instead of the computed digest of the packet \
+                    file, a fixed, bogusddigest will be inserted into the own \
+                    and peer validation batch headers written out during \
+                    intake tasks. This should only be used in test scenarios \
+                    to simulate buggy data share processors.",
+                )
+                .value_name("BOOL")
+                .possible_value("true")
+                .possible_value("false")
+                .default_value("false"),
+        )
+    }
 }
 
 fn main() -> Result<(), anyhow::Error> {
@@ -606,7 +628,8 @@ fn main() -> Result<(), anyhow::Error> {
                 .add_storage_arguments(Entity::Ingestor, InOut::Input)
                 .add_manifest_base_url_argument(Entity::Peer)
                 .add_storage_arguments(Entity::Peer, InOut::Output)
-                .add_storage_arguments(Entity::Own, InOut::Output),
+                .add_storage_arguments(Entity::Own, InOut::Output)
+                .add_use_bogus_packet_file_digest_argument()
         )
         .subcommand(
             SubCommand::with_name("aggregate")
@@ -743,6 +766,7 @@ fn main() -> Result<(), anyhow::Error> {
                 .add_storage_arguments(Entity::Own, InOut::Output)
                 .add_task_queue_arguments()
                 .add_metrics_scrape_port_argument()
+                .add_use_bogus_packet_file_digest_argument()
         )
         .subcommand(
             SubCommand::with_name("aggregate-worker")
@@ -1023,6 +1047,10 @@ fn intake_batch<F: FnMut()>(
         &mut own_validation_transport,
         is_first_from_arg(sub_matches),
     )?;
+
+    if let Some("true") = sub_matches.value_of("use-bogus-packet-file-digest") {
+        batch_intaker.set_use_bogus_packet_file_digest(true);
+    }
 
     if let Some(collector) = metrics_collector {
         batch_intaker.set_metrics_collector(collector);

@@ -62,21 +62,20 @@ ingestors = {
   }
 }
 
-peer_share_processor_manifest_base_url = "en-analytics.cancer.gov"
-portal_server_manifest_base_url        = "manifest.enpa-pha.io"
-is_first                               = false
-use_aws                                = false
-aggregation_period                     = "8h"
-aggregation_grace_period               = "4h"
-workflow_manager_version               = "0.6.3"
-facilitator_version                    = "0.6.3"
-pushgateway                            = "prometheus-pushgateway.monitoring:9091"
-
 cluster_settings = {
   initial_node_count : 4
   min_node_count : 4
   max_node_count : 5
 }
 
+peer_share_processor_manifest_base_url    = "en-analytics.cancer.gov"
+portal_server_manifest_base_url           = "manifest.enpa-pha.io"
+is_first                                  = false
+use_aws                                   = false
+aggregation_period                        = "8h"
+aggregation_grace_period                  = "4h"
+workflow_manager_version                  = "0.6.4"
+facilitator_version                       = "0.6.4"
+pushgateway                               = "prometheus-pushgateway.monitoring:9091"
 prometheus_server_persistent_disk_size_gb = 1000
 victorops_routing_key                     = "prio-prod-us"
