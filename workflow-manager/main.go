@@ -347,8 +347,8 @@ func scheduleTasks(config scheduleTasksConfig) error {
 	}
 
 	currentIntakeBatches := withinInterval(intakeBatches, interval{
-		begin: config.clock.Now().Add(-config.maxAge),
-		end:   config.clock.Now().Add(24 * time.Hour),
+		begin: config.clock.Now().UTC().Add(-config.maxAge),
+		end:   config.clock.Now().UTC().Add(24 * time.Hour),
 	})
 	log.Printf("skipping %d batches as too old", len(intakeBatches)-len(currentIntakeBatches))
 

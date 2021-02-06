@@ -126,7 +126,7 @@ pub fn generate_ingestion_sample(
 
                         let (pha_share, facilitator_share) = client
                             .encode_simple(&data)
-                            .context("failed to encode data")?;
+                            .map_err(|e| anyhow!("failed to encode data: {:?}", e))?;
 
                         // Hardcoded r_pit value
                         // This value can be dynamic by running an instance of libprio::Server

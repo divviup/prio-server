@@ -44,6 +44,9 @@ func (bpl List) Swap(i, j int) {
 func New(batchName string) (*BatchPath, error) {
 	// batchName is like "kittens-seen/2020/10/31/20/29/b8a5579a-f984-460a-a42d-2813cbf57771"
 	pathComponents := strings.Split(batchName, "/")
+	if len(pathComponents) < 6 {
+		return nil, fmt.Errorf("malformed batch name: %q", batchName)
+	}
 	batchID := pathComponents[len(pathComponents)-1]
 	aggregationID := pathComponents[0]
 	batchDate := pathComponents[1 : len(pathComponents)-1]
