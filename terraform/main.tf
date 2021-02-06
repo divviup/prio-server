@@ -369,6 +369,7 @@ locals {
     for pair in setproduct(toset(var.localities), keys(var.ingestors)) :
     "${pair[0]}-${pair[1]}" => {
       ingestor                                = pair[1]
+      locality                                = pair[0]
       kubernetes_namespace                    = kubernetes_namespace.namespaces[pair[0]].metadata[0].name
       packet_decryption_key_kubernetes_secret = kubernetes_secret.ingestion_packet_decryption_keys[pair[0]].metadata[0].name
       ingestor_manifest_base_url              = var.ingestors[pair[1]].manifest_base_url
@@ -474,8 +475,6 @@ module "fake_server_resources" {
   container_registry           = var.container_registry
   facilitator_image            = var.facilitator_image
   facilitator_version          = var.facilitator_version
-  integration_tester_image     = var.integration_tester_image
-  integration_tester_version   = var.integration_tester_version
 
   depends_on = [module.gke]
 }

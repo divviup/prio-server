@@ -866,10 +866,7 @@ fn get_valid_batch_signing_key(namespace: &str, own_manifest_url: &str) -> Resul
         )),
         Some(secret) => {
             let secret_name = secret.name();
-            let secret_data =
-                String::from_utf8(secret.data.unwrap().remove("secret_key").unwrap().0)?;
-            let secret_data = decode_base64_key(&secret_data)?;
-
+            let secret_data = base64::decode(secret.data.unwrap().remove("secret_key").unwrap().0)?;
             let key = EcdsaKeyPair::from_pkcs8(&ECDSA_P256_SHA256_ASN1_SIGNING, &secret_data)
                 .map_err(|e| anyhow!("decoding secret key rejected: {}", e))?;
 

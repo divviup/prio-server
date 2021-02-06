@@ -28,6 +28,7 @@ variable "own_manifest_base_url" {
 
 variable "ingestor_pairs" {
   type = map(object({
+    locality: string
     ingestor : string
     kubernetes_namespace : string
     packet_decryption_key_kubernetes_secret : string
@@ -53,13 +54,6 @@ variable "facilitator_version" {
   type = string
 }
 
-variable "integration_tester_image" {
-  type = string
-}
-
-variable "integration_tester_version" {
-  type = string
-}
 
 
 # For our purposes, a fake portal server is simply a bucket where we can write
@@ -171,7 +165,6 @@ POLICY
 module "account_mapping" {
   source      = "../account_mapping"
   environment = var.environment
-  gcp_project = var.gcp_project
 
   google_account_name     = "${var.environment}-fake-ingestion-identity"
   kubernetes_account_name = "ingestion-identity"
@@ -246,22 +239,38 @@ resource "kubernetes_cron_job" "integration-tester" {
           }
           spec {
             restart_policy                  = "Never"
-            service_account_name            = "ingestion-identity"
+            service_account_name            = module.account_mapping.kubernetes_account_name
             automount_service_account_token = true
             container {
               name  = "integration-tester"
-              image = "${var.container_registry}/${var.integration_tester_image}:${var.integration_tester_version}"
+              image = "us.gcr.io/prio-bringup-290620/facilitator:latest"
+              env {
+                name = "AWS_ACCOUNT_ID"
+                value = data.aws_caller_identity.current.account_id
+              }
+              env {
+                name = "RUST_BACKTRACE"
+                value = "1"
+              }
+              env {
+                name = "RUST_LOG"
+                value = "info"
+              }
               args = [
-                "--ingestor-label", each.value.ingestor,
-                "--namespace", kubernetes_namespace.tester.metadata[0].name,
-                "--own-manifest-url", "https://${each.value.ingestor_manifest_base_url}/global-manifest.json",
-                "--pha-manifest-url", "https://${var.peer_manifest_base_url}/${each.key}-manifest.json",
-                "--facil-manifest-url", "https://${var.own_manifest_base_url}/${each.key}-manifest.json",
-                "--service-account-name", module.account_mapping.kubernetes_account_name,
-                "--facilitator-image", "${var.container_registry}/${var.facilitator_image}:${var.facilitator_version}",
-                "--push-gateway", var.pushgateway,
-                "--aws-account-id", data.aws_caller_identity.current.account_id,
-                "--dry-run=false"
+                "--pushgateway", var.pushgateway,
+                "generate-ingestion-sample",
+                "--ingestor-name", each.value.ingestor,
+                "--locality-name", each.value.locality,
+                "--kube-namespace", kubernetes_namespace.tester.metadata[0].name,
+                "--own-manifest-base-url", "https://${each.value.ingestor_manifest_base_url}",
+                "--pha-manifest-base-url", "https://${var.peer_manifest_base_url}",
+                "--facilitator-manifest-base-url", "https://${var.own_manifest_base_url}",
+                "--aggregation-id", "kittens-seen",
+                "--packet-count", "10",
+                "--batch-start-time", "1000000000",
+                "--batch-end-time", "1000000100",
+                "--dimension", "123",
+                "--epsilon", "0.23",
               ]
             }
           }
