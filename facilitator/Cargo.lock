@@ -1700,11 +1700,11 @@ checksum = "ac74c624d6b2d21f425f752262f42188365d7b8ff1aff74c82e45136510a4857"
 [[package]]
 name = "prio"
 version = "0.2.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "74c293e32d9ab6c9afadf14e14d76df204f17618f4b74b38fa2adb18b352fbf2"
+source = "git+https://github.com/abetterinternet/libprio-rs?branch=amir/errors#c91fb6398dda1e714d202cadf7e938f6b4a6c497"
 dependencies = [
  "aes-ctr",
  "aes-gcm",
+ "anyhow",
  "base64 0.12.3",
  "rand 0.7.3",
  "ring",

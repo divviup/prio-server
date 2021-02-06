@@ -1,7 +1,6 @@
 use anyhow::{anyhow, Context, Result};
 use chrono::{prelude::Utc, NaiveDateTime};
 use clap::{value_t, App, Arg, ArgGroup, ArgMatches, SubCommand};
-use k8s_openapi::api::core::v1::Secret as KubernetesSecret;
 
 use kube::api::Meta;
 use log::{error, info};
@@ -412,6 +411,16 @@ fn main() -> Result<(), anyhow::Error> {
                 .add_storage_arguments(Entity::Peer, InOut::Output)
                 .add_storage_arguments(Entity::Own, InOut::Output)
                 .arg(
+                    Arg::with_name("kube-namespace")
+                    .long("kube-namespace")
+                    .env("KUBE_NAMESPACE")
+                    .value_name("STRING")
+                    .help(
+                        "Name of the kubernetes namespace"
+                    )
+                    .required(true)
+                )
+                .arg(
                     Arg::with_name("aggregation-id")
                         .long("aggregation-id")
                         .value_name("ID")
@@ -509,7 +518,16 @@ fn main() -> Result<(), anyhow::Error> {
                     .args(&["facilitator-ecies-public-key", "facilitator-manifest-base-url"])
                     .required(true)
                 )
-                .add_batch_signing_key_arguments()
+                .arg(
+                    Arg::with_name("own-manifest-base-url")
+                    .long("own-manifest-base-url")
+                    .env("OWN_MANIFEST_BASE_URL")
+                    .value_name("URL")
+                    .help(
+                        "Base URL of this ingestor's manifest"
+                    )
+                    .required(true)
+                )
                 .arg(
                     Arg::with_name("epsilon")
                         .long("epsilon")
@@ -767,7 +785,7 @@ fn main() -> Result<(), anyhow::Error> {
 
 fn get_ecies_public_key(
     key_option: Option<&str>,
-    manifest_option: Option<&str>,
+    manifest_url: Option<&str>,
     ingestor_name: &str,
     locality_name: &str,
 ) -> Result<PublicKey> {
@@ -775,7 +793,7 @@ fn get_ecies_public_key(
     match key_option {
         Some(key) => PublicKey::from_base64(key)
             .map_err(|e| anyhow!("unable to create public key from base64 ecies key: {}", e)),
-        None => match manifest_option {
+        None => match manifest_url {
             Some(manifest_url) => {
                 let manifest = SpecificManifest::from_https(manifest_url, peer_name).context(
                     format!("unable to read SpecificManifest from {}", manifest_url),
@@ -783,19 +801,47 @@ fn get_ecies_public_key(
                 let packet_decryption_keys = manifest
                     .packet_decryption_keys()
                     .context("unable to get packet decryption keys from the SpecificManifest")?;
-                let packet_decryption_key = packet_decryption_keys
-                    .values()
+                let (key_identifier, packet_decryption_key) = packet_decryption_keys
+                    .into_iter()
                     .next()
                     .context("No packet decryption keys in manifest")?;
 
-                PublicKey::from_base64(&packet_decryption_key.base64_public_key()?).map_err(|e| {
+                let public_key = &packet_decryption_key.base64_public_key()?;
+
+                info!(
+                    "Picked packet decryption key with ID: {} - public key {:?}",
+                    key_identifier, public_key
+                );
+                PublicKey::from_base64(public_key).map_err(|e| {
                     anyhow!("unable to create public key from base64 ecies key: {}", e)
                 })
             }
             None => panic!(
-                "either manifest_option or key_option were specified. This error shouldn't happen."
+                "Neither manifest_option or key_option were specified. This error shouldn't happen."
             ),
         },
+    }
+}
+
+fn get_identity_and_bucket(
+    identity: Option<&str>,
+    bucket: Option<&str>,
+    manifest_url: Option<&str>,
+    ingestor_name: &str,
+    locality_name: &str,
+) -> Result<(Option<String>, String)> {
+    let peer_name = &format!("{}-{}", locality_name, ingestor_name);
+    match bucket {
+        Some(bucket) => Ok((identity.map(String::from), String::from(bucket))),
+        None => {
+            let manifest_url =
+                manifest_url.expect("If bucket is not provided, manifest_url must be provided");
+            let manifest = SpecificManifest::from_https(manifest_url, peer_name).context(
+                format!("unable to read SpecificManifest from {}", manifest_url),
+            )?;
+
+            Ok((manifest.ingestion_identity(), manifest.ingestion_bucket()))
+        }
     }
 }
 
@@ -820,7 +866,9 @@ fn get_valid_batch_signing_key(namespace: &str, own_manifest_url: &str) -> Resul
         )),
         Some(secret) => {
             let secret_name = secret.name();
-            let secret_data = secret.data.unwrap().remove("secret_key").unwrap().0;
+            let secret_data =
+                String::from_utf8(secret.data.unwrap().remove("secret_key").unwrap().0)?;
+            let secret_data = decode_base64_key(&secret_data)?;
 
             let key = EcdsaKeyPair::from_pkcs8(&ECDSA_P256_SHA256_ASN1_SIGNING, &secret_data)
                 .map_err(|e| anyhow!("decoding secret key rejected: {}", e))?;
@@ -834,44 +882,76 @@ fn get_valid_batch_signing_key(namespace: &str, own_manifest_url: &str) -> Resul
 }
 
 fn generate_sample(sub_matches: &ArgMatches) -> Result<(), anyhow::Error> {
+    let kube_namespace = sub_matches.value_of("kube-namespace").unwrap();
+    let own_manifest_base_url = sub_matches.value_of("own-manifest-base-url").unwrap();
     let ingestor_name = sub_matches.value_of("ingestor-name").unwrap();
     let locality_name = sub_matches.value_of("locality-name").unwrap();
+    let own_batch_signing_key = get_valid_batch_signing_key(kube_namespace, own_manifest_base_url)?;
 
-    let peer_output_path = StoragePath::from_str(sub_matches.value_of("peer-output").unwrap())?;
-    let peer_identity = sub_matches.value_of("peer-identity");
+    let (peer_identity, peer_output_path) = get_identity_and_bucket(
+        sub_matches.value_of("peer-identity"),
+        sub_matches.value_of("peer-output"),
+        sub_matches.value_of("pha-manifest-base-url"),
+        ingestor_name,
+        locality_name,
+    )?;
+    info!(
+        "peer-idenity: {}, peer_output_path: {}",
+        &peer_identity.as_deref().unwrap_or("None"),
+        &peer_output_path
+    );
+
+    let peer_output_path = StoragePath::from_str(&peer_output_path)?;
 
     let packet_encryption_public_key = get_ecies_public_key(
         sub_matches.value_of("facilitator-ecies-public-key"),
-        sub_matches.value_of("facilitator-manifest-url"),
+        sub_matches.value_of("facilitator-manifest-base-url"),
         ingestor_name,
         locality_name,
-    )
-    .unwrap();
+    )?;
 
     let mut peer_transport = SampleOutput {
         transport: SignableTransport {
-            transport: transport_for_path(peer_output_path, peer_identity, sub_matches)?,
-            batch_signing_key: batch_signing_key_from_arg(sub_matches)?,
+            transport: transport_for_path(peer_output_path, peer_identity.as_deref(), sub_matches)?,
+            batch_signing_key: own_batch_signing_key,
         },
         packet_encryption_public_key,
         drop_nth_packet: None,
     };
 
-    let own_output_path = StoragePath::from_str(sub_matches.value_of("own-output").unwrap())?;
-    let own_identity = sub_matches.value_of("own-identity");
+    // let own_output_path = StoragePath::from_str(sub_matches.value_of("own-output").unwrap())?;
+    // let own_identity = sub_matches.value_of("own-identity");
+
+    let (own_identity, own_output_path) = get_identity_and_bucket(
+        sub_matches.value_of("own-identity"),
+        sub_matches.value_of("own-output"),
+        sub_matches.value_of("facilitator-manifest-base-url"),
+        ingestor_name,
+        locality_name,
+    )?;
+
+    info!(
+        "own-idenity: {}, own_output_path: {}",
+        &own_identity.as_deref().unwrap_or("None"),
+        &own_output_path
+    );
+
+    let own_output_path = StoragePath::from_str(&own_output_path)?;
 
     let packet_encryption_public_key = get_ecies_public_key(
         sub_matches.value_of("pha-ecies-public-key"),
-        sub_matches.value_of("pha-manifest-url"),
+        sub_matches.value_of("pha-manifest-base-url"),
         ingestor_name,
         locality_name,
     )
     .unwrap();
 
+    let own_batch_signing_key = get_valid_batch_signing_key(kube_namespace, own_manifest_base_url)?;
+
     let mut own_transport = SampleOutput {
         transport: SignableTransport {
-            transport: transport_for_path(own_output_path, own_identity, sub_matches)?,
-            batch_signing_key: batch_signing_key_from_arg(sub_matches)?,
+            transport: transport_for_path(own_output_path, own_identity.as_deref(), sub_matches)?,
+            batch_signing_key: own_batch_signing_key,
         },
         packet_encryption_public_key: packet_encryption_public_key,
         drop_nth_packet: None,
@@ -889,8 +969,8 @@ fn generate_sample(sub_matches: &ArgMatches) -> Result<(), anyhow::Error> {
         value_t!(sub_matches.value_of("epsilon"), f64)?,
         value_t!(sub_matches.value_of("batch-start-time"), i64)?,
         value_t!(sub_matches.value_of("batch-end-time"), i64)?,
-        &mut own_transport,
         &mut peer_transport,
+        &mut own_transport,
     )?;
     Ok(())
 }

@@ -1,4 +1,9 @@
-use crate::BatchSigningKey;
+use crate::{
+    manifest::{
+        PacketEncryptionCertificateSigningRequest, PacketEncryptionCertificateSigningRequests,
+    },
+    BatchSigningKey,
+};
 use log::LevelFilter;
 use ring::signature::{
     EcdsaKeyPair, KeyPair, UnparsedPublicKey, ECDSA_P256_SHA256_ASN1,
@@ -51,6 +56,16 @@ pub const DEFAULT_CSR_PACKET_ENCRYPTION_CERTIFICATE: &str =
 Tp7xFbJGwHeMlAW8W0cQ57qCPIBT5NBr2jR8a+Z1/QzQJRtJvR2pqbaJhWKw7y9ogp/TmcsaX+o\
 P74+SSGwrEYoAAwCgYIKoZIzj0EAwIDSAAwRQIgLSekh4unn6fLv9O9K4Lr6VxGEpLSqFz259+Lrk\
 7lwOkCIQCOzNvxwSb+iVFxJkaxUnxGYp2J+/2OnDGsKpyWY/wdhg==";
+
+pub const DEFAULT_PACKET_ENCRYPTION_CERTIFICATE_SIGNING_REQUEST: &str = "-----BEGIN CERTIFICATE REQUEST-----\nMIHyMIGZAgEAMDcxNTAzBgNVBAMTLG5hcm5pYS5hbWlyLWZhY2lsLmNlcnRpZmlj\nYXRlcy5pc3JnLXByaW8ub3JnMFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEImPq\nnZJKMV0RUt4liCn/pzj1YEs8G13wvHNyqQ8HVmvjc7fj29K4vq5wkEXRK6QGD6UO\nAZ9LiBsRN9cniLwysaAAMAoGCCqGSM49BAMCA0gAMEUCIQCqjVbLAabHDELRztvB\nZyzYemEzJoMqTRObEjpryr5gsgIgYAx8mMlBkI/GVJqCHvyBzMwRaz1hoQHme56H\nvjjDWyI=\n-----END CERTIFICATE REQUEST-----\n";
+pub const DEFAULT_PACKET_ENCRYPTION_CERTIFICATE_SIGNING_REQUEST_PRIVATE_KEY: &str = "BCJj6p2SSjFdEVLeJYgp/6c49WBLPBtd8LxzcqkPB1Zr43O349vSuL6ucJBF0SukBg+lDgGfS4gbETfXJ4i8MrHwu3/ts6VHR1/U9EIkHEFnEDZQ30r3NVASbEeJjd0/Ug==";
+
+pub fn default_packet_encryption_certificate_signing_request(
+) -> PacketEncryptionCertificateSigningRequest {
+    PacketEncryptionCertificateSigningRequest::new(String::from(
+        DEFAULT_PACKET_ENCRYPTION_CERTIFICATE_SIGNING_REQUEST,
+    ))
+}
 
 /// Constructs an EcdsaKeyPair from the default ingestor server.
 pub fn default_ingestor_private_key() -> BatchSigningKey {

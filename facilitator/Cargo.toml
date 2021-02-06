@@ -26,7 +26,7 @@ once_cell = "1.4"
 p256 = "0.7.2"
 pem = "0.8"
 pkix = "0.1.1"
-prio = "0.2"
+prio = {git = "https://github.com/abetterinternet/libprio-rs", branch = "amir/errors"}
 prometheus = "0.11"
 rand = "0.7"
 regex = "1.4"

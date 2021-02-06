@@ -1,14 +1,19 @@
 use crate::config::StoragePath;
 use crate::http;
 use anyhow::{anyhow, Context, Result};
-use elliptic_curve::sec1::ToEncodedPoint;
+use elliptic_curve::{
+    public_key,
+    sec1::{EncodedPoint, ToEncodedPoint},
+};
 use p256::pkcs8::FromPublicKey;
+use p256::NistP256;
+use pem::encode;
 use pkix::pem::{pem_to_der, PEM_CERTIFICATE_REQUEST};
 use pkix::pkcs10::DerCertificationRequest;
 use pkix::FromDer;
 use ring::signature::{UnparsedPublicKey, ECDSA_P256_SHA256_ASN1};
 use serde::Deserialize;
-use std::{collections::HashMap, str::FromStr};
+use std::{collections::HashMap, fmt::UpperHex, str::FromStr};
 
 // See discussion in SpecificManifest::batch_signing_public_key
 const ECDSA_P256_SPKI_PREFIX: &[u8] = &[
@@ -42,6 +47,11 @@ pub struct PacketEncryptionCertificateSigningRequest {
 }
 
 impl PacketEncryptionCertificateSigningRequest {
+    pub fn new(certificate_signing_request: String) -> Self {
+        PacketEncryptionCertificateSigningRequest {
+            certificate_signing_request,
+        }
+    }
     pub fn base64_public_key(&self) -> Result<String> {
         let der = pem_to_der(
             &self.certificate_signing_request,
@@ -50,10 +60,13 @@ impl PacketEncryptionCertificateSigningRequest {
         .context("failed to parse pem for packet encryption certificate signing request")?;
         let csr = DerCertificationRequest::from_der(&der).context("failed to decode csr")?;
 
-        let decoded_public_key = p256::PublicKey::from_public_key_der(&csr.reqinfo.spki.value)
-            .map_err(|e| anyhow!("error when getting public key from der: {:?}", e))?;
-        let encoded_point = decoded_public_key.to_encoded_point(false);
-        let base64_public_key = base64::encode(encoded_point.as_bytes());
+        let decoded_public_key: public_key::PublicKey<NistP256> =
+            p256::PublicKey::from_public_key_der(&csr.reqinfo.spki.value)
+                .map_err(|e| anyhow!("error when getting public key from der: {:?}", e))?;
+
+        let encoded_point: EncodedPoint<NistP256> = decoded_public_key.to_encoded_point(false);
+
+        let base64_public_key = base64::encode(encoded_point);
 
         Ok(base64_public_key)
     }
@@ -193,6 +206,14 @@ impl SpecificManifest {
             .context("bad manifest: valiation bucket")?;
         StoragePath::from_str(&self.ingestion_bucket).context("bad manifest: ingestion bucket")?;
         Ok(())
+    }
+
+    pub fn ingestion_identity(&self) -> Option<String> {
+        self.ingestion_identity.clone()
+    }
+
+    pub fn ingestion_bucket(&self) -> String {
+        self.ingestion_bucket.clone()
     }
 }
 
@@ -413,6 +434,8 @@ mod tests {
         default_ingestor_private_key, DEFAULT_CSR_PACKET_ENCRYPTION_CERTIFICATE,
         DEFAULT_INGESTOR_SUBJECT_PUBLIC_KEY_INFO,
     };
+    use base64::encode;
+    use elliptic_curve::generic_array::typenum::private;
     use ring::rand::SystemRandom;
     use rusoto_core::Region;
     use url::Url;
@@ -978,6 +1001,7 @@ mod tests {
     }
 
     use mockito::mock;
+    use prio::encrypt::{PrivateKey, PublicKey};
 
     #[test]
     fn ingestor_global_manifest() {
