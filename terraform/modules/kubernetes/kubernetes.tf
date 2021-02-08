@@ -266,8 +266,8 @@ resource "kubernetes_cron_job" "workflow_manager" {
           spec {
             container {
               name  = "workflow-manager"
-              image = "us.gcr.io/prio-bringup-290620/workflow-manager:latest"
-              resources {
+              image = "${var.container_registry}/${var.workflow_manager_image}:${var.workflow_manager_version}" 
+            resources {
                 requests {
                   memory = "500Mi"
                   cpu    = "0.5"
@@ -363,7 +363,7 @@ resource "kubernetes_deployment" "intake_batch" {
         service_account_name = module.account_mapping.kubernetes_account_name
         container {
           name  = "facile-container"
-          image = "us.gcr.io/prio-bringup-290620/facilitator:latest"
+          image = "${var.container_registry}/${var.facilitator_image}:${var.facilitator_version}"
           args  = ["intake-batch-worker"]
           # Prometheus metrics scrape endpoint
           port {

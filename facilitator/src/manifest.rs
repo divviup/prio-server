@@ -52,6 +52,8 @@ impl PacketEncryptionCertificateSigningRequest {
             certificate_signing_request,
         }
     }
+
+    /// Gets the base64ed public key from the CSR that libprio-rs is expecting
     pub fn base64_public_key(&self) -> Result<String> {
         debug!("Packet Encryption Certificate Signing Request: {:?}", self);
         let der = pem_to_der(

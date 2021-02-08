@@ -34,6 +34,13 @@ fn inconsistent_ingestion_batches() {
     end_to_end_test(Some(3), Some(4))
 }
 
+fn default_pha_packet_encryption_public_key() -> PublicKey {
+    PublicKey::from(&PrivateKey::from_base64(DEFAULT_PHA_ECIES_PRIVATE_KEY).unwrap())
+}
+
+fn default_facilitator_packet_encryption_public_key() -> PublicKey {
+    PublicKey::from(&PrivateKey::from_base64(DEFAULT_FACILITATOR_ECIES_PRIVATE_KEY).unwrap())
+}
 /// This test verifies that if some subset of the batches being aggregated are
 /// invalid due to either an invalid signature or an invalid packet file digest,
 /// the remainder of the valid batches will still be summed.
@@ -63,9 +70,7 @@ fn aggregation_including_invalid_batch() {
             )),
             batch_signing_key: default_ingestor_private_key(),
         },
-        packet_encryption_public_key: PublicKey::from(
-            &PrivateKey::from_base64(DEFAULT_PHA_ECIES_PRIVATE_KEY).unwrap(),
-        ),
+        packet_encryption_public_key: default_pha_packet_encryption_public_key(),
         drop_nth_packet: None,
     };
 
@@ -76,9 +81,7 @@ fn aggregation_including_invalid_batch() {
             )),
             batch_signing_key: default_ingestor_private_key(),
         },
-        packet_encryption_public_key: PublicKey::from(
-            &PrivateKey::from_base64(DEFAULT_FACILITATOR_ECIES_PRIVATE_KEY).unwrap(),
-        ),
+        packet_encryption_public_key: default_facilitator_packet_encryption_public_key(),
         drop_nth_packet: None,
     };
 
@@ -432,9 +435,8 @@ fn end_to_end_test(drop_nth_pha: Option<usize>, drop_nth_facilitator: Option<usi
             transport: Box::new(LocalFileTransport::new(pha_tempdir.path().to_path_buf())),
             batch_signing_key: default_ingestor_private_key(),
         },
-        packet_encryption_public_key: PublicKey::from(
-            &PrivateKey::from_base64(DEFAULT_PHA_ECIES_PRIVATE_KEY).unwrap(),
-        ),
+        packet_encryption_public_key: default_pha_packet_encryption_public_key(),
+
         drop_nth_packet: drop_nth_pha,
     };
 
@@ -445,9 +447,7 @@ fn end_to_end_test(drop_nth_pha: Option<usize>, drop_nth_facilitator: Option<usi
             )),
             batch_signing_key: default_ingestor_private_key(),
         },
-        packet_encryption_public_key: PublicKey::from(
-            &PrivateKey::from_base64(DEFAULT_FACILITATOR_ECIES_PRIVATE_KEY).unwrap(),
-        ),
+        packet_encryption_public_key: default_facilitator_packet_encryption_public_key(),
         drop_nth_packet: drop_nth_facilitator,
     };
 
