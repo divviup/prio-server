@@ -266,8 +266,8 @@ resource "kubernetes_cron_job" "workflow_manager" {
           spec {
             container {
               name  = "workflow-manager"
-              image = "${var.container_registry}/${var.workflow_manager_image}:${var.workflow_manager_version}" 
-            resources {
+              image = "${var.container_registry}/${var.workflow_manager_image}:${var.workflow_manager_version}"
+              resources {
                 requests {
                   memory = "500Mi"
                   cpu    = "0.5"

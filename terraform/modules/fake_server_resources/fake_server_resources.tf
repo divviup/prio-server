@@ -28,7 +28,7 @@ variable "own_manifest_base_url" {
 
 variable "ingestor_pairs" {
   type = map(object({
-    locality: string
+    locality : string
     ingestor : string
     kubernetes_namespace : string
     packet_decryption_key_kubernetes_secret : string
@@ -245,15 +245,15 @@ resource "kubernetes_cron_job" "integration-tester" {
               name  = "integration-tester"
               image = "us.gcr.io/prio-bringup-290620/facilitator:latest"
               env {
-                name = "AWS_ACCOUNT_ID"
+                name  = "AWS_ACCOUNT_ID"
                 value = data.aws_caller_identity.current.account_id
               }
               env {
-                name = "RUST_BACKTRACE"
+                name  = "RUST_BACKTRACE"
                 value = "1"
               }
               env {
-                name = "RUST_LOG"
+                name  = "RUST_LOG"
                 value = "info"
               }
               args = [
