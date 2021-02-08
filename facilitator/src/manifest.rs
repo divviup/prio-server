@@ -29,7 +29,7 @@ pub type BatchSigningPublicKeys = HashMap<String, UnparsedPublicKey<Vec<u8>>>;
 /// Represents the description of a batch signing public key in a specific
 /// manifest.
 #[derive(Debug, Deserialize, PartialEq)]
-#[serde(rename_all = "kebab-case")]
+#[serde(deny_unknown_fields, rename_all = "kebab-case")]
 struct BatchSigningPublicKey {
     /// The PEM-armored base64 encoding of the ASN.1 encoding of the PKIX
     /// SubjectPublicKeyInfo structure of an ECDSA P256 key.
@@ -39,7 +39,7 @@ struct BatchSigningPublicKey {
 }
 
 #[derive(Debug, Deserialize, PartialEq, Clone)]
-#[serde(rename_all = "kebab-case")]
+#[serde(deny_unknown_fields, rename_all = "kebab-case")]
 pub struct PacketEncryptionCertificateSigningRequest {
     /// The PEM-armored base64 encoding of the ASN.1 encoding of a PKCS#10
     /// certificate signing request containing an ECDSA P256 key.
@@ -80,7 +80,7 @@ pub type PacketEncryptionCertificateSigningRequests =
 /// design document for the full specification.
 /// https://docs.google.com/document/d/1MdfM3QT63ISU70l63bwzTrxr93Z7Tv7EDjLfammzo6Q/edit#heading=h.3j8dgxqo5h68
 #[derive(Debug, Deserialize, PartialEq)]
-#[serde(rename_all = "kebab-case")]
+#[serde(deny_unknown_fields, rename_all = "kebab-case")]
 pub struct DataShareProcessorGlobalManifest {
     /// Format version of the manifest. Versions besides the currently supported
     /// one are rejected.
@@ -93,7 +93,7 @@ pub struct DataShareProcessorGlobalManifest {
 /// Represents the server-identity map inside a data share processor global
 /// manifest.
 #[derive(Debug, Deserialize, PartialEq)]
-#[serde(rename_all = "kebab-case")]
+#[serde(deny_unknown_fields, rename_all = "kebab-case")]
 pub struct DataShareProcessorServerIdentity {
     /// The numeric account ID of the AWS account this data share processor will
     /// use to access peer cloud resources.
@@ -128,7 +128,7 @@ impl DataShareProcessorGlobalManifest {
 /// specification.
 /// https://docs.google.com/document/d/1MdfM3QT63ISU70l63bwzTrxr93Z7Tv7EDjLfammzo6Q/edit#heading=h.3j8dgxqo5h68
 #[derive(Debug, Deserialize, PartialEq)]
-#[serde(rename_all = "kebab-case")]
+#[serde(deny_unknown_fields, rename_all = "kebab-case")]
 pub struct SpecificManifest {
     /// Format version of the manifest. Versions besides the currently supported
     /// one are rejected.
@@ -221,7 +221,7 @@ impl SpecificManifest {
 /// Represents the server-identity structure within an ingestion server global
 /// manifest. One of aws_iam_entity or google_service_account should be Some.
 #[derive(Debug, Deserialize, PartialEq)]
-#[serde(rename_all = "kebab-case")]
+#[serde(deny_unknown_fields, rename_all = "kebab-case")]
 struct IngestionServerIdentity {
     /// The ARN of the AWS IAM entity that this ingestion server uses to access
     /// ingestion buckets,
@@ -239,7 +239,7 @@ struct IngestionServerIdentity {
 /// Represents an ingestion server's manifest. This could be a global manifest
 /// or a locality-specific manifest.
 #[derive(Debug, Deserialize, PartialEq)]
-#[serde(rename_all = "kebab-case")]
+#[serde(deny_unknown_fields, rename_all = "kebab-case")]
 pub struct IngestionServerManifest {
     /// Format version of the manifest. Versions besides the currently supported
     /// one are rejected.
@@ -315,7 +315,7 @@ impl IngestionServerManifest {
 
 /// Represents the global manifest for a portal server.
 #[derive(Debug, Deserialize, PartialEq)]
-#[serde(rename_all = "kebab-case")]
+#[serde(deny_unknown_fields, rename_all = "kebab-case")]
 pub struct PortalServerGlobalManifest {
     /// Format version of the manifest. Versions besides the currently supported
     /// one are rejected.
@@ -540,6 +540,28 @@ mod tests {
     }
 }
         "#,
+            // unexpected top-level field
+            r#"
+{
+    "format": 0,
+    "server-identity": {
+        "aws-account-id": 12345678901234567,
+        "gcp-service-account-email": "service-account@project-name.iam.gserviceaccount.com"
+    },
+    "unexpected": "some value"
+}
+        "#,
+            // unexpected server-identity field
+            r#"
+{
+    "format": 0,
+    "server-identity": {
+        "aws-account-id": 12345678901234567,
+        "gcp-service-account-email": "service-account@project-name.iam.gserviceaccount.com",
+        "unexpected": "some value"
+    }
+}
+        "#,
         ];
 
         for invalid_manifest in &invalid_manifests {
@@ -645,9 +667,9 @@ mod tests {
             // No format key
             r#"
 {
-    "packet-encryption-certificates": {
+    "packet-encryption-keys": {
         "fake-key-1": {
-            "certificate": "who cares"
+            "certificate-signing-request": "who cares"
         }
     },
     "batch-signing-public-keys": {
@@ -665,9 +687,9 @@ mod tests {
             r#"
 {
     "format": 0,
-    "packet-encryption-certificates": {
+    "packet-encryption-keys": {
         "fake-key-1": {
-            "certificate": "who cares"
+            "certificate-signing-request": "who cares"
         }
     },
     "batch-signing-public-keys": {
@@ -685,9 +707,9 @@ mod tests {
             r#"
 {
     "format": "zero",
-    "packet-encryption-certificates": {
+    "packet-encryption-keys": {
         "fake-key-1": {
-            "certificate": "who cares"
+            "certificate-signing-request": "who cares"
         }
     },
     "batch-signing-public-keys": {
@@ -704,10 +726,10 @@ mod tests {
             // Role ARN with wrong type
             r#"
 {
-    "format": 0,
-    "packet-encryption-certificates": {
+    "format": 1,
+    "packet-encryption-keys": {
         "fake-key-1": {
-            "certificate": "who cares"
+            "certificate-signing-request": "who cares"
         }
     },
     "batch-signing-public-keys": {
@@ -719,6 +741,69 @@ mod tests {
     "ingestion-bucket": "us-west-1/ingestion",
     "ingestion-identity": 1,
     "peer-validation-bucket": "us-west-1/validation"
+}
+"#,
+            // Unexpected top-level field
+            r#"
+{
+    "format": 1,
+    "packet-encryption-keys": {
+        "fake-key-1": {
+            "certificate-signing-request": "who cares"
+        }
+    },
+    "batch-signing-public-keys": {
+        "fake-key-2": {
+        "expiration": "",
+        "public-key": "-----BEGIN PUBLIC KEY-----\nfoo\n-----END PUBLIC KEY-----"
+      }
+    },
+    "ingestion-bucket": "s3://us-west-1/ingestion",
+    "ingestion-identity": "arn:aws:iam:something:fake",
+    "peer-validation-bucket": "gs://validation",
+    "unexpected": "some value"
+}
+"#,
+            // Unexpected BatchSigningPublicKey field
+            r#"
+{
+    "format": 1,
+    "packet-encryption-keys": {
+        "fake-key-1": {
+            "certificate-signing-request": "who cares"
+        }
+    },
+    "batch-signing-public-keys": {
+        "fake-key-2": {
+        "expiration": "",
+        "public-key": "-----BEGIN PUBLIC KEY-----\nfoo\n-----END PUBLIC KEY-----",
+        "unexpected": "some value"
+      }
+    },
+    "ingestion-bucket": "s3://us-west-1/ingestion",
+    "ingestion-identity": "arn:aws:iam:something:fake",
+    "peer-validation-bucket": "gs://validation"
+}
+"#,
+            // Unexpected PacketEncryptionCertificateSigningRequest field
+            r#"
+{
+    "format": 1,
+    "packet-encryption-keys": {
+        "fake-key-1": {
+            "certificate-signing-request": "who cares",
+            "unexpected": "some value"
+        }
+    },
+    "batch-signing-public-keys": {
+        "fake-key-2": {
+        "expiration": "",
+        "public-key": "-----BEGIN PUBLIC KEY-----\nfoo\n-----END PUBLIC KEY-----"
+      }
+    },
+    "ingestion-bucket": "s3://us-west-1/ingestion",
+    "ingestion-identity": "arn:aws:iam:something:fake",
+    "peer-validation-bucket": "gs://validation"
 }
 "#,
         ];
@@ -879,7 +964,7 @@ mod tests {
             r#"
 {
     "server-identity": {
-        "aws-iam-entity": "arn:aws:iam::338276578713:role/ingestor-1-role"
+        "aws-iam-entity": "arn:aws:iam::338276578713:role/ingestor-1-role",
         "gcp-service-account-email": "foo@bar.com"
     },
     "batch-signing-public-keys": {
@@ -895,7 +980,7 @@ mod tests {
 {
     "format": 2,
     "server-identity": {
-        "aws-iam-entity": "arn:aws:iam::338276578713:role/ingestor-1-role"
+        "aws-iam-entity": "arn:aws:iam::338276578713:role/ingestor-1-role",
         "gcp-service-account-email": "foo@bar.com"
     },
     "batch-signing-public-keys": {
@@ -911,8 +996,42 @@ mod tests {
 {
     "format": "zero",
     "server-identity": {
-        "aws-iam-entity": "arn:aws:iam::338276578713:role/ingestor-1-role"
+        "aws-iam-entity": "arn:aws:iam::338276578713:role/ingestor-1-role",
         "gcp-service-account-email": "foo@bar.com"
+    },
+    "batch-signing-public-keys": {
+        "key-identifier-1": {
+            "public-key": "----BEGIN PUBLIC KEY----\nMFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEI3MQm+HzXvaYa2mVlhB4zknbtAT8cSxakmBoJcBKGqGw\nYS0bhxSpuvABM1kdBTDpQhXnVdcq+LSiukXJRpGHVg==\n----END PUBLIC KEY----",
+            "expiration": "2021-01-15T18:53:20Z"
+        }
+    }
+}
+    "#,
+            // Unexpected top-level field
+            r#"
+{
+    "format": 1,
+    "unexpected": "some value",
+    "server-identity": {
+        "aws-iam-entity": "arn:aws:iam::338276578713:role/ingestor-1-role",
+        "gcp-service-account-email": "foo@bar.com"
+    },
+    "batch-signing-public-keys": {
+        "key-identifier-1": {
+            "public-key": "----BEGIN PUBLIC KEY----\nMFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEI3MQm+HzXvaYa2mVlhB4zknbtAT8cSxakmBoJcBKGqGw\nYS0bhxSpuvABM1kdBTDpQhXnVdcq+LSiukXJRpGHVg==\n----END PUBLIC KEY----",
+            "expiration": "2021-01-15T18:53:20Z"
+        }
+    }
+}
+    "#,
+            // Unexpected server-identity field
+            r#"
+{
+    "format": 1,
+    "server-identity": {
+        "aws-iam-entity": "arn:aws:iam::338276578713:role/ingestor-1-role",
+        "gcp-service-account-email": "foo@bar.com",
+        "unexpected": "some value"
     },
     "batch-signing-public-keys": {
         "key-identifier-1": {
@@ -996,8 +1115,17 @@ mod tests {
             // Missing field
             r#"
 {
-    "format": 0,
+    "format": 1,
+    "facilitator-sum-part-bucket": "gs://facilitator-bucket"
+}
+    "#,
+            // Unexpected top-level field
+            r#"
+{
+    "format": 1,
     "facilitator-sum-part-bucket": "gs://facilitator-bucket",
+    "pha-sum-part-bucket": "gs://pha-bucket",
+    "unexpected": "some value"
 }
     "#,
         ];
