@@ -267,20 +267,20 @@ func main() {
 	certificatesByNamespace := manifest.PacketEncryptionKeyCSRs{}
 
 	if terraformOutput.HasTestEnvironment.Value && terraformOutput.SingletonIngestor.Value != nil {
-		// if manifestExists(terraformOutput.OwnManifestBaseURL.Value, "singleton-ingestor/global") {
-		log.Println("global ingestor manifest exists - ignoring")
-		// } else {
-		err := setupTestEnvironment(terraformOutput.SingletonIngestor.Value, terraformOutput.ManifestBucket.Value)
-		if err != nil {
-			log.Fatalf("%s", err)
+		if manifestExists(terraformOutput.OwnManifestBaseURL.Value, "singleton-ingestor/global") {
+			log.Println("global ingestor manifest exists - ignoring")
+		} else {
+			err := setupTestEnvironment(terraformOutput.SingletonIngestor.Value, terraformOutput.ManifestBucket.Value)
+			if err != nil {
+				log.Fatalf("%s", err)
+			}
 		}
-		// }
 	}
 
 	for dataShareProcessorName, manifestWrapper := range terraformOutput.SpecificManifests.Value {
 		if manifestExists(terraformOutput.OwnManifestBaseURL.Value, dataShareProcessorName) {
 			log.Printf("manifest for %s exists - ignoring", dataShareProcessorName)
-			// continue
+			continue
 		}
 		newBatchSigningPublicKeys := manifest.BatchSigningPublicKeys{}
 		for name, batchSigningPublicKey := range manifestWrapper.SpecificManifest.BatchSigningPublicKeys {
