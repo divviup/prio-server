@@ -63,7 +63,9 @@ fn aggregation_including_invalid_batch() {
             )),
             batch_signing_key: default_ingestor_private_key(),
         },
-        packet_encryption_key: PrivateKey::from_base64(DEFAULT_PHA_ECIES_PRIVATE_KEY).unwrap(),
+        packet_encryption_public_key: PublicKey::from(
+            &PrivateKey::from_base64(DEFAULT_PHA_ECIES_PRIVATE_KEY).unwrap(),
+        ),
         drop_nth_packet: None,
     };
 
@@ -74,8 +76,9 @@ fn aggregation_including_invalid_batch() {
             )),
             batch_signing_key: default_ingestor_private_key(),
         },
-        packet_encryption_key: PrivateKey::from_base64(DEFAULT_FACILITATOR_ECIES_PRIVATE_KEY)
-            .unwrap(),
+        packet_encryption_public_key: PublicKey::from(
+            &PrivateKey::from_base64(DEFAULT_FACILITATOR_ECIES_PRIVATE_KEY).unwrap(),
+        ),
         drop_nth_packet: None,
     };
 

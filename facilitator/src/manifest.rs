@@ -5,15 +5,15 @@ use elliptic_curve::{
     public_key,
     sec1::{EncodedPoint, ToEncodedPoint},
 };
+use log::debug;
 use p256::pkcs8::FromPublicKey;
 use p256::NistP256;
-use pem::encode;
 use pkix::pem::{pem_to_der, PEM_CERTIFICATE_REQUEST};
 use pkix::pkcs10::DerCertificationRequest;
 use pkix::FromDer;
 use ring::signature::{UnparsedPublicKey, ECDSA_P256_SHA256_ASN1};
 use serde::Deserialize;
-use std::{collections::HashMap, fmt::UpperHex, str::FromStr};
+use std::{collections::HashMap, str::FromStr};
 
 // See discussion in SpecificManifest::batch_signing_public_key
 const ECDSA_P256_SPKI_PREFIX: &[u8] = &[
@@ -53,6 +53,7 @@ impl PacketEncryptionCertificateSigningRequest {
         }
     }
     pub fn base64_public_key(&self) -> Result<String> {
+        debug!("Packet Encryption Certificate Signing Request: {:?}", self);
         let der = pem_to_der(
             &self.certificate_signing_request,
             Some(PEM_CERTIFICATE_REQUEST),
@@ -429,10 +430,16 @@ fn public_key_from_pem(pem_key: &str) -> Result<UnparsedPublicKey<Vec<u8>>> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::config::{GCSPath, S3Path};
     use crate::test_utils::{
         default_ingestor_private_key, DEFAULT_CSR_PACKET_ENCRYPTION_CERTIFICATE,
         DEFAULT_INGESTOR_SUBJECT_PUBLIC_KEY_INFO,
+    };
+    use crate::{
+        config::{GCSPath, S3Path},
+        test_utils::{
+            default_packet_encryption_certificate_signing_request,
+            DEFAULT_PACKET_ENCRYPTION_CERTIFICATE_SIGNING_REQUEST_PRIVATE_KEY,
+        },
     };
     use base64::encode;
     use elliptic_curve::generic_array::typenum::private;
@@ -1128,5 +1135,16 @@ mod tests {
 
         mocked_global_get.assert();
         mocked_specific_get.assert();
+    }
+
+    #[test]
+    fn known_csr_and_private_key() {
+        let csr = default_packet_encryption_certificate_signing_request();
+        let private_key = DEFAULT_PACKET_ENCRYPTION_CERTIFICATE_SIGNING_REQUEST_PRIVATE_KEY;
+
+        let actual = PublicKey::from_base64(&csr.base64_public_key().unwrap()).unwrap();
+        let expected = PublicKey::from(&PrivateKey::from_base64(private_key).unwrap());
+
+        println!("expected:{:?}\nactual:{:?}", expected, actual)
     }
 }

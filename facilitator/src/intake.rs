@@ -7,9 +7,8 @@ use crate::{
 };
 use anyhow::{anyhow, ensure, Context, Result};
 use chrono::NaiveDateTime;
-use hyper::server;
 use log::info;
-use prio::{encrypt::PrivateKey, finite_field::Field, server::Server};
+use prio::{encrypt::PrivateKey, encrypt::PublicKey, finite_field::Field, server::Server};
 use ring::signature::UnparsedPublicKey;
 use std::{collections::HashMap, convert::TryFrom, iter::Iterator};
 use uuid::Uuid;
@@ -113,7 +112,10 @@ impl<'a> BatchIntaker<'a> {
         let mut servers = self
             .packet_decryption_keys
             .iter()
-            .map(|k| Server::new(ingestion_header.bins as usize, self.is_first, k.clone()))
+            .map(|k| {
+                info!("Public key for server is: {:?}", PublicKey::from(k));
+                Server::new(ingestion_header.bins as usize, self.is_first, k.clone())
+            })
             .collect::<Vec<Server>>();
 
         info!("We have {} servers.", &servers.len());

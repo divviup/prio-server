@@ -3,9 +3,8 @@ use chrono::{prelude::Utc, NaiveDateTime};
 use clap::{value_t, App, Arg, ArgGroup, ArgMatches, SubCommand};
 
 use kube::api::Meta;
-use log::{error, info};
+use log::{debug, error, info};
 use prio::encrypt::{PrivateKey, PublicKey};
-use prometheus::{register_counter, register_counter_vec, Counter};
 use ring::signature::{
     EcdsaKeyPair, KeyPair, UnparsedPublicKey, ECDSA_P256_SHA256_ASN1,
     ECDSA_P256_SHA256_ASN1_SIGNING,
@@ -830,15 +829,18 @@ fn get_ecies_public_key(
                     .next()
                     .context("No packet decryption keys in manifest")?;
 
-                let public_key = &packet_decryption_key.base64_public_key()?;
+                let public_key = packet_decryption_key.base64_public_key()?;
+
+                let public_key = PublicKey::from_base64(&public_key).map_err(|e| {
+                    anyhow!("unable to create public key from base64 ecies key: {}", e)
+                })?;
 
                 info!(
                     "Picked packet decryption key with ID: {} - public key {:?}",
-                    key_identifier, public_key
+                    key_identifier, &public_key
                 );
-                PublicKey::from_base64(public_key).map_err(|e| {
-                    anyhow!("unable to create public key from base64 ecies key: {}", e)
-                })
+
+                Ok(public_key)
             }
             None => panic!(
                 "Neither manifest_option or key_option were specified. This error shouldn't happen."
@@ -875,7 +877,7 @@ fn get_valid_batch_signing_key(namespace: &str, own_manifest_url: &str) -> Resul
         own_manifest_url
     ))?;
 
-    let kubernetes = Kubernetes::new(false, String::from(namespace));
+    let kubernetes = Kubernetes::new(String::from(namespace));
     let secrets = kubernetes.get_sorted_secrets("type=batch-signing-key")?;
 
     let batch_signing_keys = manifest.batch_signing_public_keys().unwrap();
@@ -925,8 +927,8 @@ fn generate_sample(sub_matches: &ArgMatches) -> Result<(), anyhow::Error> {
     let peer_output_path = StoragePath::from_str(&peer_output_path)?;
 
     let packet_encryption_public_key = get_ecies_public_key(
-        sub_matches.value_of("facilitator-ecies-public-key"),
-        sub_matches.value_of("facilitator-manifest-base-url"),
+        sub_matches.value_of("pha-ecies-public-key"),
+        sub_matches.value_of("pha-manifest-base-url"),
         ingestor_name,
         locality_name,
     )?;
@@ -960,8 +962,8 @@ fn generate_sample(sub_matches: &ArgMatches) -> Result<(), anyhow::Error> {
     let own_output_path = StoragePath::from_str(&own_output_path)?;
 
     let packet_encryption_public_key = get_ecies_public_key(
-        sub_matches.value_of("pha-ecies-public-key"),
-        sub_matches.value_of("pha-manifest-base-url"),
+        sub_matches.value_of("facilitator-ecies-public-key"),
+        sub_matches.value_of("facilitator-manifest-base-url"),
         ingestor_name,
         locality_name,
     )
@@ -974,7 +976,7 @@ fn generate_sample(sub_matches: &ArgMatches) -> Result<(), anyhow::Error> {
             transport: transport_for_path(own_output_path, own_identity.as_deref(), sub_matches)?,
             batch_signing_key: own_batch_signing_key,
         },
-        packet_encryption_public_key: packet_encryption_public_key,
+        packet_encryption_public_key,
         drop_nth_packet: None,
     };
 
@@ -1509,6 +1511,7 @@ fn intake_transport_from_args(matches: &ArgMatches) -> Result<VerifiableAndDecry
         .values_of("packet-decryption-keys")
         .unwrap()
         .map(|k| {
+            debug!("packet decryption private key: {}", k);
             PrivateKey::from_base64(k)
                 .context("could not parse encoded packet encryption key")
                 .unwrap()
