@@ -1,0 +1,27 @@
+version: 2
+
+updates:
+  - package-ecosystem: "gomod"
+    directory: "/deploy-tool"
+    schedule:
+      interval: "daily"
+  - package-ecosystem: "cargo"
+    directory: "/faciliator"
+    schedule:
+      interval: "daily"
+  - package-ecosystem: "docker"
+    directory: "/faciliator"
+    schedule:
+      interval: "daily"
+  - package-ecosystem: "terraform"
+    directory: "/terraform"
+    schedule:
+      interval: "daily"
+  - package-ecosystem: "gomod"
+    directory: "/workflow-manager"
+    schedule:
+      interval: "daily"
+  - package-ecosystem: "docker"
+    directory: "/workflow-manager"
+    schedule:
+      interval: "daily"
