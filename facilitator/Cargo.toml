@@ -8,7 +8,7 @@ version = "0.1.0"
 anyhow = "1.0"
 async-trait = "0.1"
 avro-rs = { version = "0.11.0", features = ["snappy"] }
-base64 = "0.12.3"
+base64 = "0.13.0"
 chrono = { version = "0.4", features = ["serde"] }
 clap = "2.33.3"
 derivative = "2.1.1"

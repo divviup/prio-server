@@ -528,7 +528,7 @@ dependencies = [
  "assert_matches",
  "async-trait",
  "avro-rs",
- "base64 0.12.3",
+ "base64 0.13.0",
  "chrono",
  "clap",
  "derivative",
