@@ -124,7 +124,7 @@ pub(crate) fn send_json_request(request: Request, body: SerdeValue) -> Result<Re
 // string.
 pub(crate) fn simple_get_request(url: Url) -> Result<String> {
     let request = prepare_request_without_agent(RequestParameters {
-        url: url,
+        url,
         method: Method::Get,
         ..Default::default()
     })

@@ -67,7 +67,7 @@ impl<T: Task> TaskQueue<T> for AwsSqsTaskQueue<T> {
             None => return Ok(None),
         };
 
-        if received_messages.len() == 0 {
+        if received_messages.is_empty() {
             return Ok(None);
         }
 
@@ -91,7 +91,7 @@ impl<T: Task> TaskQueue<T> for AwsSqsTaskQueue<T> {
             .context(format!("failed to decode JSON task {:?}", body))?;
 
         Ok(Some(TaskHandle {
-            task: task,
+            task,
             acknowledgment_id: receipt_handle.to_owned(),
         }))
     }
@@ -106,13 +106,12 @@ impl<T: Task> TaskQueue<T> for AwsSqsTaskQueue<T> {
 
         let request = DeleteMessageRequest {
             queue_url: self.queue_url.clone(),
-            receipt_handle: task.acknowledgment_id.clone(),
+            receipt_handle: task.acknowledgment_id,
         };
 
-        Ok(self
-            .runtime
+        self.runtime
             .block_on(client.delete_message(request))
-            .context("failed to delete/acknowledge message in SQS")?)
+            .context("failed to delete/acknowledge message in SQS")
     }
 
     fn nacknowledge_task(&mut self, task: TaskHandle<T>) -> Result<()> {
@@ -124,9 +123,8 @@ impl<T: Task> TaskQueue<T> for AwsSqsTaskQueue<T> {
             task.acknowledgment_id, self.queue_url
         );
 
-        Ok(self
-            .change_message_visibility(&task, &Duration::from_secs(0))
-            .context("failed to nacknowledge task")?)
+        self.change_message_visibility(&task, &Duration::from_secs(0))
+            .context("failed to nacknowledge task")
     }
 
     fn extend_task_deadline(&mut self, task: &TaskHandle<T>, increment: &Duration) -> Result<()> {
@@ -135,9 +133,8 @@ impl<T: Task> TaskQueue<T> for AwsSqsTaskQueue<T> {
             task.acknowledgment_id, self.queue_url
         );
 
-        Ok(self
-            .change_message_visibility(task, increment)
-            .context("failed to extend deadline on task")?)
+        self.change_message_visibility(task, increment)
+            .context("failed to extend deadline on task")
     }
 }
 
@@ -185,9 +182,8 @@ impl<T: Task> AwsSqsTaskQueue<T> {
             visibility_timeout: timeout,
         };
 
-        Ok(self
-            .runtime
+        self.runtime
             .block_on(client.change_message_visibility(request))
-            .context("failed to change message visibility message in SQS")?)
+            .context("failed to change message visibility message in SQS")
     }
 }

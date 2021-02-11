@@ -152,7 +152,6 @@ impl<T: Task> TaskQueue<T> for GcpPubSubTaskQueue<T> {
                 )?,
                 method: Method::Post,
                 token_provider: Some(&mut self.oauth_token_provider),
-                ..Default::default()
             },
         )?;
 
@@ -181,7 +180,7 @@ impl<T: Task> TaskQueue<T> for GcpPubSubTaskQueue<T> {
             ));
         }
 
-        if received_messages.len() == 0 {
+        if received_messages.is_empty() {
             return Ok(None);
         }
 
@@ -193,7 +192,7 @@ impl<T: Task> TaskQueue<T> for GcpPubSubTaskQueue<T> {
             .context(format!("failed to decode task {:?} from JSON", task_json))?;
 
         let handle = TaskHandle {
-            task: task,
+            task,
             acknowledgment_id: received_messages[0].ack_id.clone(),
         };
 
@@ -219,7 +218,6 @@ impl<T: Task> TaskQueue<T> for GcpPubSubTaskQueue<T> {
                 )?,
                 method: Method::Post,
                 token_provider: Some(&mut self.oauth_token_provider),
-                ..Default::default()
             },
         )?;
 
@@ -243,9 +241,8 @@ impl<T: Task> TaskQueue<T> for GcpPubSubTaskQueue<T> {
             self.oauth_token_provider,
         );
 
-        Ok(self
-            .modify_ack_deadline(&handle, &Duration::from_secs(0))
-            .context("failed to nacknowledge task")?)
+        self.modify_ack_deadline(&handle, &Duration::from_secs(0))
+            .context("failed to nacknowledge task")
     }
 
     fn extend_task_deadline(&mut self, handle: &TaskHandle<T>, increment: &Duration) -> Result<()> {
@@ -257,9 +254,8 @@ impl<T: Task> TaskQueue<T> for GcpPubSubTaskQueue<T> {
             self.oauth_token_provider,
         );
 
-        Ok(self
-            .modify_ack_deadline(handle, increment)
-            .context("failed to extend deadline on task")?)
+        self.modify_ack_deadline(handle, increment)
+            .context("failed to extend deadline on task")
     }
 }
 
@@ -289,7 +285,6 @@ impl<T: Task> GcpPubSubTaskQueue<T> {
                 )?,
                 method: Method::Post,
                 token_provider: Some(&mut self.oauth_token_provider),
-                ..Default::default()
             },
         )?;
 
