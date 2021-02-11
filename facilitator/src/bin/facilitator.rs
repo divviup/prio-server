@@ -9,7 +9,10 @@ use ring::signature::{
     EcdsaKeyPair, KeyPair, UnparsedPublicKey, ECDSA_P256_SHA256_ASN1,
     ECDSA_P256_SHA256_ASN1_SIGNING,
 };
-use std::{collections::HashMap, fs, fs::File, io::Read, str::FromStr, thread, time::Duration, time::Instant};
+use std::{
+    collections::HashMap, fs, fs::File, io::Read, str::FromStr, thread, time::Duration,
+    time::Instant,
+};
 use uuid::Uuid;
 
 use facilitator::{
