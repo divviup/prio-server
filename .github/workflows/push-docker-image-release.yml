@@ -1,14 +1,17 @@
 name: push-docker-image
 
 on:
-  push:
-    branches: [ main ]
+  release:
+    types: [published]
 
 jobs:
   push-facilitator:
     runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@v2
+    - name: Get the version
+      id: get_version
+      run: echo ::set-output name=VERSION::${GITHUB_REF/refs\/tags\//}
     - name: Set up Docker build
       uses: docker/setup-buildx-action@v1
     - name: Login to DockerHub
@@ -16,17 +19,26 @@ jobs:
       with:
         username: isrgautomaton
         password: ${{ secrets.ISRG_AUTOMATON_DOCKERHUB_AUTH_TOKEN }}
+    - name: update-version
+      run: sed -i "s/^version =.*/version = \"${{ steps.get_version.outputs.VERSION }}\"/" facilitator/Cargo.toml
     - name: build
       run: ./facilitator/build.sh
-    - name: tag dev
-      run: docker tag letsencrypt/prio-facilitator letsencrypt/prio-facilitator:dev
-    - name: push dev
-      run: docker push letsencrypt/prio-facilitator:dev
+    - name: tag
+      run: docker tag letsencrypt/prio-facilitator letsencrypt/prio-facilitator:${{ steps.get_version.outputs.VERSION }}
+    - name: tag-latest
+      run: docker tag letsencrypt/prio-facilitator letsencrypt/prio-facilitator:latest
+    - name: push
+      run: docker push letsencrypt/prio-facilitator:${{ steps.get_version.outputs.VERSION }}
+    - name: push-latest
+      run: docker push letsencrypt/prio-facilitator:latest
 
   push-workflow-manager:
     runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@v2
+    - name: Get the version
+      id: get_version
+      run: echo ::set-output name=VERSION::${GITHUB_REF/refs\/tags\//}
     - name: Set up Docker build
       uses: docker/setup-buildx-action@v1
     - name: Login to DockerHub
@@ -36,15 +48,22 @@ jobs:
         password: ${{ secrets.ISRG_AUTOMATON_DOCKERHUB_AUTH_TOKEN }}
     - name: build
       run: ./workflow-manager/build.sh
-    - name: tag-dev
-      run: docker tag letsencrypt/prio-workflow-manager letsencrypt/prio-workflow-manager:dev
-    - name: push-dev
-      run: docker push letsencrypt/prio-workflow-manager:dev
+    - name: tag
+      run: docker tag letsencrypt/prio-workflow-manager letsencrypt/prio-workflow-manager:${{ steps.get_version.outputs.VERSION }}
+    - name: tag-latest
+      run: docker tag letsencrypt/prio-workflow-manager letsencrypt/prio-workflow-manager:latest
+    - name: push
+      run: docker push letsencrypt/prio-workflow-manager:${{ steps.get_version.outputs.VERSION }}
+    - name: push-latest
+      run: docker push letsencrypt/prio-workflow-manager:latest
 
   push-deploy-operator:
     runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@v2
+    - name: Get the version
+      id: get_version
+      run: echo ::set-output name=VERSION::${GITHUB_REF/refs\/tags\//}
     - name: Set up Docker build
       uses: docker/setup-buildx-action@v1
     - name: Login to DockerHub
@@ -54,15 +73,22 @@ jobs:
         password: ${{ secrets.ISRG_AUTOMATON_DOCKERHUB_AUTH_TOKEN }}
     - name: build
       run: ./deploy-operator/build.sh
-    - name: tag-dev
-      run: docker tag letsencrypt/prio-deploy-operator letsencrypt/prio-deploy-operator:dev
-    - name: push-dev
-      run: docker push letsencrypt/prio-deploy-operator:dev
+    - name: tag
+      run: docker tag letsencrypt/prio-deploy-operator letsencrypt/prio-deploy-operator:${{ steps.get_version.outputs.VERSION }}
+    - name: tag-latest
+      run: docker tag letsencrypt/prio-deploy-operator letsencrypt/prio-deploy-operator:latest
+    - name: push
+      run: docker push letsencrypt/prio-deploy-operator:${{ steps.get_version.outputs.VERSION }}
+    - name: push-latest
+      run: docker push letsencrypt/prio-deploy-operator:latest
 
   push-manifest-updater:
     runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@v2
+    - name: Get the version
+      id: get_version
+      run: echo ::set-output name=VERSION::${GITHUB_REF/refs\/tags\//}
     - name: Set up Docker build
       uses: docker/setup-buildx-action@v1
     - name: Login to DockerHub
@@ -72,7 +98,11 @@ jobs:
         password: ${{ secrets.ISRG_AUTOMATON_DOCKERHUB_AUTH_TOKEN }}
     - name: build
       run: ./manifest-updater/build.sh
-    - name: tag-dev
-      run: docker tag letsencrypt/prio-manifest-updater letsencrypt/prio-manifest-updater:dev
-    - name: push-dev
-      run: docker push letsencrypt/prio-manifest-updater:dev
+    - name: tag
+      run: docker tag letsencrypt/prio-manifest-updater letsencrypt/prio-manifest-updater:${{ steps.get_version.outputs.VERSION }}
+    - name: tag-latest
+      run: docker tag letsencrypt/prio-manifest-updater letsencrypt/prio-manifest-updater:latest
+    - name: push
+      run: docker push letsencrypt/prio-manifest-updater:${{ steps.get_version.outputs.VERSION }}
+    - name: push-latest
+      run: docker push letsencrypt/prio-manifest-updater:latest
