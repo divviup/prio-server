@@ -6,11 +6,11 @@ updates:
     schedule:
       interval: "daily"
   - package-ecosystem: "cargo"
-    directory: "/faciliator"
+    directory: "/facilitator"
     schedule:
       interval: "daily"
   - package-ecosystem: "docker"
-    directory: "/faciliator"
+    directory: "/facilitator"
     schedule:
       interval: "daily"
   - package-ecosystem: "terraform"
