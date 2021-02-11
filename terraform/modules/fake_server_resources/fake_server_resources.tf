@@ -213,73 +213,69 @@ resource "kubernetes_role_binding" "integration_tester_role_binding" {
   }
 }
 
-resource "kubernetes_cron_job" "integration-tester" {
+resource "kubernetes_deployment" "integration-tester" {
   for_each = var.ingestor_pairs
-  metadata {
-    name      = "global-integration-tester-${each.value.ingestor}"
-    namespace = kubernetes_namespace.tester.metadata[0].name
 
-    annotations = {
-      environment = var.environment
-    }
+  metadata {
+    name      = "integration-tester-${each.value.ingestor}"
+    namespace = kubernetes_namespace.tester.metadata[0].name
   }
+
   spec {
-    schedule                      = "* * * * *"
-    concurrency_policy            = "Forbid"
-    successful_jobs_history_limit = 1
-    failed_jobs_history_limit     = 2
-    job_template {
-      metadata {}
+    replicas = 1
+    selector {
+      match_labels = {
+        app      = "integration-tester-worker"
+        ingestor = each.value.ingestor
+      }
+    }
+    template {
+      metadata {
+        labels = {
+          app      = "integration-tester-worker"
+          ingestor = each.value.ingestor
+        }
+      }
       spec {
-        template {
-          metadata {
-            labels = {
-              "type" : "integration-tester-manager"
-            }
+        service_account_name            = module.account_mapping.kubernetes_account_name
+        automount_service_account_token = true
+        container {
+          name  = "integration-tester"
+          image = "us.gcr.io/prio-bringup-290620/facilitator:latest"
+          env {
+            name  = "AWS_ACCOUNT_ID"
+            value = data.aws_caller_identity.current.account_id
           }
-          spec {
-            restart_policy                  = "Never"
-            service_account_name            = module.account_mapping.kubernetes_account_name
-            automount_service_account_token = true
-            container {
-              name  = "integration-tester"
-              image = "us.gcr.io/prio-bringup-290620/facilitator:latest"
-              env {
-                name  = "AWS_ACCOUNT_ID"
-                value = data.aws_caller_identity.current.account_id
-              }
-              env {
-                name  = "RUST_BACKTRACE"
-                value = "1"
-              }
-              env {
-                name  = "RUST_LOG"
-                value = "info"
-              }
-              args = [
-                "--pushgateway", var.pushgateway,
-                "generate-ingestion-sample",
-                "--ingestor-name", each.value.ingestor,
-                "--locality-name", each.value.locality,
-                "--kube-namespace", kubernetes_namespace.tester.metadata[0].name,
-                "--own-manifest-base-url", "https://${each.value.ingestor_manifest_base_url}",
-                "--pha-manifest-base-url", "https://${var.peer_manifest_base_url}",
-                "--facilitator-manifest-base-url", "https://${var.own_manifest_base_url}",
-                "--aggregation-id", "kittens-seen",
-                "--packet-count", "10",
-                "--batch-start-time", "1000000000",
-                "--batch-end-time", "1000000100",
-                "--dimension", "123",
-                "--epsilon", "0.23",
-              ]
-            }
+          env {
+            name  = "RUST_BACKTRACE"
+            value = "FULL"
           }
+          env {
+            name  = "RUST_LOG"
+            value = "info"
+          }
+          args = [
+            "--pushgateway", var.pushgateway,
+            "generate-ingestion-sample-worker",
+            "--ingestor-name", each.value.ingestor,
+            "--locality-name", each.value.locality,
+            "--kube-namespace", kubernetes_namespace.tester.metadata[0].name,
+            "--ingestor-manifest-base-url", "https://${each.value.ingestor_manifest_base_url}",
+            "--pha-manifest-base-url", "https://${var.peer_manifest_base_url}",
+            "--facilitator-manifest-base-url", "https://${var.own_manifest_base_url}",
+            "--aggregation-id", "kittens-seen",
+            "--packet-count", "10",
+            "--batch-start-time", "1000000000",
+            "--batch-end-time", "1000000100",
+            "--dimension", "123",
+            "--epsilon", "0.23",
+            "--generation-interval", "60"
+          ]
         }
       }
     }
   }
 }
-
 output "aws_iam_entity" {
   value = aws_iam_role.tester_role.arn
 }

@@ -9,7 +9,7 @@ use ring::signature::{
     EcdsaKeyPair, KeyPair, UnparsedPublicKey, ECDSA_P256_SHA256_ASN1,
     ECDSA_P256_SHA256_ASN1_SIGNING,
 };
-use std::{collections::HashMap, fs, fs::File, io::Read, str::FromStr, time::Instant};
+use std::{collections::HashMap, fs, fs::File, io::Read, str::FromStr, thread, time::Duration, time::Instant};
 use uuid::Uuid;
 
 use facilitator::{
@@ -66,7 +66,7 @@ trait AppArgumentAdder {
 
     fn add_batch_public_key_arguments(self: Self, entity: Entity) -> Self;
 
-    fn add_batch_signing_key_arguments(self: Self) -> Self;
+    fn add_batch_signing_key_arguments(self: Self, required: bool) -> Self;
 
     fn add_packet_decryption_key_argument(self: Self) -> Self;
 
@@ -77,6 +77,8 @@ trait AppArgumentAdder {
     fn add_metrics_scrape_port_argument(self: Self) -> Self;
 
     fn add_use_bogus_packet_file_digest_argument(self: Self) -> Self;
+
+    fn add_common_sample_maker_arguments(self: Self) -> Self;
 }
 
 const SHARED_HELP: &str = "Storage arguments: Any flag ending in -input or -output can take an \
@@ -125,6 +127,8 @@ impl InOut {
 
 /// One of the organizations participating in the Prio system.
 enum Entity {
+    /// Only used for SampleMaker
+    Facilitator,
     Ingestor,
     Peer,
     Own,
@@ -140,6 +144,7 @@ fn leak_string(s: String) -> &'static str {
 impl Entity {
     fn str(&self) -> &'static str {
         match self {
+            Entity::Facilitator => "facilitator",
             Entity::Ingestor => "ingestor",
             Entity::Peer => "peer",
             Entity::Own => "own",
@@ -257,7 +262,7 @@ impl<'a, 'b> AppArgumentAdder for App<'a, 'b> {
         )
     }
 
-    fn add_batch_signing_key_arguments(self: App<'a, 'b>) -> App<'a, 'b> {
+    fn add_batch_signing_key_arguments(self: App<'a, 'b>, required: bool) -> App<'a, 'b> {
         self.arg(
             Arg::with_name("batch-signing-private-key")
                 .long("batch-signing-private-key")
@@ -269,7 +274,7 @@ impl<'a, 'b> AppArgumentAdder for App<'a, 'b> {
                     batch signing private key to be used by this server when \
                     sending messages to other servers.",
                 )
-                .required(true),
+                .required(required),
         )
         .arg(
             Arg::with_name("batch-signing-private-key-identifier")
@@ -283,7 +288,7 @@ impl<'a, 'b> AppArgumentAdder for App<'a, 'b> {
                     or specific manifest. Used to construct \
                     PrioBatchSignature messages.",
                 )
-                .required(true),
+                .required(required),
         )
     }
 
@@ -405,6 +410,166 @@ impl<'a, 'b> AppArgumentAdder for App<'a, 'b> {
                 .default_value("false"),
         )
     }
+
+    fn add_common_sample_maker_arguments(self: App<'a, 'b>) -> App<'a, 'b> {
+        self.add_gcp_service_account_key_file_argument()
+            .add_storage_arguments(Entity::Peer, InOut::Output)
+            .add_storage_arguments(Entity::Facilitator, InOut::Output)
+            .arg(
+                Arg::with_name("aggregation-id")
+                    .long("aggregation-id")
+                    .value_name("ID")
+                    .required(true)
+                    .help("Name of the aggregation"),
+            )
+            .arg(
+                Arg::with_name("batch-id")
+                    .long("batch-id")
+                    .value_name("UUID")
+                    .help(
+                        "UUID of the batch. If omitted, a UUID is \
+                            randomly generated.",
+                    )
+                    .validator(uuid_validator),
+            )
+            .arg(
+                Arg::with_name("date")
+                    .long("date")
+                    .value_name("DATE")
+                    .help("Date for the batch in YYYY/mm/dd/HH/MM format")
+                    .long_help(
+                        "Date for the batch in YYYY/mm/dd/HH/MM format. If \
+                            omitted, the current date is used.",
+                    )
+                    .validator(date_validator),
+            )
+            .arg(
+                Arg::with_name("dimension")
+                    .long("dimension")
+                    .short("d")
+                    .value_name("INT")
+                    .required(true)
+                    .validator(num_validator::<i32>)
+                    .help(
+                        "Length in bits of the data packets to generate \
+                            (a.k.a. \"bins\" in some contexts). Must be a \
+                            natural number.",
+                    ),
+            )
+            .arg(
+                Arg::with_name("packet-count")
+                    .long("packet-count")
+                    .short("p")
+                    .value_name("INT")
+                    .required(true)
+                    .validator(num_validator::<usize>)
+                    .help("Number of data packets to generate"),
+            )
+            .arg(
+                Arg::with_name("pha-ecies-public-key")
+                    .long("pha-ecies-public-key")
+                    .env("PHA_ECIES_PUBLIC_KEY")
+                    .value_name("B64")
+                    .help(
+                        "Base64 encoded X9.62 uncompressed public key for the PHA \
+                            server",
+                    ),
+            )
+            .arg(
+                Arg::with_name("pha-manifest-base-url")
+                    .long("pha-manifest-base-url")
+                    .env("PHA_MANIFEST_BASE_URL")
+                    .value_name("URL")
+                    .help("Base URL of the Public Health Authority manifest"),
+            )
+            .group(
+                ArgGroup::with_name("public_health_authority_information")
+                    .args(&["pha-ecies-public-key", "pha-manifest-base-url"])
+                    .required(true),
+            )
+            .arg(
+                Arg::with_name("facilitator-ecies-public-key")
+                    .long("facilitator-ecies-public-key")
+                    .env("FACILITATOR_ECIES_PUBLIC_KEY")
+                    .value_name("B64")
+                    .help(
+                        "Base64 encoded X9.62 uncompressed public key for the \
+                            facilitator server",
+                    ),
+            )
+            .arg(
+                Arg::with_name("facilitator-manifest-base-url")
+                    .long("facilitator-manifest-base-url")
+                    .env("FACILITATOR_MANIFEST_BASE_URL")
+                    .value_name("URL")
+                    .help("Base URL of the Facilitator manifest"),
+            )
+            .group(
+                ArgGroup::with_name("facilitator_information")
+                    .args(&[
+                        "facilitator-ecies-public-key",
+                        "facilitator-manifest-base-url",
+                    ])
+                    .required(true),
+            )
+            .arg(
+                Arg::with_name("ingestor-manifest-base-url")
+                    .long("ingestor-manifest-base-url")
+                    .env("INGESTOR_MANIFEST_BASE_URL")
+                    .value_name("URL")
+                    .help("Base URL of this ingestor's manifest")
+                    .required(true),
+            )
+            .arg(
+                Arg::with_name("ingestor-batch-signing-key")
+                    .long("ingestor-batch-signing-key")
+                    .env("INGESTOR_BATCH_SIGNING_KEY")
+                    .value_name("B64")
+                    .help("Base64 "),
+            )
+            .arg(
+                Arg::with_name("epsilon")
+                    .long("epsilon")
+                    .value_name("DOUBLE")
+                    .help(
+                        "Differential privacy parameter for local \
+                            randomization before aggregation",
+                    )
+                    .required(true)
+                    .validator(num_validator::<f64>),
+            )
+            .arg(
+                Arg::with_name("batch-start-time")
+                    .long("batch-start-time")
+                    .value_name("MILLIS")
+                    .help("Start of timespan covered by the batch, in milliseconds since epoch")
+                    .required(true)
+                    .validator(num_validator::<i64>),
+            )
+            .arg(
+                Arg::with_name("batch-end-time")
+                    .long("batch-end-time")
+                    .value_name("MILLIS")
+                    .help("End of timespan covered by the batch, in milliseconds since epoch")
+                    .required(true)
+                    .validator(num_validator::<i64>),
+            )
+            .arg(
+                Arg::with_name("locality-name")
+                    .long("locality-name")
+                    .value_name("STRING")
+                    .help("Name of the locality this ingestor is targetting")
+                    .required(true),
+            )
+            .arg(
+                Arg::with_name("ingestor-name")
+                    .long("ingestor-name")
+                    .value_name("STRING")
+                    .help("Name of this ingestor")
+                    .required(true),
+            )
+            .add_batch_signing_key_arguments(false)
+    }
 }
 
 fn main() -> Result<(), anyhow::Error> {
@@ -428,167 +593,30 @@ fn main() -> Result<(), anyhow::Error> {
         .subcommand(
             SubCommand::with_name("generate-ingestion-sample")
                 .about("Generate sample data files")
-                .add_gcp_service_account_key_file_argument()
-                .add_storage_arguments(Entity::Peer, InOut::Output)
-                .add_storage_arguments(Entity::Own, InOut::Output)
+                .add_common_sample_maker_arguments()
+        )
+        .subcommand(
+            SubCommand::with_name("generate-ingestion-sample-worker")
+                .about("Spawn a worker to generate sample data files")
+                .add_common_sample_maker_arguments()
                 .arg(
                     Arg::with_name("kube-namespace")
-                    .long("kube-namespace")
-                    .env("KUBE_NAMESPACE")
-                    .value_name("STRING")
-                    .help(
-                        "Name of the kubernetes namespace"
-                    )
-                    .required(true)
-                )
-                .arg(
-                    Arg::with_name("aggregation-id")
-                        .long("aggregation-id")
-                        .value_name("ID")
-                        .required(true)
-                        .help("Name of the aggregation"),
-                )
-                .arg(
-                    Arg::with_name("batch-id")
-                        .long("batch-id")
-                        .value_name("UUID")
-                        .help(
-                            "UUID of the batch. If omitted, a UUID is \
-                            randomly generated.",
-                        )
-                        .validator(uuid_validator),
-                )
-                .arg(
-                    Arg::with_name("date")
-                        .long("date")
-                        .value_name("DATE")
-                        .help("Date for the batch in YYYY/mm/dd/HH/MM format")
-                        .long_help(
-                            "Date for the batch in YYYY/mm/dd/HH/MM format. If \
-                            omitted, the current date is used.",
-                        )
-                        .validator(date_validator),
-                )
-                .arg(
-                    Arg::with_name("dimension")
-                        .long("dimension")
-                        .short("d")
-                        .value_name("INT")
-                        .required(true)
-                        .validator(num_validator::<i32>)
-                        .help(
-                            "Length in bits of the data packets to generate \
-                            (a.k.a. \"bins\" in some contexts). Must be a \
-                            natural number.",
-                        ),
-                )
-                .arg(
-                    Arg::with_name("packet-count")
-                        .long("packet-count")
-                        .short("p")
-                        .value_name("INT")
-                        .required(true)
-                        .validator(num_validator::<usize>)
-                        .help("Number of data packets to generate"),
-                )
-                .arg(
-                    Arg::with_name("pha-ecies-public-key")
-                        .long("pha-ecies-public-key")
-                        .env("PHA_ECIES_PUBLIC_KEY")
-                        .value_name("B64")
-                        .help(
-                            "Base64 encoded X9.62 uncompressed public key for the PHA \
-                            server",
-                        )
-                )
-                .arg(
-                    Arg::with_name("pha-manifest-base-url")
-                    .long("pha-manifest-base-url")
-                    .env("PHA_MANIFEST_BASE_URL")
-                    .value_name("URL")
-                    .help(
-                        "Base URL of the Public Health Authority manifest"
-                    )
-                )
-                .group(
-                    ArgGroup::with_name("public_health_authority_information")
-                    .args(&["pha-ecies-public-key", "pha-manifest-base-url"])
-                    .required(true)
-                )
-                .arg(
-                    Arg::with_name("facilitator-ecies-public-key")
-                        .long("facilitator-ecies-public-key")
-                        .env("FACILITATOR_ECIES_PUBLIC_KEY")
-                        .value_name("B64")
-                        .help(
-                            "Base64 encoded X9.62 uncompressed public key for the \
-                            facilitator server",
-                        )
-                )
-                .arg(
-                    Arg::with_name("facilitator-manifest-base-url")
-                    .long("facilitator-manifest-base-url")
-                    .env("FACILITATOR_MANIFEST_BASE_URL")
-                    .value_name("URL")
-                    .help(
-                        "Base URL of the Facilitator manifest"
-                    )
-                )
-                .group(
-                    ArgGroup::with_name("facilitator_information")
-                    .args(&["facilitator-ecies-public-key", "facilitator-manifest-base-url"])
-                    .required(true)
-                )
-                .arg(
-                    Arg::with_name("own-manifest-base-url")
-                    .long("own-manifest-base-url")
-                    .env("OWN_MANIFEST_BASE_URL")
-                    .value_name("URL")
-                    .help(
-                        "Base URL of this ingestor's manifest"
-                    )
-                    .required(true)
-                )
-                .arg(
-                    Arg::with_name("epsilon")
-                        .long("epsilon")
-                        .value_name("DOUBLE")
-                        .help(
-                            "Differential privacy parameter for local \
-                            randomization before aggregation",
-                        )
-                        .required(true)
-                        .validator(num_validator::<f64>),
-                )
-                .arg(
-                    Arg::with_name("batch-start-time")
-                        .long("batch-start-time")
-                        .value_name("MILLIS")
-                        .help("Start of timespan covered by the batch, in milliseconds since epoch")
-                        .required(true)
-                        .validator(num_validator::<i64>),
-                )
-                .arg(
-                    Arg::with_name("batch-end-time")
-                        .long("batch-end-time")
-                        .value_name("MILLIS")
-                        .help("End of timespan covered by the batch, in milliseconds since epoch")
-                        .required(true)
-                        .validator(num_validator::<i64>),
-                )
-                .arg(
-                    Arg::with_name("locality-name")
-                        .long("locality-name")
+                        .long("kube-namespace")
+                        .env("KUBE_NAMESPACE")
                         .value_name("STRING")
-                        .help("Name of the locality this ingestor is targetting")
-                        .required(true),
+                        .help(
+                            "Name of the kubernetes namespace"
+                        )
+                        .required(true)
                 )
                 .arg(
-                    Arg::with_name("ingestor-name")
-                        .long("ingestor-name")
-                        .value_name("STRING")
-                        .help("Name of this ingestor")
-                        .required(true),
+                    Arg::with_name("generation-interval")
+                        .long("generation-interval")
+                        .value_name("INTERVAL")
+                        .help(
+                            "How often should samples be generated in seconds"
+                        )
+                        .required(true)
                 )
         )
         .subcommand(
@@ -622,7 +650,7 @@ fn main() -> Result<(), anyhow::Error> {
                 )
                 .add_packet_decryption_key_argument()
                 .add_batch_public_key_arguments(Entity::Ingestor)
-                .add_batch_signing_key_arguments()
+                .add_batch_signing_key_arguments(true)
                 .add_manifest_base_url_argument(Entity::Ingestor)
                 .add_storage_arguments(Entity::Ingestor, InOut::Input)
                 .add_manifest_base_url_argument(Entity::Peer)
@@ -701,7 +729,7 @@ fn main() -> Result<(), anyhow::Error> {
                 .add_manifest_base_url_argument(Entity::Portal)
                 .add_storage_arguments(Entity::Portal, InOut::Output)
                 .add_packet_decryption_key_argument()
-                .add_batch_signing_key_arguments()
+                .add_batch_signing_key_arguments(true)
         )
         .subcommand(
             SubCommand::with_name("lint-manifest")
@@ -757,7 +785,7 @@ fn main() -> Result<(), anyhow::Error> {
                 .add_gcp_service_account_key_file_argument()
                 .add_packet_decryption_key_argument()
                 .add_batch_public_key_arguments(Entity::Ingestor)
-                .add_batch_signing_key_arguments()
+                .add_batch_signing_key_arguments(true)
                 .add_manifest_base_url_argument(Entity::Ingestor)
                 .add_storage_arguments(Entity::Ingestor, InOut::Input)
                 .add_manifest_base_url_argument(Entity::Peer)
@@ -784,7 +812,7 @@ fn main() -> Result<(), anyhow::Error> {
                 .add_manifest_base_url_argument(Entity::Portal)
                 .add_storage_arguments(Entity::Portal, InOut::Output)
                 .add_packet_decryption_key_argument()
-                .add_batch_signing_key_arguments()
+                .add_batch_signing_key_arguments(true)
                 .add_task_queue_arguments()
                 .add_metrics_scrape_port_argument()
         )
@@ -795,6 +823,9 @@ fn main() -> Result<(), anyhow::Error> {
         // various parameters are present and valid, so it is safe to use
         // unwrap() here.
         ("generate-ingestion-sample", Some(sub_matches)) => generate_sample(sub_matches),
+        ("generate-ingestion-sample-worker", Some(sub_matches)) => {
+            generate_sample_worker(sub_matches.clone())
+        }
         ("intake-batch", Some(sub_matches)) => intake_batch_subcommand(sub_matches),
         ("intake-batch-worker", Some(sub_matches)) => intake_batch_worker(sub_matches),
         ("aggregate", Some(sub_matches)) => aggregate_subcommand(sub_matches),
@@ -804,6 +835,26 @@ fn main() -> Result<(), anyhow::Error> {
     };
 
     result
+}
+#[tokio::main(flavor = "multi_thread", worker_threads = 10)]
+async fn generate_sample_worker(sub_matches: ArgMatches<'static>) -> Result<(), anyhow::Error> {
+    let interval = String::from(sub_matches.value_of("generation-interval").unwrap());
+
+    let seconds = interval.parse::<u64>().expect("interval wasn't a number");
+    let mut ticker = tokio::time::interval(Duration::from_secs(seconds));
+    loop {
+        ticker.tick().await;
+        info!("Starting a sample generation job.");
+        let new_matches = sub_matches.clone();
+        thread::spawn(move || {
+            let result = generate_sample(&new_matches);
+
+            match result {
+                Ok(()) => println!("\tSuccess"),
+                Err(e) => println!("\tError: {:?}", e),
+            }
+        });
+    }
 }
 
 fn get_ecies_public_key(
@@ -871,45 +922,63 @@ fn get_identity_and_bucket(
     }
 }
 
-fn get_valid_batch_signing_key(namespace: &str, own_manifest_url: &str) -> Result<BatchSigningKey> {
-    let manifest = IngestionServerManifest::from_https(own_manifest_url, None).context(format!(
-        "unable to get ingestion server manifest from url: {}",
-        own_manifest_url
-    ))?;
+fn get_valid_batch_signing_key(
+    namespace: Option<&str>,
+    ingestor_manifest_url: Option<&str>,
+    matches: &ArgMatches,
+) -> Result<BatchSigningKey> {
+    match ingestor_manifest_url {
+        Some(own_manifest_url) => {
+            let namespace = namespace.unwrap();
 
-    let kubernetes = Kubernetes::new(String::from(namespace));
-    let secrets = kubernetes.get_sorted_secrets("type=batch-signing-key")?;
+            let manifest =
+                IngestionServerManifest::from_https(own_manifest_url, None).context(format!(
+                    "unable to get ingestion server manifest from url: {}",
+                    own_manifest_url
+                ))?;
 
-    let batch_signing_keys = manifest.batch_signing_public_keys().unwrap();
+            let kubernetes = Kubernetes::new(String::from(namespace));
+            let secrets = kubernetes.get_sorted_secrets("type=batch-signing-key")?;
 
-    let secret = secrets
-        .into_iter()
-        .find(|secret| batch_signing_keys.contains_key(&secret.name()));
+            let batch_signing_keys = manifest.batch_signing_public_keys().unwrap();
 
-    match secret {
-        None => Err(anyhow!(
+            let secret = secrets
+                .into_iter()
+                .find(|secret| batch_signing_keys.contains_key(&secret.name()));
+
+            match secret {
+                None => Err(anyhow!(
             "unable to find a batch signing key from the manifest and kubernetes secret store"
         )),
-        Some(secret) => {
-            let secret_name = secret.name();
-            let secret_data = base64::decode(secret.data.unwrap().remove("secret_key").unwrap().0)?;
-            let key = EcdsaKeyPair::from_pkcs8(&ECDSA_P256_SHA256_ASN1_SIGNING, &secret_data)
-                .map_err(|e| anyhow!("decoding secret key rejected: {}", e))?;
+                Some(secret) => {
+                    let secret_name = secret.name();
+                    let secret_data =
+                        base64::decode(secret.data.unwrap().remove("secret_key").unwrap().0)?;
+                    let key =
+                        EcdsaKeyPair::from_pkcs8(&ECDSA_P256_SHA256_ASN1_SIGNING, &secret_data)
+                            .map_err(|e| anyhow!("decoding secret key rejected: {}", e))?;
 
-            Ok(BatchSigningKey {
-                identifier: secret_name,
-                key,
-            })
+                    Ok(BatchSigningKey {
+                        identifier: secret_name,
+                        key,
+                    })
+                }
+            }
         }
+        // The caller is passing key in directly
+        None => batch_signing_key_from_arg(matches),
     }
 }
 
 fn generate_sample(sub_matches: &ArgMatches) -> Result<(), anyhow::Error> {
-    let kube_namespace = sub_matches.value_of("kube-namespace").unwrap();
-    let own_manifest_base_url = sub_matches.value_of("own-manifest-base-url").unwrap();
+    let kube_namespace = sub_matches.value_of("kube-namespace");
+    let ingestor_manifest_base_url = sub_matches.value_of("ingestor-manifest-base-url");
+
     let ingestor_name = sub_matches.value_of("ingestor-name").unwrap();
     let locality_name = sub_matches.value_of("locality-name").unwrap();
-    let own_batch_signing_key = get_valid_batch_signing_key(kube_namespace, own_manifest_base_url)?;
+
+    let own_batch_signing_key =
+        get_valid_batch_signing_key(kube_namespace, ingestor_manifest_base_url, sub_matches)?;
 
     let (peer_identity, peer_output_path) = get_identity_and_bucket(
         sub_matches.value_of("peer-identity"),
@@ -942,24 +1011,21 @@ fn generate_sample(sub_matches: &ArgMatches) -> Result<(), anyhow::Error> {
         drop_nth_packet: None,
     };
 
-    // let own_output_path = StoragePath::from_str(sub_matches.value_of("own-output").unwrap())?;
-    // let own_identity = sub_matches.value_of("own-identity");
-
-    let (own_identity, own_output_path) = get_identity_and_bucket(
-        sub_matches.value_of("own-identity"),
-        sub_matches.value_of("own-output"),
+    let (facilitator_identity, faciliator_output) = get_identity_and_bucket(
+        sub_matches.value_of("facilitator-identity"),
+        sub_matches.value_of("facilitator-output"),
         sub_matches.value_of("facilitator-manifest-base-url"),
         ingestor_name,
         locality_name,
     )?;
 
     info!(
-        "own-idenity: {}, own_output_path: {}",
-        &own_identity.as_deref().unwrap_or("None"),
-        &own_output_path
+        "facilitator-idenity: {}, facilitator_output_path: {}",
+        &facilitator_identity.as_deref().unwrap_or("None"),
+        &faciliator_output
     );
 
-    let own_output_path = StoragePath::from_str(&own_output_path)?;
+    let faciliator_output = StoragePath::from_str(&faciliator_output)?;
 
     let packet_encryption_public_key = get_ecies_public_key(
         sub_matches.value_of("facilitator-ecies-public-key"),
@@ -969,11 +1035,16 @@ fn generate_sample(sub_matches: &ArgMatches) -> Result<(), anyhow::Error> {
     )
     .unwrap();
 
-    let own_batch_signing_key = get_valid_batch_signing_key(kube_namespace, own_manifest_base_url)?;
+    let own_batch_signing_key =
+        get_valid_batch_signing_key(kube_namespace, ingestor_manifest_base_url, sub_matches)?;
 
-    let mut own_transport = SampleOutput {
+    let mut facilitator_transport = SampleOutput {
         transport: SignableTransport {
-            transport: transport_for_path(own_output_path, own_identity.as_deref(), sub_matches)?,
+            transport: transport_for_path(
+                faciliator_output,
+                facilitator_identity.as_deref(),
+                sub_matches,
+            )?,
             batch_signing_key: own_batch_signing_key,
         },
         packet_encryption_public_key,
@@ -993,7 +1064,7 @@ fn generate_sample(sub_matches: &ArgMatches) -> Result<(), anyhow::Error> {
         value_t!(sub_matches.value_of("batch-start-time"), i64)?,
         value_t!(sub_matches.value_of("batch-end-time"), i64)?,
         &mut peer_transport,
-        &mut own_transport,
+        &mut facilitator_transport,
     )?;
     Ok(())
 }
