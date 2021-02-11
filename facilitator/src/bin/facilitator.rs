@@ -594,6 +594,16 @@ fn main() -> Result<(), anyhow::Error> {
             SubCommand::with_name("generate-ingestion-sample")
                 .about("Generate sample data files")
                 .add_common_sample_maker_arguments()
+                .arg(
+                    Arg::with_name("kube-namespace")
+                        .long("kube-namespace")
+                        .env("KUBE_NAMESPACE")
+                        .value_name("STRING")
+                        .help(
+                            "Name of the kubernetes namespace"
+                        )
+                        .required(false)
+                )
         )
         .subcommand(
             SubCommand::with_name("generate-ingestion-sample-worker")

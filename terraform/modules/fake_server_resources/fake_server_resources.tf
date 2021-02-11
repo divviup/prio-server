@@ -276,6 +276,7 @@ resource "kubernetes_deployment" "integration-tester" {
     }
   }
 }
+
 output "aws_iam_entity" {
   value = aws_iam_role.tester_role.arn
 }
