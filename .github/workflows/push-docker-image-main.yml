@@ -51,6 +51,6 @@ jobs:
     - name: tag latest-main
       run: docker tag letsencrypt/prio-workflow-manager letsencrypt/prio-workflow-manager:latest-main
     - name: push hash
-      run: docker push letsencrypt/prio-workflow-manager letsencrypt/prio-workflow-manager:${{ steps.get_hash.outputs.HASH }}
+      run: docker push letsencrypt/prio-workflow-manager:${{ steps.get_hash.outputs.HASH }}
     - name: push latest-main
       run: docker push letsencrypt/prio-workflow-manager:latest-main
