@@ -1,9 +1,6 @@
 use anyhow::{anyhow, Context, Result};
-use chrono::Duration;
-use once_cell::sync::Lazy;
-use regex::Regex;
 use rusoto_core::{region::ParseRegionError, Region};
-use serde::{de, Deserialize, Deserializer, Serialize, Serializer};
+use serde::{de, Deserialize, Deserializer};
 use std::{
     fmt::{self, Display, Formatter},
     path::PathBuf,
@@ -228,113 +225,12 @@ impl Display for TaskQueueKind {
     }
 }
 
-/// Represents a simple duration specified in terms of whole hours, minutes and seconds. Mostly used
-/// for user input in flags or config files. For computations it should usually be converted to a
-/// [`chrono::Duration`] using [`to_duration`](DayDuration::to_duration).
-#[derive(Copy, Clone, Debug, PartialEq)]
-pub struct DayDuration {
-    hours: u32,
-    minutes: u32,
-    seconds: u32,
-}
-
-impl DayDuration {
-    pub fn from_hms(hours: u32, minutes: u32, seconds: u32) -> DayDuration {
-        DayDuration {
-            hours,
-            minutes,
-            seconds,
-        }
-    }
-
-    pub fn validate(&self) -> Result<(), String> {
-        // Components aren't allowed to overflow unless they're the first non-0 component
-        if self.hours != 0 && self.minutes >= 60 {
-            return Err("minutes > 59 are not allowed if hours is specified".into());
-        }
-        if (self.hours != 0 || self.minutes != 0) && self.seconds >= 60 {
-            return Err("seconds > 59 are not allowed if hours or minutes are specified".into());
-        }
-        Ok(())
-    }
-
-    pub fn to_duration(&self) -> Duration {
-        Duration::hours(self.hours.into())
-            + Duration::minutes(self.minutes.into())
-            + Duration::seconds(self.seconds.into())
-    }
-}
-
-impl From<DayDuration> for Duration {
-    fn from(d: DayDuration) -> Duration {
-        d.to_duration()
-    }
-}
-
-impl fmt::Display for DayDuration {
-    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-        if self.hours != 0 {
-            write!(f, "{}h", self.hours)?;
-        }
-        if self.minutes != 0 {
-            write!(f, "{}m", self.minutes)?;
-        }
-        if self.seconds != 0 || (self.hours == 0 && self.minutes == 0) {
-            write!(f, "{}s", self.seconds)?;
-        }
-        Ok(())
-    }
-}
-
-impl FromStr for DayDuration {
-    type Err = String;
-
-    fn from_str(s: &str) -> Result<DayDuration, String> {
-        static RE: Lazy<Regex> =
-            Lazy::new(|| Regex::new(r"^(?:(\d+)h)?(?:(\d+)m)?(?:(\d+)s)?$").unwrap());
-
-        let groups = RE
-            .captures(&s)
-            .ok_or("not in expected format (e.g. 1h30m20s)")?;
-
-        let parse_component = |group_idx, label| -> Result<u32, String> {
-            groups
-                .get(group_idx)
-                .map_or(Ok(0), |x| u32::from_str(x.as_str()))
-                .map_err(|e| format!("failed to parse {}: {}", label, e))
-        };
-
-        let d = DayDuration {
-            hours: parse_component(1, "hours")?,
-            minutes: parse_component(2, "minutes")?,
-            seconds: parse_component(3, "seconds")?,
-        };
-        d.validate()?;
-        Ok(d)
-    }
-}
-
-impl Serialize for DayDuration {
-    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        serializer.serialize_str(&self.to_string())
-    }
-}
-
-impl<'de> Deserialize<'de> for DayDuration {
-    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<DayDuration, D::Error> {
-        String::deserialize(deserializer)?
-            .parse()
-            .map_err(de::Error::custom)
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::{GCSPath, GCSPathParseError, S3Path, S3PathParseError, StoragePath};
-    use crate::config::DayDuration;
     use assert_matches::assert_matches;
     use rusoto_core::Region;
-    use serde_test::{assert_de_tokens, assert_tokens, Token};
+    use serde_test::{assert_de_tokens, Token};
     use std::str::FromStr;
 
     #[test]
@@ -399,62 +295,6 @@ mod tests {
             &StoragePath::LocalPath("/absolute/path".into()),
             &[Token::Str("/absolute/path")],
         );
-    }
-
-    #[test]
-    fn dayduration_serialization() {
-        let testcases = [
-            // All combinations of components
-            (DayDuration::from_hms(0, 0, 0), "0s"),
-            (DayDuration::from_hms(11, 0, 0), "11h"),
-            (DayDuration::from_hms(0, 22, 0), "22m"),
-            (DayDuration::from_hms(0, 0, 33), "33s"),
-            (DayDuration::from_hms(11, 22, 0), "11h22m"),
-            (DayDuration::from_hms(11, 0, 33), "11h33s"),
-            (DayDuration::from_hms(0, 22, 33), "22m33s"),
-            (DayDuration::from_hms(11, 22, 33), "11h22m33s"),
-            // Allowed overflows
-            (DayDuration::from_hms(0, 0, 90), "90s"),
-            (DayDuration::from_hms(0, 90, 33), "90m33s"),
-            (DayDuration::from_hms(90, 22, 33), "90h22m33s"),
-        ];
-
-        for (duration, serialized) in &testcases {
-            assert_tokens(duration, &[Token::Str(serialized)]);
-        }
-    }
-
-    #[test]
-    fn dayduration_parse_errors() {
-        let testcases = [
-            // Wrong format
-            ("123", "not in expected format"),
-            ("h", "not in expected format"),
-            ("33s22m", "not in expected format"),
-            ("11hXXm33s", "not in expected format"),
-            // Disallowed overflow
-            ("1m90s", "seconds > 59"),
-            ("1h90s", "seconds > 59"),
-            ("1h90m", "minutes > 59"),
-            // Int parsing error (overflow)
-            ("9999999999s", "failed to parse seconds"),
-            ("9999999999m", "failed to parse minutes"),
-            ("9999999999h", "failed to parse hours"),
-        ];
-
-        for (serialized, expected_error) in &testcases {
-            match DayDuration::from_str(serialized) {
-                Ok(val) => panic!(
-                    "Expected {:?} to fail to deserialize, but it succeeded: {:?}",
-                    serialized, val
-                ),
-                Err(err) if !err.contains(expected_error) => panic!(
-                    "Expected {:?} to fail with {:?}, but failed with: {:?}",
-                    serialized, expected_error, err
-                ),
-                _ => {}
-            }
-        }
     }
 
     #[test]
