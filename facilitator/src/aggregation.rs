@@ -108,18 +108,8 @@ impl<'a> BatchAggregator<'a> {
             .collect::<Vec<Server>>();
 
         for batch_id in batch_ids {
-            if let Err(error) =
-                self.aggregate_share(&batch_id.0, &batch_id.1, &mut servers, &mut invalid_uuids)
-            {
-                log::info!(
-                    "ignoring batch {}/{} due to error {:?}",
-                    batch_id.0,
-                    batch_id.1,
-                    error
-                );
-            } else {
-                included_batch_uuids.push(batch_id.0);
-            }
+            self.aggregate_share(&batch_id.0, &batch_id.1, &mut servers, &mut invalid_uuids)?;
+            included_batch_uuids.push(batch_id.0);
             callback();
         }
 
