@@ -173,7 +173,7 @@ impl StreamingTransferWriter {
             .query("name", &encoded_object)
             // By default, ureq will wait forever to connect or read
             .timeout_connect(10_000) // ten seconds
-            .timeout_read(10_000) // ten seconds
+            .timeout_read(120_000) // two minutes
             .send_bytes(&[]);
         if http_response.error() {
             return Err(anyhow!("uploading to gs://{}: {:?}", bucket, http_response));
@@ -235,7 +235,7 @@ impl StreamingTransferWriter {
             .set("Content-Range", &content_range)
             // By default, ureq will wait forever to connect or read
             .timeout_connect(10_000) // ten seconds
-            .timeout_read(10_000) // ten seconds
+            .timeout_read(120_000) // two minutes
             .send_bytes(body);
 
         // On success we expect HTTP 308 Resume Incomplete and a Range: header,
@@ -333,7 +333,7 @@ impl TransportWriter for StreamingTransferWriter {
             .set("Content-Length", "0")
             // By default, ureq will wait forever to connect or read
             .timeout_connect(10_000) // ten seconds
-            .timeout_read(10_000) // ten seconds
+            .timeout_read(120_000) // two minutes
             .call();
         match http_response.status() {
             499 => Ok(()),
