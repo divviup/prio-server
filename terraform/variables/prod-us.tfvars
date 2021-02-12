@@ -18,20 +18,20 @@ ingestors = {
         aggregate_worker_count = 1
       }
       us-ct = {
-        intake_worker_count    = 1
-        aggregate_worker_count = 1
+        intake_worker_count    = 5
+        aggregate_worker_count = 3
       }
       us-md = {
-        intake_worker_count    = 1
-        aggregate_worker_count = 1
+        intake_worker_count    = 5
+        aggregate_worker_count = 3
       }
       us-va = {
-        intake_worker_count    = 1
-        aggregate_worker_count = 1
+        intake_worker_count    = 5
+        aggregate_worker_count = 3
       }
       us-wa = {
-        intake_worker_count    = 1
-        aggregate_worker_count = 1
+        intake_worker_count    = 5
+        aggregate_worker_count = 3
       }
     }
   }
@@ -43,20 +43,20 @@ ingestors = {
         aggregate_worker_count = 1
       }
       us-ct = {
-        intake_worker_count    = 1
-        aggregate_worker_count = 1
+        intake_worker_count    = 3
+        aggregate_worker_count = 3
       }
       us-md = {
-        intake_worker_count    = 1
-        aggregate_worker_count = 1
+        intake_worker_count    = 3
+        aggregate_worker_count = 3
       }
       us-va = {
-        intake_worker_count    = 1
-        aggregate_worker_count = 1
+        intake_worker_count    = 3
+        aggregate_worker_count = 3
       }
       us-wa = {
-        intake_worker_count    = 1
-        aggregate_worker_count = 1
+        intake_worker_count    = 3
+        aggregate_worker_count = 3
       }
     }
   }
