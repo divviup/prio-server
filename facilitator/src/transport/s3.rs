@@ -421,9 +421,8 @@ impl Write for MultipartUploadWriter {
         // enough content.
         self.buffer.extend_from_slice(buf);
         if self.buffer.len() >= self.minimum_upload_part_size {
-            self.upload_part().map_err(|e| {
-                std::io::Error::new(std::io::ErrorKind::Other, Error::AnyhowError(e))
-            })?;
+            self.upload_part()
+                .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, Error::Anyhow(e)))?;
         }
 
         Ok(buf.len())

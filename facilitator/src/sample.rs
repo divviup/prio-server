@@ -191,10 +191,10 @@ pub fn generate_ingestion_sample(
                 &facilitator_batch_signing_key_ref.key,
             )?;
 
-            facilitator_ingestion_batch.put_signature(
+            Ok(facilitator_ingestion_batch.put_signature(
                 &facilitator_header_signature,
                 &facilitator_batch_signing_key_ref.identifier,
-            )
+            )?)
         })?;
 
     let pha_header_signature = pha_ingestion_batch.put_header(

@@ -2,9 +2,9 @@ use crate::{
     hex_dump,
     idl::{BatchSignature, Header, Packet},
     transport::{Transport, TransportWriter},
-    DigestWriter, SidecarWriter, DATE_FORMAT,
+    DigestWriter, Error, SidecarWriter, DATE_FORMAT,
 };
-use anyhow::{anyhow, Context, Result};
+use anyhow::{Context, Result};
 use avro_rs::{Reader, Schema, Writer};
 use chrono::NaiveDateTime;
 use ring::{
@@ -140,7 +140,7 @@ impl<'a, H: Header, P: Packet> BatchReader<'a, H, P> {
     pub fn header(
         &mut self,
         public_keys: &HashMap<String, UnparsedPublicKey<Vec<u8>>>,
-    ) -> Result<H> {
+    ) -> Result<H, Error> {
         let signature = BatchSignature::read(self.transport.get(self.batch.signature_key())?)?;
 
         let mut header_buf = Vec::new();
@@ -151,22 +151,25 @@ impl<'a, H: Header, P: Packet> BatchReader<'a, H, P> {
 
         public_keys
             .get(&signature.key_identifier)
-            .context(format!(
-                "key identifier {} not present in key map",
-                signature.key_identifier,
-            ))?
+            .ok_or_else(|| Error::NoSuchKey {
+                header_path: self.batch.header_key().to_string(),
+                key_name: signature.key_identifier.clone(),
+            })?
             .verify(&header_buf, &signature.batch_header_signature)
-            .context(format!(
-                "invalid signature on header with key {}",
-                signature.key_identifier,
-            ))?;
-        Ok(H::read(Cursor::new(header_buf))?)
+            // UnparsedPublicKey::verify returns ring::error::Unspecified, which
+            // intentionally carries no information about the failure, so
+            // there's no use wrapping it.
+            .map_err(|_| Error::InvalidSignature {
+                header_path: self.batch.header_key().to_string(),
+                key_name: signature.key_identifier,
+            })?;
+        H::read(Cursor::new(header_buf)).map_err(|e| e.into())
     }
 
     /// Return an avro_rs::Reader that yields the packets in the packet file,
     /// but only if the whole file's digest matches the packet_file_digest field
     /// in the provided header. The header is assumed to be trusted.
-    pub fn packet_file_reader(&mut self, header: &H) -> Result<Reader<Cursor<Vec<u8>>>> {
+    pub fn packet_file_reader(&mut self, header: &H) -> Result<Reader<Cursor<Vec<u8>>>, Error> {
         // Fetch packet file to validate its digest. It could be quite large so
         // so our intuition would be to stream the packets from the transport
         // and into a hasher and into the validation step, so that we wouldn't
@@ -192,11 +195,11 @@ impl<'a, H: Header, P: Packet> BatchReader<'a, H, P> {
         // ... then verify the digest over it ...
         let packet_file_digest = sidecar_writer.sidecar.finish();
         if header.packet_file_digest().as_slice() != packet_file_digest.as_ref() {
-            return Err(anyhow!(
-                "packet file digest in header {} does not match actual packet file digest {}",
-                hex_dump(header.packet_file_digest()),
-                hex_dump(packet_file_digest.as_ref())
-            ));
+            return Err(Error::DigestMismatch {
+                header_path: self.batch.header_key().to_string(),
+                expected_digest: hex_dump(header.packet_file_digest()),
+                actual_digest: hex_dump(packet_file_digest.as_ref()),
+            });
         }
 
         // pop() should always succeed here because sidecar_writers.writers is
@@ -209,6 +212,7 @@ impl<'a, H: Header, P: Packet> BatchReader<'a, H, P> {
         // ... then return a packet reader.
         Reader::with_schema(&self.packet_schema, Cursor::new(packet_file))
             .context("failed to create Avro reader for packets")
+            .map_err(|e| e.into())
     }
 }
 
@@ -241,7 +245,7 @@ impl<'a, H: Header, P: Packet> BatchWriter<'a, H, P> {
     /// Encode the provided header into Avro, sign that representation with the
     /// provided key and write the header into the batch. Returns the signature
     /// on success.
-    pub fn put_header(&mut self, header: &H, key: &EcdsaKeyPair) -> Result<Signature> {
+    pub fn put_header(&mut self, header: &H, key: &EcdsaKeyPair) -> Result<Signature, Error> {
         let mut sidecar_writer = SidecarWriter::new(
             vec![self.transport.put(self.batch.header_key())?],
             Vec::new(),
@@ -264,7 +268,7 @@ impl<'a, H: Header, P: Packet> BatchWriter<'a, H, P> {
         &mut self,
         mut more_batch_writers: Vec<&mut BatchWriter<H, P>>,
         operation: F,
-    ) -> Result<Digest>
+    ) -> Result<Digest, Error>
     where
         F: FnOnce(&mut Writer<SidecarWriter<Box<dyn TransportWriter>, DigestWriter>>) -> Result<()>,
     {
@@ -292,7 +296,7 @@ impl<'a, H: Header, P: Packet> BatchWriter<'a, H, P> {
                     .cancel_upload()
                     .with_context(|| format!("Encountered while handling: {}", e))?;
             }
-            return Err(e);
+            return Err(e.into());
         }
 
         for transport_writer in &mut sidecar_writer.writers {
@@ -309,7 +313,7 @@ impl<'a, H: Header, P: Packet> BatchWriter<'a, H, P> {
     /// The operation should return Ok(()) when it has finished successfully or
     /// some Err() otherwise. packet_file_writer returns the digest of all the
     /// content written by the operation.
-    pub fn packet_file_writer<F>(&mut self, operation: F) -> Result<Digest>
+    pub fn packet_file_writer<F>(&mut self, operation: F) -> Result<Digest, Error>
     where
         F: FnOnce(&mut Writer<SidecarWriter<Box<dyn TransportWriter>, DigestWriter>>) -> Result<()>,
     {
@@ -318,7 +322,11 @@ impl<'a, H: Header, P: Packet> BatchWriter<'a, H, P> {
 
     /// Constructs a signature structure from the provided buffers and writes it
     /// to the batch's signature file
-    pub fn put_signature(&mut self, signature: &Signature, key_identifier: &str) -> Result<()> {
+    pub fn put_signature(
+        &mut self,
+        signature: &Signature,
+        key_identifier: &str,
+    ) -> Result<(), Error> {
         let batch_signature = BatchSignature {
             batch_header_signature: signature.as_ref().to_vec(),
             key_identifier: key_identifier.to_string(),
@@ -330,6 +338,7 @@ impl<'a, H: Header, P: Packet> BatchWriter<'a, H, P> {
         writer
             .complete_upload()
             .context("failed to complete signature upload")
+            .map_err(|e| e.into())
     }
 }
 
@@ -458,7 +467,7 @@ mod tests {
 
         // One more read should get EOF
         match IngestionDataSharePacket::read(&mut packet_file_reader) {
-            Err(Error::EofError) => (),
+            Err(Error::Eof) => (),
             v => assert!(false, "wrong error {:?}", v),
         }
     }

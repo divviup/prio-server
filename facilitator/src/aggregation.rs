@@ -8,7 +8,7 @@ use crate::{
     transport::{SignableTransport, VerifiableAndDecryptableTransport, VerifiableTransport},
     BatchSigningKey, Error,
 };
-use anyhow::{anyhow, Context, Result};
+use anyhow::{Context, Result};
 use avro_rs::Reader;
 use chrono::NaiveDateTime;
 use log::info;
@@ -82,7 +82,7 @@ impl<'a> BatchAggregator<'a> {
         &mut self,
         batch_ids: &[(Uuid, NaiveDateTime)],
         mut callback: F,
-    ) -> Result<()> {
+    ) -> Result<(), Error> {
         info!(
             "processing intake from {}, own validity from {}, peer validity from {} and saving sum parts to {}",
             self.ingestion_transport.transport.transport.path(),
@@ -193,7 +193,7 @@ impl<'a> BatchAggregator<'a> {
         batch_date: &NaiveDateTime,
         servers: &mut Vec<Server>,
         invalid_uuids: &mut Vec<Uuid>,
-    ) -> Result<()> {
+    ) -> Result<(), Error> {
         let mut ingestion_batch: BatchReader<'_, IngestionHeader, IngestionDataSharePacket> =
             BatchReader::new(
                 Batch::new_ingestion(self.aggregation_name, batch_id, batch_date),
@@ -221,7 +221,7 @@ impl<'a> BatchAggregator<'a> {
                         .with_label_values(&["header"])
                         .inc();
                 }
-                return Err(error);
+                return Err(Error::BadPeerValidationBatch(error.into()));
             }
         };
 
@@ -236,26 +236,31 @@ impl<'a> BatchAggregator<'a> {
                         .with_label_values(&["header"])
                         .inc();
                 }
-                return Err(error);
+                return Err(Error::BadOwnValidationBatch(error.into()));
             }
         };
 
         let ingestion_header = ingestion_batch
-            .header(&self.ingestion_transport.transport.batch_signing_public_keys)?;
+            .header(&self.ingestion_transport.transport.batch_signing_public_keys)
+            .map_err(|e| Error::BadIngestionBatch(e.into()))?;
 
         // Make sure all the parameters in the headers line up
         if !peer_validation_header.check_parameters(&own_validation_header) {
-            return Err(anyhow!(
-                "validation headers do not match. Peer: {:?}\nOwn: {:?}",
-                peer_validation_header,
-                own_validation_header
+            return Err(Error::BadPeerValidationBatch(
+                Error::HeaderMismatch {
+                    lhs: format!("{:?}", peer_validation_header),
+                    rhs: format!("{:?}", own_validation_header),
+                }
+                .into(),
             ));
         }
         if !ingestion_header.check_parameters(&peer_validation_header) {
-            return Err(anyhow!(
-                "ingestion header does not match peer validation header. Ingestion: {:?}\nPeer:{:?}",
-                ingestion_header,
-                peer_validation_header
+            return Err(Error::BadOwnValidationBatch(
+                Error::HeaderMismatch {
+                    lhs: format!("{:?}", ingestion_header),
+                    rhs: format!("{:?}", peer_validation_header),
+                }
+                .into(),
             ));
         }
 
@@ -278,7 +283,7 @@ impl<'a> BatchAggregator<'a> {
                             .with_label_values(&["packet_file"])
                             .inc();
                     }
-                    return Err(error);
+                    return Err(Error::BadPeerValidationBatch(error.into()));
                 }
             };
         let peer_validation_packets: HashMap<Uuid, ValidationPacket> =
@@ -294,7 +299,7 @@ impl<'a> BatchAggregator<'a> {
                             .with_label_values(&["packet_file"])
                             .inc();
                     }
-                    return Err(error);
+                    return Err(Error::BadOwnValidationBatch(error.into()));
                 }
             };
 
@@ -305,13 +310,15 @@ impl<'a> BatchAggregator<'a> {
         // duplicates.
         let mut processed_ingestion_packets = HashSet::new();
 
-        let mut ingestion_packet_reader = ingestion_batch.packet_file_reader(&ingestion_header)?;
+        let mut ingestion_packet_reader = ingestion_batch
+            .packet_file_reader(&ingestion_header)
+            .map_err(|e| Error::BadIngestionBatch(e.into()))?;
 
         loop {
             let ingestion_packet =
                 match IngestionDataSharePacket::read(&mut ingestion_packet_reader) {
                     Ok(p) => p,
-                    Err(Error::EofError) => break,
+                    Err(Error::Eof) => break,
                     Err(e) => return Err(e.into()),
                 };
 
@@ -352,8 +359,12 @@ impl<'a> BatchAggregator<'a> {
             for server in servers.iter_mut() {
                 match server.aggregate(
                     &ingestion_packet.encrypted_payload,
-                    &VerificationMessage::try_from(peer_validation_packet)?,
-                    &VerificationMessage::try_from(own_validation_packet)?,
+                    &VerificationMessage::try_from(peer_validation_packet).context(
+                        "peer validation packet could not be converted to verification message",
+                    )?,
+                    &VerificationMessage::try_from(own_validation_packet).context(
+                        "own validation packet could not be converted to verification message",
+                    )?,
                 ) {
                     Ok(valid) => {
                         if !valid {
@@ -374,12 +385,12 @@ impl<'a> BatchAggregator<'a> {
                 }
             }
             if !did_aggregate_shares {
-                return last_err
+                return Ok(last_err
                     // Unwrap the optional, providing an error if it is None
                     .context("unknown validation error")?
                     // Wrap either the default error or what we got from
                     // server.aggregate
-                    .context("failed to validate packets");
+                    .context("failed to validate packets")?);
             }
         }
 
@@ -396,7 +407,7 @@ fn validation_packet_map(
             Ok(p) => {
                 map.insert(p.uuid, p);
             }
-            Err(Error::EofError) => return Ok(map),
+            Err(Error::Eof) => return Ok(map),
             Err(e) => return Err(e.into()),
         }
     }

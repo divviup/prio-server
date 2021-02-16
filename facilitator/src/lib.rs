@@ -21,23 +21,56 @@ pub const DATE_FORMAT: &str = "%Y/%m/%d/%H/%M";
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
-    /// Compatibility enum entry to ease migration.
-    #[error(transparent)]
-    // TODO(yuriks): The `From` impl should stay disabled while not updating errors, to avoid
-    //   accidentally wrapping an `EofError` inside `AnyhowError`, which would then get missed when
-    //   code tries to pattern-match against it. I don't trust our current test coverage enough to
-    //   detect all cases where that happens and leads to incorrect behavior.
-    //   Later on, `anyhow` downcasting with `Error::is` can be used to check for `EofError`.
-    AnyhowError(/*#[from]*/ anyhow::Error),
+    /// An error occurred while reading or writing an ingestion batch
+    #[error("error reading/writing ingestion batch")]
+    BadIngestionBatch(#[source] Box<Error>),
+    /// An error occurred while reading or writing a peer validation batch
+    #[error("error reading/writing peer validation batch")]
+    BadPeerValidationBatch(#[source] Box<Error>),
+    /// An error occurred while reading or writing an own validation batch
+    #[error("error reading/writing own validation batch")]
+    BadOwnValidationBatch(#[source] Box<Error>),
 
+    // Errors from batch module
+    #[error("{header_path}: key {key_name} not present in key map")]
+    NoSuchKey {
+        header_path: String,
+        key_name: String,
+    },
+    #[error("invalid signature on header {header_path} with key {key_name}")]
+    InvalidSignature {
+        header_path: String,
+        key_name: String,
+    },
+    #[error("packet file digest in header {header_path} {expected_digest} does not match actual packet file digest {actual_digest}")]
+    DigestMismatch {
+        header_path: String,
+        expected_digest: String,
+        actual_digest: String,
+    },
+
+    // Errors from aggregation module
+    #[error("values in batch headers do not match: {lhs:?}\n{rhs:?}")]
+    HeaderMismatch { lhs: String, rhs: String },
+
+    // Errors from idl module
     #[error("avro error: {0}")]
-    AvroError(String, #[source] avro_rs::Error),
+    Avro(String, #[source] avro_rs::Error),
     #[error("malformed header: {0}")]
-    MalformedHeaderError(String),
+    MalformedHeader(String),
     #[error("malformed data packet: {0}")]
-    MalformedDataPacketError(String),
+    MalformedDataPacket(String),
     #[error("end of file")]
-    EofError,
+    Eof,
+
+    #[error("invalid value for argument {0}")]
+    InvalidArgument(String),
+
+    /// Catchall case for errors not captured by specific variants of this enum.
+    /// As we encounter more errors that should be distinguished from others
+    /// programmatically, specific variants should be added to this enum.
+    #[error(transparent)]
+    Anyhow(#[from] anyhow::Error),
 }
 
 /// An implementation of transport::TransportWriter that computes a SHA256

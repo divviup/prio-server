@@ -72,32 +72,25 @@ impl BatchSignature {
     /// Reads and parses one BatchSignature from the provided std::io::Read
     /// instance.
     pub fn read<R: Read>(reader: R) -> Result<BatchSignature, Error> {
-        let schema = Schema::parse_str(BATCH_SIGNATURE_SCHEMA).map_err(|e| {
-            Error::AvroError("failed to parse ingestion signature schema".to_owned(), e)
-        })?;
+        let schema = Schema::parse_str(BATCH_SIGNATURE_SCHEMA)
+            .map_err(|e| Error::Avro("failed to parse ingestion signature schema".to_owned(), e))?;
         let mut reader = Reader::with_schema(&schema, reader)
-            .map_err(|e| Error::AvroError("failed to create Avro reader".to_owned(), e))?;
+            .map_err(|e| Error::Avro("failed to create Avro reader".to_owned(), e))?;
 
         // We expect exactly one record and for it to be an ingestion signature
         let record = match reader.next() {
             Some(Ok(Value::Record(r))) => r,
-            Some(Ok(_)) => {
-                return Err(Error::MalformedHeaderError(
-                    "value is not a record".to_owned(),
-                ))
-            }
+            Some(Ok(_)) => return Err(Error::MalformedHeader("value is not a record".to_owned())),
             Some(Err(e)) => {
-                return Err(Error::AvroError(
+                return Err(Error::Avro(
                     "failed to read record from Avro reader".to_owned(),
                     e,
                 ));
             }
-            None => return Err(Error::EofError),
+            None => return Err(Error::Eof),
         };
         if reader.next().is_some() {
-            return Err(Error::MalformedHeaderError(
-                "excess value in reader".to_owned(),
-            ));
+            return Err(Error::MalformedHeader("excess value in reader".to_owned()));
         }
 
         // Here we might wish to use from_value::<BatchSignature>(record) but
@@ -113,7 +106,7 @@ impl BatchSignature {
                 ("batch_header_signature", Value::Bytes(v)) => batch_header_signature = Some(v),
                 ("key_identifier", Value::String(v)) => key_identifier = Some(v),
                 (f, _) => {
-                    return Err(Error::MalformedHeaderError(format!(
+                    return Err(Error::MalformedHeader(format!(
                         "unexpected field {} in record",
                         f
                     )))
@@ -122,7 +115,7 @@ impl BatchSignature {
         }
 
         if batch_header_signature.is_none() || key_identifier.is_none() {
-            return Err(Error::MalformedHeaderError(
+            return Err(Error::MalformedHeader(
                 "missing fields in record".to_owned(),
             ));
         }
@@ -136,9 +129,8 @@ impl BatchSignature {
     /// Serializes this signature into Avro format and writes it to the provided
     /// std::io::Write instance.
     pub fn write<W: Write>(&self, writer: &mut W) -> Result<(), Error> {
-        let schema = Schema::parse_str(BATCH_SIGNATURE_SCHEMA).map_err(|e| {
-            Error::AvroError("failed to parse ingestion signature schema".to_owned(), e)
-        })?;
+        let schema = Schema::parse_str(BATCH_SIGNATURE_SCHEMA)
+            .map_err(|e| Error::Avro("failed to parse ingestion signature schema".to_owned(), e))?;
         let mut writer = Writer::new(&schema, writer);
 
         let mut record = match Record::new(writer.schema()) {
@@ -158,13 +150,13 @@ impl BatchSignature {
         );
         record.put("key_identifier", Value::String(self.key_identifier.clone()));
 
-        writer.append(record).map_err(|e| {
-            Error::AvroError("failed to append record to Avro writer".to_owned(), e)
-        })?;
+        writer
+            .append(record)
+            .map_err(|e| Error::Avro("failed to append record to Avro writer".to_owned(), e))?;
 
         writer
             .flush()
-            .map_err(|e| Error::AvroError("failed to flush Avro writer".to_owned(), e))?;
+            .map_err(|e| Error::Avro("failed to flush Avro writer".to_owned(), e))?;
 
         Ok(())
     }
@@ -204,33 +196,26 @@ impl Header for IngestionHeader {
     }
 
     fn read<R: Read>(reader: R) -> Result<IngestionHeader, Error> {
-        let schema = Schema::parse_str(INGESTION_HEADER_SCHEMA).map_err(|e| {
-            Error::AvroError("failed to parse ingestion header schema".to_owned(), e)
-        })?;
+        let schema = Schema::parse_str(INGESTION_HEADER_SCHEMA)
+            .map_err(|e| Error::Avro("failed to parse ingestion header schema".to_owned(), e))?;
         let mut reader = Reader::with_schema(&schema, reader).map_err(|e| {
-            Error::AvroError("failed to create reader for ingestion header".to_owned(), e)
+            Error::Avro("failed to create reader for ingestion header".to_owned(), e)
         })?;
 
         // We expect exactly one record in the reader and for it to be an ingestion header
         let record = match reader.next() {
             Some(Ok(Value::Record(r))) => r,
-            Some(Ok(_)) => {
-                return Err(Error::MalformedHeaderError(
-                    "value is not a record".to_owned(),
-                ))
-            }
+            Some(Ok(_)) => return Err(Error::MalformedHeader("value is not a record".to_owned())),
             Some(Err(e)) => {
-                return Err(Error::AvroError(
+                return Err(Error::Avro(
                     "failed to read header from Avro reader".to_owned(),
                     e,
                 ))
             }
-            None => return Err(Error::EofError),
+            None => return Err(Error::Eof),
         };
         if reader.next().is_some() {
-            return Err(Error::MalformedHeaderError(
-                "excess header in reader".to_owned(),
-            ));
+            return Err(Error::MalformedHeader("excess header in reader".to_owned()));
         }
 
         // Here we might wish to use from_value::<IngestionSignature>(record) but avro_rs does not
@@ -261,7 +246,7 @@ impl Header for IngestionHeader {
                         Value::Int(v) => Some(v),
                         Value::Null => None,
                         v => {
-                            return Err(Error::MalformedHeaderError(format!(
+                            return Err(Error::MalformedHeader(format!(
                                 "unexpected value {:?} for hamming weight",
                                 v
                             )));
@@ -272,7 +257,7 @@ impl Header for IngestionHeader {
                 ("batch_end_time", Value::TimestampMillis(v)) => batch_end_time = Some(v),
                 ("packet_file_digest", Value::Bytes(v)) => packet_file_digest = Some(v),
                 (f, v) => {
-                    return Err(Error::MalformedHeaderError(format!(
+                    return Err(Error::MalformedHeader(format!(
                         "unexpected field {} -> {:?} in record",
                         f, v
                     )))
@@ -290,7 +275,7 @@ impl Header for IngestionHeader {
             || batch_end_time.is_none()
             || packet_file_digest.is_none()
         {
-            return Err(Error::MalformedHeaderError(
+            return Err(Error::MalformedHeader(
                 "missing field(s) in record".to_owned(),
             ));
         }
@@ -310,9 +295,8 @@ impl Header for IngestionHeader {
     }
 
     fn write<W: Write>(&self, writer: &mut W) -> Result<(), Error> {
-        let schema = Schema::parse_str(INGESTION_HEADER_SCHEMA).map_err(|e| {
-            Error::AvroError("failed to parse ingestion header schema".to_owned(), e)
-        })?;
+        let schema = Schema::parse_str(INGESTION_HEADER_SCHEMA)
+            .map_err(|e| Error::Avro("failed to parse ingestion header schema".to_owned(), e))?;
         let mut writer = Writer::new(&schema, writer);
 
         // Ideally we would just do `writer.append_ser(self)` to use Serde serialization to write
@@ -351,13 +335,13 @@ impl Header for IngestionHeader {
             Value::Bytes(self.packet_file_digest.clone()),
         );
 
-        writer.append(record).map_err(|e| {
-            Error::AvroError("failed to append record to Avro writer".to_owned(), e)
-        })?;
+        writer
+            .append(record)
+            .map_err(|e| Error::Avro("failed to append record to Avro writer".to_owned(), e))?;
 
         writer
             .flush()
-            .map_err(|e| Error::AvroError("failed to flush Avro writer".to_owned(), e))?;
+            .map_err(|e| Error::Avro("failed to flush Avro writer".to_owned(), e))?;
 
         Ok(())
     }
@@ -385,17 +369,17 @@ impl Packet for IngestionDataSharePacket {
         let record = match reader.next() {
             Some(Ok(Value::Record(r))) => r,
             Some(Ok(_)) => {
-                return Err(Error::MalformedDataPacketError(
+                return Err(Error::MalformedDataPacket(
                     "value is not a record".to_owned(),
                 ))
             }
             Some(Err(e)) => {
-                return Err(Error::AvroError(
+                return Err(Error::Avro(
                     "failed to read record from Avro reader".to_owned(),
                     e,
                 ));
             }
-            None => return Err(Error::EofError),
+            None => return Err(Error::Eof),
         };
 
         // As in IngestionSignature::read_signature, , we can't just deserialize into a struct and
@@ -415,7 +399,7 @@ impl Packet for IngestionDataSharePacket {
                     Value::String(v) => encryption_key_id = Some(v),
                     Value::Null => encryption_key_id = None,
                     v => {
-                        return Err(Error::MalformedDataPacketError(format!(
+                        return Err(Error::MalformedDataPacket(format!(
                             "unexpected boxed value {:?} in encryption_key_id",
                             v
                         )))
@@ -426,7 +410,7 @@ impl Packet for IngestionDataSharePacket {
                     Value::String(v) => version_configuration = Some(v),
                     Value::Null => version_configuration = None,
                     v => {
-                        return Err(Error::MalformedDataPacketError(format!(
+                        return Err(Error::MalformedDataPacket(format!(
                             "unexpected boxed value {:?} in version_configuration",
                             v
                         )))
@@ -436,14 +420,14 @@ impl Packet for IngestionDataSharePacket {
                     Value::Bytes(v) => device_nonce = Some(v),
                     Value::Null => device_nonce = None,
                     v => {
-                        return Err(Error::MalformedDataPacketError(format!(
+                        return Err(Error::MalformedDataPacket(format!(
                             "unexpected boxed value {:?} in device_nonce",
                             v
                         )))
                     }
                 },
                 (f, _) => {
-                    return Err(Error::MalformedDataPacketError(format!(
+                    return Err(Error::MalformedDataPacket(format!(
                         "unexpected field {} in record",
                         f
                     )))
@@ -452,7 +436,7 @@ impl Packet for IngestionDataSharePacket {
         }
 
         if uuid.is_none() || encrypted_payload.is_none() || r_pit.is_none() {
-            return Err(Error::MalformedDataPacketError(
+            return Err(Error::MalformedDataPacket(
                 "missing fields in record".to_owned(),
             ));
         }
@@ -506,9 +490,9 @@ impl Packet for IngestionDataSharePacket {
             None => record.put("device_nonce", Value::Union(Box::new(Value::Null))),
         }
 
-        writer.append(record).map_err(|e| {
-            Error::AvroError("failed to append record to Avro writer".to_owned(), e)
-        })?;
+        writer
+            .append(record)
+            .map_err(|e| Error::Avro("failed to append record to Avro writer".to_owned(), e))?;
 
         Ok(())
     }
@@ -547,11 +531,10 @@ impl Header for ValidationHeader {
     }
 
     fn read<R: Read>(reader: R) -> Result<ValidationHeader, Error> {
-        let schema = Schema::parse_str(VALIDATION_HEADER_SCHEMA).map_err(|e| {
-            Error::AvroError("failed to parse validation header schema".to_owned(), e)
-        })?;
+        let schema = Schema::parse_str(VALIDATION_HEADER_SCHEMA)
+            .map_err(|e| Error::Avro("failed to parse validation header schema".to_owned(), e))?;
         let mut reader = Reader::with_schema(&schema, reader).map_err(|e| {
-            Error::AvroError(
+            Error::Avro(
                 "failed to create reader for validation header".to_owned(),
                 e,
             )
@@ -560,23 +543,17 @@ impl Header for ValidationHeader {
         // We expect exactly one record in the reader and for it to be an ingestion header
         let record = match reader.next() {
             Some(Ok(Value::Record(r))) => r,
-            Some(Ok(_)) => {
-                return Err(Error::MalformedHeaderError(
-                    "value is not a record".to_owned(),
-                ))
-            }
+            Some(Ok(_)) => return Err(Error::MalformedHeader("value is not a record".to_owned())),
             Some(Err(e)) => {
-                return Err(Error::AvroError(
+                return Err(Error::Avro(
                     "failed to read header from Avro reader".to_owned(),
                     e,
                 ))
             }
-            None => return Err(Error::EofError),
+            None => return Err(Error::Eof),
         };
         if reader.next().is_some() {
-            return Err(Error::MalformedHeaderError(
-                "excess header in reader".to_owned(),
-            ));
+            return Err(Error::MalformedHeader("excess header in reader".to_owned()));
         }
 
         // Here we might wish to use from_value::<IngestionSignature>(record) but avro_rs does not
@@ -605,7 +582,7 @@ impl Header for ValidationHeader {
                         Value::Int(v) => Some(v),
                         Value::Null => None,
                         v => {
-                            return Err(Error::MalformedHeaderError(format!(
+                            return Err(Error::MalformedHeader(format!(
                                 "unexpected value {:?} for hamming weight",
                                 v
                             )));
@@ -614,7 +591,7 @@ impl Header for ValidationHeader {
                 }
                 ("packet_file_digest", Value::Bytes(v)) => packet_file_digest = Some(v),
                 (f, v) => {
-                    return Err(Error::MalformedHeaderError(format!(
+                    return Err(Error::MalformedHeader(format!(
                         "unexpected field {} -> {:?} in record",
                         f, v
                     )))
@@ -630,7 +607,7 @@ impl Header for ValidationHeader {
             || number_of_servers.is_none()
             || packet_file_digest.is_none()
         {
-            return Err(Error::MalformedHeaderError(
+            return Err(Error::MalformedHeader(
                 "missing field(s) in record".to_owned(),
             ));
         }
@@ -648,9 +625,8 @@ impl Header for ValidationHeader {
     }
 
     fn write<W: Write>(&self, writer: &mut W) -> Result<(), Error> {
-        let schema = Schema::parse_str(VALIDATION_HEADER_SCHEMA).map_err(|e| {
-            Error::AvroError("failed to parse validation header schema".to_owned(), e)
-        })?;
+        let schema = Schema::parse_str(VALIDATION_HEADER_SCHEMA)
+            .map_err(|e| Error::Avro("failed to parse validation header schema".to_owned(), e))?;
         let mut writer = Writer::new(&schema, writer);
 
         let mut record = match Record::new(writer.schema()) {
@@ -677,13 +653,13 @@ impl Header for ValidationHeader {
             Value::Bytes(self.packet_file_digest.clone()),
         );
 
-        writer.append(record).map_err(|e| {
-            Error::AvroError("failed to append record to Avro writer".to_owned(), e)
-        })?;
+        writer
+            .append(record)
+            .map_err(|e| Error::Avro("failed to append record to Avro writer".to_owned(), e))?;
 
         writer
             .flush()
-            .map_err(|e| Error::AvroError("failed to flush Avro writer".to_owned(), e))?;
+            .map_err(|e| Error::Avro("failed to flush Avro writer".to_owned(), e))?;
 
         Ok(())
     }
@@ -706,16 +682,16 @@ impl Packet for ValidationPacket {
         let header = match reader.next() {
             Some(Ok(h)) => h,
             Some(Err(e)) => {
-                return Err(Error::AvroError(
+                return Err(Error::Avro(
                     "failed to read header from Avro reader".to_owned(),
                     e,
                 ))
             }
-            None => return Err(Error::EofError),
+            None => return Err(Error::Eof),
         };
 
         from_value::<ValidationPacket>(&header)
-            .map_err(|e| Error::AvroError("failed to parse validation header".to_owned(), e))
+            .map_err(|e| Error::Avro("failed to parse validation header".to_owned(), e))
     }
 
     fn write<W: Write>(&self, writer: &mut Writer<W>) -> Result<(), Error> {
@@ -737,9 +713,9 @@ impl Packet for ValidationPacket {
         record.put("g_r", Value::Long(self.g_r));
         record.put("h_r", Value::Long(self.h_r));
 
-        writer.append(record).map_err(|e| {
-            Error::AvroError("failed to append record to Avro writer".to_owned(), e)
-        })?;
+        writer
+            .append(record)
+            .map_err(|e| Error::Avro("failed to append record to Avro writer".to_owned(), e))?;
 
         Ok(())
     }
@@ -789,31 +765,25 @@ impl Header for SumPart {
 
     fn read<R: Read>(reader: R) -> Result<SumPart, Error> {
         let schema = Schema::parse_str(SUM_PART_SCHEMA)
-            .map_err(|e| Error::AvroError("failed to parse sum part schema".to_owned(), e))?;
+            .map_err(|e| Error::Avro("failed to parse sum part schema".to_owned(), e))?;
         let mut reader = Reader::with_schema(&schema, reader)
-            .map_err(|e| Error::AvroError("failed to create reader for sum part".to_owned(), e))?;
+            .map_err(|e| Error::Avro("failed to create reader for sum part".to_owned(), e))?;
 
         // We expect exactly one record in the reader and for it to be a sum
         // part.
         let record = match reader.next() {
             Some(Ok(Value::Record(r))) => r,
-            Some(Ok(_)) => {
-                return Err(Error::MalformedHeaderError(
-                    "value is not a record".to_owned(),
-                ))
-            }
+            Some(Ok(_)) => return Err(Error::MalformedHeader("value is not a record".to_owned())),
             Some(Err(e)) => {
-                return Err(Error::AvroError(
+                return Err(Error::Avro(
                     "failed to read header from Avro reader".to_owned(),
                     e,
                 ))
             }
-            None => return Err(Error::EofError),
+            None => return Err(Error::Eof),
         };
         if reader.next().is_some() {
-            return Err(Error::MalformedHeaderError(
-                "excess header in reader".to_owned(),
-            ));
+            return Err(Error::MalformedHeader("excess header in reader".to_owned()));
         }
 
         let mut batch_uuids = None;
@@ -839,7 +809,7 @@ impl Header for SumPart {
                                 if let Value::Uuid(u) = value {
                                     Ok(u)
                                 } else {
-                                    Err(Error::MalformedHeaderError(format!(
+                                    Err(Error::MalformedHeader(format!(
                                         "unexpected value in batch_uuids array {:?}",
                                         value
                                     )))
@@ -858,7 +828,7 @@ impl Header for SumPart {
                         Value::Int(v) => Some(v),
                         Value::Null => None,
                         v => {
-                            return Err(Error::MalformedHeaderError(format!(
+                            return Err(Error::MalformedHeader(format!(
                                 "unexpected value {:?} for hamming weight",
                                 v
                             )));
@@ -873,7 +843,7 @@ impl Header for SumPart {
                                 if let Value::Long(l) = value {
                                     Ok(l)
                                 } else {
-                                    Err(Error::MalformedHeaderError(format!(
+                                    Err(Error::MalformedHeader(format!(
                                         "unexpected value in sum array {:?}",
                                         value
                                     )))
@@ -891,7 +861,7 @@ impl Header for SumPart {
                 ("packet_file_digest", Value::Bytes(v)) => packet_file_digest = Some(v),
                 ("total_individual_clients", Value::Long(v)) => total_individual_clients = Some(v),
                 (f, v) => {
-                    return Err(Error::MalformedHeaderError(format!(
+                    return Err(Error::MalformedHeader(format!(
                         "unexpected field {} -> {:?} in record",
                         f, v
                     )))
@@ -910,7 +880,7 @@ impl Header for SumPart {
             || aggregation_end_time.is_none()
             || packet_file_digest.is_none()
         {
-            return Err(Error::MalformedHeaderError(
+            return Err(Error::MalformedHeader(
                 "missing field(s) in record".to_owned(),
             ));
         }
@@ -933,7 +903,7 @@ impl Header for SumPart {
 
     fn write<W: Write>(&self, writer: &mut W) -> Result<(), Error> {
         let schema = Schema::parse_str(SUM_PART_SCHEMA)
-            .map_err(|e| Error::AvroError("failed to parse sum part schema".to_owned(), e))?;
+            .map_err(|e| Error::Avro("failed to parse sum part schema".to_owned(), e))?;
         let mut writer = Writer::new(&schema, writer);
 
         // Ideally we would just do `writer.append_ser(self)` to use Serde serialization to write
@@ -983,13 +953,13 @@ impl Header for SumPart {
             Value::Long(self.total_individual_clients),
         );
 
-        writer.append(record).map_err(|e| {
-            Error::AvroError("failed to append record to Avro writer".to_owned(), e)
-        })?;
+        writer
+            .append(record)
+            .map_err(|e| Error::Avro("failed to append record to Avro writer".to_owned(), e))?;
 
         writer
             .flush()
-            .map_err(|e| Error::AvroError("failed to flush Avro writer".to_owned(), e))?;
+            .map_err(|e| Error::Avro("failed to flush Avro writer".to_owned(), e))?;
 
         Ok(())
     }
@@ -1009,16 +979,16 @@ impl Packet for InvalidPacket {
         let header = match reader.next() {
             Some(Ok(h)) => h,
             Some(Err(e)) => {
-                return Err(Error::AvroError(
+                return Err(Error::Avro(
                     "failed to read invalid packet from Avro reader".to_owned(),
                     e,
                 ))
             }
-            None => return Err(Error::EofError),
+            None => return Err(Error::Eof),
         };
 
         from_value::<InvalidPacket>(&header)
-            .map_err(|e| Error::AvroError("failed to parse invalid packet".to_owned(), e))
+            .map_err(|e| Error::Avro("failed to parse invalid packet".to_owned(), e))
     }
 
     fn write<W: Write>(&self, writer: &mut Writer<W>) -> Result<(), Error> {
@@ -1037,9 +1007,9 @@ impl Packet for InvalidPacket {
 
         record.put("uuid", Value::Uuid(self.uuid));
 
-        writer.append(record).map_err(|e| {
-            Error::AvroError("failed to append record to Avro writer".to_owned(), e)
-        })?;
+        writer
+            .append(record)
+            .map_err(|e| Error::Avro("failed to append record to Avro writer".to_owned(), e))?;
 
         Ok(())
     }
@@ -1153,7 +1123,7 @@ mod tests {
 
         // Do one more read. This should yield EOF.
         match IngestionDataSharePacket::read(&mut reader) {
-            Err(Error::EofError) => (),
+            Err(Error::Eof) => (),
             v => assert!(false, "wrong error {:?}", v),
         }
     }
@@ -1233,7 +1203,7 @@ mod tests {
 
         // Do one more read. This should yield EOF.
         match ValidationPacket::read(&mut reader) {
-            Err(Error::EofError) => (),
+            Err(Error::Eof) => (),
             v => assert!(false, "wrong error {:?}", v),
         }
     }
@@ -1312,7 +1282,7 @@ mod tests {
 
         // Do one more read. This should yield EOF.
         match InvalidPacket::read(&mut reader) {
-            Err(Error::EofError) => (),
+            Err(Error::Eof) => (),
             v => assert!(false, "wrong error {:?}", v),
         }
     }

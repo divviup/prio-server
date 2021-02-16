@@ -25,7 +25,7 @@ use facilitator::{
         GCSTransport, LocalFileTransport, S3Transport, SignableTransport, Transport,
         VerifiableAndDecryptableTransport, VerifiableTransport,
     },
-    BatchSigningKey, DATE_FORMAT,
+    BatchSigningKey, Error, DATE_FORMAT,
 };
 
 fn num_validator<F: FromStr>(s: String) -> Result<(), String> {
@@ -931,7 +931,7 @@ fn aggregate<F: FnMut()>(
     sub_matches: &ArgMatches,
     metrics_collector: Option<&AggregateMetricsCollector>,
     callback: F,
-) -> Result<()> {
+) -> Result<(), Error> {
     let instance_name = sub_matches.value_of("instance-name").unwrap();
     let is_first = is_first_from_arg(sub_matches);
 
@@ -960,10 +960,11 @@ fn aggregate<F: FnMut()>(
             public_key_map_from_arg(private_key, private_key_identifier)?
         }
         _ => {
-            return Err(anyhow!(
+            return Err(Error::InvalidArgument(
                 "batch-signing-private-key and \
                 batch-signing-private-key-identifier are required if \
                 own-manifest-base-url is not provided."
+                    .to_string(),
             ))
         }
     };
@@ -993,9 +994,10 @@ fn aggregate<F: FnMut()>(
             public_key_map_from_arg(public_key, public_key_identifier)?
         }
         _ => {
-            return Err(anyhow!(
-                "peer-public-key and peer-public-key-identifier are \
-                        required if peer-manifest-base-url is not provided."
+            return Err(Error::InvalidArgument(
+                "peer-public-key and peer-public-key-identifier are required \
+                if peer-manifest-base-url is not provided."
+                    .to_string(),
             ))
         }
     };
@@ -1107,6 +1109,7 @@ fn aggregate_subcommand(sub_matches: &ArgMatches) -> Result<(), anyhow::Error> {
         None,
         || {}, // no-op callback
     )
+    .context("aggregation failed")
 }
 
 fn aggregate_worker(sub_matches: &ArgMatches) -> Result<(), anyhow::Error> {
@@ -1142,12 +1145,40 @@ fn aggregate_worker(sub_matches: &ArgMatches) -> Result<(), anyhow::Error> {
                 },
             );
 
-            match result {
-                Ok(_) => queue.acknowledge_task(task_handle)?,
-                Err(err) => {
-                    error!("error while processing task {}: {:?}", task_handle, err);
-                    queue.nacknowledge_task(task_handle)?;
+            // If an aggregation fails due to invalid validation batches, we want to log
+            // about it but we don't want to retry: an invalid signature won't become
+            // valid if we verify it twice, so having the task queue redeliver the
+            // message is just a waste of compute time.
+            // Further, if the failure was down to invalid peer batches, we don't want
+            // to send the message to the dead letter queue because then we would get an
+            // alert that we can't do anything with, so just return Ok(()) in order to
+            // ack the message.
+            // If the aggregation fails due to a bad own validation batch, we
+            // don't want to retry for the same reasons, but we do want to
+            // alert, since that indicates a bug on our side. However
+            // BatchAggregator::aggregate_share increments a metric when it this
+            // happens, so we can alert on that message and safely ack this
+            // task.
+            let ack = match result {
+                Ok(_) => true,
+                Err(Error::BadPeerValidationBatch(e)) => {
+                    error!("aggregation failed due to invalid batch from peer: {:?}", e);
+                    true
                 }
+                Err(Error::BadOwnValidationBatch(e)) => {
+                    error!("aggregation failed due to invalid batch from self: {:?}", e);
+                    true
+                }
+                Err(e) => {
+                    error!("error while processing task {}: {:?}", task_handle, e);
+                    false
+                }
+            };
+
+            if ack {
+                queue.acknowledge_task(task_handle)?;
+            } else {
+                queue.nacknowledge_task(task_handle)?;
             }
         }
     }

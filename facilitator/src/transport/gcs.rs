@@ -348,7 +348,7 @@ impl Write for StreamingTransferWriter {
         self.buffer.extend_from_slice(buf);
         while self.buffer.len() >= self.minimum_upload_chunk_size {
             self.upload_chunk(false)
-                .map_err(|e| io::Error::new(io::ErrorKind::Other, Error::AnyhowError(e)))?;
+                .map_err(|e| io::Error::new(io::ErrorKind::Other, Error::Anyhow(e)))?;
         }
 
         Ok(buf.len())

@@ -129,7 +129,7 @@ impl<'a> BatchIntaker<'a> {
             |mut packet_writer| loop {
                 let packet = match IngestionDataSharePacket::read(&mut ingestion_packet_reader) {
                     Ok(p) => p,
-                    Err(Error::EofError) => return Ok(()),
+                    Err(Error::Eof) => return Ok(()),
                     Err(e) => return Err(e.into()),
                 };
 
@@ -205,10 +205,10 @@ impl<'a> BatchIntaker<'a> {
             &peer_header_signature,
             &self.peer_validation_batch_signing_key.identifier,
         )?;
-        self.own_validation_batch.put_signature(
+        Ok(self.own_validation_batch.put_signature(
             &own_header_signature,
             &self.own_validation_batch_signing_key.identifier,
-        )
+        )?)
     }
 }
 
