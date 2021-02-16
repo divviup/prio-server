@@ -65,7 +65,6 @@ var awsSNSIdentity = flag.String("aws-sns-identity", "", "AWS IAM ARN of the rol
 // monitoring things
 var (
 	intakesStarted            monitor.GaugeMonitor = &monitor.NoopGauge{}
-	intakesSkippedDueToAge    monitor.GaugeMonitor = &monitor.NoopGauge{}
 	intakesSkippedDueToMarker monitor.GaugeMonitor = &monitor.NoopGauge{}
 
 	aggregationsStarted            monitor.GaugeMonitor = &monitor.NoopGauge{}
@@ -99,15 +98,16 @@ func main() {
 			Gatherer(prometheus.DefaultGatherer).
 			Grouping("locality", *k8sNS).
 			Grouping("ingestor", *ingestorLabel)
+		defer func(){
+			err := pusher.Push()
+			if err != nil {
+				log.Err(err).Msg("error occurred with pushing to prometheus")
+			}
+		}()
 
-		defer pusher.Push()
 		intakesStarted = promauto.NewGauge(prometheus.GaugeOpts{
 			Name: "workflow_manager_intake_tasks_scheduled",
 			Help: "The number of intake-batch tasks successfully scheduled",
-		})
-		intakesSkippedDueToAge = promauto.NewGauge(prometheus.GaugeOpts{
-			Name: "workflow_manager_intake_tasks_skipped_due_to_age",
-			Help: "The number of intake-batch tasks not scheduled because the batch was too old",
 		})
 		intakesSkippedDueToMarker = promauto.NewGauge(prometheus.GaugeOpts{
 			Name: "workflow_manager_intake_tasks_skipped_due_to_marker",
@@ -431,7 +431,7 @@ func enqueueAggregationTask(
 		return nil
 	}
 
-	var batches []task.Batch
+	batches := []task.Batch{}
 
 	batchCount := 0
 	for _, batchPath := range readyBatches {
