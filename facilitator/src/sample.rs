@@ -42,10 +42,7 @@ pub struct ReferenceSum {
 }
 
 fn drop_packet(count: usize, drop_nth_packet: Option<usize>) -> bool {
-    match drop_nth_packet {
-        Some(nth) if count % nth == 0 => true,
-        _ => false,
-    }
+    matches!(drop_nth_packet, Some(nth) if count % nth == 0)
 }
 
 #[allow(clippy::too_many_arguments)] // Grandfathered in
