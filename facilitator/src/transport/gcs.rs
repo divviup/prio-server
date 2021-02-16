@@ -174,6 +174,7 @@ impl StreamingTransferWriter {
             // By default, ureq will wait forever to connect or read
             .timeout_connect(10_000) // ten seconds
             .timeout_read(120_000) // two minutes
+            .timeout_write(120_000) // two minutes
             .send_bytes(&[]);
         if http_response.error() {
             return Err(anyhow!("uploading to gs://{}: {:?}", bucket, http_response));
@@ -236,6 +237,7 @@ impl StreamingTransferWriter {
             // By default, ureq will wait forever to connect or read
             .timeout_connect(10_000) // ten seconds
             .timeout_read(120_000) // two minutes
+            .timeout_write(120_000) // two minutes
             .send_bytes(body);
 
         // On success we expect HTTP 308 Resume Incomplete and a Range: header,

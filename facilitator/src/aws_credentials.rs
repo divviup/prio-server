@@ -1,4 +1,5 @@
 use anyhow::Result;
+use log::info;
 use rusoto_core::{
     credential::EnvironmentProvider,
     credential::{
@@ -108,8 +109,9 @@ async fn chain_provider_credentials(
     if let Ok(creds) = provider.container_provider.credentials().await {
         return Ok(creds);
     }
-    if let Ok(creds) = provider.webidp_provider.credentials().await {
-        return Ok(creds);
+    match provider.webidp_provider.credentials().await {
+        Ok(creds) => return Ok(creds),
+        Err(err) => info!("failed to obtain credentials from webidp provider: {:?}", err),
     }
     if let Ok(creds) = provider.instance_metadata_provider.credentials().await {
         return Ok(creds);
