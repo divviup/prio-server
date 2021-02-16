@@ -12,7 +12,7 @@ base64 = "0.13.0"
 chrono = { version = "0.4", features = ["serde"] }
 clap = "2.33.3"
 derivative = "2.1.1"
-env_logger = "0.8.1"
+env_logger = "0.8.3"
 http = "^0.2"
 hyper = "^0.14"
 hyper-rustls = "^0.22"
@@ -40,6 +40,6 @@ warp = "^0.3"
 
 [dev-dependencies]
 assert_matches = "1.5.0"
-mockito = "0.27.0"
+mockito = "0.29.0"
 rusoto_mock = { version = "^0.46", default_features = false, features = ["rustls"] }
 serde_test = "1.0"
