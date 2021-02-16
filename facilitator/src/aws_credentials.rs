@@ -111,7 +111,10 @@ async fn chain_provider_credentials(
     }
     match provider.webidp_provider.credentials().await {
         Ok(creds) => return Ok(creds),
-        Err(err) => info!("failed to obtain credentials from webidp provider: {:?}", err),
+        Err(err) => info!(
+            "failed to obtain credentials from webidp provider: {:?}",
+            err
+        ),
     }
     if let Ok(creds) = provider.instance_metadata_provider.credentials().await {
         return Ok(creds);
