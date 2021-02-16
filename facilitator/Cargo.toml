@@ -8,7 +8,7 @@ version = "0.1.0"
 anyhow = "1.0"
 async-trait = "0.1"
 avro-rs = { version = "0.11.0", features = ["snappy"] }
-base64 = "0.12.3"
+base64 = "0.13.0"
 chrono = { version = "0.4", features = ["serde"] }
 clap = "2.33.3"
 derivative = "2.1.1"
@@ -39,7 +39,7 @@ uuid = { version = "0.8", features = ["serde", "v4"] }
 warp = "^0.3"
 
 [dev-dependencies]
-assert_matches = "1.4.0"
+assert_matches = "1.5.0"
 mockito = "0.27.0"
 rusoto_mock = { version = "^0.46", default_features = false, features = ["rustls"] }
 serde_test = "1.0"
