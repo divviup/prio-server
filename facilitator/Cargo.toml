@@ -39,7 +39,7 @@ uuid = { version = "0.8", features = ["serde", "v4"] }
 warp = "^0.3"
 
 [dev-dependencies]
-assert_matches = "1.4.0"
+assert_matches = "1.5.0"
 mockito = "0.27.0"
 rusoto_mock = { version = "^0.46", default_features = false, features = ["rustls"] }
 serde_test = "1.0"
