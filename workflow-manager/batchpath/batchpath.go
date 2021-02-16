@@ -2,11 +2,12 @@ package batchpath
 
 import (
 	"fmt"
-	"log"
 	"sort"
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/rs/zerolog/log"
 
 	wftime "github.com/letsencrypt/prio-server/workflow-manager/time"
 	"github.com/letsencrypt/prio-server/workflow-manager/utils"
@@ -155,7 +156,7 @@ func ReadyBatches(files []string, infix string) (List, error) {
 		if v.isComplete() {
 			output = append(output, v)
 		} else {
-			log.Printf("ignoring incomplete batch %s", v)
+			log.Info().Msgf("ignoring incomplete batch %s", v)
 		}
 	}
 	sort.Sort(List(output))

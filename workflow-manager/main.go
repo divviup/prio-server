@@ -9,9 +9,12 @@ package main
 import (
 	"flag"
 	"fmt"
-	"log"
 	"os"
+	"strings"
 	"time"
+
+	"github.com/rs/zerolog"
+	"github.com/rs/zerolog/log"
 
 	"github.com/letsencrypt/prio-server/workflow-manager/batchpath"
 	"github.com/letsencrypt/prio-server/workflow-manager/monitor"
@@ -41,7 +44,6 @@ var peerValidationIdentity = flag.String("peer-validation-identity", "", "Identi
 var aggregationPeriod = flag.String("aggregation-period", "3h", "How much time each aggregation covers")
 var gracePeriod = flag.String("grace-period", "1h", "Wait this amount of time after the end of an aggregation timeslice to run the aggregation")
 var pushGateway = flag.String("push-gateway", "", "Set this to the gateway to use with prometheus. If left empty, workflow-manager will not use prometheus.")
-var kubeconfigPath = flag.String("kube-config-path", "", "Path to the kubeconfig file to be used to authenticate to Kubernetes API")
 var dryRun = flag.Bool("dry-run", false, "If set, no operations with side effects will be done.")
 var taskQueueKind = flag.String("task-queue-kind", "", "Which task queue kind to use.")
 var intakeTasksTopic = flag.String("intake-tasks-topic", "", "Name of the topic to which intake-batch tasks should be published")
@@ -76,12 +78,20 @@ var (
 
 func fail(format string, args ...interface{}) {
 	workflowManagerLastFailure.SetToCurrentTime()
-	log.Fatalf(format, args...)
+	log.Fatal().Msgf(format, args...)
+}
+
+func prepareLogger() {
+	zerolog.LevelFieldName = "severity"
+	zerolog.TimestampFieldName = "timestamp"
+	zerolog.TimeFieldFormat = time.RFC3339Nano
+	zerolog.SetGlobalLevel(zerolog.TraceLevel)
 }
 
 func main() {
+	prepareLogger()
 	startTime := time.Now()
-	log.Printf("starting %s version %s. Args: %s", os.Args[0], BuildInfo, os.Args[1:])
+	log.Info().Str("app", os.Args[0]).Str("version", BuildInfo).Str("Args", strings.Join(os.Args[1:], ","))
 	flag.Parse()
 
 	if *pushGateway != "" {
@@ -257,7 +267,7 @@ func main() {
 	}
 
 	for _, aggregationID := range aggregationIDs {
-		scheduleTasks(scheduleTasksConfig{
+		err = scheduleTasks(scheduleTasksConfig{
 			aggregationID:           aggregationID,
 			isFirst:                 *isFirst,
 			clock:                   wftime.DefaultClock(),
@@ -270,6 +280,9 @@ func main() {
 			aggregationPeriod:       aggregationPeriodParsed,
 			gracePeriod:             gracePeriodParsed,
 		})
+		if err != nil {
+			log.Err(err).Str("aggregation ID", aggregationID).Msg("Failed to schedule aggregation tasks")
+		}
 
 		workflowManagerLastSuccess.SetToCurrentTime()
 		endTime := time.Now()
@@ -277,7 +290,7 @@ func main() {
 		workflowManagerRuntime.Set(endTime.Sub(startTime).Seconds())
 	}
 
-	log.Print("done")
+	log.Info().Msg("done")
 }
 
 type scheduleTasksConfig struct {
@@ -330,7 +343,8 @@ func scheduleTasks(config scheduleTasksConfig) error {
 	}
 
 	aggInterval := wftime.AggregationInterval(config.clock, config.aggregationPeriod, config.gracePeriod)
-	log.Printf("looking for batches to aggregate in interval %s", aggInterval)
+
+	log.Info().Str("aggregation interval", aggInterval.String()).Msg("looking for batches to aggregate")
 
 	ownValidationFiles, err := config.ownValidationBucket.ListBatchFiles(config.aggregationID, aggInterval)
 	if err != nil {
@@ -343,7 +357,7 @@ func scheduleTasks(config scheduleTasksConfig) error {
 		return err
 	}
 
-	log.Printf("found %d own validations", len(ownValidationBatches))
+	log.Info().Int("own validations", len(ownValidationBatches)).Msgf("found %d own validations", len(ownValidationBatches))
 
 	peerValidationFiles, err := config.peerValidationBucket.ListBatchFiles(config.aggregationID, aggInterval)
 	if err != nil {
@@ -356,7 +370,7 @@ func scheduleTasks(config scheduleTasksConfig) error {
 		return err
 	}
 
-	log.Printf("found %d peer validations", len(peerValidationBatches))
+	log.Info().Int("peer validations", len(peerValidationBatches)).Msgf("found %d peer validations", len(peerValidationBatches))
 
 	// Take the intersection of the sets of own validations and peer validations
 	// to get the list of batches we can aggregate.
@@ -413,11 +427,11 @@ func enqueueAggregationTask(
 	enqueuer task.Enqueuer,
 ) error {
 	if len(readyBatches) == 0 {
-		log.Printf("no batches to aggregate")
+		log.Info().Msg("no batches to aggregate")
 		return nil
 	}
 
-	batches := []task.Batch{}
+	var batches []task.Batch
 
 	batchCount := 0
 	for _, batchPath := range readyBatches {
@@ -441,23 +455,33 @@ func enqueueAggregationTask(
 	}
 
 	if _, ok := taskMarkers[aggregationTask.Marker()]; ok {
-		log.Printf("skipped aggregation task due to marker")
+		log.Info().
+			Str("aggregation ID", aggregationID).
+			Msg("skipped aggregation task due to marker")
 		aggregationsSkippedDueToMarker.Inc()
 		return nil
 	}
 
-	log.Printf("scheduling aggregation task over interval %s for aggregation ID %s over %d batches",
-		aggregationWindow, aggregationID, batchCount)
+	log.Info().
+		Str("aggregation ID", aggregationID).
+		Str("aggregation window", aggregationWindow.String()).
+		Int("batch count", batchCount).
+		Msg("Scheduling aggregation task")
+
 	enqueuer.Enqueue(aggregationTask, func(err error) {
 		if err != nil {
-			log.Printf("failed to enqueue aggregation task: %s", err)
+			log.Err(err).
+				Str("aggregation ID", aggregationID).
+				Msg("failed to enqueue aggregation task")
 			return
 		}
 
 		// Write a marker to cloud storage to ensure we don't schedule redundant
 		// tasks
 		if err := ownValidationBucket.WriteTaskMarker(aggregationTask.Marker()); err != nil {
-			log.Printf("failed to write aggregation task marker: %s", err)
+			log.Err(err).
+				Str("aggregation ID", aggregationID).
+				Msg("failed to write aggregation task marker")
 		}
 
 		aggregationsStarted.Inc()
@@ -488,17 +512,25 @@ func enqueueIntakeTasks(
 			continue
 		}
 
-		log.Printf("scheduling intake task for batch %s", batch)
+		log.Info().
+			Str("aggregation ID", batch.AggregationID).
+			Str("batch", batch.String()).
+			Msg("scheduling intake task for batch")
+
 		scheduled++
 		enqueuer.Enqueue(intakeTask, func(err error) {
 			if err != nil {
-				log.Printf("failed to enqueue intake task: %s", err)
+				log.Err(err).
+					Str("aggregation ID", batch.AggregationID).
+					Msg("failed to enqueue intake task")
 				return
 			}
 			// Write a marker to cloud storage to ensure we don't schedule
 			// redundant tasks
 			if err := ownValidationBucket.WriteTaskMarker(intakeTask.Marker()); err != nil {
-				log.Printf("failed to write intake task marker: %s", err)
+				log.Err(err).
+					Str("aggregation ID", batch.AggregationID).
+					Msg("failed to write intake task marker")
 				return
 			}
 
@@ -506,8 +538,10 @@ func enqueueIntakeTasks(
 		})
 	}
 
-	log.Printf("skipped %d batches with existing tasks. Scheduled %d new intake tasks.",
-		skippedDueToMarker, scheduled)
+	log.Info().
+		Int("skipped batches", skippedDueToMarker).
+		Int("scheduled batches", scheduled).
+		Msg("skipped and scheduled intake tasks")
 
 	return nil
 }

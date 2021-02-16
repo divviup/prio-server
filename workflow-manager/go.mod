@@ -7,6 +7,7 @@ require (
 	cloud.google.com/go/storage v1.12.0
 	github.com/aws/aws-sdk-go v1.37.11
 	github.com/prometheus/client_golang v1.8.0
+	github.com/rs/zerolog v1.20.0
 	golang.org/x/text v0.3.4 // indirect
 	google.golang.org/api v0.33.0
 	gopkg.in/retry.v1 v1.0.3
