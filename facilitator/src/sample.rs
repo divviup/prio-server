@@ -112,7 +112,7 @@ pub fn generate_ingestion_sample(
                     for count in 0..packet_count {
                         // Generate random bit vector
                         let data = (0..dim)
-                            .map(|_| Field::from(thread_rng.gen_range(0, 2)))
+                            .map(|_| Field::from(thread_rng.gen_range(0..2)))
                             .collect::<Vec<Field>>();
 
                         // If we are dropping the packet from either output, do
