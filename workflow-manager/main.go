@@ -90,7 +90,11 @@ func prepareLogger() {
 func main() {
 	prepareLogger()
 	startTime := time.Now()
-	log.Info().Str("app", os.Args[0]).Str("version", BuildInfo).Str("Args", strings.Join(os.Args[1:], ","))
+	log.Info().
+		Str("app", os.Args[0]).
+		Str("version", BuildInfo).
+		Str("Args", strings.Join(os.Args[1:], ",")).
+		Msgf("starting %s version %s. Args: %s", os.Args[0], BuildInfo, os.Args[1:])
 	flag.Parse()
 
 	if *pushGateway != "" {
@@ -98,7 +102,7 @@ func main() {
 			Gatherer(prometheus.DefaultGatherer).
 			Grouping("locality", *k8sNS).
 			Grouping("ingestor", *ingestorLabel)
-		defer func(){
+		defer func() {
 			err := pusher.Push()
 			if err != nil {
 				log.Err(err).Msg("error occurred with pushing to prometheus")
@@ -281,7 +285,7 @@ func main() {
 			gracePeriod:             gracePeriodParsed,
 		})
 		if err != nil {
-			log.Err(err).Str("aggregation ID", aggregationID).Msg("Failed to schedule aggregation tasks")
+			log.Err(err).Str("aggregation ID", aggregationID).Msgf("Failed to schedule aggregation tasks: %s", err)
 		}
 
 		workflowManagerLastSuccess.SetToCurrentTime()
@@ -344,7 +348,7 @@ func scheduleTasks(config scheduleTasksConfig) error {
 
 	aggInterval := wftime.AggregationInterval(config.clock, config.aggregationPeriod, config.gracePeriod)
 
-	log.Info().Str("aggregation interval", aggInterval.String()).Msg("looking for batches to aggregate")
+	log.Info().Str("aggregation interval", aggInterval.String()).Msgf("looking for batches to aggregate in interval %s", aggInterval)
 
 	ownValidationFiles, err := config.ownValidationBucket.ListBatchFiles(config.aggregationID, aggInterval)
 	if err != nil {
@@ -472,7 +476,7 @@ func enqueueAggregationTask(
 		if err != nil {
 			log.Err(err).
 				Str("aggregation ID", aggregationID).
-				Msg("failed to enqueue aggregation task")
+				Msgf("failed to enqueue aggregation task: %s", err)
 			return
 		}
 
@@ -481,7 +485,7 @@ func enqueueAggregationTask(
 		if err := ownValidationBucket.WriteTaskMarker(aggregationTask.Marker()); err != nil {
 			log.Err(err).
 				Str("aggregation ID", aggregationID).
-				Msg("failed to write aggregation task marker")
+				Msgf("failed to write aggregation task marker: %s", err)
 		}
 
 		aggregationsStarted.Inc()
