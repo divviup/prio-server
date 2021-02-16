@@ -84,7 +84,6 @@ func prepareLogger() {
 	zerolog.LevelFieldName = "severity"
 	zerolog.TimestampFieldName = "timestamp"
 	zerolog.TimeFieldFormat = time.RFC3339Nano
-	zerolog.SetGlobalLevel(zerolog.TraceLevel)
 }
 
 func main() {
@@ -284,8 +283,10 @@ func main() {
 			aggregationPeriod:       aggregationPeriodParsed,
 			gracePeriod:             gracePeriodParsed,
 		})
+
 		if err != nil {
 			log.Err(err).Str("aggregation ID", aggregationID).Msgf("Failed to schedule aggregation tasks: %s", err)
+			return
 		}
 
 		workflowManagerLastSuccess.SetToCurrentTime()
