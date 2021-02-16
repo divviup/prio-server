@@ -528,13 +528,18 @@ resource "kubernetes_deployment" "aggregate" {
   }
 }
 
-resource "kubernetes_cron_job" "sample_maker" {
+locals {
   # This sample maker acts as an ingestion server in our test setup. It only
   # gets created in one of the two envs, and writes to both env's ingestion
   # buckets.
-  count = var.is_env_with_ingestor ? 1 : 0
+  sample_makers = var.is_env_with_ingestor ? ["kittens-seen", "dogs-petted"] : []
+}
+
+resource "kubernetes_cron_job" "sample_maker" {
+  for_each = toset(local.sample_makers)
+
   metadata {
-    name      = "sample-maker-${var.ingestor}-${var.environment}"
+    name      = "sample-maker-${each.key}-${var.ingestor}-${var.environment}"
     namespace = var.kubernetes_namespace
 
     annotations = {
@@ -564,7 +569,7 @@ resource "kubernetes_cron_job" "sample_maker" {
                 "--peer-output", var.ingestion_bucket,
                 "--own-output", var.test_peer_ingestion_bucket,
                 "--own-identity", var.remote_peer_validation_bucket_identity,
-                "--aggregation-id", "kittens-seen",
+                "--aggregation-id", each.key,
                 # All instances of the sample maker use the same batch signing
                 # key, thus simulating being a single server.
                 "--batch-signing-private-key", "MIGHAgEAMBMGByqGSM49AgEGCCqGSM49AwEHBG0wawIBAQQggoa08rQR90Asvhy5bWIgFBDeGaO8FnVEF3PVpNVmDGChRANCAAQ2mZfm4UC73PkWsYz3Uub6UTIAFQCPGxouP1O1PlmntOpfLYdvyZDCuenAzv1oCfyToolNArNjwo/+harNn1fs",
