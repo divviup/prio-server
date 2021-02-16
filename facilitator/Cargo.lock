@@ -542,7 +542,7 @@ dependencies = [
  "pem",
  "prio",
  "prometheus",
- "rand 0.7.3",
+ "rand 0.8.3",
  "ring",
  "rusoto_core",
  "rusoto_mock",
