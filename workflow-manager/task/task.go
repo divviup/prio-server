@@ -8,9 +8,10 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log"
 	"sync"
 	"time"
+
+	"github.com/rs/zerolog/log"
 
 	leaws "github.com/letsencrypt/prio-server/workflow-manager/aws"
 	"github.com/letsencrypt/prio-server/workflow-manager/limiter"
@@ -160,7 +161,7 @@ func (e *GCPPubSubEnqueuer) Enqueue(task Task, completion func(error)) {
 			}
 
 			if e.dryRun {
-				log.Printf("dry run, not enqueuing task")
+				log.Info().Msg("dry run, not enqueuing task")
 				completion(nil)
 				return
 			}
@@ -222,7 +223,7 @@ func (e *AWSSNSEnqueuer) Enqueue(task Task, completion func(error)) {
 	}
 
 	if e.dryRun {
-		log.Printf("dry run, not enqueuing task")
+		log.Info().Msg("dry run, not enqueuing task")
 		completion(nil)
 		return
 	}

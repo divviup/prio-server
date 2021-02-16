@@ -4,9 +4,10 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"log"
 	"strings"
 	"time"
+
+	"github.com/rs/zerolog/log"
 
 	leaws "github.com/letsencrypt/prio-server/workflow-manager/aws"
 	"github.com/letsencrypt/prio-server/workflow-manager/batchpath"
@@ -256,7 +257,7 @@ func (b *S3Bucket) ListAggregateTaskMarkers(aggregationID string) ([]string, err
 }
 
 func (b *S3Bucket) listObjects(trimObjectPrefix string, listInput s3.ListObjectsV2Input) (*listResult, error) {
-	log.Printf("listing files in s3://%s as %q", b.bucketName, b.identity)
+	log.Info().Msgf("listing files in s3://%s as %q", b.bucketName, b.identity)
 
 	svc, err := b.service()
 	if err != nil {
@@ -292,10 +293,10 @@ func (b *S3Bucket) listObjects(trimObjectPrefix string, listInput s3.ListObjects
 
 func (b *S3Bucket) WriteTaskMarker(marker string) error {
 	markerObject := taskMarkerObject(marker)
-	log.Printf("writing task marker to s3://%s/%s as %q", b.bucketName, markerObject, b.identity)
+	log.Info().Msgf("writing task marker to s3://%s/%s as %q", b.bucketName, markerObject, b.identity)
 
 	if b.dryRun {
-		log.Printf("dry run, skipping marker write")
+		log.Info().Msg("dry run, skipping marker write")
 		return nil
 	}
 
@@ -423,7 +424,7 @@ func (b *GCSBucket) listObjects(trimObjectPrefix string, query storage.Query) (*
 		return nil, fmt.Errorf("query.SetAttrSelection: %w", err)
 	}
 
-	log.Printf("listing bucket gs://%s as (ambient service account)", b.bucketName)
+	log.Info().Msgf("listing bucket gs://%s as (ambient service account)", b.bucketName)
 	var output listResult
 	it := bkt.Objects(ctx, &query)
 
@@ -468,11 +469,11 @@ func (b *GCSBucket) WriteTaskMarker(marker string) error {
 	bkt := client.Bucket(b.bucketName)
 
 	markerObject := taskMarkerObject(marker)
-	log.Printf("writing task marker to gs://%s/%s as (ambient service account)",
+	log.Info().Msgf("writing task marker to gs://%s/%s as (ambient service account)",
 		b.bucketName, markerObject)
 
 	if b.dryRun {
-		log.Printf("dry run, skipping marker write")
+		log.Info().Msg("dry run, skipping marker write")
 		return nil
 	}
 
