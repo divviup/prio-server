@@ -10,7 +10,7 @@ require (
 	google.golang.org/api v0.40.0
 	gopkg.in/retry.v1 v1.0.3
 	k8s.io/api v0.19.3
-	k8s.io/apimachinery v0.19.3
+	k8s.io/apimachinery v0.20.2
 	k8s.io/client-go v0.19.3
 	k8s.io/utils v0.0.0-20201015054608-420da100c033 // indirect
 )
