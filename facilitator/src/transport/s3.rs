@@ -1,5 +1,5 @@
 use crate::{
-    aws_credentials::{basic_runtime, DefaultCredentialsProvider},
+    aws_credentials::{basic_runtime, retry_request, DefaultCredentialsProvider},
     config::{Identity, S3Path},
     transport::{Transport, TransportWriter},
     Error,
@@ -7,10 +7,10 @@ use crate::{
 use anyhow::{Context, Result};
 use derivative::Derivative;
 use hyper_rustls::HttpsConnector;
-use log::{debug, info};
+use log::info;
 use rusoto_core::{
     credential::{AutoRefreshingProvider, CredentialsError, Secret, Variable},
-    ByteStream, Region, RusotoError, RusotoResult,
+    ByteStream, Region,
 };
 use rusoto_s3::{
     AbortMultipartUploadRequest, CompleteMultipartUploadRequest, CompletedMultipartUpload,
@@ -42,43 +42,8 @@ const METADATA_SERVICE_TOKEN_URL: &str = "http://metadata.google.internal:80/com
 // via environment variable.
 const AWS_ACCOUNT_ID_ENVIRONMENT_VARIABLE: &str = "AWS_ACCOUNT_ID";
 
-/// We attempt AWS API requests up to three times (i.e., two retries)
-const MAX_ATTEMPT_COUNT: i32 = 3;
-
 /// ClientProvider allows mocking out a client for testing.
 type ClientProvider = Box<dyn Fn(&Region, Option<String>) -> Result<S3Client>>;
-
-/// Calls the provided closure, retrying up to MAX_ATTEMPT_COUNT times if it
-/// fails with RusotoError::HttpDispatch, which indicates a problem sending the
-/// request such as the connection getting closed under us.
-fn retry_request<F, T, E>(action: &str, mut f: F) -> RusotoResult<T, E>
-where
-    F: FnMut() -> RusotoResult<T, E>,
-    E: std::fmt::Debug,
-{
-    let mut attempts = 0;
-    loop {
-        match f() {
-            Err(RusotoError::HttpDispatch(err)) => {
-                attempts += 1;
-                if attempts >= MAX_ATTEMPT_COUNT {
-                    break Err(RusotoError::HttpDispatch(err));
-                }
-                info!(
-                    "failed to {} (will retry {} more times): {}",
-                    action,
-                    MAX_ATTEMPT_COUNT - attempts,
-                    err
-                );
-            }
-            Err(err) => {
-                debug!("encountered non retryable error: {:?}", err);
-                break Err(err);
-            }
-            result => break result,
-        }
-    }
-}
 
 /// Implementation of Transport that reads and writes objects from Amazon S3.
 #[derive(Derivative)]

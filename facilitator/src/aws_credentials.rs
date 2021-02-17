@@ -1,11 +1,11 @@
 use anyhow::Result;
-use log::info;
+use log::{debug, info};
 use rusoto_core::{
-    credential::EnvironmentProvider,
     credential::{
         AutoRefreshingProvider, AwsCredentials, ContainerProvider, CredentialsError,
-        InstanceMetadataProvider, ProfileProvider, ProvideAwsCredentials,
+        EnvironmentProvider, InstanceMetadataProvider, ProfileProvider, ProvideAwsCredentials,
     },
+    RusotoError, RusotoResult,
 };
 use rusoto_sts::WebIdentityProvider;
 use std::{boxed::Box, time::Duration};
@@ -14,6 +14,59 @@ use tokio::runtime::{Builder, Runtime};
 /// Constructs a basic runtime suitable for use in our single threaded context
 pub(crate) fn basic_runtime() -> Result<Runtime> {
     Ok(Builder::new().basic_scheduler().enable_all().build()?)
+}
+
+/// We attempt AWS API requests up to three times (i.e., two retries)
+const MAX_ATTEMPT_COUNT: i32 = 3;
+
+/// Calls the provided closure, retrying up to MAX_ATTEMPT_COUNT times if it
+/// fails with RusotoError::HttpDispatch, which indicates a problem sending the
+/// request such as the connection getting closed under us.
+/// Additionally, in the case where there is an error while fetching credentials
+/// before making an actual request, the error will be RusotoError::Credentials,
+/// wrapping a rusoto_core::credential::CredentialsError, which can in turn
+/// contain an HttpDispatchError! Sadly, CredentialsError does not preserve the
+/// structure of the underlying error, just its message, so we must resort to
+/// matching on a substring in order to detect it.
+pub fn retry_request<F, T, E>(action: &str, mut f: F) -> RusotoResult<T, E>
+where
+    F: FnMut() -> RusotoResult<T, E>,
+    E: std::fmt::Debug,
+{
+    let mut attempts = 0;
+    loop {
+        match f() {
+            Err(RusotoError::HttpDispatch(err)) => {
+                attempts += 1;
+                if attempts >= MAX_ATTEMPT_COUNT {
+                    break Err(RusotoError::HttpDispatch(err));
+                }
+                info!(
+                    "failed to {} (will retry {} more times): {}",
+                    action,
+                    MAX_ATTEMPT_COUNT - attempts,
+                    err
+                );
+            }
+            Err(RusotoError::Credentials(err)) if err.message.contains("Error during dispatch") => {
+                attempts += 1;
+                if attempts >= MAX_ATTEMPT_COUNT {
+                    break Err(RusotoError::Credentials(err));
+                }
+                info!(
+                    "failed to {} (will retry {} more times): {}",
+                    action,
+                    MAX_ATTEMPT_COUNT - attempts,
+                    err
+                );
+            }
+            Err(err) => {
+                debug!("encountered non retryable error: {:?}", err);
+                break Err(err);
+            }
+            result => break result,
+        }
+    }
 }
 
 // ------------- Everything below here was copied from rusoto/credential/src/lib.rs in the rusoto repo ---------------------------
@@ -109,19 +162,7 @@ async fn chain_provider_credentials(
     if let Ok(creds) = provider.container_provider.credentials().await {
         return Ok(creds);
     }
-    match provider.webidp_provider.credentials().await {
-        Ok(creds) => return Ok(creds),
-        Err(err) => info!(
-            "failed to obtain credentials from webidp provider: {:?}",
-            err
-        ),
-    }
-    if let Ok(creds) = provider.instance_metadata_provider.credentials().await {
-        return Ok(creds);
-    }
-    Err(CredentialsError::new(
-        "Couldn't find AWS credentials in environment, credentials file, or IAM role.",
-    ))
+    provider.webidp_provider.credentials().await
 }
 
 use async_trait::async_trait;
