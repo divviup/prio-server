@@ -9,6 +9,7 @@ use log::info;
 use std::{
     io,
     io::{Read, Write},
+    time::Duration,
 };
 
 const STORAGE_API_BASE_URL: &str = "https://storage.googleapis.com";
@@ -75,8 +76,7 @@ impl Transport for GCSTransport {
                 &format!("Bearer {}", self.oauth_token_provider.ensure_oauth_token()?),
             )
             // By default, ureq will wait forever to connect or read
-            .timeout_connect(10_000) // ten seconds
-            .timeout_read(10_000) // ten seconds
+            .timeout(Duration::from_secs(120)) // two minutes for connect + read + write
             .call();
         if response.error() {
             return Err(anyhow!(
@@ -172,9 +172,7 @@ impl StreamingTransferWriter {
             .query("uploadType", "resumable")
             .query("name", &encoded_object)
             // By default, ureq will wait forever to connect or read
-            .timeout_connect(10_000) // ten seconds
-            .timeout_read(120_000) // two minutes
-            .timeout_write(120_000) // two minutes
+            .timeout(Duration::from_secs(120)) // two minutes for connect + read + write
             .send_bytes(&[]);
         if http_response.error() {
             return Err(anyhow!("uploading to gs://{}: {:?}", bucket, http_response));
