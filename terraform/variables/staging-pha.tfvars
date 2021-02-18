@@ -48,8 +48,9 @@ ingestors = {
 peer_share_processor_manifest_base_url = "storage.googleapis.com/prio-staging-facil-manifests"
 portal_server_manifest_base_url        = "storage.googleapis.com/prio-staging-pha-manifests/portal-server"
 test_peer_environment = {
-  env_with_ingestor    = "staging-facil"
-  env_without_ingestor = "staging-pha"
+  env_with_ingestor            = "staging-facil"
+  env_without_ingestor         = "staging-pha"
+  localities_with_sample_maker = ["narnia", "gondor"]
 }
 is_first                 = true
 use_aws                  = true

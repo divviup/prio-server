@@ -88,10 +88,6 @@ variable "sum_part_bucket_service_account_email" {
   type = string
 }
 
-variable "is_env_with_ingestor" {
-  type = bool
-}
-
 variable "test_peer_ingestion_bucket" {
   type = string
 }
@@ -130,6 +126,10 @@ variable "intake_worker_count" {
 
 variable "aggregate_worker_count" {
   type = number
+}
+
+variable "create_sample_maker" {
+  type = bool
 }
 
 data "aws_caller_identity" "current" {}
@@ -532,7 +532,7 @@ locals {
   # This sample maker acts as an ingestion server in our test setup. It only
   # gets created in one of the two envs, and writes to both env's ingestion
   # buckets.
-  sample_makers = var.is_env_with_ingestor ? ["kittens-seen", "dogs-petted"] : []
+  sample_makers = var.create_sample_maker ? ["kittens-seen", "dogs-petted"] : []
 }
 
 resource "kubernetes_cron_job" "sample_maker" {

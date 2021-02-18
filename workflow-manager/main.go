@@ -288,12 +288,12 @@ func main() {
 			log.Err(err).Str("aggregation ID", aggregationID).Msgf("Failed to schedule aggregation tasks: %s", err)
 			return
 		}
-
-		workflowManagerLastSuccess.SetToCurrentTime()
-		endTime := time.Now()
-
-		workflowManagerRuntime.Set(endTime.Sub(startTime).Seconds())
 	}
+
+	workflowManagerLastSuccess.SetToCurrentTime()
+
+	endTime := time.Now()
+	workflowManagerRuntime.Set(endTime.Sub(startTime).Seconds())
 
 	log.Info().Msg("done")
 }
