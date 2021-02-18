@@ -82,7 +82,7 @@ trait AppArgumentAdder {
     fn add_use_bogus_packet_file_digest_argument(self: Self) -> Self;
 
     fn add_common_sample_maker_arguments(self: Self) -> Self;
-    
+
     fn add_use_bogus_packet_file_digest_argument(self) -> Self;
 }
 
