@@ -312,10 +312,7 @@ fn aggregation_including_invalid_batch() {
     .generate_sum_part(&batch_uuids_and_dates, || {})
     .unwrap_err();
 
-    match err {
-        Error::BadPeerValidationBatch(_) => (),
-        _ => assert!(false, "unexpected error {:?}", err),
-    };
+    assert!(matches!(err, Error::BadPeerValidationBatch(_)));
 
     let err = BatchAggregator::new(
         instance_name,
@@ -332,10 +329,7 @@ fn aggregation_including_invalid_batch() {
     .generate_sum_part(&batch_uuids_and_dates, || {})
     .unwrap_err();
 
-    match err {
-        Error::BadPeerValidationBatch(_) => (),
-        _ => assert!(false, "unexpected error {:?}", err),
-    };
+    assert!(matches!(err, Error::BadPeerValidationBatch(_)));
 }
 
 fn end_to_end_test(drop_nth_pha: Option<usize>, drop_nth_facilitator: Option<usize>) {
