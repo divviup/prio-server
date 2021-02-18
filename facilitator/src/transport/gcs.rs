@@ -233,9 +233,7 @@ impl StreamingTransferWriter {
         let http_response = ureq::put(&self.upload_session_uri)
             .set("Content-Range", &content_range)
             // By default, ureq will wait forever to connect or read
-            .timeout_connect(10_000) // ten seconds
-            .timeout_read(120_000) // two minutes
-            .timeout_write(120_000) // two minutes
+            .timeout(Duration::from_secs(120)) // two minutes
             .send_bytes(body);
 
         // On success we expect HTTP 308 Resume Incomplete and a Range: header,
@@ -332,8 +330,7 @@ impl TransportWriter for StreamingTransferWriter {
         let http_response = ureq::delete(&self.upload_session_uri)
             .set("Content-Length", "0")
             // By default, ureq will wait forever to connect or read
-            .timeout_connect(10_000) // ten seconds
-            .timeout_read(120_000) // two minutes
+            .timeout(Duration::from_secs(120)) // two minutes
             .call();
         match http_response.status() {
             499 => Ok(()),
