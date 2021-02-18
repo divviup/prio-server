@@ -3,10 +3,10 @@ package tokenfetcher
 import (
 	"fmt"
 	"io/ioutil"
-	"log"
 	"net/http"
 
 	"github.com/aws/aws-sdk-go/aws/credentials"
+	"github.com/rs/zerolog/log"
 )
 
 type TokenFetcher struct {
@@ -38,6 +38,6 @@ func (tf TokenFetcher) FetchToken(credentials.Context) ([]byte, error) {
 		return nil, fmt.Errorf("status code %d from metadata service at %s: %s",
 			resp.StatusCode, url, string(bytes))
 	}
-	log.Printf("fetched token from %s", url)
+	log.Info().Msgf("fetched token from %s", url)
 	return bytes, nil
 }

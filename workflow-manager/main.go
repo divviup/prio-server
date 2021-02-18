@@ -9,15 +9,18 @@ package main
 import (
 	"flag"
 	"fmt"
-	"log"
 	"os"
 	"strings"
 	"time"
 
+	"github.com/rs/zerolog"
+	"github.com/rs/zerolog/log"
+
 	"github.com/letsencrypt/prio-server/workflow-manager/batchpath"
-	"github.com/letsencrypt/prio-server/workflow-manager/bucket"
 	"github.com/letsencrypt/prio-server/workflow-manager/monitor"
+	"github.com/letsencrypt/prio-server/workflow-manager/storage"
 	"github.com/letsencrypt/prio-server/workflow-manager/task"
+	wftime "github.com/letsencrypt/prio-server/workflow-manager/time"
 	"github.com/letsencrypt/prio-server/workflow-manager/utils"
 
 	"github.com/prometheus/client_golang/prometheus"
@@ -41,7 +44,6 @@ var peerValidationIdentity = flag.String("peer-validation-identity", "", "Identi
 var aggregationPeriod = flag.String("aggregation-period", "3h", "How much time each aggregation covers")
 var gracePeriod = flag.String("grace-period", "1h", "Wait this amount of time after the end of an aggregation timeslice to run the aggregation")
 var pushGateway = flag.String("push-gateway", "", "Set this to the gateway to use with prometheus. If left empty, workflow-manager will not use prometheus.")
-var kubeconfigPath = flag.String("kube-config-path", "", "Path to the kubeconfig file to be used to authenticate to Kubernetes API")
 var dryRun = flag.Bool("dry-run", false, "If set, no operations with side effects will be done.")
 var taskQueueKind = flag.String("task-queue-kind", "", "Which task queue kind to use.")
 var intakeTasksTopic = flag.String("intake-tasks-topic", "", "Name of the topic to which intake-batch tasks should be published")
@@ -63,7 +65,6 @@ var awsSNSIdentity = flag.String("aws-sns-identity", "", "AWS IAM ARN of the rol
 // monitoring things
 var (
 	intakesStarted            monitor.GaugeMonitor = &monitor.NoopGauge{}
-	intakesSkippedDueToAge    monitor.GaugeMonitor = &monitor.NoopGauge{}
 	intakesSkippedDueToMarker monitor.GaugeMonitor = &monitor.NoopGauge{}
 
 	aggregationsStarted            monitor.GaugeMonitor = &monitor.NoopGauge{}
@@ -76,12 +77,23 @@ var (
 
 func fail(format string, args ...interface{}) {
 	workflowManagerLastFailure.SetToCurrentTime()
-	log.Fatalf(format, args...)
+	log.Fatal().Msgf(format, args...)
+}
+
+func prepareLogger() {
+	zerolog.LevelFieldName = "severity"
+	zerolog.TimestampFieldName = "timestamp"
+	zerolog.TimeFieldFormat = time.RFC3339Nano
 }
 
 func main() {
+	prepareLogger()
 	startTime := time.Now()
-	log.Printf("starting %s version %s. Args: %s", os.Args[0], BuildInfo, os.Args[1:])
+	log.Info().
+		Str("app", os.Args[0]).
+		Str("version", BuildInfo).
+		Str("Args", strings.Join(os.Args[1:], ",")).
+		Msgf("starting %s version %s. Args: %s", os.Args[0], BuildInfo, os.Args[1:])
 	flag.Parse()
 
 	if *pushGateway != "" {
@@ -89,15 +101,16 @@ func main() {
 			Gatherer(prometheus.DefaultGatherer).
 			Grouping("locality", *k8sNS).
 			Grouping("ingestor", *ingestorLabel)
+		defer func() {
+			err := pusher.Push()
+			if err != nil {
+				log.Err(err).Msg("error occurred with pushing to prometheus")
+			}
+		}()
 
-		defer pusher.Push()
 		intakesStarted = promauto.NewGauge(prometheus.GaugeOpts{
 			Name: "workflow_manager_intake_tasks_scheduled",
 			Help: "The number of intake-batch tasks successfully scheduled",
-		})
-		intakesSkippedDueToAge = promauto.NewGauge(prometheus.GaugeOpts{
-			Name: "workflow_manager_intake_tasks_skipped_due_to_age",
-			Help: "The number of intake-batch tasks not scheduled because the batch was too old",
 		})
 		intakesSkippedDueToMarker = promauto.NewGauge(prometheus.GaugeOpts{
 			Name: "workflow_manager_intake_tasks_skipped_due_to_marker",
@@ -129,17 +142,17 @@ func main() {
 		})
 	}
 
-	ownValidationBucket, err := bucket.New(*ownValidationInput, *ownValidationIdentity, *dryRun)
+	ownValidationBucket, err := storage.NewBucket(*ownValidationInput, *ownValidationIdentity, *dryRun)
 	if err != nil {
 		fail("--own-validation-input: %s", err)
 		return
 	}
-	peerValidationBucket, err := bucket.New(*peerValidationInput, *peerValidationIdentity, *dryRun)
+	peerValidationBucket, err := storage.NewBucket(*peerValidationInput, *peerValidationIdentity, *dryRun)
 	if err != nil {
 		fail("--peer-validation-input: %s", err)
 		return
 	}
-	intakeBucket, err := bucket.New(*ingestorInput, *ingestorIdentity, *dryRun)
+	intakeBucket, err := storage.NewBucket(*ingestorInput, *ingestorIdentity, *dryRun)
 	if err != nil {
 		fail("--ingestor-input: %s", err)
 		return
@@ -249,85 +262,84 @@ func main() {
 		fail("unknown task queue kind %s", *taskQueueKind)
 		return
 	}
-  
-	intakeFiles, err := intakeBucket.ListFiles()
+
+	aggregationIDs, err := intakeBucket.ListAggregationIDs()
 	if err != nil {
-		fail("%s", err)
+		fail("unable to discover aggregation IDs from ingestion bucket: %q", err)
 		return
 	}
 
-	ownValidationFiles, err := ownValidationBucket.ListFiles()
-	if err != nil {
-		fail("%s", err)
-		return
+	for _, aggregationID := range aggregationIDs {
+		err = scheduleTasks(scheduleTasksConfig{
+			aggregationID:           aggregationID,
+			isFirst:                 *isFirst,
+			clock:                   wftime.DefaultClock(),
+			intakeBucket:            intakeBucket,
+			ownValidationBucket:     ownValidationBucket,
+			peerValidationBucket:    peerValidationBucket,
+			intakeTaskEnqueuer:      intakeTaskEnqueuer,
+			aggregationTaskEnqueuer: aggregationTaskEnqueuer,
+			maxAge:                  maxAgeParsed,
+			aggregationPeriod:       aggregationPeriodParsed,
+			gracePeriod:             gracePeriodParsed,
+		})
+
+		if err != nil {
+			log.Err(err).Str("aggregation ID", aggregationID).Msgf("Failed to schedule aggregation tasks: %s", err)
+			return
+		}
+
+		workflowManagerLastSuccess.SetToCurrentTime()
+		endTime := time.Now()
+
+		workflowManagerRuntime.Set(endTime.Sub(startTime).Seconds())
 	}
 
-	peerValidationFiles, err := peerValidationBucket.ListFiles()
-	if err != nil {
-		fail("%s", err)
-		return
-	}
-
-	scheduleTasks(scheduleTasksConfig{
-		isFirst:                 *isFirst,
-		clock:                   utils.DefaultClock(),
-		intakeFiles:             intakeFiles,
-		ownValidationFiles:      ownValidationFiles,
-		peerValidationFiles:     peerValidationFiles,
-		intakeTaskEnqueuer:      intakeTaskEnqueuer,
-		aggregationTaskEnqueuer: aggregationTaskEnqueuer,
-		ownValidationBucket:     ownValidationBucket,
-		maxAge:                  maxAgeParsed,
-		aggregationPeriod:       aggregationPeriodParsed,
-		gracePeriod:             gracePeriodParsed,
-	})
-
-	workflowManagerLastSuccess.SetToCurrentTime()
-	endTime := time.Now()
-
-	workflowManagerRuntime.Set(endTime.Sub(startTime).Seconds())
-
-	log.Print("done")
+	log.Info().Msg("done")
 }
 
 type scheduleTasksConfig struct {
-	isFirst                                              bool
-	clock                                                utils.Clock
-	intakeFiles, ownValidationFiles, peerValidationFiles []string
-	intakeTaskEnqueuer, aggregationTaskEnqueuer          task.Enqueuer
-	ownValidationBucket                                  bucket.TaskMarkerWriter
-	maxAge, aggregationPeriod, gracePeriod               time.Duration
+	aggregationID                                           string
+	isFirst                                                 bool
+	clock                                                   wftime.Clock
+	intakeBucket, ownValidationBucket, peerValidationBucket storage.Bucket
+	intakeTaskEnqueuer, aggregationTaskEnqueuer             task.Enqueuer
+	maxAge, aggregationPeriod, gracePeriod                  time.Duration
 }
 
 // scheduleTasks evaluates bucket contents and Kubernetes cluster state to
 // schedule new tasks
 func scheduleTasks(config scheduleTasksConfig) error {
-	intakeBatches, err := batchpath.ReadyBatches(config.intakeFiles, "batch")
+	intakeInterval := wftime.Interval{
+		Begin: config.clock.Now().Add(-config.maxAge),
+		End:   config.clock.Now().Add(24 * time.Hour),
+	}
+
+	intakeFiles, err := config.intakeBucket.ListBatchFiles(config.aggregationID, intakeInterval)
+	if err != nil {
+		return err
+	}
+
+	intakeBatches, err := batchpath.ReadyBatches(intakeFiles, "batch")
 	if err != nil {
 		return err
 	}
 
 	// Make a set of the tasks for which we have marker objects for efficient
 	// lookup later.
-	taskMarkers := map[string]struct{}{}
-	for _, object := range config.ownValidationFiles {
-		if !strings.HasPrefix(object, "task-markers/") {
-			continue
-		}
-		taskMarkers[strings.TrimPrefix(object, "task-markers/")] = struct{}{}
+	intakeTaskMarkers, err := config.ownValidationBucket.ListIntakeTaskMarkers(config.aggregationID, intakeInterval)
+	if err != nil {
+		return err
 	}
 
-	currentIntakeBatches := withinInterval(intakeBatches, interval{
-		begin: config.clock.Now().UTC().Add(-config.maxAge),
-		end:   config.clock.Now().UTC().Add(24 * time.Hour),
-	})
-	log.Printf("skipping %d batches as too old", len(intakeBatches)-len(currentIntakeBatches))
+	intakeTaskMarkersSet := map[string]struct{}{}
+	for _, marker := range intakeTaskMarkers {
+		intakeTaskMarkersSet[marker] = struct{}{}
+	}
 
 	err = enqueueIntakeTasks(
-		config.clock,
-		currentIntakeBatches,
-		config.maxAge,
-		taskMarkers,
+		intakeBatches,
+		intakeTaskMarkersSet,
 		config.ownValidationBucket,
 		config.intakeTaskEnqueuer,
 	)
@@ -335,21 +347,35 @@ func scheduleTasks(config scheduleTasksConfig) error {
 		return err
 	}
 
-	ownValidityInfix := fmt.Sprintf("validity_%d", utils.Index(config.isFirst))
-	ownValidationBatches, err := batchpath.ReadyBatches(config.ownValidationFiles, ownValidityInfix)
+	aggInterval := wftime.AggregationInterval(config.clock, config.aggregationPeriod, config.gracePeriod)
+
+	log.Info().Str("aggregation interval", aggInterval.String()).Msgf("looking for batches to aggregate in interval %s", aggInterval)
+
+	ownValidationFiles, err := config.ownValidationBucket.ListBatchFiles(config.aggregationID, aggInterval)
 	if err != nil {
 		return err
 	}
 
-	log.Printf("found %d own validations", len(ownValidationBatches))
+	ownValidityInfix := fmt.Sprintf("validity_%d", utils.Index(config.isFirst))
+	ownValidationBatches, err := batchpath.ReadyBatches(ownValidationFiles, ownValidityInfix)
+	if err != nil {
+		return err
+	}
+
+	log.Info().Int("own validations", len(ownValidationBatches)).Msgf("found %d own validations", len(ownValidationBatches))
+
+	peerValidationFiles, err := config.peerValidationBucket.ListBatchFiles(config.aggregationID, aggInterval)
+	if err != nil {
+		return err
+	}
 
 	peerValidityInfix := fmt.Sprintf("validity_%d", utils.Index(!config.isFirst))
-	peerValidationBatches, err := batchpath.ReadyBatches(config.peerValidationFiles, peerValidityInfix)
+	peerValidationBatches, err := batchpath.ReadyBatches(peerValidationFiles, peerValidityInfix)
 	if err != nil {
 		return err
 	}
 
-	log.Printf("found %d peer validations", len(peerValidationBatches))
+	log.Info().Int("peer validations", len(peerValidationBatches)).Msgf("found %d peer validations", len(peerValidationBatches))
 
 	// Take the intersection of the sets of own validations and peer validations
 	// to get the list of batches we can aggregate.
@@ -368,14 +394,20 @@ func scheduleTasks(config scheduleTasksConfig) error {
 		}
 	}
 
-	interval := aggregationInterval(config.clock, config.aggregationPeriod, config.gracePeriod)
-	log.Printf("looking for batches to aggregate in interval %s", interval)
-	aggregationBatches = withinInterval(aggregationBatches, interval)
-	aggregationMap := groupByAggregationID(aggregationBatches)
-	err = enqueueAggregationTasks(
-		aggregationMap,
-		interval,
-		taskMarkers,
+	aggregationTaskMarkers, err := config.ownValidationBucket.ListAggregateTaskMarkers(config.aggregationID)
+	if err != nil {
+		return err
+	}
+	aggregationTaskMarkersSet := map[string]struct{}{}
+	for _, marker := range aggregationTaskMarkers {
+		aggregationTaskMarkersSet[marker] = struct{}{}
+	}
+
+	err = enqueueAggregationTask(
+		config.aggregationID,
+		aggregationBatches,
+		aggInterval,
+		aggregationTaskMarkersSet,
 		config.ownValidationBucket,
 		config.aggregationTaskEnqueuer,
 	)
@@ -391,152 +423,92 @@ func scheduleTasks(config scheduleTasksConfig) error {
 	return nil
 }
 
-// interval represents a half-open interval of time.
-// It includes `begin` and excludes `end`.
-type interval struct {
-	begin time.Time
-	end   time.Time
-}
-
-func (inter interval) String() string {
-	return fmt.Sprintf("%s to %s", fmtTime(inter.begin), fmtTime(inter.end))
-}
-
-// fmtTime returns the input time in the same style expected by facilitator/lib.rs,
-// currently "%Y/%m/%d/%H/%M"
-func fmtTime(t time.Time) string {
-	return t.Format("2006/01/02/15/04")
-}
-
-// aggregationInterval calculates the interval we want to run an aggregation for, if any.
-// That is whatever interval is `gracePeriod` earlier than now and aligned on multiples
-// of `aggregationPeriod` (relative to the zero time).
-func aggregationInterval(clock utils.Clock, aggregationPeriod, gracePeriod time.Duration) interval {
-	var output interval
-	output.end = clock.Now().Add(-gracePeriod).Truncate(aggregationPeriod)
-	output.begin = output.end.Add(-aggregationPeriod)
-	return output
-}
-
-// withinInterval returns the subset of `batchPath`s that are within the given interval.
-func withinInterval(batches batchpath.List, inter interval) batchpath.List {
-	var output batchpath.List
-	for _, bp := range batches {
-		// We use Before twice rather than Before and after, because Before is <,
-		// and After is >, but we are processing a half-open interval so we need
-		// >= and <.
-		if !bp.Time.Before(inter.begin) && bp.Time.Before(inter.end) {
-			output = append(output, bp)
-		}
-	}
-	return output
-}
-
-type aggregationMap map[string]batchpath.List
-
-func groupByAggregationID(batches batchpath.List) aggregationMap {
-	output := make(aggregationMap)
-	for _, v := range batches {
-		output[v.AggregationID] = append(output[v.AggregationID], v)
-	}
-	return output
-}
-
-func enqueueAggregationTasks(
-	batchesByID aggregationMap,
-	inter interval,
+func enqueueAggregationTask(
+	aggregationID string,
+	readyBatches batchpath.List,
+	aggregationWindow wftime.Interval,
 	taskMarkers map[string]struct{},
-	ownValidationBucket bucket.TaskMarkerWriter,
+	ownValidationBucket storage.Bucket,
 	enqueuer task.Enqueuer,
 ) error {
-	if len(batchesByID) == 0 {
-		log.Printf("no batches to aggregate")
+	if len(readyBatches) == 0 {
+		log.Info().Msg("no batches to aggregate")
 		return nil
 	}
 
-	skippedDueToMarker := 0
-	scheduled := 0
+	batches := []task.Batch{}
 
-	for _, readyBatches := range batchesByID {
-		aggregationID := readyBatches[0].AggregationID
-		batches := []task.Batch{}
-
-		batchCount := 0
-		for _, batchPath := range readyBatches {
-			batchCount++
-			batches = append(batches, task.Batch{
-				ID:   batchPath.ID,
-				Time: task.Timestamp(batchPath.Time),
-			})
-
-			// All batches should have the same aggregation ID?
-			if aggregationID != batchPath.AggregationID {
-				return fmt.Errorf("found batch with aggregation ID %s, wanted %s", batchPath.AggregationID, aggregationID)
-			}
-		}
-
-		aggregationTask := task.Aggregation{
-			AggregationID:    aggregationID,
-			AggregationStart: task.Timestamp(inter.begin),
-			AggregationEnd:   task.Timestamp(inter.end),
-			Batches:          batches,
-		}
-
-		if _, ok := taskMarkers[aggregationTask.Marker()]; ok {
-			skippedDueToMarker++
-			aggregationsSkippedDueToMarker.Inc()
-			continue
-		}
-
-		log.Printf("scheduling aggregation task over interval %s for aggregation ID %s over %d batches",
-			inter, aggregationID, batchCount)
-		scheduled++
-		enqueuer.Enqueue(aggregationTask, func(err error) {
-			if err != nil {
-				log.Printf("failed to enqueue aggregation task: %s", err)
-				return
-			}
-
-			// Write a marker to cloud storage to ensure we don't schedule
-			// redundant tasks
-			if err := ownValidationBucket.WriteTaskMarker(aggregationTask.Marker()); err != nil {
-				log.Printf("failed to write aggregation task marker: %s", err)
-			}
-
-			aggregationsStarted.Inc()
+	batchCount := 0
+	for _, batchPath := range readyBatches {
+		batchCount++
+		batches = append(batches, task.Batch{
+			ID:   batchPath.ID,
+			Time: wftime.Timestamp(batchPath.Time),
 		})
+
+		// All batches should have the same aggregation ID?
+		if aggregationID != batchPath.AggregationID {
+			return fmt.Errorf("found batch with aggregation ID %s, wanted %s", batchPath.AggregationID, aggregationID)
+		}
 	}
 
-	log.Printf("skipped %d aggregation tasks due to markers. Scheduled %d new aggregation tasks.",
-		skippedDueToMarker, scheduled)
+	aggregationTask := task.Aggregation{
+		AggregationID:    aggregationID,
+		AggregationStart: wftime.Timestamp(aggregationWindow.Begin),
+		AggregationEnd:   wftime.Timestamp(aggregationWindow.End),
+		Batches:          batches,
+	}
+
+	if _, ok := taskMarkers[aggregationTask.Marker()]; ok {
+		log.Info().
+			Str("aggregation ID", aggregationID).
+			Msg("skipped aggregation task due to marker")
+		aggregationsSkippedDueToMarker.Inc()
+		return nil
+	}
+
+	log.Info().
+		Str("aggregation ID", aggregationID).
+		Str("aggregation window", aggregationWindow.String()).
+		Int("batch count", batchCount).
+		Msg("Scheduling aggregation task")
+
+	enqueuer.Enqueue(aggregationTask, func(err error) {
+		if err != nil {
+			log.Err(err).
+				Str("aggregation ID", aggregationID).
+				Msgf("failed to enqueue aggregation task: %s", err)
+			return
+		}
+
+		// Write a marker to cloud storage to ensure we don't schedule redundant
+		// tasks
+		if err := ownValidationBucket.WriteTaskMarker(aggregationTask.Marker()); err != nil {
+			log.Err(err).
+				Str("aggregation ID", aggregationID).
+				Msgf("failed to write aggregation task marker: %s", err)
+		}
+
+		aggregationsStarted.Inc()
+	})
 
 	return nil
 }
 
 func enqueueIntakeTasks(
-	clock utils.Clock,
 	readyBatches batchpath.List,
-	ageLimit time.Duration,
 	taskMarkers map[string]struct{},
-	ownValidationBucket bucket.TaskMarkerWriter,
+	ownValidationBucket storage.Bucket,
 	enqueuer task.Enqueuer,
 ) error {
-	skippedDueToAge := 0
 	skippedDueToMarker := 0
 	scheduled := 0
 
 	for _, batch := range readyBatches {
-		age := clock.Now().Sub(batch.Time)
-		if age > ageLimit {
-			skippedDueToAge++
-			intakesSkippedDueToAge.Inc()
-			continue
-		}
-
 		intakeTask := task.IntakeBatch{
 			AggregationID: batch.AggregationID,
 			BatchID:       batch.ID,
-			Date:          task.Timestamp(batch.Time),
+			Date:          wftime.Timestamp(batch.Time),
 		}
 
 		if _, ok := taskMarkers[intakeTask.Marker()]; ok {
@@ -545,17 +517,25 @@ func enqueueIntakeTasks(
 			continue
 		}
 
-		log.Printf("scheduling intake task for batch %s", batch)
+		log.Info().
+			Str("aggregation ID", batch.AggregationID).
+			Str("batch", batch.String()).
+			Msg("scheduling intake task for batch")
+
 		scheduled++
 		enqueuer.Enqueue(intakeTask, func(err error) {
 			if err != nil {
-				log.Printf("failed to enqueue intake task: %s", err)
+				log.Err(err).
+					Str("aggregation ID", batch.AggregationID).
+					Msg("failed to enqueue intake task")
 				return
 			}
 			// Write a marker to cloud storage to ensure we don't schedule
 			// redundant tasks
 			if err := ownValidationBucket.WriteTaskMarker(intakeTask.Marker()); err != nil {
-				log.Printf("failed to write intake task marker: %s", err)
+				log.Err(err).
+					Str("aggregation ID", batch.AggregationID).
+					Msg("failed to write intake task marker")
 				return
 			}
 
@@ -563,8 +543,10 @@ func enqueueIntakeTasks(
 		})
 	}
 
-	log.Printf("skipped %d batches as too old, %d with existing tasks. Scheduled %d new intake tasks.",
-		skippedDueToAge, skippedDueToMarker, scheduled)
+	log.Info().
+		Int("skipped batches", skippedDueToMarker).
+		Int("scheduled batches", scheduled).
+		Msg("skipped and scheduled intake tasks")
 
 	return nil
 }

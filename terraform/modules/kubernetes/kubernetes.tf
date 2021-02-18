@@ -517,8 +517,6 @@ resource "kubernetes_deployment" "aggregate" {
     }
   }
 }
-
-
 output "service_account_unique_id" {
   value = module.account_mapping.google_service_account_unique_id
 }

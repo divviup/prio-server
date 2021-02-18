@@ -7,13 +7,13 @@ version = "0.1.0"
 [dependencies]
 anyhow = "1.0"
 async-trait = "0.1"
-avro-rs = { version = "0.11.0", features = ["snappy"] }
-base64 = "0.12.3"
+avro-rs = { version = "0.13.0", features = ["snappy"] }
+base64 = "0.13.0"
 chrono = { version = "0.4", features = ["serde"] }
 clap = "2.33.3"
 derivative = "2.1.1"
 elliptic-curve = { version = "0.8.4", features = ["pem"] }
-env_logger = "0.8.1"
+env_logger = "0.8.3"
 http = "^0.2"
 hyper = "^0.14"
 hyper-rustls = "^0.22"
@@ -27,8 +27,8 @@ pem = "0.8"
 pkix = "0.1.1"
 prio = {git = "https://github.com/abetterinternet/libprio-rs", branch = "amir/errors"}
 prometheus = "0.11"
-rand = "0.7"
-ring = { version = "0.16.15", features = ["std"] }
+rand = "0.8"
+ring = { version = "0.16.20", features = ["std"] }
 rusoto_core = { version = "^0.46", default_features = false, features = ["rustls"] }
 rusoto_s3 = { version = "^0.46", default_features = false, features = ["rustls"] }
 rusoto_sqs = { version = "^0.46", default_features = false, features = ["rustls"] }
@@ -37,7 +37,7 @@ serde = { version = "^1.0", features = ["derive"] }
 serde_json = "1.0"
 tempfile = "3.1.0"
 thiserror = "1.0"
-tokio = { version = "^1.0", features = ["full"] }
+tokio = { version = "^1.2", features = ["full"] }
 ureq = { version = "^2.0", features = ["json"] }
 url = "2.2.0"
 urlencoding = "1.1.1"
@@ -45,7 +45,7 @@ uuid = { version = "0.8", features = ["serde", "v4"] }
 warp = "^0.3"
 
 [dev-dependencies]
-assert_matches = "1.4.0"
+assert_matches = "1.5.0"
 mockito = "0.29.0"
 rusoto_mock = { version = "^0.46", default_features = false, features = ["rustls"] }
 serde_test = "1.0"

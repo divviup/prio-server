@@ -41,10 +41,7 @@ pub struct ReferenceSum {
 }
 
 fn drop_packet(count: usize, drop_nth_packet: Option<usize>) -> bool {
-    match drop_nth_packet {
-        Some(nth) if count % nth == 0 => true,
-        _ => false,
-    }
+    matches!(drop_nth_packet, Some(nth) if count % nth == 0)
 }
 
 #[allow(clippy::too_many_arguments)] // Grandfathered in
@@ -110,7 +107,7 @@ pub fn generate_ingestion_sample(
                     for count in 0..packet_count {
                         // Generate random bit vector
                         let data = (0..dim)
-                            .map(|_| Field::from(thread_rng.gen_range(0, 2)))
+                            .map(|_| Field::from(thread_rng.gen_range(0..2)))
                             .collect::<Vec<Field>>();
 
                         // If we are dropping the packet from either output, do

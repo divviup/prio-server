@@ -224,7 +224,12 @@ impl StreamingTransferWriter {
                 "failed to parse upload_session_uri url: {}",
                 &upload_session_uri
             ))?,
-            agent: AgentBuilder::new().timeout(Duration::from_secs(10)).build(),
+            // We set an unusually long timeout for uploads to GCS, per Google's
+            // recommendation:
+            // https://cloud.google.com/storage/docs/best-practices#uploading
+            agent: AgentBuilder::new()
+                .timeout(Duration::from_secs(120))
+                .build(),
         })
     }
 

@@ -8,42 +8,19 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log"
 	"sync"
 	"time"
 
+	"github.com/rs/zerolog/log"
+
 	leaws "github.com/letsencrypt/prio-server/workflow-manager/aws"
 	"github.com/letsencrypt/prio-server/workflow-manager/limiter"
-	"github.com/letsencrypt/prio-server/workflow-manager/utils"
+	wftime "github.com/letsencrypt/prio-server/workflow-manager/time"
 
 	"cloud.google.com/go/pubsub"
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/service/sns"
 )
-
-// Timestamp is an alias to time.Time with a custom JSON marshaler that
-// marshals the time to UTC, with minute precision, in the format
-// "2006/01/02/15/04"
-type Timestamp time.Time
-
-func (t Timestamp) MarshalJSON() ([]byte, error) {
-	return json.Marshal(t.String())
-}
-
-func (t *Timestamp) stringWithFormat(format string) string {
-	asTime := (*time.Time)(t)
-	return asTime.Format(format)
-}
-
-func (t *Timestamp) String() string {
-	return t.stringWithFormat("2006/01/02/15/04")
-}
-
-// Returns the representation of the timestamp as it should be incorporated into
-// a task marker
-func (t *Timestamp) MarkerString() string {
-	return t.stringWithFormat("2006-01-02-15-04")
-}
 
 // Task is a task that can be enqueued into an Enqueuer
 type Task interface {
@@ -58,9 +35,9 @@ type Aggregation struct {
 	AggregationID string `json:"aggregation-id"`
 	// AggregationStart is the start of the range of time covered by the
 	// aggregation
-	AggregationStart Timestamp `json:"aggregation-start"`
+	AggregationStart wftime.Timestamp `json:"aggregation-start"`
 	// AggregationEnd is the end of the range of time covered by the aggregation
-	AggregationEnd Timestamp `json:"aggregation-end"`
+	AggregationEnd wftime.Timestamp `json:"aggregation-end"`
 	// Batches is the list of batch ID date pairs of the batches aggregated by
 	// this task
 	Batches []Batch `json:"batches"`
@@ -80,7 +57,7 @@ type Batch struct {
 	// ID is the batch ID. Typically a UUID.
 	ID string `json:"id"`
 	// Time is the timestamp on the batch
-	Time Timestamp `json:"time"`
+	Time wftime.Timestamp `json:"time"`
 }
 
 type IntakeBatch struct {
@@ -89,7 +66,7 @@ type IntakeBatch struct {
 	// BatchID is the identifier of the batch. Typically a UUID.
 	BatchID string `json:"batch-id"`
 	// Date is the timestamp on the batch
-	Date Timestamp `json:"date"`
+	Date wftime.Timestamp `json:"date"`
 }
 
 func (i IntakeBatch) Marker() string {
@@ -184,7 +161,7 @@ func (e *GCPPubSubEnqueuer) Enqueue(task Task, completion func(error)) {
 			}
 
 			if e.dryRun {
-				log.Printf("dry run, not enqueuing task")
+				log.Info().Msg("dry run, not enqueuing task")
 				completion(nil)
 				return
 			}
@@ -194,7 +171,7 @@ func (e *GCPPubSubEnqueuer) Enqueue(task Task, completion func(error)) {
 			// automatically retries for us, so we just keep the handle so the caller
 			// can do whatever they need to after successful publication and we can
 			// block in Stop() until all tasks have been enqueued
-			ctx, cancel := utils.ContextWithTimeout()
+			ctx, cancel := wftime.ContextWithTimeout()
 			defer cancel()
 			res := e.topic.Publish(ctx, &pubsub.Message{Data: jsonTask})
 			if _, err := res.Get(ctx); err != nil {
@@ -246,7 +223,7 @@ func (e *AWSSNSEnqueuer) Enqueue(task Task, completion func(error)) {
 	}
 
 	if e.dryRun {
-		log.Printf("dry run, not enqueuing task")
+		log.Info().Msg("dry run, not enqueuing task")
 		completion(nil)
 		return
 	}

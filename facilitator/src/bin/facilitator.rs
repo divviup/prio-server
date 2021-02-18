@@ -59,29 +59,31 @@ fn path_validator(s: String) -> Result<(), String> {
 // Trait applied to clap::App to extend its builder pattern with some helpers
 // specific to our use case.
 trait AppArgumentAdder {
-    fn add_is_first_argument(self: Self) -> Self;
+    fn add_is_first_argument(self) -> Self;
 
-    fn add_instance_name_argument(self: Self) -> Self;
+    fn add_instance_name_argument(self) -> Self;
 
-    fn add_manifest_base_url_argument(self: Self, entity: Entity) -> Self;
+    fn add_manifest_base_url_argument(self, entity: Entity) -> Self;
 
-    fn add_storage_arguments(self: Self, entity: Entity, in_out: InOut) -> Self;
+    fn add_storage_arguments(self, entity: Entity, in_out: InOut) -> Self;
 
-    fn add_batch_public_key_arguments(self: Self, entity: Entity) -> Self;
+    fn add_batch_public_key_arguments(self, entity: Entity) -> Self;
 
     fn add_batch_signing_key_arguments(self: Self, required: bool) -> Self;
 
-    fn add_packet_decryption_key_argument(self: Self) -> Self;
+    fn add_packet_decryption_key_argument(self) -> Self;
 
-    fn add_gcp_service_account_key_file_argument(self: Self) -> Self;
+    fn add_gcp_service_account_key_file_argument(self) -> Self;
 
-    fn add_task_queue_arguments(self: Self) -> Self;
+    fn add_task_queue_arguments(self) -> Self;
 
-    fn add_metrics_scrape_port_argument(self: Self) -> Self;
+    fn add_metrics_scrape_port_argument(self) -> Self;
 
     fn add_use_bogus_packet_file_digest_argument(self: Self) -> Self;
 
     fn add_common_sample_maker_arguments(self: Self) -> Self;
+    
+    fn add_use_bogus_packet_file_digest_argument(self) -> Self;
 }
 
 const SHARED_HELP: &str = "Storage arguments: Any flag ending in -input or -output can take an \
@@ -1667,18 +1669,18 @@ fn intake_task_queue_from_args(
     let task_queue_kind = TaskQueueKind::from_str(
         matches
             .value_of("task-queue-kind")
-            .ok_or(anyhow!("task-queue-kind is required"))?,
+            .ok_or_else(|| anyhow!("task-queue-kind is required"))?,
     )?;
     let identity = matches.value_of("task-queue-identity");
     let queue_name = matches
         .value_of("task-queue-name")
-        .ok_or(anyhow!("task-queue-name is required"))?;
+        .ok_or_else(|| anyhow!("task-queue-name is required"))?;
 
     match task_queue_kind {
         TaskQueueKind::GcpPubSub => {
             let gcp_project_id = matches
                 .value_of("gcp-project-id")
-                .ok_or(anyhow!("gcp-project-id is required"))?;
+                .ok_or_else(|| anyhow!("gcp-project-id is required"))?;
             let pubsub_api_endpoint = matches.value_of("pubsub-api-endpoint");
             Ok(Box::new(GcpPubSubTaskQueue::new(
                 pubsub_api_endpoint,
@@ -1690,7 +1692,7 @@ fn intake_task_queue_from_args(
         TaskQueueKind::AwsSqs => {
             let sqs_region = matches
                 .value_of("aws-sqs-region")
-                .ok_or(anyhow!("aws-sqs-region is required"))?;
+                .ok_or_else(|| anyhow!("aws-sqs-region is required"))?;
             Ok(Box::new(AwsSqsTaskQueue::new(sqs_region, queue_name)?))
         }
     }
@@ -1702,18 +1704,18 @@ fn aggregation_task_queue_from_args(
     let task_queue_kind = TaskQueueKind::from_str(
         matches
             .value_of("task-queue-kind")
-            .ok_or(anyhow!("task-queue-kind is required"))?,
+            .ok_or_else(|| anyhow!("task-queue-kind is required"))?,
     )?;
     let identity = matches.value_of("task-queue-identity");
     let queue_name = matches
         .value_of("task-queue-name")
-        .ok_or(anyhow!("task-queue-name is required"))?;
+        .ok_or_else(|| anyhow!("task-queue-name is required"))?;
 
     match task_queue_kind {
         TaskQueueKind::GcpPubSub => {
             let gcp_project_id = matches
                 .value_of("gcp-project-id")
-                .ok_or(anyhow!("gcp-project-id is required"))?;
+                .ok_or_else(|| anyhow!("gcp-project-id is required"))?;
             let pubsub_api_endpoint = matches.value_of("pubsub-api-endpoint");
             Ok(Box::new(GcpPubSubTaskQueue::new(
                 pubsub_api_endpoint,
@@ -1725,7 +1727,7 @@ fn aggregation_task_queue_from_args(
         TaskQueueKind::AwsSqs => {
             let sqs_region = matches
                 .value_of("aws-sqs-region")
-                .ok_or(anyhow!("aws-sqs-region is required"))?;
+                .ok_or_else(|| anyhow!("aws-sqs-region is required"))?;
             Ok(Box::new(AwsSqsTaskQueue::new(sqs_region, queue_name)?))
         }
     }
