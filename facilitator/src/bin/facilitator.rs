@@ -14,6 +14,7 @@ use facilitator::{
     aggregation::BatchAggregator,
     config::{Identity, ManifestKind, StoragePath, TaskQueueKind},
     intake::BatchIntaker,
+    logging::setup_env_logging,
     manifest::{
         DataShareProcessorGlobalManifest, IngestionServerManifest, PortalServerGlobalManifest,
         SpecificManifest,
@@ -405,8 +406,7 @@ impl<'a, 'b> AppArgumentAdder for App<'a, 'b> {
 }
 
 fn main() -> Result<(), anyhow::Error> {
-    env_logger::builder().format_timestamp_millis().init();
-
+    setup_env_logging();
     let args: Vec<String> = std::env::args().collect();
     info!(
         "starting {} version {}. Args: [{}]",
@@ -643,49 +643,49 @@ fn main() -> Result<(), anyhow::Error> {
         )
         .subcommand(
             SubCommand::with_name("lint-manifest")
-            .about("Validate and print out global or specific manifests")
-            .arg(
-                Arg::with_name("manifest-base-url")
-                    .long("manifest-base-url")
-                    .value_name("URL")
-                    .help("base URL relative to which manifests may be fetched")
-                    .long_help(
-                        "base URL relative to which manifests may be fetched \
+                .about("Validate and print out global or specific manifests")
+                .arg(
+                    Arg::with_name("manifest-base-url")
+                        .long("manifest-base-url")
+                        .value_name("URL")
+                        .help("base URL relative to which manifests may be fetched")
+                        .long_help(
+                            "base URL relative to which manifests may be fetched \
                         over HTTPS. Should be in the form \"https://foo.com\"."
-                    )
-                    .required_unless("manifest-path")
-            )
-            .arg(
-                Arg::with_name("manifest-path")
-                    .long("manifest-path")
-                    .value_name("PATH")
-                    .help("path to local manifest file to lint")
-                    .required_unless("manifest-base-url")
-            )
-            .arg(
-                Arg::with_name("manifest-kind")
-                    .long("manifest-kind")
-                    .value_name("KIND")
-                    .help("kind of manifest to locate and parse")
-                    .possible_value(leak_string(ManifestKind::IngestorGlobal.to_string()))
-                    .possible_value(leak_string(ManifestKind::IngestorSpecific.to_string()))
-                    .possible_value(leak_string(ManifestKind::DataShareProcessorGlobal.to_string()))
-                    .possible_value(leak_string(ManifestKind::DataShareProcessorSpecific.to_string()))
-                    .possible_value(leak_string(ManifestKind::PortalServerGlobal.to_string()))
-                    .required(true)
+                        )
+                        .required_unless("manifest-path")
                 )
-            .arg(
-                Arg::with_name("instance")
-                    .long("instance")
-                    .value_name("INSTANCE_NAME")
-                    .help("the instance name whose manifest is to be fetched")
-                    .long_help(
-                        leak_string(format!("the instance name whose manifest is to be fetched, \
+                .arg(
+                    Arg::with_name("manifest-path")
+                        .long("manifest-path")
+                        .value_name("PATH")
+                        .help("path to local manifest file to lint")
+                        .required_unless("manifest-base-url")
+                )
+                .arg(
+                    Arg::with_name("manifest-kind")
+                        .long("manifest-kind")
+                        .value_name("KIND")
+                        .help("kind of manifest to locate and parse")
+                        .possible_value(leak_string(ManifestKind::IngestorGlobal.to_string()))
+                        .possible_value(leak_string(ManifestKind::IngestorSpecific.to_string()))
+                        .possible_value(leak_string(ManifestKind::DataShareProcessorGlobal.to_string()))
+                        .possible_value(leak_string(ManifestKind::DataShareProcessorSpecific.to_string()))
+                        .possible_value(leak_string(ManifestKind::PortalServerGlobal.to_string()))
+                        .required(true)
+                )
+                .arg(
+                    Arg::with_name("instance")
+                        .long("instance")
+                        .value_name("INSTANCE_NAME")
+                        .help("the instance name whose manifest is to be fetched")
+                        .long_help(
+                            leak_string(format!("the instance name whose manifest is to be fetched, \
                         e.g., \"mi-google\" for a data share processor specific manifest or \"mi\" \
                         for an ingestor specific manifest. Required if manifest-kind={} or {}.",
-                        ManifestKind::DataShareProcessorSpecific, ManifestKind::IngestorSpecific))
-                    )
-            )
+                                                ManifestKind::DataShareProcessorSpecific, ManifestKind::IngestorSpecific))
+                        )
+                )
         )
         .subcommand(
             SubCommand::with_name("intake-batch-worker")
@@ -964,7 +964,7 @@ fn aggregate<F: FnMut()>(
                 "batch-signing-private-key and \
                 batch-signing-private-key-identifier are required if \
                 own-manifest-base-url is not provided."
-            ))
+            ));
         }
     };
 
@@ -996,7 +996,7 @@ fn aggregate<F: FnMut()>(
             return Err(anyhow!(
                 "peer-public-key and peer-public-key-identifier are \
                         required if peer-manifest-base-url is not provided."
-            ))
+            ));
         }
     };
 
@@ -1297,7 +1297,7 @@ fn intake_transport_from_args(matches: &ArgMatches) -> Result<VerifiableAndDecry
             return Err(anyhow!(
                 "ingestor-public-key and ingestor-public-key-identifier are \
                 required if ingestor-manifest-base-url is not provided."
-            ))
+            ));
         }
     };
 
