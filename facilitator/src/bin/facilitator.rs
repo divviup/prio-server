@@ -82,8 +82,6 @@ trait AppArgumentAdder {
     fn add_use_bogus_packet_file_digest_argument(self: Self) -> Self;
 
     fn add_common_sample_maker_arguments(self: Self) -> Self;
-
-    fn add_use_bogus_packet_file_digest_argument(self) -> Self;
 }
 
 const SHARED_HELP: &str = "Storage arguments: Any flag ending in -input or -output can take an \

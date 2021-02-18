@@ -1,10 +1,7 @@
 use crate::config::StoragePath;
 use crate::http;
 use anyhow::{anyhow, Context, Result};
-use elliptic_curve::{
-    public_key,
-    sec1::{EncodedPoint, ToEncodedPoint},
-};
+use elliptic_curve::sec1::{EncodedPoint, ToEncodedPoint};
 use log::debug;
 use p256::pkcs8::FromPublicKey;
 use p256::NistP256;
@@ -63,7 +60,7 @@ impl PacketEncryptionCertificateSigningRequest {
         .context("failed to parse pem for packet encryption certificate signing request")?;
         let csr = DerCertificationRequest::from_der(&der).context("failed to decode csr")?;
 
-        let decoded_public_key: public_key::PublicKey<NistP256> =
+        let decoded_public_key: elliptic_curve::PublicKey<NistP256> =
             p256::PublicKey::from_public_key_der(&csr.reqinfo.spki.value)
                 .map_err(|e| anyhow!("error when getting public key from der: {:?}", e))?;
 
