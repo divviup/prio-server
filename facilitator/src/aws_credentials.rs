@@ -66,6 +66,8 @@ where
             }
             result => break result,
         }
+
+        std::thread::sleep(std::time::Duration::from_secs(5));
     }
 }
 
