@@ -71,8 +71,16 @@ variable "portal_server_manifest_base_url" {
 }
 
 variable "test_peer_environment" {
-  type        = map(string)
-  default     = {}
+  type = object({
+    env_with_ingestor            = string
+    env_without_ingestor         = string
+    localities_with_sample_maker = list(string)
+  })
+  default = {
+    env_with_ingestor            = ""
+    env_without_ingestor         = ""
+    localities_with_sample_maker = []
+  }
   description = "See main.tf for discussion."
 }
 
@@ -161,6 +169,7 @@ locals {
   resource_prefix         = "prio-${var.environment}-${var.data_share_processor_name}"
   is_env_with_ingestor    = lookup(var.test_peer_environment, "env_with_ingestor", "") == var.environment
   is_env_without_ingestor = lookup(var.test_peer_environment, "env_without_ingestor", "") == var.environment
+  create_sample_maker     = local.is_env_with_ingestor && contains(lookup(var.test_peer_environment, "localities_with_sample_maker", []), var.kubernetes_namespace)
   # There are three cases for who is accessing this data share processor's
   # storage buckets, listed in the order we check for them:
   #
@@ -432,7 +441,7 @@ module "kubernetes" {
   own_manifest_base_url                   = var.own_manifest_base_url
   sum_part_bucket_service_account_email   = var.remote_bucket_writer_gcp_service_account_email
   portal_server_manifest_base_url         = var.portal_server_manifest_base_url
-  is_env_with_ingestor                    = local.is_env_with_ingestor
+  create_sample_maker                     = local.create_sample_maker
   test_peer_ingestion_bucket              = local.test_peer_ingestion_bucket
   is_first                                = var.is_first
   intake_max_age                          = var.intake_max_age
