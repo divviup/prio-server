@@ -62,13 +62,24 @@ variable "portal_server_manifest_base_url" {
 }
 
 variable "test_peer_environment" {
-  type        = map(string)
-  default     = {}
+  type = object({
+    env_with_ingestor            = string
+    env_without_ingestor         = string
+    localities_with_sample_maker = list(string)
+  })
+  default = {
+    env_with_ingestor            = ""
+    env_without_ingestor         = ""
+    localities_with_sample_maker = []
+  }
   description = <<DESCRIPTION
 Describes a pair of data share processor environments set up to test against
 each other. One environment, named in "env_with_ingestor", hosts a fake
-ingestion server. The other, named in "env_without_ingestor", does not. This
-variable should not be specified in production deployments.
+ingestion servers, but only for the localities enumerated in
+"localities_with_sample_makers", which should be a subset of the ones in
+"localities". The other environment, named in "env_without_ingestor", has no
+fake ingestion servers. This variable should not be specified in production
+deployments.
 DESCRIPTION
 }
 

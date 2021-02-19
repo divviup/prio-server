@@ -122,6 +122,10 @@ variable "aggregate_worker_count" {
   type = number
 }
 
+variable "create_sample_maker" {
+  type = bool
+}
+
 data "aws_caller_identity" "current" {}
 
 # Workload identity[1] lets us map GCP service accounts to Kubernetes service

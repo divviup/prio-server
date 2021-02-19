@@ -71,8 +71,16 @@ variable "portal_server_manifest_base_url" {
 }
 
 variable "test_peer_environment" {
-  type        = map(string)
-  default     = {}
+  type = object({
+    env_with_ingestor            = string
+    env_without_ingestor         = string
+    localities_with_sample_maker = list(string)
+  })
+  default = {
+    env_with_ingestor            = ""
+    env_without_ingestor         = ""
+    localities_with_sample_maker = []
+  }
   description = "See main.tf for discussion."
 }
 
