@@ -374,7 +374,7 @@ fn main() -> Result<(), anyhow::Error> {
 
     let args: Vec<String> = std::env::args().collect();
     info!(
-        "starting {} version {}. Args: [{}]",
+        "starting {} version {}, built from Debian. Args: [{}]",
         args[0],
         option_env!("BUILD_INFO").unwrap_or("(BUILD_INFO unavailable)"),
         args[1..].join(" "),
