@@ -3,23 +3,25 @@ use log::{Level, Record};
 use serde::Serialize;
 use std::io::Write;
 
+/// Severity maps `log::Level` to Google Cloud Platform's notion of Severity.
+/// https://cloud.google.com/logging/docs/reference/v2/rest/v2/LogEntry#LogSeverity
 #[derive(Debug, Serialize)]
-#[serde()]
+#[serde(rename_all = "UPPERCASE")]
 enum Severity {
-    DEBUG,
-    INFO,
-    WARNING,
-    ERROR,
+    Debug,
+    Info,
+    Warning,
+    Error,
 }
 
 impl Severity {
-    fn from_log_level(level: log::Level) -> Severity {
+    fn from_log_level(level: Level) -> Severity {
         match level {
-            Level::Error => Severity::ERROR,
-            Level::Warn => Severity::WARNING,
-            Level::Info => Severity::INFO,
-            Level::Debug => Severity::DEBUG,
-            Level::Trace => Severity::DEBUG,
+            Level::Error => Severity::Error,
+            Level::Warn => Severity::Warning,
+            Level::Info => Severity::Info,
+            Level::Debug => Severity::Debug,
+            Level::Trace => Severity::Debug,
         }
     }
 }
