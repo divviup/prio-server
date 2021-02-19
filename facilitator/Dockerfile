@@ -1,4 +1,4 @@
-FROM rust:1.46 as builder
+FROM rust:1.50 as builder
 
 # Attempt to install a nonexistent package. This triggers
 # updating the crates.io index separately from building the
