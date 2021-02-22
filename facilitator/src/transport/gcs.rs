@@ -71,7 +71,9 @@ impl GCSTransport {
                 identity.map(|x| x.to_string()),
                 key_file_reader,
             )?,
-            agent: AgentBuilder::new().timeout(Duration::from_secs(10)).build(),
+            agent: AgentBuilder::new()
+                .timeout(Duration::from_secs(120))
+                .build(),
         })
     }
 }
