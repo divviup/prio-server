@@ -54,8 +54,8 @@ test_peer_environment = {
 }
 is_first                 = true
 use_aws                  = true
-workflow_manager_version = "0.6.7"
-facilitator_version      = "0.6.7"
+workflow_manager_version = "0.6.8"
+facilitator_version      = "0.6.8"
 pushgateway              = "prometheus-pushgateway.monitoring:9091"
 victorops_routing_key    = "prio-staging"
 aggregation_period       = "30m"
