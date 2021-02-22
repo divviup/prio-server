@@ -42,7 +42,7 @@ groups:
         more than 95% of the time in the last 8 hours"
   - alert: task_queue_growth
     expr: stackdriver_pubsub_subscription_pubsub_googleapis_com_subscription_num_undelivered_messages{subscription_id!~".*-dead-letter"} > 0
-    for: 2h
+    for: 3h
     labels:
       severity: page
       environment: ${environment}
