@@ -133,10 +133,16 @@ func TestScheduleIntakeTasks(t *testing.T) {
 				}
 			} else {
 				foundExpectedTask := false
-				for _, task := range intakeTaskEnqueuer.enqueuedTasks {
-					if reflect.DeepEqual(task, *testCase.expectedIntakeTask) {
-						foundExpectedTask = true
-						break
+				for _, enqueuedTask := range intakeTaskEnqueuer.enqueuedTasks {
+					if intakeTask, ok := enqueuedTask.(task.IntakeBatch); ok {
+						// TraceID is a dynamic value assigned at runtime. Don't
+						// use it to match
+						intakeTask.TraceID = ""
+
+						if reflect.DeepEqual(intakeTask, *testCase.expectedIntakeTask) {
+							foundExpectedTask = true
+							break
+						}
 					}
 				}
 				if !foundExpectedTask {
@@ -311,10 +317,16 @@ func TestScheduleAggregationTasks(t *testing.T) {
 				}
 			} else {
 				foundExpectedTask := false
-				for _, task := range aggregateTaskEnqueuer.enqueuedTasks {
-					if reflect.DeepEqual(task, *testCase.expectedAggregationTask) {
-						foundExpectedTask = true
-						break
+				for _, enqueuedTask := range aggregateTaskEnqueuer.enqueuedTasks {
+					if aggregationTask, ok := enqueuedTask.(task.Aggregation); ok {
+						// TraceID is a dynamic value assigned at runtime. Don't
+						// use it to match
+						aggregationTask.TraceID = ""
+
+						if reflect.DeepEqual(aggregationTask, *testCase.expectedAggregationTask) {
+							foundExpectedTask = true
+							break
+						}
 					}
 				}
 				if !foundExpectedTask {

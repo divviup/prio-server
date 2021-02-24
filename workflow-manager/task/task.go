@@ -11,6 +11,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
 
 	leaws "github.com/letsencrypt/prio-server/workflow-manager/aws"
@@ -31,6 +32,8 @@ type Task interface {
 
 // Aggregation represents an aggregation task
 type Aggregation struct {
+	// TraceID is the tracing identifier for the aggregation. Typically a UUID
+	TraceID string `json:"trace-id"`
 	// AggregationID is the identifier for the aggregation
 	AggregationID string `json:"aggregation-id"`
 	// AggregationStart is the start of the range of time covered by the
@@ -41,6 +44,13 @@ type Aggregation struct {
 	// Batches is the list of batch ID date pairs of the batches aggregated by
 	// this task
 	Batches []Batch `json:"batches"`
+}
+func (a Aggregation) LogEvent() *zerolog.Event {
+	event := zerolog.Event{}
+	return event.
+		Str("trace ID", a.TraceID).
+		Str("aggregation ID", a.AggregationID)
+	/// etc
 }
 
 func (a Aggregation) Marker() string {
@@ -61,7 +71,9 @@ type Batch struct {
 }
 
 type IntakeBatch struct {
-	// AggregationID is the identifier for the aggregaton
+	// TraceID is the tracing identifier for the intake batch. Typically a UUID
+	TraceID string `json:"trace-id"`
+	// AggregationID is the identifier for the aggregation
 	AggregationID string `json:"aggregation-id"`
 	// BatchID is the identifier of the batch. Typically a UUID.
 	BatchID string `json:"batch-id"`

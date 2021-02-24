@@ -795,6 +795,7 @@ fn generate_sample(sub_matches: &ArgMatches) -> Result<(), anyhow::Error> {
 }
 
 fn intake_batch<F: FnMut()>(
+    trace_id: Option<&String>,
     aggregation_id: &str,
     batch_id: &str,
     date: &str,
@@ -875,6 +876,7 @@ fn intake_batch<F: FnMut()>(
 
 fn intake_batch_subcommand(sub_matches: &ArgMatches) -> Result<(), anyhow::Error> {
     intake_batch(
+        None,
         sub_matches.value_of("aggregation-id").unwrap(),
         sub_matches.value_of("batch-id").unwrap(),
         sub_matches.value_of("date").unwrap(),
@@ -896,6 +898,7 @@ fn intake_batch_worker(sub_matches: &ArgMatches) -> Result<(), anyhow::Error> {
             let task_start = Instant::now();
 
             let result = intake_batch(
+                task_handle.task.trace_id.as_ref(),
                 &task_handle.task.aggregation_id,
                 &task_handle.task.batch_id,
                 &task_handle.task.date,

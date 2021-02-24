@@ -23,6 +23,7 @@ import (
 	wftime "github.com/letsencrypt/prio-server/workflow-manager/time"
 	"github.com/letsencrypt/prio-server/workflow-manager/utils"
 
+	"github.com/google/uuid"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
 	"github.com/prometheus/client_golang/prometheus/push"
@@ -453,6 +454,7 @@ func enqueueAggregationTask(
 	}
 
 	aggregationTask := task.Aggregation{
+		TraceID:          uuid.NewString(),
 		AggregationID:    aggregationID,
 		AggregationStart: wftime.Timestamp(aggregationWindow.Begin),
 		AggregationEnd:   wftime.Timestamp(aggregationWindow.End),
@@ -461,6 +463,7 @@ func enqueueAggregationTask(
 
 	if _, ok := taskMarkers[aggregationTask.Marker()]; ok {
 		log.Info().
+			Str("trace ID", aggregationTask.TraceID).
 			Str("aggregation ID", aggregationID).
 			Msg("skipped aggregation task due to marker")
 		aggregationsSkippedDueToMarker.Inc()
@@ -468,6 +471,7 @@ func enqueueAggregationTask(
 	}
 
 	log.Info().
+		Str("trace ID", aggregationTask.TraceID).
 		Str("aggregation ID", aggregationID).
 		Str("aggregation window", aggregationWindow.String()).
 		Int("batch count", batchCount).
@@ -476,6 +480,7 @@ func enqueueAggregationTask(
 	enqueuer.Enqueue(aggregationTask, func(err error) {
 		if err != nil {
 			log.Err(err).
+				Str("trace ID", aggregationTask.TraceID).
 				Str("aggregation ID", aggregationID).
 				Msgf("failed to enqueue aggregation task: %s", err)
 			return
@@ -485,6 +490,7 @@ func enqueueAggregationTask(
 		// tasks
 		if err := ownValidationBucket.WriteTaskMarker(aggregationTask.Marker()); err != nil {
 			log.Err(err).
+				Str("trace ID", aggregationTask.TraceID).
 				Str("aggregation ID", aggregationID).
 				Msgf("failed to write aggregation task marker: %s", err)
 		}
@@ -509,6 +515,7 @@ func enqueueIntakeTasks(
 			AggregationID: batch.AggregationID,
 			BatchID:       batch.ID,
 			Date:          wftime.Timestamp(batch.Time),
+			TraceID:       uuid.NewString(),
 		}
 
 		if _, ok := taskMarkers[intakeTask.Marker()]; ok {
@@ -518,6 +525,7 @@ func enqueueIntakeTasks(
 		}
 
 		log.Info().
+			Str("trace ID", intakeTask.TraceID).
 			Str("aggregation ID", batch.AggregationID).
 			Str("batch", batch.String()).
 			Msg("scheduling intake task for batch")
@@ -526,6 +534,7 @@ func enqueueIntakeTasks(
 		enqueuer.Enqueue(intakeTask, func(err error) {
 			if err != nil {
 				log.Err(err).
+					Str("trace ID", intakeTask.TraceID).
 					Str("aggregation ID", batch.AggregationID).
 					Msg("failed to enqueue intake task")
 				return
@@ -534,6 +543,7 @@ func enqueueIntakeTasks(
 			// redundant tasks
 			if err := ownValidationBucket.WriteTaskMarker(intakeTask.Marker()); err != nil {
 				log.Err(err).
+					Str("trace ID", intakeTask.TraceID).
 					Str("aggregation ID", batch.AggregationID).
 					Msg("failed to write intake task marker")
 				return
