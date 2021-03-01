@@ -6,10 +6,6 @@ variable "gcp_region" {
   type = string
 }
 
-variable "gcp_project" {
-  type = string
-}
-
 variable "manifest_bucket" {
   type = string
 }
@@ -260,7 +256,7 @@ resource "kubernetes_deployment" "integration-tester" {
         automount_service_account_token = true
         container {
           name  = "integration-tester"
-          image = "us.gcr.io/prio-bringup-290620/facilitator:latest"
+          image = "${var.container_registry}/${var.facilitator_image}:${var.facilitator_version}"
           env {
             name  = "AWS_ACCOUNT_ID"
             value = data.aws_caller_identity.current.account_id

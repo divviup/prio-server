@@ -22,10 +22,6 @@ variable "peer_validation_bucket_writer" {
   type = string
 }
 
-variable "peer_validation_bucket_reader" {
-  type = string
-}
-
 variable "kms_key" {
   type = string
 }

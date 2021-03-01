@@ -18,9 +18,6 @@ variable "gcp_region" {
   type = string
 }
 
-variable "manifest_bucket" {
-  type = string
-}
 
 variable "use_aws" {
   type = bool
@@ -70,19 +67,6 @@ variable "portal_server_manifest_base_url" {
   type = string
 }
 
-variable "test_peer_environment" {
-  type = object({
-    env_with_ingestor            = string
-    env_without_ingestor         = string
-    localities_with_sample_maker = list(string)
-  })
-  default = {
-    env_with_ingestor            = ""
-    env_without_ingestor         = ""
-    localities_with_sample_maker = []
-  }
-  description = "See main.tf for discussion."
-}
 
 variable "is_first" {
   type = bool
@@ -136,13 +120,6 @@ variable "aggregate_worker_count" {
   type = number
 }
 
-variable "deployment_has_ingestor" {
-  type = bool
-}
-
-variable "is_env_with_ingestor" {
-  type = bool
-}
 
 # We need the ingestion server's manifest so that we can discover the GCP
 # service account it will use to upload ingestion batches. Some ingestors
@@ -184,19 +161,21 @@ locals {
   )
   ingestor_aws_iam_entity = local.ingestor_global_manifest_exists ? (
     jsondecode(data.http.ingestor_global_manifest[0].body).server-identity.aws-iam-entity
-  ) : ("")
+    ) : (
+    jsondecode(data.http.ingestor_specific_manifest[0].body).server-identity.aws-iam-entity
+  )
   resource_prefix = "prio-${var.environment}-${var.data_share_processor_name}"
   # There are three cases for who is accessing this data share processor's
   # storage buckets, listed in the order we check for them:
   #
-  # 1 - This is a test environment that does _not_ create fake ingestors and
-  #     whose storage is partially in s3.
+  # 1 - This is a test environment that does *not* create fake ingestors and
+  #     whose storage is partially in s3. use_aws will be set to true for this.
   # 2 - This is either a test, or non-test environment whose storage is
   #     exclusively in GCS and for an ingestor that advertises a GCP service account email.
   #
   # The case we no longer support is a non-test environment for an ingestor that
   # advertises an AWS role.
-  bucket_access_identities = !var.is_env_with_ingestor && var.deployment_has_ingestor ? (
+  bucket_access_identities = var.use_aws ? (
     {
       # In the test setup, the peer env hosts the sample-makers, so allow
       # entities in the peer's AWS account to write to our ingeston bucket
@@ -376,7 +355,6 @@ module "cloud_storage_gcp" {
   ingestion_bucket_reader       = local.bucket_access_identities.ingestion_bucket_reader
   peer_validation_bucket_name   = local.peer_validation_bucket_name
   peer_validation_bucket_writer = local.bucket_access_identities.peer_validation_bucket_writer
-  peer_validation_bucket_reader = local.bucket_access_identities.peer_validation_bucket_reader
   # Ensure the GCS service account exists and has permission to use the KMS key
   # before creating buckets.
   depends_on = [google_kms_crypto_key_iam_binding.bucket_encryption_key]
@@ -411,7 +389,6 @@ module "kubernetes" {
   source                                  = "../../modules/kubernetes/"
   data_share_processor_name               = var.data_share_processor_name
   ingestor                                = var.ingestor
-  gcp_project                             = var.gcp_project
   environment                             = var.environment
   kubernetes_namespace                    = var.kubernetes_namespace
   ingestion_bucket                        = local.ingestion_bucket_url

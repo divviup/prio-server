@@ -166,16 +166,6 @@ variable "facilitator_version" {
   default = "latest"
 }
 
-variable "integration_tester_image" {
-  type    = string
-  default = "prio-integration-tester"
-}
-
-variable "integration_tester_version" {
-  type    = string
-  default = "latest"
-}
-
 variable "prometheus_server_persistent_disk_size_gb" {
   type = number
   # This is quite high, but it's the minimum for GCE regional disks
@@ -399,7 +389,6 @@ module "locality_kubernetes" {
   for_each             = kubernetes_namespace.namespaces
   source               = "./modules/locality_kubernetes"
   environment          = var.environment
-  gcp_project          = var.gcp_project
   manifest_bucket      = module.manifest.bucket
   kubernetes_namespace = each.value.metadata[0].name
   ingestors            = keys(var.ingestors)
@@ -420,7 +409,6 @@ module "data_share_processors" {
   aws_region                                     = var.aws_region
   gcp_region                                     = var.gcp_region
   gcp_project                                    = var.gcp_project
-  manifest_bucket                                = module.manifest.bucket
   kubernetes_namespace                           = each.value.kubernetes_namespace
   certificate_domain                             = "${var.environment}.certificates.${var.manifest_domain}"
   ingestor_manifest_base_url                     = each.value.ingestor_manifest_base_url
@@ -431,7 +419,6 @@ module "data_share_processors" {
   remote_bucket_writer_gcp_service_account_email = google_service_account.sum_part_bucket_writer.email
   portal_server_manifest_base_url                = var.portal_server_manifest_base_url
   own_manifest_base_url                          = module.manifest.base_url
-  test_peer_environment                          = var.test_peer_environment
   is_first                                       = var.is_first
   intake_max_age                                 = var.intake_max_age
   aggregation_period                             = var.aggregation_period
@@ -445,8 +432,6 @@ module "data_share_processors" {
   container_registry                             = var.container_registry
   intake_worker_count                            = each.value.intake_worker_count
   aggregate_worker_count                         = each.value.aggregate_worker_count
-  deployment_has_ingestor                        = local.deployment_has_ingestor
-  is_env_with_ingestor                           = local.is_env_with_ingestor
 }
 
 # The portal owns two sum part buckets (one for each data share processor) and
@@ -473,7 +458,6 @@ module "fake_server_resources" {
   gcp_region                   = var.gcp_region
   environment                  = var.environment
   sum_part_bucket_writer_email = google_service_account.sum_part_bucket_writer.email
-  gcp_project                  = var.gcp_project
   ingestor_pairs               = local.locality_ingestor_pairs
   peer_manifest_base_url       = var.peer_share_processor_manifest_base_url
   own_manifest_base_url        = module.manifest.base_url

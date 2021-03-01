@@ -30,10 +30,6 @@ variable "facilitator_version" {
   type = string
 }
 
-variable "gcp_project" {
-  type = string
-}
-
 variable "ingestion_bucket" {
   type = string
 }
