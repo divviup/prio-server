@@ -14,8 +14,13 @@ variable "gcp_project" {
   type = string
 }
 
-variable "machine_type" {
-  type = string
+variable "cluster_settings" {
+  type = object({
+    initial_node_count = number
+    min_node_count     = number
+    max_node_count     = number
+    machine_type       = string
+  })
 }
 
 resource "google_container_cluster" "cluster" {
@@ -84,15 +89,15 @@ resource "google_container_node_pool" "worker_nodes" {
   name               = "${var.resource_prefix}-node-pool"
   location           = var.gcp_region
   cluster            = google_container_cluster.cluster.name
-  initial_node_count = 4
+  initial_node_count = var.cluster_settings.initial_node_count
   autoscaling {
-    min_node_count = 4
-    max_node_count = 5
+    min_node_count = var.cluster_settings.min_node_count
+    max_node_count = var.cluster_settings.max_node_count
   }
   node_config {
     disk_size_gb = "25"
     image_type   = "COS_CONTAINERD"
-    machine_type = var.machine_type
+    machine_type = var.cluster_settings.machine_type
     oauth_scopes = [
       "storage-ro",
       "logging-write",

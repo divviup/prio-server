@@ -1,7 +1,6 @@
 environment     = "prod-us"
 gcp_region      = "us-west1"
 gcp_project     = "prio-prod-us"
-machine_type    = "e2-standard-8"
 localities      = ["ta-ta", "us-ct", "us-md", "us-va", "us-wa", "us-ca"]
 aws_region      = "us-west-1"
 manifest_domain = "isrg-prio.org"
@@ -68,6 +67,12 @@ ingestors = {
       }
     }
   }
+}
+cluster_settings = {
+  initial_node_count = 4
+  min_node_count     = 1
+  max_node_count     = 5
+  machine_type       = "e2-standard-8"
 }
 peer_share_processor_manifest_base_url    = "en-analytics.cancer.gov"
 portal_server_manifest_base_url           = "manifest.enpa-pha.io"

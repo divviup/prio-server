@@ -24,11 +24,6 @@ variable "aws_profile" {
   default = "leuswest2"
 }
 
-variable "machine_type" {
-  type    = string
-  default = "e2.small"
-}
-
 variable "localities" {
   type = list(string)
 }
@@ -173,6 +168,15 @@ variable "victorops_routing_key" {
   default     = "bogus-routing-key"
 }
 
+variable "cluster_settings" {
+  type = object({
+    initial_node_count = number
+    min_node_count     = number
+    max_node_count     = number
+    machine_type       = string
+  })
+}
+
 terraform {
   backend "gcs" {}
 
@@ -282,14 +286,14 @@ module "manifest" {
 }
 
 module "gke" {
-  source          = "./modules/gke"
-  environment     = var.environment
-  resource_prefix = "prio-${var.environment}"
-  gcp_region      = var.gcp_region
-  gcp_project     = var.gcp_project
-  machine_type    = var.machine_type
-  network         = google_compute_network.network.self_link
-  base_subnet     = local.cluster_subnet_block
+  source           = "./modules/gke"
+  environment      = var.environment
+  resource_prefix  = "prio-${var.environment}"
+  gcp_region       = var.gcp_region
+  gcp_project      = var.gcp_project
+  cluster_settings = var.cluster_settings
+  network          = google_compute_network.network.self_link
+  base_subnet      = local.cluster_subnet_block
 
   depends_on = [
     google_project_service.compute,
