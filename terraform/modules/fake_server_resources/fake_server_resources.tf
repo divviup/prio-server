@@ -10,10 +10,6 @@ variable "manifest_bucket" {
   type = string
 }
 
-variable "peer_manifest_base_url" {
-  type = string
-}
-
 variable "own_manifest_base_url" {
   type = string
 }
@@ -27,6 +23,7 @@ variable "ingestor_pairs" {
     ingestor_manifest_base_url : string
     intake_worker_count : string
     aggregate_worker_count : string
+    peer_share_processor_manifest_base_url : string
   }))
 }
 
@@ -45,7 +42,6 @@ variable "facilitator_image" {
 variable "facilitator_version" {
   type = string
 }
-
 
 resource "kubernetes_namespace" "tester" {
   metadata {
@@ -229,7 +225,7 @@ resource "kubernetes_deployment" "integration-tester" {
             "--locality-name", each.value.locality,
             "--kube-namespace", kubernetes_namespace.tester.metadata[0].name,
             "--ingestor-manifest-base-url", "https://${each.value.ingestor_manifest_base_url}",
-            "--pha-manifest-base-url", "https://${var.peer_manifest_base_url}",
+            "--pha-manifest-base-url", "https://${each.value.peer_share_processor_manifest_base_url}",
             "--facilitator-manifest-base-url", "https://${var.own_manifest_base_url}",
             "--aggregation-id", "kittens-seen",
             "--packet-count", "10",

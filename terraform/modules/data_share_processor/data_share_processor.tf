@@ -42,14 +42,6 @@ variable "ingestor_manifest_base_url" {
   type = string
 }
 
-variable "peer_share_processor_aws_account_id" {
-  type = string
-}
-
-variable "peer_share_processor_gcp_service_account_email" {
-  type = string
-}
-
 variable "peer_share_processor_manifest_base_url" {
   type = string
 }
@@ -149,6 +141,10 @@ data "http" "ingestor_specific_manifest" {
   url   = "https://${var.ingestor_manifest_base_url}/${var.data_share_processor_name}-manifest.json"
 }
 
+data "http" "peer_share_processor_global_manifest" {
+  url = "https://${var.peer_share_processor_manifest_base_url}/global-manifest.json"
+}
+
 locals {
   ingestor_global_manifest_exists = data.external.global_manifest_http_status.result.http_code == "200"
   ingestor_server_identity = local.ingestor_global_manifest_exists ? (
@@ -157,6 +153,11 @@ locals {
     jsondecode(data.http.ingestor_specific_manifest[0].body).server-identity
   )
   resource_prefix = "prio-${var.environment}-${var.data_share_processor_name}"
+
+  peer_share_processor_server_identity           = jsondecode(data.http.peer_share_processor_global_manifest.body).server-identity
+  peer_share_processor_aws_account_id            = local.peer_share_processor_server_identity.aws-account-id
+  peer_share_processor_gcp_service_account_email = local.peer_share_processor_server_identity.gcp-service-account-email
+
   # There are three cases for who is accessing this data share processor's
   # storage buckets, listed in the order we check for them:
   #
@@ -181,7 +182,7 @@ locals {
       remote_validation_bucket_writer = var.remote_bucket_writer_gcp_service_account_email
       # We permit entities in the peer's AWS account to write their validations
       # to our bucket
-      peer_validation_bucket_writer = var.peer_share_processor_aws_account_id
+      peer_validation_bucket_writer = local.peer_share_processor_aws_account_id
       # We assume this AWS role to read the bucket to which peers wrote their
       # validations
       peer_validation_bucket_reader = aws_iam_role.bucket_role.arn
@@ -204,7 +205,7 @@ locals {
       remote_validation_bucket_writer = aws_iam_role.bucket_role.arn
       # We permit the peer's GCP service account to write their validations to
       # our bucket
-      peer_validation_bucket_writer = var.peer_share_processor_gcp_service_account_email
+      peer_validation_bucket_writer = local.peer_share_processor_gcp_service_account_email
       # No special auth is needed to read from the validation bucket in GCS
       peer_validation_bucket_reader = module.kubernetes.service_account_email
       # The identity that GKE jobs should assume or impersonate to access the
