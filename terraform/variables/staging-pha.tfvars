@@ -45,10 +45,10 @@ ingestors = {
   }
 }
 cluster_settings = {
-  initial_node_count : 4
-  min_node_count : 4
-  max_node_count : 5
-  machine_type : "e2-standard-4"
+  initial_node_count = 2
+  min_node_count     = 1
+  max_node_count     = 3
+  machine_type       = "e2-standard-2"
 }
 peer_share_processor_manifest_base_url = "storage.googleapis.com/prio-staging-facil-manifests"
 portal_server_manifest_base_url        = "storage.googleapis.com/prio-staging-pha-manifests/portal-server"

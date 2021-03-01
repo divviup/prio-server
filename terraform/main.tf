@@ -167,12 +167,13 @@ variable "victorops_routing_key" {
   description = "VictorOps/Splunk OnCall routing key for prometheus-alertmanager"
   default     = "bogus-routing-key"
 }
+
 variable "cluster_settings" {
   type = object({
-    initial_node_count : number
-    min_node_count : number
-    max_node_count : number
-    machine_type : string
+    initial_node_count = number
+    min_node_count     = number
+    max_node_count     = number
+    machine_type       = string
   })
 }
 

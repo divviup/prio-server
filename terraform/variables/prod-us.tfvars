@@ -69,10 +69,10 @@ ingestors = {
   }
 }
 cluster_settings = {
-  initial_node_count : 4
-  min_node_count : 4
-  max_node_count : 5
-  machine_type : "e2-standard-8"
+  initial_node_count = 4
+  min_node_count     = 1
+  max_node_count     = 5
+  machine_type       = "e2-standard-8"
 }
 peer_share_processor_manifest_base_url    = "en-analytics.cancer.gov"
 portal_server_manifest_base_url           = "manifest.enpa-pha.io"
