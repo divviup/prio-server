@@ -521,7 +521,7 @@ output "singleton_ingestor" {
     gcp_service_account_id      = module.fake_server_resources[0].gcp_service_account_id
     gcp_service_account_email   = module.fake_server_resources[0].gcp_service_account_email
     tester_kubernetes_namespace = module.fake_server_resources[0].test_kubernetes_namespace
-    batch_signing_key_name = module.fake_server_resources[0].batch_signing_key_name
+    batch_signing_key_name      = module.fake_server_resources[0].batch_signing_key_name
   } : {}
 }
 

@@ -209,8 +209,8 @@ resource "kubernetes_role_binding" "integration_tester_role_binding" {
 
 resource "kubernetes_secret" "batch_signing_key" {
   metadata {
-    generate_name      = "batch-signing-key"
-    namespace = kubernetes_namespace.tester.metadata[0].name
+    generate_name = "batch-signing-key"
+    namespace     = kubernetes_namespace.tester.metadata[0].name
     labels = {
       "isrg-prio.org/type" : "batch-signing-key"
     }
