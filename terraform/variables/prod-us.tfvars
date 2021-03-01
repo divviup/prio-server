@@ -2,7 +2,7 @@ environment     = "prod-us"
 gcp_region      = "us-west1"
 gcp_project     = "prio-prod-us"
 machine_type    = "e2-standard-8"
-localities      = ["ta-ta", "us-ct", "us-md", "us-va", "us-wa"]
+localities      = ["ta-ta", "us-ct", "us-md", "us-va", "us-wa", "us-ca"]
 aws_region      = "us-west-1"
 manifest_domain = "isrg-prio.org"
 managed_dns_zone = {
@@ -33,6 +33,10 @@ ingestors = {
         intake_worker_count    = 5
         aggregate_worker_count = 3
       }
+      us-ca = {
+        intake_worker_count    = 25
+        aggregate_worker_count = 7
+      }
     }
   }
   g-enpa = {
@@ -58,6 +62,10 @@ ingestors = {
         intake_worker_count    = 3
         aggregate_worker_count = 3
       }
+      us-ca = {
+        intake_worker_count    = 15
+        aggregate_worker_count = 3
+      }
     }
   }
 }
@@ -74,8 +82,8 @@ is_first                                  = false
 use_aws                                   = false
 aggregation_period                        = "8h"
 aggregation_grace_period                  = "4h"
-workflow_manager_version                  = "0.6.7"
-facilitator_version                       = "0.6.7"
+workflow_manager_version                  = "0.6.8"
+facilitator_version                       = "0.6.8"
 pushgateway                               = "prometheus-pushgateway.monitoring:9091"
 prometheus_server_persistent_disk_size_gb = 1000
 victorops_routing_key                     = "prio-prod-us"
