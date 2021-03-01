@@ -171,7 +171,7 @@ module "account_mapping" {
   kubernetes_namespace    = kubernetes_namespace.tester.metadata[0].name
 }
 
-resource "kubernetes_role" "workflow_manager_role" {
+resource "kubernetes_role" "integration_tester_role" {
   metadata {
     name      = "${var.environment}-ingestion-tester-role"
     namespace = kubernetes_namespace.tester.metadata[0].name
@@ -179,17 +179,11 @@ resource "kubernetes_role" "workflow_manager_role" {
 
   rule {
     api_groups = [""]
-    // workflow-manager needs to be able to list and get secrets
-    // this is how the integration tester works as they share roles
+    // integration-tester needs to be able to list and get secrets.
+    // This is used by the integration-tester to find a valid
+    // batch signing key for itself.
     resources = ["secrets"]
     verbs     = ["list", "get"]
-  }
-
-  rule {
-    api_groups = ["batch"]
-    // integration-tester needs to make jobs
-    resources = ["jobs"]
-    verbs     = ["get", "list", "watch", "create", "delete", "deletecollection"]
   }
 }
 
@@ -202,7 +196,7 @@ resource "kubernetes_role_binding" "integration_tester_role_binding" {
 
   role_ref {
     kind      = "Role"
-    name      = kubernetes_role.workflow_manager_role.metadata[0].name
+    name      = kubernetes_role.integration_tester_role.metadata[0].name
     api_group = "rbac.authorization.k8s.io"
   }
 
