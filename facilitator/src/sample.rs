@@ -137,7 +137,7 @@ pub fn generate_ingestion_sample(
                             uuid: packet_uuid,
                             encrypted_payload: pha_share,
                             encryption_key_id: Some("pha-fake-key-1".to_owned()),
-                            r_pit: u32::from(r_pit) as i64,
+                            r_pit: r_pit as i64,
                             version_configuration: Some("config-1".to_owned()),
                             device_nonce: None,
                         };
@@ -156,7 +156,7 @@ pub fn generate_ingestion_sample(
                             uuid: packet_uuid,
                             encrypted_payload: facilitator_share,
                             encryption_key_id: None,
-                            r_pit: u32::from(r_pit) as i64,
+                            r_pit: r_pit as i64,
                             version_configuration: Some("config-1".to_owned()),
                             device_nonce: None,
                         };

@@ -69,7 +69,7 @@ trait AppArgumentAdder {
 
     fn add_batch_public_key_arguments(self, entity: Entity) -> Self;
 
-    fn add_batch_signing_key_arguments(self: Self, required: bool) -> Self;
+    fn add_batch_signing_key_arguments(self, required: bool) -> Self;
 
     fn add_packet_decryption_key_argument(self) -> Self;
 
@@ -79,9 +79,9 @@ trait AppArgumentAdder {
 
     fn add_metrics_scrape_port_argument(self) -> Self;
 
-    fn add_use_bogus_packet_file_digest_argument(self: Self) -> Self;
+    fn add_use_bogus_packet_file_digest_argument(self) -> Self;
 
-    fn add_common_sample_maker_arguments(self: Self) -> Self;
+    fn add_common_sample_maker_arguments(self) -> Self;
 }
 
 const SHARED_HELP: &str = "Storage arguments: Any flag ending in -input or -output can take an \
