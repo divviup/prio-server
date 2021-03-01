@@ -204,7 +204,7 @@ variable "victorops_routing_key" {
 terraform {
   backend "gcs" {}
 
-  required_version = ">= 0.13.3"
+  required_version = ">= 0.14.4"
 
   required_providers {
     aws = {
