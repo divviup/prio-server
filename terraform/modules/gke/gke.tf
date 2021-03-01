@@ -16,9 +16,10 @@ variable "gcp_project" {
 
 variable "cluster_settings" {
   type = object({
-    initial_node_count : number
-    min_node_count : number
-    max_node_count : number
+    initial_node_count = number
+    min_node_count     = number
+    max_node_count     = number
+    machine_type       = string
   })
 }
 

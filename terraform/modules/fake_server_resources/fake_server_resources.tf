@@ -207,6 +207,31 @@ resource "kubernetes_role_binding" "integration_tester_role_binding" {
   }
 }
 
+resource "kubernetes_secret" "batch_signing_key" {
+  metadata {
+    generate_name      = "batch-signing-key"
+    namespace = kubernetes_namespace.tester.metadata[0].name
+    labels = {
+      "isrg-prio.org/type" : "batch-signing-key"
+    }
+  }
+
+  data = {
+    # We want this to be a Terraform resource that can be managed and destroyed
+    # by this module, but we do not want the cleartext private key to appear in
+    # the TF statefile. So we set a dummy value here, and will update the value
+    # later using kubectl. We use lifecycle.ignore_changes so that Terraform
+    # won't blow away the replaced value on subsequent applies.
+    secret_key = "not-a-real-key"
+  }
+
+  lifecycle {
+    ignore_changes = [
+      data["secret_key"]
+    ]
+  }
+}
+
 resource "kubernetes_deployment" "integration-tester" {
   for_each = var.ingestor_pairs
 
@@ -285,4 +310,8 @@ output "gcp_service_account_email" {
 
 output "test_kubernetes_namespace" {
   value = kubernetes_namespace.tester.metadata[0].name
+}
+
+output "batch_signing_key_name" {
+  value = kubernetes_secret.batch_signing_key.metadata[0].name
 }

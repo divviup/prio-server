@@ -862,8 +862,8 @@ async fn generate_sample_worker(sub_matches: ArgMatches<'static>) -> Result<(), 
             let result = generate_sample(&new_matches);
 
             match result {
-                Ok(()) => println!("\tSuccess"),
-                Err(e) => println!("\tError: {:?}", e),
+                Ok(()) => info!("\tSuccess"),
+                Err(e) => error!("\tError: {:?}", e),
             }
         });
     }
@@ -950,7 +950,7 @@ fn get_valid_batch_signing_key(
                 ))?;
 
             let kubernetes = Kubernetes::new(String::from(namespace));
-            let secrets = kubernetes.get_sorted_secrets("type=batch-signing-key")?;
+            let secrets = kubernetes.get_sorted_secrets("isrg-prio.org/type=batch-signing-key")?;
 
             let batch_signing_keys = manifest.batch_signing_public_keys().unwrap();
 

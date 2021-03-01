@@ -66,6 +66,7 @@ type SingletonIngestor struct {
 	GcpServiceAccountEmail    string `json:"gcp_service_account_email"`
 	GcpServiceAccountID       string `json:"gcp_service_account_id"`
 	TesterKubernetesNamespace string `json:"tester_kubernetes_namespace"`
+	BatchSigningKeyName       string `json:"batch_signing_key_name"`
 }
 
 type privateKeyMarshaler func(*ecdsa.PrivateKey) ([]byte, error)
@@ -89,7 +90,7 @@ func marshalPKCS8PrivateKey(ecdsaKey *ecdsa.PrivateKey) ([]byte, error) {
 // encoded PKCS#8 encoding of that key in a Kubernetes secret with the provided
 // keyName, in the provided namespace. Returns the private key so the caller may
 // use it to populate specific manifests.
-func generateAndDeployKeyPair(namespace, keyName, ingestorName, keyType string, keyMarshaler privateKeyMarshaler) (*ecdsa.PrivateKey, error) {
+func generateAndDeployKeyPair(namespace, keyName string, keyMarshaler privateKeyMarshaler) (*ecdsa.PrivateKey, error) {
 	p256Key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	if err != nil {
 		return nil, fmt.Errorf("failed to generate P-256 key: %w", err)
@@ -126,14 +127,10 @@ func generateAndDeployKeyPair(namespace, keyName, ingestorName, keyType string, 
 	kubectlCreate := exec.Command("kubectl", "-n", namespace, "create",
 		"secret", "generic", keyName, secretArgument, "--dry-run=client", "-o=json")
 
-	kubectlLabel := exec.Command("kubectl", "label", "-f-", "--dry-run",
-		"-o=json", "--local",
-		fmt.Sprintf("type=%s", keyType), fmt.Sprintf("ingestor=%s", ingestorName))
-
 	kubectlApply := exec.Command("kubectl", "apply", "-f", "-")
 
 	read, write := io.Pipe()
-	kubectlLabel.Stdin = read
+	kubectlApply.Stdin = read
 	kubectlCreate.Stdout = write
 
 	// Do this async because if we don't close `kubectl create`'s stdout,
@@ -141,16 +138,6 @@ func generateAndDeployKeyPair(namespace, keyName, ingestorName, keyType string, 
 	go func() {
 		defer write.Close()
 		if err := kubectlCreate.Run(); err != nil {
-			log.Fatalf("failed to run kubectl create: %v", err)
-		}
-	}()
-
-	read2, write2 := io.Pipe()
-	kubectlLabel.Stdout = write2
-	kubectlApply.Stdin = read2
-	go func() {
-		defer write2.Close()
-		if err := kubectlLabel.Run(); err != nil {
 			log.Fatalf("failed to run kubectl create: %v", err)
 		}
 	}()
@@ -176,8 +163,7 @@ func manifestExists(fqdn, dsp string) bool {
 }
 
 func setupTestEnvironment(ingestor *SingletonIngestor, manifestBucket string) error {
-	name := "integration-tester-signing-key"
-	batchSigningPublicKey, err := createBatchSigningPublicKey(ingestor.TesterKubernetesNamespace, name, "")
+	batchSigningPublicKey, err := createBatchSigningPublicKey(ingestor.TesterKubernetesNamespace, ingestor.BatchSigningKeyName)
 	if err != nil {
 		return fmt.Errorf("error when creating the batch signing public key for the test environment")
 	}
@@ -190,7 +176,7 @@ func setupTestEnvironment(ingestor *SingletonIngestor, manifestBucket string) er
 			GCPServiceAccountEmail: ingestor.GcpServiceAccountEmail,
 		},
 		BatchSigningPublicKeys: manifest.BatchSigningPublicKeys{
-			name: *batchSigningPublicKey,
+			ingestor.BatchSigningKeyName: *batchSigningPublicKey,
 		},
 	}
 
@@ -228,8 +214,8 @@ func setupTestEnvironment(ingestor *SingletonIngestor, manifestBucket string) er
 	return nil
 }
 
-func createBatchSigningPublicKey(kubernetesNamespace, name, ingestorName string) (*manifest.BatchSigningPublicKey, error) {
-	privateKey, err := generateAndDeployKeyPair(kubernetesNamespace, name, ingestorName, "batch-signing-key", marshalPKCS8PrivateKey)
+func createBatchSigningPublicKey(kubernetesNamespace, name string) (*manifest.BatchSigningPublicKey, error) {
+	privateKey, err := generateAndDeployKeyPair(kubernetesNamespace, name, marshalPKCS8PrivateKey)
 	if err != nil {
 		return nil, fmt.Errorf("error generating and deploying key pair: %v", err)
 	}
@@ -290,7 +276,7 @@ func main() {
 			}
 			log.Printf("generating ECDSA P256 key %s", name)
 
-			batchSigningPublicKey, err := createBatchSigningPublicKey(manifestWrapper.KubernetesNamespace, name, manifestWrapper.IngestorName)
+			batchSigningPublicKey, err := createBatchSigningPublicKey(manifestWrapper.KubernetesNamespace, name)
 			if err != nil {
 				log.Fatalf("Error when creating and signing public key: %v", batchSigningPublicKey)
 			}
@@ -315,7 +301,7 @@ func main() {
 
 			log.Printf("generating and certifying P256 key %s", name)
 			keyMarshaler := marshalX962UncompressedPrivateKey
-			privKey, err := generateAndDeployKeyPair(manifestWrapper.KubernetesNamespace, name, manifestWrapper.IngestorName, "packet-decryption-key", keyMarshaler)
+			privKey, err := generateAndDeployKeyPair(manifestWrapper.KubernetesNamespace, name, keyMarshaler)
 			if err != nil {
 				log.Fatalf("%s", err)
 			}
