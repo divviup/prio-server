@@ -32,6 +32,7 @@ pub struct BatchIntaker<'a> {
 
 impl<'a> BatchIntaker<'a> {
     pub fn new(
+        trace_id: &str,
         aggregation_name: &str,
         batch_id: &Uuid,
         date: &NaiveDateTime,
@@ -326,6 +327,7 @@ mod tests {
         };
 
         let mut pha_ingestor = BatchIntaker::new(
+            "None",
             &aggregation_name,
             &batch_uuid,
             &date,
@@ -341,6 +343,7 @@ mod tests {
             .expect("PHA failed to generate validation");
 
         let mut facilitator_ingestor = BatchIntaker::new(
+            "None",
             &aggregation_name,
             &batch_uuid,
             &date,

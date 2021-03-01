@@ -8,6 +8,7 @@ use std::{
     fmt::{Debug, Display},
     time::Duration,
 };
+use uuid::Uuid;
 
 pub use pubsub::GcpPubSubTaskQueue;
 pub use sqs::AwsSqsTaskQueue;
@@ -66,8 +67,9 @@ pub trait Task: Debug + Display + Sized + serde::de::DeserializeOwned {}
 #[derive(Debug, Deserialize, PartialEq)]
 #[serde(rename_all = "kebab-case")]
 pub struct IntakeBatchTask {
-    /// The trace identifier for the intake, typically a UUID
-    pub trace_id: Option<String>,
+    /// The trace identifier for the intake
+    /// TODO: https://github.com/abetterinternet/prio-server/issues/452
+    pub trace_id: Option<Uuid>,
     /// The identifier for the aggregation
     pub aggregation_id: String,
     /// The identifier of the batch, typically a UUID
@@ -81,7 +83,7 @@ impl Task for IntakeBatchTask {}
 
 impl Display for IntakeBatchTask {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        if let Some(id) = self.trace_id.as_ref() {
+        if let Some(id) = self.trace_id {
             write!(f, "trace ID: {}\n", id)?;
         }
         write!(
@@ -96,8 +98,9 @@ impl Display for IntakeBatchTask {
 #[derive(Debug, Deserialize, PartialEq)]
 #[serde(rename_all = "kebab-case")]
 pub struct AggregationTask {
-    /// The trace identifier for the aggregation, typically a UUID
-    pub trace_id: Option<String>,
+    /// The trace identifier for the aggregation
+    /// TODO: https://github.com/abetterinternet/prio-server/issues/452
+    pub trace_id: Option<Uuid>,
     /// The identifier for the aggregation
     pub aggregation_id: String,
     /// The start of the range of time covered by the aggregation in UTC, with
@@ -114,7 +117,7 @@ impl Task for AggregationTask {}
 
 impl Display for AggregationTask {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        if let Some(id) = self.trace_id.as_ref() {
+        if let Some(id) = self.trace_id {
             write!(f, "trace ID: {}\n", id)?;
         }
         write!(

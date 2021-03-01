@@ -6,9 +6,12 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/letsencrypt/prio-server/workflow-manager/task"
 	wftime "github.com/letsencrypt/prio-server/workflow-manager/time"
 )
+
+var expectedUuid = uuid.New()
 
 type mockEnqueuer struct {
 	enqueuedTasks []task.Task
@@ -68,6 +71,7 @@ func TestScheduleIntakeTasks(t *testing.T) {
 			name:             "current-batch-no-marker",
 			taskMarkerExists: false,
 			expectedIntakeTask: &task.IntakeBatch{
+				TraceID:       expectedUuid,
 				AggregationID: "kittens-seen",
 				BatchID:       "b8a5579a-f984-460a-a42d-2813cbf57771",
 				Date:          wftime.Timestamp(batchTime),
@@ -137,7 +141,7 @@ func TestScheduleIntakeTasks(t *testing.T) {
 					if intakeTask, ok := enqueuedTask.(task.IntakeBatch); ok {
 						// TraceID is a dynamic value assigned at runtime. Don't
 						// use it to match
-						intakeTask.TraceID = ""
+						intakeTask.TraceID = expectedUuid
 
 						if reflect.DeepEqual(intakeTask, *testCase.expectedIntakeTask) {
 							foundExpectedTask = true
@@ -184,6 +188,7 @@ func TestScheduleAggregationTasks(t *testing.T) {
 	gracePeriod, _ := time.ParseDuration("4h")
 	aggregationMarker := "aggregate-kittens-seen-2020-10-31-16-00-2020-11-01-00-00"
 	expectedAggregationTask := &task.Aggregation{
+		TraceID:          expectedUuid,
 		AggregationID:    "kittens-seen",
 		AggregationStart: wftime.Timestamp(aggregationStart),
 		AggregationEnd:   wftime.Timestamp(aggregationEnd),
@@ -321,7 +326,7 @@ func TestScheduleAggregationTasks(t *testing.T) {
 					if aggregationTask, ok := enqueuedTask.(task.Aggregation); ok {
 						// TraceID is a dynamic value assigned at runtime. Don't
 						// use it to match
-						aggregationTask.TraceID = ""
+						aggregationTask.TraceID = expectedUuid
 
 						if reflect.DeepEqual(aggregationTask, *testCase.expectedAggregationTask) {
 							foundExpectedTask = true

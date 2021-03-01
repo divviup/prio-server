@@ -37,7 +37,8 @@ pub struct BatchAggregator<'a> {
 impl<'a> BatchAggregator<'a> {
     #[allow(clippy::too_many_arguments)] // Grandfathered in
     pub fn new(
-        instance_name: &'a str,
+        trace_id: &str,
+        instance_name: &str,
         aggregation_name: &'a str,
         aggregation_start: &'a NaiveDateTime,
         aggregation_end: &'a NaiveDateTime,

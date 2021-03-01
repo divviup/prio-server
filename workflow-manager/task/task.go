@@ -11,6 +11,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
 
@@ -32,8 +33,8 @@ type Task interface {
 
 // Aggregation represents an aggregation task
 type Aggregation struct {
-	// TraceID is the tracing identifier for the aggregation. Typically a UUID
-	TraceID string `json:"trace-id"`
+	// TraceID is the tracing identifier for the aggregation.
+	TraceID uuid.UUID `json:"trace-id"`
 	// AggregationID is the identifier for the aggregation
 	AggregationID string `json:"aggregation-id"`
 	// AggregationStart is the start of the range of time covered by the
@@ -45,12 +46,12 @@ type Aggregation struct {
 	// this task
 	Batches []Batch `json:"batches"`
 }
-func (a Aggregation) LogEvent() *zerolog.Event {
-	event := zerolog.Event{}
+
+func (a Aggregation) PrepareLog(event *zerolog.Event) *zerolog.Event {
 	return event.
-		Str("trace ID", a.TraceID).
-		Str("aggregation ID", a.AggregationID)
-	/// etc
+		Str("trace ID", a.TraceID.String()).
+		Str("aggregation ID", a.AggregationID).
+		Int("batch count", len(a.Batches))
 }
 
 func (a Aggregation) Marker() string {
@@ -71,14 +72,21 @@ type Batch struct {
 }
 
 type IntakeBatch struct {
-	// TraceID is the tracing identifier for the intake batch. Typically a UUID
-	TraceID string `json:"trace-id"`
+	// TraceID is the tracing identifier for the intake batch.
+	TraceID uuid.UUID `json:"trace-id"`
 	// AggregationID is the identifier for the aggregation
 	AggregationID string `json:"aggregation-id"`
 	// BatchID is the identifier of the batch. Typically a UUID.
 	BatchID string `json:"batch-id"`
 	// Date is the timestamp on the batch
 	Date wftime.Timestamp `json:"date"`
+}
+
+func (i IntakeBatch) PrepareLog(event *zerolog.Event) *zerolog.Event {
+	return event.
+		Str("trace ID", i.TraceID.String()).
+		Str("aggregation ID", i.AggregationID).
+		Str("batch ID", i.BatchID)
 }
 
 func (i IntakeBatch) Marker() string {

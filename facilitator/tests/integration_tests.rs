@@ -204,6 +204,7 @@ fn aggregation_including_invalid_batch() {
         };
 
         let mut pha_batch_intaker = BatchIntaker::new(
+            "None",
             aggregation_name,
             &uuid,
             &date,
@@ -215,6 +216,7 @@ fn aggregation_including_invalid_batch() {
         .unwrap();
 
         let mut facilitator_batch_intaker = BatchIntaker::new(
+            "None",
             aggregation_name,
             &uuid,
             &date,
@@ -298,6 +300,7 @@ fn aggregation_including_invalid_batch() {
 
     // Perform the aggregation on PHA and facilitator
     let err = BatchAggregator::new(
+        "None",
         instance_name,
         aggregation_name,
         &start_date,
@@ -316,6 +319,7 @@ fn aggregation_including_invalid_batch() {
     assert!(err.to_string().contains("packet file digest in header"));
 
     let err = BatchAggregator::new(
+        "None",
         instance_name,
         aggregation_name,
         &start_date,
@@ -464,6 +468,7 @@ fn end_to_end_test(drop_nth_pha: Option<usize>, drop_nth_facilitator: Option<usi
 
     let mut intake_callback_count = 0;
     let mut batch_intaker = BatchIntaker::new(
+        "None",
         &aggregation_name,
         &batch_1_uuid,
         &date,
@@ -484,6 +489,7 @@ fn end_to_end_test(drop_nth_pha: Option<usize>, drop_nth_facilitator: Option<usi
     );
 
     BatchIntaker::new(
+        "None",
         &aggregation_name,
         &batch_2_uuid,
         &date,
@@ -497,6 +503,7 @@ fn end_to_end_test(drop_nth_pha: Option<usize>, drop_nth_facilitator: Option<usi
     .unwrap();
 
     BatchIntaker::new(
+        "None",
         &aggregation_name,
         &batch_1_uuid,
         &date,
@@ -510,6 +517,7 @@ fn end_to_end_test(drop_nth_pha: Option<usize>, drop_nth_facilitator: Option<usi
     .unwrap();
 
     BatchIntaker::new(
+        "None",
         &aggregation_name,
         &batch_2_uuid,
         &date,
@@ -554,6 +562,7 @@ fn end_to_end_test(drop_nth_pha: Option<usize>, drop_nth_facilitator: Option<usi
 
     let mut aggregation_callback_count = 0;
     BatchAggregator::new(
+        "None",
         instance_name,
         &aggregation_name,
         &start_date,
@@ -579,6 +588,7 @@ fn end_to_end_test(drop_nth_pha: Option<usize>, drop_nth_facilitator: Option<usi
 
     let mut aggregation_callback_count = 0;
     BatchAggregator::new(
+        "None",
         instance_name,
         &aggregation_name,
         &start_date,
