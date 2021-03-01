@@ -7,7 +7,7 @@ use crate::{
 };
 use anyhow::{anyhow, ensure, Context, Result};
 use chrono::NaiveDateTime;
-use log::info;
+use log::{info, trace};
 use prio::{encrypt::PrivateKey, encrypt::PublicKey, finite_field::Field, server::Server};
 use ring::signature::UnparsedPublicKey;
 use std::{collections::HashMap, convert::TryFrom, iter::Iterator};
@@ -152,9 +152,9 @@ impl<'a> BatchIntaker<'a> {
                         Field::from(r_pit),
                         &packet.encrypted_payload,
                     ) {
-                        Ok(m) => m,
-                        Err(e) => {
-                            info!("Error when trying to create validation message: {:?} - this might be because it is not compatible with this key", e);
+                        Some(m) => m,
+                        None => {
+                            trace!("Error when trying to create validation message - this might be that we picked the wrong packet decryption key");
                             continue;
                         }
                     };
