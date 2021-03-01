@@ -156,6 +156,9 @@ resource "kubernetes_secret" "batch_signing_key" {
   metadata {
     name      = "${var.environment}-${var.data_share_processor_name}-batch-signing-key"
     namespace = var.kubernetes_namespace
+    labels = {
+      
+    }
   }
 
   data = {

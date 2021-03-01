@@ -877,10 +877,8 @@ fn get_ecies_public_key(
 ) -> Result<PublicKey> {
     let peer_name = &format!("{}-{}", locality_name, ingestor_name);
     match key_option {
-        Some(key) => PublicKey::from_base64(key).context(anyhow!(
-            "unable to create public key from base64 ecies key: {}",
-            e
-        )),
+        Some(key) => PublicKey::from_base64(key)
+            .map_err(|e| anyhow!("unable to create public key from base64 ecies key: {}", e)),
         None => match manifest_url {
             Some(manifest_url) => {
                 let manifest = SpecificManifest::from_https(manifest_url, peer_name).context(
@@ -896,10 +894,9 @@ fn get_ecies_public_key(
 
                 let public_key = packet_decryption_key.base64_public_key()?;
 
-                let public_key = PublicKey::from_base64(&public_key).context(anyhow!(
-                    "unable to create public key from base64 ecies key: {}",
-                    e
-                ))?;
+                let public_key = PublicKey::from_base64(&public_key).map_err(|e| {
+                    anyhow!("unable to create public key from base64 ecies key: {}", e)
+                })?;
 
                 info!(
                     "Picked packet decryption key with ID: {} - public key {:?}",
