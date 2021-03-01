@@ -157,10 +157,10 @@ resource "kubernetes_secret" "batch_signing_key" {
     name      = "${var.environment}-${var.data_share_processor_name}-batch-signing-key"
     namespace = var.kubernetes_namespace
     labels = {
-      "isrg-prio.org/type": "batch-signing-key"
-      "isrg-prio.org/ingestor": var.ingestor
-      "isrg-prio.org/locality": var.kubernetes_namespace
-      "isrg-prio.org/instance": var.data_share_processor_name
+      "isrg-prio.org/type" : "batch-signing-key"
+      "isrg-prio.org/ingestor" : var.ingestor
+      "isrg-prio.org/locality" : var.kubernetes_namespace
+      "isrg-prio.org/instance" : var.data_share_processor_name
     }
   }
 
