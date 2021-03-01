@@ -1,7 +1,6 @@
 environment     = "staging-pha"
 gcp_region      = "us-west1"
 gcp_project     = "prio-staging-300104"
-machine_type    = "e2-standard-8"
 localities      = ["narnia", "gondor", "asgard"]
 aws_region      = "us-west-1"
 manifest_domain = "isrg-prio.org"
@@ -44,6 +43,12 @@ ingestors = {
       }
     }
   }
+}
+cluster_settings = {
+  initial_node_count = 2
+  min_node_count     = 1
+  max_node_count     = 3
+  machine_type       = "e2-standard-2"
 }
 peer_share_processor_manifest_base_url = "storage.googleapis.com/prio-staging-facil-manifests"
 portal_server_manifest_base_url        = "storage.googleapis.com/prio-staging-pha-manifests/portal-server"

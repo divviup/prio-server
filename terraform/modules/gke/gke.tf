@@ -14,8 +14,13 @@ variable "gcp_project" {
   type = string
 }
 
-variable "machine_type" {
-  type = string
+variable "cluster_settings" {
+  type = object({
+    initial_node_count = number
+    min_node_count     = number
+    max_node_count     = number
+    machine_type       = string
+  })
 }
 
 variable "cluster_settings" {
@@ -100,7 +105,7 @@ resource "google_container_node_pool" "worker_nodes" {
   node_config {
     disk_size_gb = "25"
     image_type   = "COS_CONTAINERD"
-    machine_type = var.machine_type
+    machine_type = var.cluster_settings.machine_type
     oauth_scopes = [
       "storage-ro",
       "logging-write",
