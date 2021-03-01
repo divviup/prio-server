@@ -176,14 +176,6 @@ variable "integration_tester_version" {
   default = "latest"
 }
 
-variable "cluster_settings" {
-  type = object({
-    initial_node_count : number
-    min_node_count : number
-    max_node_count : number
-  })
-}
-
 variable "prometheus_server_persistent_disk_size_gb" {
   type = number
   # This is quite high, but it's the minimum for GCE regional disks
