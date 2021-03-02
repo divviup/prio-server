@@ -17,6 +17,7 @@ use uuid::Uuid;
 /// sent by the ingestion server and emitting validation shares to the other
 /// share processor.
 pub struct BatchIntaker<'a> {
+    trace_id: &'a str,
     intake_batch: BatchReader<'a, IngestionHeader, IngestionDataSharePacket>,
     intake_public_keys: &'a HashMap<String, UnparsedPublicKey<Vec<u8>>>,
     packet_decryption_keys: &'a Vec<PrivateKey>,
@@ -32,7 +33,7 @@ pub struct BatchIntaker<'a> {
 
 impl<'a> BatchIntaker<'a> {
     pub fn new(
-        trace_id: &str,
+        trace_id: &'a str,
         aggregation_name: &str,
         batch_id: &Uuid,
         date: &NaiveDateTime,
@@ -42,6 +43,7 @@ impl<'a> BatchIntaker<'a> {
         is_first: bool,
     ) -> Result<BatchIntaker<'a>> {
         Ok(BatchIntaker {
+            trace_id,
             intake_batch: BatchReader::new(
                 Batch::new_ingestion(aggregation_name, batch_id, date),
                 &mut *ingestion_transport.transport.transport,
@@ -92,7 +94,8 @@ impl<'a> BatchIntaker<'a> {
     /// thousand processed packets, unless set_callback_cadence has been called.
     pub fn generate_validation_share<F: FnMut()>(&mut self, mut callback: F) -> Result<()> {
         info!(
-            "processing intake from {} and saving validity to {} and {}",
+            "trace id {} processing intake from {} and saving validity to {} and {}",
+            self.trace_id,
             self.intake_batch.path(),
             self.own_validation_batch.path(),
             self.peer_validation_batch.path()
