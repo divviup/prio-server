@@ -795,6 +795,7 @@ fn generate_sample(sub_matches: &ArgMatches) -> Result<(), anyhow::Error> {
 }
 
 fn intake_batch<F: FnMut()>(
+    trace_id: &str,
     aggregation_id: &str,
     batch_id: &str,
     date: &str,
@@ -837,6 +838,7 @@ fn intake_batch<F: FnMut()>(
     let date: NaiveDateTime = NaiveDateTime::parse_from_str(date, DATE_FORMAT).unwrap();
 
     let mut batch_intaker = BatchIntaker::new(
+        trace_id,
         &aggregation_id,
         &batch_id,
         &date,
@@ -875,6 +877,7 @@ fn intake_batch<F: FnMut()>(
 
 fn intake_batch_subcommand(sub_matches: &ArgMatches) -> Result<(), anyhow::Error> {
     intake_batch(
+        "None",
         sub_matches.value_of("aggregation-id").unwrap(),
         sub_matches.value_of("batch-id").unwrap(),
         sub_matches.value_of("date").unwrap(),
@@ -895,7 +898,14 @@ fn intake_batch_worker(sub_matches: &ArgMatches) -> Result<(), anyhow::Error> {
             info!("dequeued task: {}", task_handle);
             let task_start = Instant::now();
 
+            let trace_id = task_handle
+                .task
+                .trace_id
+                .map(|id| id.to_string())
+                .unwrap_or(String::from("None"));
+
             let result = intake_batch(
+                &trace_id,
                 &task_handle.task.aggregation_id,
                 &task_handle.task.batch_id,
                 &task_handle.task.date,
@@ -924,6 +934,7 @@ fn intake_batch_worker(sub_matches: &ArgMatches) -> Result<(), anyhow::Error> {
 }
 
 fn aggregate<F: FnMut()>(
+    trace_id: &str,
     aggregation_id: &str,
     start: &str,
     end: &str,
@@ -1047,6 +1058,7 @@ fn aggregate<F: FnMut()>(
     }
 
     let mut aggregator = BatchAggregator::new(
+        trace_id,
         instance_name,
         aggregation_id,
         &start,
@@ -1099,6 +1111,7 @@ fn aggregate_subcommand(sub_matches: &ArgMatches) -> Result<(), anyhow::Error> {
     let batch_info: Vec<_> = batch_ids.into_iter().zip(batch_dates).collect();
 
     aggregate(
+        "None",
         &sub_matches.value_of("aggregation-id").unwrap(),
         sub_matches.value_of("aggregation-start").unwrap(),
         sub_matches.value_of("aggregation-end").unwrap(),
@@ -1126,7 +1139,15 @@ fn aggregate_worker(sub_matches: &ArgMatches) -> Result<(), anyhow::Error> {
                 .iter()
                 .map(|b| (b.id.as_str(), b.time.as_str()))
                 .collect();
+
+            let trace_id = task_handle
+                .task
+                .trace_id
+                .map(|id| id.to_string())
+                .unwrap_or(String::from("None"));
+
             let result = aggregate(
+                &trace_id,
                 &task_handle.task.aggregation_id,
                 &task_handle.task.aggregation_start,
                 &task_handle.task.aggregation_end,

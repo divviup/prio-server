@@ -21,6 +21,7 @@ use std::{
 use uuid::Uuid;
 
 pub struct BatchAggregator<'a> {
+    trace_id: &'a str,
     is_first: bool,
     aggregation_name: &'a str,
     aggregation_start: &'a NaiveDateTime,
@@ -37,7 +38,8 @@ pub struct BatchAggregator<'a> {
 impl<'a> BatchAggregator<'a> {
     #[allow(clippy::too_many_arguments)] // Grandfathered in
     pub fn new(
-        instance_name: &'a str,
+        trace_id: &'a str,
+        instance_name: &str,
         aggregation_name: &'a str,
         aggregation_start: &'a NaiveDateTime,
         aggregation_end: &'a NaiveDateTime,
@@ -48,6 +50,7 @@ impl<'a> BatchAggregator<'a> {
         aggregation_transport: &'a mut SignableTransport,
     ) -> Result<BatchAggregator<'a>> {
         Ok(BatchAggregator {
+            trace_id,
             is_first,
             aggregation_name,
             aggregation_start,
@@ -84,7 +87,8 @@ impl<'a> BatchAggregator<'a> {
         mut callback: F,
     ) -> Result<()> {
         info!(
-            "processing intake from {}, own validity from {}, peer validity from {} and saving sum parts to {}",
+            "trace id {} processing intake from {}, own validity from {}, peer validity from {} and saving sum parts to {}",
+            self.trace_id,
             self.ingestion_transport.transport.transport.path(),
             self.own_validation_transport.transport.path(),
             self.peer_validation_transport.transport.path(),
@@ -246,14 +250,16 @@ impl<'a> BatchAggregator<'a> {
         // Make sure all the parameters in the headers line up
         if !peer_validation_header.check_parameters(&own_validation_header) {
             return Err(anyhow!(
-                "validation headers do not match. Peer: {:?}\nOwn: {:?}",
+                "trace id {} validation headers do not match. Peer: {:?}\nOwn: {:?}",
+                self.trace_id,
                 peer_validation_header,
                 own_validation_header
             ));
         }
         if !ingestion_header.check_parameters(&peer_validation_header) {
             return Err(anyhow!(
-                "ingestion header does not match peer validation header. Ingestion: {:?}\nPeer:{:?}",
+                "trace id {} ingestion header does not match peer validation header. Ingestion: {:?}\nPeer:{:?}",
+                self.trace_id,
                 ingestion_header,
                 peer_validation_header
             ));
@@ -358,8 +364,8 @@ impl<'a> BatchAggregator<'a> {
                     Ok(valid) => {
                         if !valid {
                             info!(
-                                "rejecting packet {} due to invalid proof",
-                                peer_validation_packet.uuid
+                                "trace id {} rejecting packet {} due to invalid proof",
+                                self.trace_id, peer_validation_packet.uuid
                             );
                             invalid_uuids.push(peer_validation_packet.uuid);
                         }
@@ -379,7 +385,10 @@ impl<'a> BatchAggregator<'a> {
                     .context("unknown validation error")?
                     // Wrap either the default error or what we got from
                     // server.aggregate
-                    .context("failed to validate packets");
+                    .context(format!(
+                        "trace id {} failed to validate packets",
+                        self.trace_id
+                    ));
             }
         }
 

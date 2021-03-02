@@ -23,6 +23,7 @@ import (
 	wftime "github.com/letsencrypt/prio-server/workflow-manager/time"
 	"github.com/letsencrypt/prio-server/workflow-manager/utils"
 
+	"github.com/google/uuid"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
 	"github.com/prometheus/client_golang/prometheus/push"
@@ -453,6 +454,7 @@ func enqueueAggregationTask(
 	}
 
 	aggregationTask := task.Aggregation{
+		TraceID:          uuid.New(),
 		AggregationID:    aggregationID,
 		AggregationStart: wftime.Timestamp(aggregationWindow.Begin),
 		AggregationEnd:   wftime.Timestamp(aggregationWindow.End),
@@ -460,23 +462,19 @@ func enqueueAggregationTask(
 	}
 
 	if _, ok := taskMarkers[aggregationTask.Marker()]; ok {
-		log.Info().
-			Str("aggregation ID", aggregationID).
+		aggregationTask.PrepareLog(log.Info()).
 			Msg("skipped aggregation task due to marker")
 		aggregationsSkippedDueToMarker.Inc()
 		return nil
 	}
 
-	log.Info().
-		Str("aggregation ID", aggregationID).
+	aggregationTask.PrepareLog(log.Info()).
 		Str("aggregation window", aggregationWindow.String()).
-		Int("batch count", batchCount).
 		Msg("Scheduling aggregation task")
 
 	enqueuer.Enqueue(aggregationTask, func(err error) {
 		if err != nil {
-			log.Err(err).
-				Str("aggregation ID", aggregationID).
+			aggregationTask.PrepareLog(log.Err(err)).
 				Msgf("failed to enqueue aggregation task: %s", err)
 			return
 		}
@@ -484,8 +482,7 @@ func enqueueAggregationTask(
 		// Write a marker to cloud storage to ensure we don't schedule redundant
 		// tasks
 		if err := ownValidationBucket.WriteTaskMarker(aggregationTask.Marker()); err != nil {
-			log.Err(err).
-				Str("aggregation ID", aggregationID).
+			aggregationTask.PrepareLog(log.Err(err)).
 				Msgf("failed to write aggregation task marker: %s", err)
 		}
 
@@ -509,6 +506,7 @@ func enqueueIntakeTasks(
 			AggregationID: batch.AggregationID,
 			BatchID:       batch.ID,
 			Date:          wftime.Timestamp(batch.Time),
+			TraceID:       uuid.New(),
 		}
 
 		if _, ok := taskMarkers[intakeTask.Marker()]; ok {
@@ -517,24 +515,21 @@ func enqueueIntakeTasks(
 			continue
 		}
 
-		log.Info().
-			Str("aggregation ID", batch.AggregationID).
+		intakeTask.PrepareLog(log.Info()).
 			Str("batch", batch.String()).
 			Msg("scheduling intake task for batch")
 
 		scheduled++
 		enqueuer.Enqueue(intakeTask, func(err error) {
 			if err != nil {
-				log.Err(err).
-					Str("aggregation ID", batch.AggregationID).
+				intakeTask.PrepareLog(log.Err(err)).
 					Msg("failed to enqueue intake task")
 				return
 			}
 			// Write a marker to cloud storage to ensure we don't schedule
 			// redundant tasks
 			if err := ownValidationBucket.WriteTaskMarker(intakeTask.Marker()); err != nil {
-				log.Err(err).
-					Str("aggregation ID", batch.AggregationID).
+				intakeTask.PrepareLog(log.Err(err)).
 					Msg("failed to write intake task marker")
 				return
 			}
