@@ -20,32 +20,17 @@ func NewWriter(manifestBucketLocation string) Writer {
 }
 
 func (w *Writer) WriteIngestorGlobalManifest(manifest IngestorGlobalManifest, path string) error {
-	log.Info().
-		Str("path", path).
-		Msg("writing the manifest file")
-
-	ioWriter, err := w.getWriter(path)
-	if err != nil {
-		return fmt.Errorf("unable to get writer: %w", err)
-	}
-
-	err = json.NewEncoder(ioWriter).Encode(manifest)
-	if err != nil {
-		return fmt.Errorf("encoding manifest json failed: %w", err)
-	}
-
-	err = ioWriter.Close()
-	if err != nil {
-		return fmt.Errorf("writing manifest failed: %w", err)
-	}
-
-	return nil
+	return w.writeManifest(manifest, path)
 }
 
 func (w *Writer) WriteDataShareSpecificManifest(manifest DataShareProcessorSpecificManifest, path string) error {
+	return w.writeManifest(manifest, path)
+}
+
+func (w *Writer) writeManifest(manifest interface{}, path string) error {
 	log.Info().
 		Str("path", path).
-		Msg("writing the manifest file")
+		Msg("writing a manifest file")
 
 	ioWriter, err := w.getWriter(path)
 	if err != nil {
