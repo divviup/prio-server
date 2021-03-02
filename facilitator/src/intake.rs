@@ -7,7 +7,7 @@ use crate::{
 };
 use anyhow::{anyhow, ensure, Context, Result};
 use chrono::NaiveDateTime;
-use log::{info, trace};
+use log::{debug, info, trace};
 use prio::{encrypt::PrivateKey, encrypt::PublicKey, finite_field::Field, server::Server};
 use ring::signature::UnparsedPublicKey;
 use std::{collections::HashMap, convert::TryFrom, iter::Iterator};
@@ -113,12 +113,12 @@ impl<'a> BatchIntaker<'a> {
             .packet_decryption_keys
             .iter()
             .map(|k| {
-                info!("Public key for server is: {:?}", PublicKey::from(k));
+                debug!("Public key for server is: {:?}", PublicKey::from(k));
                 Server::new(ingestion_header.bins as usize, self.is_first, k.clone())
             })
             .collect::<Vec<Server>>();
 
-        info!("We have {} servers.", &servers.len());
+        debug!("We have {} servers.", &servers.len());
 
         // Read all the ingestion packets, generate a verification message for
         // each, and write them to the validation batch.
@@ -228,7 +228,7 @@ mod tests {
         test_utils::{
             default_facilitator_signing_private_key, default_ingestor_private_key,
             default_ingestor_public_key, default_packet_encryption_certificate_signing_request,
-            default_pha_signing_private_key, DEFAULT_FACILITATOR_ECIES_PRIVATE_KEY,
+            default_pha_signing_private_key,
             DEFAULT_PACKET_ENCRYPTION_CERTIFICATE_SIGNING_REQUEST_PRIVATE_KEY,
         },
         transport::{LocalFileTransport, SignableTransport, VerifiableTransport},

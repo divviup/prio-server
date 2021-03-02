@@ -1,55 +1,55 @@
-use anyhow::{anyhow, Result};
+use anyhow::{anyhow, Context, Result};
 
 use kube::{
     api::{Api, ListParams},
     Client,
 };
 
-use k8s_openapi::{api::core::v1::Secret, Metadata};
+use k8s_openapi::api::core::v1::Secret;
 
 use tokio::runtime::Runtime;
 
 /// Definition of a namespaced Kubernetes API implementation
 #[derive(Debug)]
-pub struct Kubernetes {
+pub struct KubernetesClient {
     namespace: String,
 }
 
-/// Methods for retrieving time from a value
+/// Definining a Time type that is used by secrets.
 #[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd)]
 struct Time(chrono::DateTime<chrono::Utc>);
-trait WithTime {
-    fn get_time(&self) -> Time;
-}
 
-/// Implementation of WithTime for Kubernetes Secret. Will panic if timestamp
-/// does not exist.
-impl WithTime for Secret {
-    fn get_time(&self) -> Time {
-        let x = self
-            .metadata()
-            .clone()
-            .creation_timestamp
-            .expect("Should have had timestamp");
-        Time(x.0)
+/// Will panic if secret does not have timestamp.
+impl std::convert::From<&Secret> for Time {
+    fn from(secret: &Secret) -> Self {
+        Time(
+            secret
+                .metadata
+                .clone()
+                .creation_timestamp
+                .expect("Should have had timestamp")
+                .0,
+        )
     }
 }
 
 /// Sorts a vector of WithTime values with descending values.
-fn sort_by_time_descending<T: WithTime>(values: &mut Vec<T>) {
+fn sort_by_time_descending<T>(values: &mut Vec<T>)
+where
+    for<'a> &'a T: Into<Time>,
+{
     values.sort_by(|e1, e2| {
-        let t1 = e1.get_time();
-
-        let t2 = e2.get_time();
+        let t1: Time = e1.into();
+        let t2: Time = e2.into();
 
         t2.partial_cmp(&t1)
             .expect("t1 should've been comparable to t2")
     })
 }
 
-impl Kubernetes {
+impl KubernetesClient {
     pub fn new(namespace: String) -> Self {
-        Kubernetes { namespace }
+        KubernetesClient { namespace }
     }
 
     /// Gets a descending by creation timestamp sorted vector of secrets from
@@ -71,13 +71,10 @@ impl Kubernetes {
                 ..Default::default()
             })
             .await
-            .map_err(|e| {
-                anyhow!(
-                    "listing secrets failed with {} as label_selector: {}",
-                    label_selector,
-                    e
-                )
-            })?;
+            .context(format!(
+                "listing secrets failed with {} as label_selector",
+                label_selector
+            ))?;
 
         let mut items = listed_secrets.items;
         sort_by_time_descending(&mut items);
@@ -103,9 +100,9 @@ mod tests {
         creation: Time,
     }
 
-    impl WithTime for TestStruct {
-        fn get_time(&self) -> Time {
-            self.creation.clone()
+    impl std::convert::From<&TestStruct> for Time {
+        fn from(t: &TestStruct) -> Self {
+            t.creation.clone()
         }
     }
 

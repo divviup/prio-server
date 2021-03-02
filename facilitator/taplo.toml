@@ -1,4 +1,0 @@
-include = ["Cargo.toml"]
-
-[formatting]
-reorder_keys = true

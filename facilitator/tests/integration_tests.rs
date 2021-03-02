@@ -6,10 +6,11 @@ use facilitator::{
     intake::BatchIntaker,
     sample::{generate_ingestion_sample, SampleOutput},
     test_utils::{
-        default_facilitator_signing_private_key, default_facilitator_signing_public_key,
-        default_ingestor_private_key, default_ingestor_public_key, default_pha_signing_private_key,
-        default_pha_signing_public_key, log_init, DEFAULT_FACILITATOR_ECIES_PRIVATE_KEY,
-        DEFAULT_PHA_ECIES_PRIVATE_KEY,
+        default_facilitator_packet_encryption_public_key, default_facilitator_signing_private_key,
+        default_facilitator_signing_public_key, default_ingestor_private_key,
+        default_ingestor_public_key, default_pha_packet_encryption_public_key,
+        default_pha_signing_private_key, default_pha_signing_public_key, log_init,
+        DEFAULT_FACILITATOR_ECIES_PRIVATE_KEY, DEFAULT_PHA_ECIES_PRIVATE_KEY,
     },
     transport::{
         LocalFileTransport, SignableTransport, VerifiableAndDecryptableTransport,
@@ -17,7 +18,7 @@ use facilitator::{
     },
     Error,
 };
-use prio::{encrypt::PrivateKey, encrypt::PublicKey, util::reconstruct_shares};
+use prio::{encrypt::PrivateKey, util::reconstruct_shares};
 use std::collections::{HashMap, HashSet};
 use tempfile::TempDir;
 use uuid::Uuid;
@@ -32,14 +33,6 @@ fn inconsistent_ingestion_batches() {
     // Have sample generation drop every third and every fourth packet from the
     // PHA and facilitator ingestion batches, respectively.
     end_to_end_test(Some(3), Some(4))
-}
-
-fn default_pha_packet_encryption_public_key() -> PublicKey {
-    PublicKey::from(&PrivateKey::from_base64(DEFAULT_PHA_ECIES_PRIVATE_KEY).unwrap())
-}
-
-fn default_facilitator_packet_encryption_public_key() -> PublicKey {
-    PublicKey::from(&PrivateKey::from_base64(DEFAULT_FACILITATOR_ECIES_PRIVATE_KEY).unwrap())
 }
 
 /// This test verifies that aggregations fail as expected if some subset of the

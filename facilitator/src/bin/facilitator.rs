@@ -9,8 +9,7 @@ use ring::signature::{
     ECDSA_P256_SHA256_ASN1_SIGNING,
 };
 use std::{
-    collections::HashMap, fs, fs::File, io::Read, str::FromStr, thread, time::Duration,
-    time::Instant,
+    collections::HashMap, fs, fs::File, io::Read, str::FromStr, time::Duration, time::Instant,
 };
 use uuid::Uuid;
 
@@ -18,7 +17,7 @@ use facilitator::{
     aggregation::BatchAggregator,
     config::{Identity, ManifestKind, StoragePath, TaskQueueKind},
     intake::BatchIntaker,
-    kubernetes::Kubernetes,
+    kubernetes::KubernetesClient,
     logging::setup_env_logging,
     manifest::{
         DataShareProcessorGlobalManifest, IngestionServerManifest, PortalServerGlobalManifest,
@@ -836,7 +835,7 @@ fn main() -> Result<(), anyhow::Error> {
         // unwrap() here.
         ("generate-ingestion-sample", Some(sub_matches)) => generate_sample(sub_matches),
         ("generate-ingestion-sample-worker", Some(sub_matches)) => {
-            generate_sample_worker(sub_matches.clone())
+            generate_sample_worker(&sub_matches)
         }
         ("intake-batch", Some(sub_matches)) => intake_batch_subcommand(sub_matches),
         ("intake-batch-worker", Some(sub_matches)) => intake_batch_worker(sub_matches),
@@ -848,24 +847,19 @@ fn main() -> Result<(), anyhow::Error> {
 
     result
 }
-#[tokio::main(flavor = "multi_thread", worker_threads = 10)]
-async fn generate_sample_worker(sub_matches: ArgMatches<'static>) -> Result<(), anyhow::Error> {
-    let interval = String::from(sub_matches.value_of("generation-interval").unwrap());
 
-    let seconds = interval.parse::<u64>().expect("interval wasn't a number");
-    let mut ticker = tokio::time::interval(Duration::from_secs(seconds));
+fn generate_sample_worker(sub_matches: &ArgMatches) -> Result<(), anyhow::Error> {
+    let interval = value_t!(sub_matches.value_of("generation-interval"), u64)?;
+
     loop {
-        ticker.tick().await;
         info!("Starting a sample generation job.");
-        let new_matches = sub_matches.clone();
-        thread::spawn(move || {
-            let result = generate_sample(&new_matches);
+        let result = generate_sample(&sub_matches);
 
-            match result {
-                Ok(()) => info!("\tSuccess"),
-                Err(e) => error!("\tError: {:?}", e),
-            }
-        });
+        match result {
+            Ok(()) => info!("\tSuccess"),
+            Err(e) => error!("\tError: {:?}", e),
+        }
+        std::thread::sleep(Duration::from_secs(interval))
     }
 }
 
@@ -877,8 +871,9 @@ fn get_ecies_public_key(
 ) -> Result<PublicKey> {
     let peer_name = &format!("{}-{}", locality_name, ingestor_name);
     match key_option {
-        Some(key) => PublicKey::from_base64(key)
-            .map_err(|e| anyhow!("unable to create public key from base64 ecies key: {}", e)),
+        Some(key) => {
+            PublicKey::from_base64(key).context("unable to create public key from base64 ecies key")
+        }
         None => match manifest_url {
             Some(manifest_url) => {
                 let manifest = SpecificManifest::from_https(manifest_url, peer_name).context(
@@ -894,25 +889,24 @@ fn get_ecies_public_key(
 
                 let public_key = packet_decryption_key.base64_public_key()?;
 
-                let public_key = PublicKey::from_base64(&public_key).map_err(|e| {
-                    anyhow!("unable to create public key from base64 ecies key: {}", e)
-                })?;
+                let public_key = PublicKey::from_base64(&public_key)
+                    .context("unable to create public key from base64 ecies key")?;
 
-                info!(
+                debug!(
                     "Picked packet decryption key with ID: {} - public key {:?}",
                     key_identifier, &public_key
                 );
 
                 Ok(public_key)
             }
-            None => panic!(
+            None => Err(anyhow!(
                 "Neither manifest_option or key_option were specified. This error shouldn't happen."
-            ),
+            )),
         },
     }
 }
 
-fn get_identity_and_bucket(
+fn get_ingestion_identity_and_bucket(
     identity: Option<&str>,
     bucket: Option<&str>,
     manifest_url: Option<&str>,
@@ -949,7 +943,7 @@ fn get_valid_batch_signing_key(
                     own_manifest_url
                 ))?;
 
-            let kubernetes = Kubernetes::new(String::from(namespace));
+            let kubernetes = KubernetesClient::new(String::from(namespace));
             let secrets = kubernetes.get_sorted_secrets("isrg-prio.org/type=batch-signing-key")?;
 
             let batch_signing_keys = manifest.batch_signing_public_keys().unwrap();
@@ -992,7 +986,7 @@ fn generate_sample(sub_matches: &ArgMatches) -> Result<(), anyhow::Error> {
     let own_batch_signing_key =
         get_valid_batch_signing_key(kube_namespace, ingestor_manifest_base_url, sub_matches)?;
 
-    let (peer_identity, peer_output_path) = get_identity_and_bucket(
+    let (peer_identity, peer_output_path) = get_ingestion_identity_and_bucket(
         sub_matches.value_of("peer-identity"),
         sub_matches.value_of("peer-output"),
         sub_matches.value_of("pha-manifest-base-url"),
@@ -1023,7 +1017,7 @@ fn generate_sample(sub_matches: &ArgMatches) -> Result<(), anyhow::Error> {
         drop_nth_packet: None,
     };
 
-    let (facilitator_identity, faciliator_output) = get_identity_and_bucket(
+    let (facilitator_identity, faciliator_output) = get_ingestion_identity_and_bucket(
         sub_matches.value_of("facilitator-identity"),
         sub_matches.value_of("facilitator-output"),
         sub_matches.value_of("facilitator-manifest-base-url"),
@@ -1594,7 +1588,6 @@ fn intake_transport_from_args(matches: &ArgMatches) -> Result<VerifiableAndDecry
         .values_of("packet-decryption-keys")
         .unwrap()
         .map(|k| {
-            debug!("packet decryption private key: {}", k);
             PrivateKey::from_base64(k)
                 .context("could not parse encoded packet encryption key")
                 .unwrap()

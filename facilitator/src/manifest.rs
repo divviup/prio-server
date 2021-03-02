@@ -440,8 +440,6 @@ mod tests {
             DEFAULT_PACKET_ENCRYPTION_CERTIFICATE_SIGNING_REQUEST_PRIVATE_KEY,
         },
     };
-    use base64::encode;
-    use elliptic_curve::generic_array::typenum::private;
     use ring::rand::SystemRandom;
     use rusoto_core::Region;
     use url::Url;

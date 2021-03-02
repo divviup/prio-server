@@ -24,21 +24,19 @@ func (w *Writer) WriteIngestorGlobalManifest(manifest IngestorGlobalManifest, pa
 		Str("path", path).
 		Msg("writing the manifest file")
 
-	iow, err := w.getWriter(path)
+	ioWriter, err := w.getWriter(path)
 	if err != nil {
 		return fmt.Errorf("unable to get writer: %w", err)
 	}
 
-	defer func() {
-		err := iow.Close()
-		if err != nil {
-			log.Fatal().Err(err).Msg("Unable to write manifest")
-		}
-	}()
-
-	err = json.NewEncoder(iow).Encode(manifest)
+	err = json.NewEncoder(ioWriter).Encode(manifest)
 	if err != nil {
 		return fmt.Errorf("encoding manifest json failed: %w", err)
+	}
+
+	err = ioWriter.Close()
+	if err != nil {
+		return fmt.Errorf("writing manifest failed: %w", err)
 	}
 
 	return nil
@@ -49,21 +47,20 @@ func (w *Writer) WriteDataShareSpecificManifest(manifest DataShareProcessorSpeci
 		Str("path", path).
 		Msg("writing the manifest file")
 
-	iow, err := w.getWriter(path)
+	ioWriter, err := w.getWriter(path)
 	if err != nil {
 		return fmt.Errorf("unable to get writer: %w", err)
 	}
 
-	defer func() {
-		err := iow.Close()
-		if err != nil {
-			log.Fatal().Err(err).Msg("Unable to write manifest")
-		}
-	}()
-
-	err = json.NewEncoder(iow).Encode(manifest)
+	err = json.NewEncoder(ioWriter).Encode(manifest)
 	if err != nil {
+		_ = ioWriter.Close()
 		return fmt.Errorf("encoding manifest json failed: %w", err)
+	}
+
+	err = ioWriter.Close()
+	if err != nil {
+		return fmt.Errorf("writing manifest failed: %w", err)
 	}
 
 	return nil
@@ -79,9 +76,9 @@ func (w *Writer) getWriter(path string) (*storage.Writer, error) {
 
 	manifestObj := bucket.Object(path)
 
-	iow := manifestObj.NewWriter(context.Background())
-	iow.CacheControl = "no-cache"
-	iow.ContentType = "application/json; charset=UTF-8"
+	ioWriter := manifestObj.NewWriter(context.Background())
+	ioWriter.CacheControl = "no-cache"
+	ioWriter.ContentType = "application/json; charset=UTF-8"
 
-	return iow, nil
+	return ioWriter, nil
 }

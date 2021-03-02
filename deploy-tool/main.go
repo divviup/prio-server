@@ -275,11 +275,6 @@ func main() {
 			}
 
 			prioKey := key.NewPrioKey(privKey)
-			b := &pem.Block{
-				Type:  "PUBLIC KEY",
-				Bytes: elliptic.Marshal(privKey.PublicKey, privKey.PublicKey.X, privKey.PublicKey.Y),
-			}
-			fmt.Println(string(pem.EncodeToMemory(b)))
 			csrTemplate := key.GetPrioCSRTemplate(manifestWrapper.CertificateFQDN)
 
 			pemCSR, err := prioKey.CreatePemEncodedCertificateRequest(rand.Reader, csrTemplate)
