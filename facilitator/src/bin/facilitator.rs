@@ -917,8 +917,9 @@ fn get_ingestion_identity_and_bucket(
     match bucket {
         Some(bucket) => Ok((identity.map(String::from), String::from(bucket))),
         None => {
-            let manifest_url =
-                manifest_url.ok_or(anyhow!("If bucket is not provided, manifest_url must be provided"))?;
+            let manifest_url = manifest_url.ok_or(anyhow!(
+                "If bucket is not provided, manifest_url must be provided"
+            ))?;
 
             let manifest = SpecificManifest::from_https(manifest_url, peer_name).context(
                 format!("unable to read SpecificManifest from {}", manifest_url),
@@ -936,7 +937,9 @@ fn get_valid_batch_signing_key(
 ) -> Result<BatchSigningKey> {
     match ingestor_manifest_url {
         Some(own_manifest_url) => {
-            let namespace = namespace.ok_or(anyhow!("If manifest URLs are used, kubernetes namespace must be provided"))?;
+            let namespace = namespace.ok_or(anyhow!(
+                "If manifest URLs are used, kubernetes namespace must be provided"
+            ))?;
 
             let manifest =
                 IngestionServerManifest::from_https(own_manifest_url, None).context(format!(
