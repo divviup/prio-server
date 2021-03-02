@@ -406,6 +406,7 @@ impl<'a, 'b> AppArgumentAdder for App<'a, 'b> {
 }
 
 fn main() -> Result<(), anyhow::Error> {
+    // If guard goes out of scope, any log statement will panic the program.
     let _guard = setup_env_logging();
     let args: Vec<String> = std::env::args().collect();
     info!(

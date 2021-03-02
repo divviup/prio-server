@@ -71,6 +71,7 @@ impl convert::From<&Record<'_>> for LogEntry {
     }
 }
 
+/// slog::Serializer allows us to handler the KV records emitted by slog.
 impl slog::Serializer for LogEntry {
     fn emit_arguments(&mut self, k: slog::Key, v: &std::fmt::Arguments) -> slog::Result {
         let value = match serde_json::to_value(v) {
@@ -84,12 +85,13 @@ impl slog::Serializer for LogEntry {
     }
 }
 
+/// JSONDrain is a custom slog drain implementation that implements the
+/// slog::Drain trait. It acts as a final output for the log messages.
 #[derive(Debug)]
 struct JSONDrain {}
 
 impl slog::Drain for JSONDrain {
     type Ok = ();
-
     type Err = anyhow::Error;
 
     fn log(
@@ -97,11 +99,15 @@ impl slog::Drain for JSONDrain {
         record: &slog::Record,
         values: &slog::OwnedKVList,
     ) -> Result<Self::Ok, Self::Err> {
+        // Convert the slog::Record into a LogEntry record
         let mut log_entry: LogEntry = record.into();
+        // These are the values that were provided on creation of the logger
+        // using the slog::o! macro.
         let _ = values.serialize(record, &mut log_entry);
 
         let _ = match serde_json::to_string(&log_entry) {
             Ok(json_value) => writeln!(stderr(), "{}", json_value),
+            // Just write normally to stderr
             _ => writeln!(stderr(), "{:?} - {}", log_entry.severity, log_entry.message),
         };
 
@@ -114,5 +120,6 @@ pub fn setup_env_logging() -> GlobalLoggerGuard {
     let drain = JSONDrain {};
 
     let root = slog::Logger::root(Mutex::new(drain).map(slog::Fuse), slog::o!());
+    // If the return value of this goes out of scope, we don't have a logger anymore
     return slog_scope::set_global_logger(root);
 }
