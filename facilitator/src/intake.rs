@@ -97,7 +97,7 @@ impl<'a> BatchIntaker<'a> {
             "processing intake from {} and saving validity to {} and {}",
             self.intake_batch.path(),
             self.own_validation_batch.path(),
-            self.peer_validation_batch.path(); 
+            self.peer_validation_batch.path();
             "trace id" => self.trace_id
         );
 
