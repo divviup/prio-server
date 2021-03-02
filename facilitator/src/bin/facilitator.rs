@@ -561,7 +561,7 @@ impl<'a, 'b> AppArgumentAdder for App<'a, 'b> {
                 Arg::with_name("locality-name")
                     .long("locality-name")
                     .value_name("STRING")
-                    .help("Name of the locality this ingestor is targetting")
+                    .help("Name of the locality this ingestor is targeting")
                     .required(true),
             )
             .arg(
