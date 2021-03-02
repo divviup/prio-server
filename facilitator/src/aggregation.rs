@@ -11,8 +11,8 @@ use crate::{
 use anyhow::{anyhow, Context, Result};
 use avro_rs::Reader;
 use chrono::NaiveDateTime;
-use log::info;
 use prio::server::{Server, VerificationMessage};
+use slog_scope::{error, info};
 use std::{
     collections::{HashMap, HashSet},
     convert::TryFrom,
@@ -87,12 +87,11 @@ impl<'a> BatchAggregator<'a> {
         mut callback: F,
     ) -> Result<()> {
         info!(
-            "trace id {} processing intake from {}, own validity from {}, peer validity from {} and saving sum parts to {}",
-            self.trace_id,
+            "processing intake from {}, own validity from {}, peer validity from {} and saving sum parts to {}",
             self.ingestion_transport.transport.transport.path(),
             self.own_validation_transport.transport.path(),
             self.peer_validation_transport.transport.path(),
-            self.aggregation_batch.path(),
+            self.aggregation_batch.path(); "trace id" => self.trace_id
         );
         let mut invalid_uuids = Vec::new();
         let mut included_batch_uuids = Vec::new();
@@ -198,6 +197,8 @@ impl<'a> BatchAggregator<'a> {
         servers: &mut Vec<Server>,
         invalid_uuids: &mut Vec<Uuid>,
     ) -> Result<()> {
+        let trace_id = self.trace_id;
+
         let mut ingestion_batch: BatchReader<'_, IngestionHeader, IngestionDataSharePacket> =
             BatchReader::new(
                 Batch::new_ingestion(self.aggregation_name, batch_id, batch_date),
@@ -249,6 +250,11 @@ impl<'a> BatchAggregator<'a> {
 
         // Make sure all the parameters in the headers line up
         if !peer_validation_header.check_parameters(&own_validation_header) {
+            error!("validation headers do not match";
+            "trace id" => self.trace_id,        
+            "peer" => format!("{:?}", &peer_validation_header),     
+            "own" => format!("{:?}", &own_validation_header));
+
             return Err(anyhow!(
                 "trace id {} validation headers do not match. Peer: {:?}\nOwn: {:?}",
                 self.trace_id,
@@ -257,6 +263,11 @@ impl<'a> BatchAggregator<'a> {
             ));
         }
         if !ingestion_header.check_parameters(&peer_validation_header) {
+            error!("ingestion header does not match peer validation header";
+            "trace id" => self.trace_id,        
+            "ingestion" => format!("{:?}", &ingestion_header),     
+            "peer" => format!("{:?}", &peer_validation_header));
+
             return Err(anyhow!(
                 "trace id {} ingestion header does not match peer validation header. Ingestion: {:?}\nPeer:{:?}",
                 self.trace_id,
@@ -364,8 +375,8 @@ impl<'a> BatchAggregator<'a> {
                     Ok(valid) => {
                         if !valid {
                             info!(
-                                "trace id {} rejecting packet {} due to invalid proof",
-                                self.trace_id, peer_validation_packet.uuid
+                                "rejecting packet {} due to invalid proof",
+                                &peer_validation_packet.uuid; "trace id" => trace_id
                             );
                             invalid_uuids.push(peer_validation_packet.uuid);
                         }
@@ -387,7 +398,7 @@ impl<'a> BatchAggregator<'a> {
                     // server.aggregate
                     .context(format!(
                         "trace id {} failed to validate packets",
-                        self.trace_id
+                        &self.trace_id
                     ));
             }
         }

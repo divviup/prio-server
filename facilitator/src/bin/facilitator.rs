@@ -1,12 +1,12 @@
 use anyhow::{anyhow, Context, Result};
 use chrono::{prelude::Utc, NaiveDateTime};
 use clap::{value_t, App, Arg, ArgMatches, SubCommand};
-use log::{error, info};
 use prio::encrypt::PrivateKey;
 use ring::signature::{
     EcdsaKeyPair, KeyPair, UnparsedPublicKey, ECDSA_P256_SHA256_ASN1,
     ECDSA_P256_SHA256_ASN1_SIGNING,
 };
+use slog_scope::{error, info};
 use std::{collections::HashMap, fs, fs::File, io::Read, str::FromStr, time::Instant};
 use uuid::Uuid;
 
@@ -406,7 +406,7 @@ impl<'a, 'b> AppArgumentAdder for App<'a, 'b> {
 }
 
 fn main() -> Result<(), anyhow::Error> {
-    setup_env_logging();
+    let _guard = setup_env_logging();
     let args: Vec<String> = std::env::args().collect();
     info!(
         "starting {} version {}. Args: [{}]",
@@ -1144,7 +1144,7 @@ fn aggregate_worker(sub_matches: &ArgMatches) -> Result<(), anyhow::Error> {
                 .task
                 .trace_id
                 .map(|id| id.to_string())
-                .unwrap_or(String::from("None"));
+                .unwrap_or_else(|| String::from("None"));
 
             let result = aggregate(
                 &trace_id,

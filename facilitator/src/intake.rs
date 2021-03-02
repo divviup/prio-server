@@ -7,9 +7,9 @@ use crate::{
 };
 use anyhow::{anyhow, ensure, Context, Result};
 use chrono::NaiveDateTime;
-use log::info;
 use prio::{encrypt::PrivateKey, finite_field::Field, server::Server};
 use ring::signature::UnparsedPublicKey;
+use slog_scope::info;
 use std::{collections::HashMap, convert::TryFrom, iter::Iterator};
 use uuid::Uuid;
 
@@ -94,11 +94,11 @@ impl<'a> BatchIntaker<'a> {
     /// thousand processed packets, unless set_callback_cadence has been called.
     pub fn generate_validation_share<F: FnMut()>(&mut self, mut callback: F) -> Result<()> {
         info!(
-            "trace id {} processing intake from {} and saving validity to {} and {}",
-            self.trace_id,
+            "processing intake from {} and saving validity to {} and {}",
             self.intake_batch.path(),
             self.own_validation_batch.path(),
-            self.peer_validation_batch.path()
+            self.peer_validation_batch.path(); 
+            "trace id" => self.trace_id
         );
 
         let ingestion_header = self.intake_batch.header(self.intake_public_keys)?;

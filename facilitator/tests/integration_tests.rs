@@ -18,6 +18,7 @@ use facilitator::{
     Error,
 };
 use prio::{encrypt::PrivateKey, util::reconstruct_shares};
+use slog_scope::info;
 use std::collections::{HashMap, HashSet};
 use tempfile::TempDir;
 use uuid::Uuid;
@@ -197,7 +198,7 @@ fn aggregation_including_invalid_batch() {
     // tampering with signatures or batch headers as needed.
     for (index, (uuid, _)) in batch_uuids_and_dates.iter().enumerate() {
         let pha_peer_validation_transport = if index == 2 {
-            log::info!("pha using wrong key for peer validations");
+            info!("pha using wrong key for peer validations");
             &mut pha_to_facilitator_validation_transport_wrong_key
         } else {
             &mut pha_to_facilitator_validation_transport_valid_key

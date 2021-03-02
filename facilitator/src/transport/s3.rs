@@ -8,7 +8,6 @@ use crate::{
 use anyhow::{Context, Result};
 use derivative::Derivative;
 use hyper_rustls::HttpsConnector;
-use log::{debug, info};
 use rusoto_core::{
     credential::{AutoRefreshingProvider, CredentialsError, Secret, Variable},
     ByteStream, Region, RusotoError, RusotoResult,
@@ -18,6 +17,7 @@ use rusoto_s3::{
     CompletedPart, CreateMultipartUploadRequest, GetObjectRequest, S3Client, UploadPartRequest, S3,
 };
 use rusoto_sts::WebIdentityProvider;
+use slog_scope::{debug, info};
 use std::{
     boxed::Box,
     env,
