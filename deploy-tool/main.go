@@ -15,7 +15,6 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
-	"sync"
 	"time"
 
 	"github.com/abetterinternet/prio-server/deploy-tool/key"
@@ -168,7 +167,7 @@ func setupTestEnvironment(ingestor *SingletonIngestor, manifestBucket string) er
 		return fmt.Errorf("error when creating the batch signing public key for the test environment")
 	}
 
-	manifest := manifest.IngestorGlobalManifest{
+	globalManifest := manifest.IngestorGlobalManifest{
 		Format: 1,
 		ServerIdentity: manifest.ServerIdentity{
 			AWSIamEntity:           ingestor.AwsIamEntity,
@@ -180,38 +179,8 @@ func setupTestEnvironment(ingestor *SingletonIngestor, manifestBucket string) er
 		},
 	}
 
-	destination := fmt.Sprintf("gs://%s/singleton-ingestor/global-manifest.json", manifestBucket)
-
-	log.Printf("uploading specific manifest %s", destination)
-	gsutil := exec.Command("gsutil",
-		"-h", "Content-Type:application/json",
-		"-h", "Cache-Control:no-cache",
-		"cp", "-", destination)
-	stdin, err := gsutil.StdinPipe()
-	if err != nil {
-		return fmt.Errorf("could not get pipe to gsutil stdin: %v", err)
-	}
-	wg := sync.WaitGroup{}
-	// We're going to need to sync once the goroutine below is complete
-	wg.Add(1)
-
-	// Do this async because if we don't close gsutil's stdin, it will
-	// never be able to get started.
-	go func() {
-		defer stdin.Close()
-		defer wg.Done()
-		log.Printf("uploading manifest %+v", manifest)
-		manifestEncoder := json.NewEncoder(stdin)
-		if err := manifestEncoder.Encode(manifest); err != nil {
-			log.Fatalf("failed to encode manifest into gsutil stdin: %v", err)
-		}
-	}()
-
-	if output, err := gsutil.CombinedOutput(); err != nil {
-		return fmt.Errorf("gsutil failed: %v\noutput: %s", err, output)
-	}
-	wg.Wait()
-	return nil
+	writer := manifest.NewWriter(manifestBucket)
+	return writer.WriteIngestorGlobalManifest(globalManifest, "singleton-ingestor/global-manifest.json")
 }
 
 func createBatchSigningPublicKey(kubernetesNamespace, name string) (*manifest.BatchSigningPublicKey, error) {
@@ -243,7 +212,6 @@ func createBatchSigningPublicKey(kubernetesNamespace, name string) (*manifest.Ba
 }
 
 func main() {
-	wg := sync.WaitGroup{}
 	var terraformOutput TerraformOutput
 
 	if err := json.NewDecoder(os.Stdin).Decode(&terraformOutput); err != nil {
@@ -327,41 +295,13 @@ func main() {
 
 		manifestWrapper.SpecificManifest.PacketEncryptionKeyCSRs = newCertificates
 
-		// Put the specific manifests into the manifest bucket. Users of this
-		// tool already need to have gsutil and valid Google Cloud credentials
-		// to be able to use the Makefile, so execing out to gsutil saves us the
-		// trouble of pulling in the gcloud SDK.
-		destination := fmt.Sprintf("gs://%s/%s-manifest.json",
-			terraformOutput.ManifestBucket.Value, dataShareProcessorName)
-		log.Printf("uploading specific manifest %s", destination)
-		gsutil := exec.Command("gsutil",
-			"-h", "Content-Type:application/json",
-			"-h", "Cache-Control:no-cache",
-			"cp", "-", destination)
-		stdin, err := gsutil.StdinPipe()
+		// Put the specific manifests into the manifest bucket.
+		destination := fmt.Sprintf("%s-manifest.json", dataShareProcessorName)
+		writer := manifest.NewWriter(terraformOutput.ManifestBucket.Value)
+
+		err := writer.WriteDataShareSpecificManifest(manifestWrapper.SpecificManifest, destination)
 		if err != nil {
-			log.Fatalf("could not get pipe to gsutil stdin: %v", err)
-		}
-		// We're going to need to sync once the goroutine below is complete
-		wg.Add(1)
-
-		// Do this async because if we don't close gsutil's stdin, it will
-		// never be able to get started.
-		go func() {
-			defer stdin.Close()
-			defer wg.Done()
-			log.Printf("uploading manifest %+v", manifestWrapper.SpecificManifest)
-			manifestEncoder := json.NewEncoder(stdin)
-			if err := manifestEncoder.Encode(manifestWrapper.SpecificManifest); err != nil {
-				log.Fatalf("failed to encode manifest into gsutil stdin: %v", err)
-			}
-		}()
-
-		if output, err := gsutil.CombinedOutput(); err != nil {
-			log.Fatalf("gsutil failed: %v\noutput: %s", err, output)
+			log.Fatalf("could not write data share specific manifest: %s", err)
 		}
 	}
-
-	// Make sure everything can cleanly exit
-	wg.Wait()
 }
