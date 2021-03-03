@@ -937,9 +937,9 @@ fn get_valid_batch_signing_key(
 ) -> Result<BatchSigningKey> {
     match ingestor_manifest_url {
         Some(own_manifest_url) => {
-            let namespace = namespace.ok_or_else(|| anyhow!(
-                "If manifest URLs are used, kubernetes namespace must be provided"
-            ))?;
+            let namespace = namespace.ok_or_else(|| {
+                anyhow!("If manifest URLs are used, kubernetes namespace must be provided")
+            })?;
 
             let manifest =
                 IngestionServerManifest::from_https(own_manifest_url, None).context(format!(

@@ -430,8 +430,8 @@ fn public_key_from_pem(pem_key: &str) -> Result<UnparsedPublicKey<Vec<u8>>> {
 mod tests {
     use super::*;
     use crate::test_utils::{
-        default_ingestor_private_key, DEFAULT_CSR_PACKET_ENCRYPTION_CERTIFICATE,
-        DEFAULT_INGESTOR_SUBJECT_PUBLIC_KEY_INFO,
+        default_ingestor_private_key, DEFAULT_INGESTOR_SUBJECT_PUBLIC_KEY_INFO,
+        DEFAULT_PACKET_ENCRYPTION_CSR,
     };
     use crate::{
         config::{GCSPath, S3Path},
@@ -588,7 +588,7 @@ mod tests {
     "peer-validation-bucket": "gs://validation/path/fragment"
 }}
     "#,
-            DEFAULT_CSR_PACKET_ENCRYPTION_CERTIFICATE, DEFAULT_INGESTOR_SUBJECT_PUBLIC_KEY_INFO
+            DEFAULT_PACKET_ENCRYPTION_CSR, DEFAULT_INGESTOR_SUBJECT_PUBLIC_KEY_INFO
         );
         let manifest = SpecificManifest::from_slice(json.as_bytes()).unwrap();
 
@@ -609,7 +609,7 @@ mod tests {
             PacketEncryptionCertificateSigningRequest {
                 certificate_signing_request: format!(
                     "-----BEGIN CERTIFICATE REQUEST-----\n{}\n-----END CERTIFICATE REQUEST-----\n",
-                    DEFAULT_CSR_PACKET_ENCRYPTION_CERTIFICATE
+                    DEFAULT_PACKET_ENCRYPTION_CSR
                 ),
             },
         );
