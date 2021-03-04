@@ -1,7 +1,7 @@
+use crate::aws_credentials;
 use crate::{
-    aws_credentials::{basic_runtime, DefaultCredentialsProvider},
-    config::{Identity, S3Path},
-    http::{prepare_request_without_agent, Method, RequestParameters},
+    aws_credentials::basic_runtime,
+    config::S3Path,
     transport::{Transport, TransportWriter},
     Error,
 };
@@ -9,18 +9,12 @@ use anyhow::{Context, Result};
 use derivative::Derivative;
 use hyper_rustls::HttpsConnector;
 use log::{debug, info};
-use rusoto_core::{
-    credential::{AutoRefreshingProvider, CredentialsError, Secret, Variable},
-    ByteStream, Region, RusotoError, RusotoResult,
-};
+use rusoto_core::{ByteStream, Region, RusotoError, RusotoResult};
 use rusoto_s3::{
     AbortMultipartUploadRequest, CompleteMultipartUploadRequest, CompletedMultipartUpload,
     CompletedPart, CreateMultipartUploadRequest, GetObjectRequest, S3Client, UploadPartRequest, S3,
 };
-use rusoto_sts::WebIdentityProvider;
 use std::{
-    boxed::Box,
-    env,
     io::{Read, Write},
     mem,
     pin::Pin,
@@ -30,28 +24,12 @@ use tokio::{
     io::{AsyncRead, AsyncReadExt},
     runtime::Runtime,
 };
-use url::Url;
-// We use workload identity to map GCP service accounts to Kubernetes service
-// accounts and make an auth token for the GCP account available to containers
-// in the GKE metadata service. Sadly we can't use the Kubernetes feature to
-// automount a service account token, because that would provide the token for
-// the *Kubernetes* service account, not the GCP one.
-// See terraform/modules/gke/gke.tf and terraform/modules/kuberenetes/kubernetes.tf
-
-fn metadata_service_token_url() -> Url {
-    Url::parse("http://metadata.google.internal:80/computeMetadata/v1/instance/service-accounts/default/identity")
-    .expect("could not parse token metadata api url")
-}
-
-// When running in GCP, we are provided the AWS account ID that owns our buckets
-// via environment variable.
-const AWS_ACCOUNT_ID_ENVIRONMENT_VARIABLE: &str = "AWS_ACCOUNT_ID";
 
 /// We attempt AWS API requests up to three times (i.e., two retries)
 const MAX_ATTEMPT_COUNT: i32 = 3;
 
 /// ClientProvider allows mocking out a client for testing.
-type ClientProvider = Box<dyn Fn(&Region, Option<String>) -> Result<S3Client>>;
+type ClientProvider = Box<dyn Fn(&Region, aws_credentials::Provider) -> Result<S3Client>>;
 
 /// Calls the provided closure, retrying up to MAX_ATTEMPT_COUNT times if it
 /// fails with RusotoError::HttpDispatch, which indicates a problem sending the
@@ -90,139 +68,56 @@ where
 #[derivative(Debug)]
 pub struct S3Transport {
     path: S3Path,
-    iam_role: Option<String>,
+    #[derivative(Debug = "ignore")]
+    credentials_provider: aws_credentials::Provider,
     // client_provider allows injection of mock S3Client for testing purposes
     #[derivative(Debug = "ignore")]
     client_provider: ClientProvider,
 }
 
 impl S3Transport {
-    pub fn new(path: S3Path, identity: Identity) -> S3Transport {
+    pub fn new(path: S3Path, credentials_provider: aws_credentials::Provider) -> Self {
         S3Transport::new_with_client(
             path,
-            identity,
-            Box::new(|region: &Region, iam_role: Option<String>| {
-                // Rusoto uses Hyper which uses connection pools. The default
-                // timeout for those connections is 90 seconds[1]. Amazon S3's
-                // API closes idle client connections after 20 seconds[2]. If we
-                // use a default client via S3Client::new, this mismatch causes
-                // uploads to fail when Hyper tries to re-use a connection that
-                // has been idle too long. Until this is fixed in Rusoto[3], we
-                // construct our own HTTP request dispatcher whose underlying
-                // hyper::Client is configured to timeout idle connections after
-                // 10 seconds.
-                //
-                // [1]: https://docs.rs/hyper/0.13.8/hyper/client/struct.Builder.html#method.pool_idle_timeout
-                // [2]: https://aws.amazon.com/premiumsupport/knowledge-center/s3-socket-connection-timeout-error/
-                // [3]: https://github.com/rusoto/rusoto/issues/1686
-                let mut builder = hyper::Client::builder();
-                builder.pool_idle_timeout(Duration::from_secs(10));
-                let connector = HttpsConnector::with_native_roots();
-                let http_client = rusoto_core::HttpClient::from_builder(builder, connector);
-
-                if let Some(iam_role) = iam_role {
-                    // When running in GKE, the token used to authenticate to
-                    // AWS S3 is made available via the instance metadata
-                    // service. See terraform/modules/kubernetes/kubernetes.tf
-                    // for discussion.
-                    // This dynamic variable lets us provide a callback for
-                    // fetching tokens, allowing Rusoto to automatically get new
-                    // credentials if they expire (which they do every hour).
-                    let oidc_token_variable = Variable::dynamic(|| {
-                        let aws_account_id = env::var(AWS_ACCOUNT_ID_ENVIRONMENT_VARIABLE)
-                            .map_err(|e| {
-                                CredentialsError::new(format!(
-                                    "could not read {} from environment: {}",
-                                    AWS_ACCOUNT_ID_ENVIRONMENT_VARIABLE, e
-                                ))
-                            })?;
-                        // We use ureq for this request because it is designed
-                        // to use purely synchronous Rust. Ironically, we are in
-                        // the context of an async runtime when this callback is
-                        // invoked, but because the closure is not declared
-                        // async, we cannot use .await to work with Futures.
-
-                        let mut url = metadata_service_token_url();
-
-                        url.query_pairs_mut()
-                            .append_pair(
-                                "audience",
-                                &format!("sts.amazonaws.com/{}", aws_account_id),
-                            )
-                            .finish();
-
-                        let mut request = prepare_request_without_agent(RequestParameters {
-                            url,
-                            method: Method::Get,
-                            ..Default::default()
-                        })
-                        .map_err(|e| {
-                            CredentialsError::new(format!("failed to create request: {:?}", e))
-                        })?;
-
-                        request = request.set("Metadata-Flavor", "Google");
-
-                        let response = request.call().map_err(|e| {
-                            CredentialsError::new(format!(
-                                "failed to fetch auth token from metadata service: {:?}",
-                                e
-                            ))
-                        })?;
-
-                        let token = response.into_string().map_err(|e| {
-                            CredentialsError::new(format!(
-                                "failed to fetch auth token from metadata service: {}",
-                                e
-                            ))
-                        })?;
-                        Ok(Secret::from(token))
-                    });
-
-                    let credentials_provider =
-                        AutoRefreshingProvider::new(WebIdentityProvider::new(
-                            oidc_token_variable,
-                            // The AWS role that we are assuming is provided via
-                            // environment variable. See
-                            // terraform/modules/kubernetes/kubernetes.tf
-                            iam_role,
-                            // The role ARN we assume is already bound to a
-                            // specific facilitator instance, so we don't get
-                            // much from further scoping the role assumption,
-                            // unless we eventually introduce something like a
-                            // job ID that could then show up in AWS-side logs.
-                            // https://docs.aws.amazon.com/credref/latest/refdocs/setting-global-role_session_name.html
-                            Some(Variable::from_env_var_optional("AWS_ROLE_SESSION_NAME")),
-                        ))?;
+            credentials_provider,
+            Box::new(
+                |region: &Region, credentials_provider: aws_credentials::Provider| {
+                    // Rusoto uses Hyper which uses connection pools. The default
+                    // timeout for those connections is 90 seconds[1]. Amazon S3's
+                    // API closes idle client connections after 20 seconds[2]. If we
+                    // use a default client via S3Client::new, this mismatch causes
+                    // uploads to fail when Hyper tries to re-use a connection that
+                    // has been idle too long. Until this is fixed in Rusoto[3], we
+                    // construct our own HTTP request dispatcher whose underlying
+                    // hyper::Client is configured to timeout idle connections after
+                    // 10 seconds.
+                    //
+                    // [1]: https://docs.rs/hyper/0.13.8/hyper/client/struct.Builder.html#method.pool_idle_timeout
+                    // [2]: https://aws.amazon.com/premiumsupport/knowledge-center/s3-socket-connection-timeout-error/
+                    // [3]: https://github.com/rusoto/rusoto/issues/1686
+                    let mut builder = hyper::Client::builder();
+                    builder.pool_idle_timeout(Duration::from_secs(10));
+                    let connector = HttpsConnector::with_native_roots();
+                    let http_client = rusoto_core::HttpClient::from_builder(builder, connector);
 
                     Ok(S3Client::new_with(
                         http_client,
                         credentials_provider,
                         region.clone(),
                     ))
-                } else {
-                    // Credentials for authenticating to AWS are automatically
-                    // sourced from environment variables or ~/.aws/credentials.
-                    // https://github.com/rusoto/rusoto/blob/master/AWS-CREDENTIALS.md
-                    let credentials_provider = DefaultCredentialsProvider::new()
-                        .context("failed to create credentials provider")?;
-                    Ok(S3Client::new_with(
-                        http_client,
-                        credentials_provider,
-                        region.clone(),
-                    ))
-                }
-            }),
+                },
+            ),
         )
     }
 
     fn new_with_client(
         path: S3Path,
-        identity: Identity,
+        credentials_provider: aws_credentials::Provider,
         client_provider: ClientProvider,
-    ) -> S3Transport {
+    ) -> Self {
         S3Transport {
             path: path.ensure_directory_prefix(),
-            iam_role: identity.map(|x| x.to_string()),
+            credentials_provider,
             client_provider,
         }
     }
@@ -234,9 +129,9 @@ impl Transport for S3Transport {
     }
 
     fn get(&mut self, key: &str) -> Result<Box<dyn Read>> {
-        info!("get {}/{} as {:?}", self.path, key, self.iam_role);
+        info!("get {}/{} as {}", self.path, key, self.credentials_provider);
         let runtime = basic_runtime()?;
-        let client = (self.client_provider)(&self.path.region, self.iam_role.clone())?;
+        let client = (self.client_provider)(&self.path.region, self.credentials_provider.clone())?;
 
         let get_output = retry_request("get s3 object", || {
             runtime.block_on(client.get_object(GetObjectRequest {
@@ -253,14 +148,14 @@ impl Transport for S3Transport {
     }
 
     fn put(&mut self, key: &str) -> Result<Box<dyn TransportWriter>> {
-        info!("put {}/{} as {:?}", self.path, key, self.iam_role);
+        info!("put {}/{} as {}", self.path, key, self.credentials_provider);
         let writer = MultipartUploadWriter::new(
             self.path.bucket.to_owned(),
             format!("{}{}", &self.path.key, key),
             // Set buffer size to 5 MB, which is the minimum required by Amazon
             // https://docs.aws.amazon.com/AmazonS3/latest/dev/qfacts.html
             5_242_880,
-            (self.client_provider)(&self.path.region, self.iam_role.clone())?,
+            (self.client_provider)(&self.path.region, self.credentials_provider.clone())?,
         )?;
         Ok(Box::new(writer))
     }
@@ -480,9 +375,7 @@ mod tests {
     use super::*;
     use crate::test_utils::log_init;
     use rusoto_core::{request::HttpDispatchError, signature::SignedRequest};
-    use rusoto_mock::{
-        MockCredentialsProvider, MockRequestDispatcher, MultipleMockRequestDispatcher,
-    };
+    use rusoto_mock::{MockRequestDispatcher, MultipleMockRequestDispatcher};
     use rusoto_s3::CreateMultipartUploadError;
     use std::io::Read;
 
@@ -595,7 +488,7 @@ mod tests {
             S3Client::new_with(
                 MockRequestDispatcher::with_status(401)
                     .with_request_checker(is_create_multipart_upload_request),
-                MockCredentialsProvider,
+                aws_credentials::Provider::new_mock(),
                 Region::UsWest2,
             ),
         )
@@ -626,7 +519,7 @@ mod tests {
 </InitiateMultipartUploadResult>"#,
                     )
                     .with_request_checker(is_create_multipart_upload_request),
-                MockCredentialsProvider,
+                aws_credentials::Provider::new_mock(),
                 Region::UsWest2,
             ),
         )
@@ -712,7 +605,7 @@ mod tests {
                 ];
                 S3Client::new_with(
                     MultipleMockRequestDispatcher::new(requests),
-                    MockCredentialsProvider,
+                    aws_credentials::Provider::new_mock(),
                     Region::UsWest2,
                 )
             })
@@ -745,32 +638,41 @@ mod tests {
             key: "".into(),
         };
 
-        let provider = Box::new(|region: &Region, _: Option<String>| {
-            Ok(S3Client::new_with(
-                // Failed GetObject request
-                MockRequestDispatcher::with_status(404).with_request_checker(is_get_object_request),
-                MockCredentialsProvider,
-                region.clone(),
-            ))
-        });
-        let mut transport = S3Transport::new_with_client(s3_path.clone(), None, provider);
+        let client_provider = Box::new(
+            |region: &Region, credentials_provider: aws_credentials::Provider| {
+                Ok(S3Client::new_with(
+                    // Failed GetObject request
+                    MockRequestDispatcher::with_status(404)
+                        .with_request_checker(is_get_object_request),
+                    credentials_provider,
+                    region.clone(),
+                ))
+            },
+        );
+        let mut transport = S3Transport::new_with_client(
+            s3_path.clone(),
+            aws_credentials::Provider::new_mock(),
+            client_provider,
+        );
 
         let ret = transport.get(TEST_KEY);
         assert!(ret.is_err(), "unexpected return value {:?}", ret.err());
 
         let mut transport = S3Transport::new_with_client(
             s3_path.clone(),
-            None,
-            Box::new(|region: &Region, _: Option<String>| {
-                Ok(S3Client::new_with(
-                    // Successful GetObject request
-                    MockRequestDispatcher::with_status(200)
-                        .with_request_checker(is_get_object_request)
-                        .with_body("fake-content"),
-                    MockCredentialsProvider,
-                    region.clone(),
-                ))
-            }),
+            aws_credentials::Provider::new_mock(),
+            Box::new(
+                |region: &Region, credentials_provider: aws_credentials::Provider| {
+                    Ok(S3Client::new_with(
+                        // Successful GetObject request
+                        MockRequestDispatcher::with_status(200)
+                            .with_request_checker(is_get_object_request)
+                            .with_body("fake-content"),
+                        credentials_provider,
+                        region.clone(),
+                    ))
+                },
+            ),
         );
 
         let mut reader = transport
@@ -782,47 +684,49 @@ mod tests {
 
         let mut transport = S3Transport::new_with_client(
             s3_path,
-            None,
-            Box::new(|region: &Region, _: Option<String>| {
-                let requests = vec![
-                    // Response to CreateMultipartUpload
-                    MockRequestDispatcher::with_status(200)
-                        .with_body(
-                            r#"<?xml version="1.0" encoding="UTF-8"?>
+            aws_credentials::Provider::new_mock(),
+            Box::new(
+                |region: &Region, credentials_provider: aws_credentials::Provider| {
+                    let requests = vec![
+                        // Response to CreateMultipartUpload
+                        MockRequestDispatcher::with_status(200)
+                            .with_body(
+                                r#"<?xml version="1.0" encoding="UTF-8"?>
 <InitiateMultipartUploadResult>
    <Bucket>fake-bucket</Bucket>
    <Key>fake-key</Key>
    <UploadId>upload-id</UploadId>
 </InitiateMultipartUploadResult>"#,
-                        )
-                        .with_request_checker(is_create_multipart_upload_request),
-                    // Well formed response to UploadPart
-                    MockRequestDispatcher::with_status(200)
-                        .with_request_checker(is_upload_part_request)
-                        .with_header("ETag", "fake-etag"),
-                    // Well formed response to CompleteMultipartUpload
-                    MockRequestDispatcher::with_status(200)
-                        .with_request_checker(is_complete_multipart_upload_request)
-                        .with_body(
-                            r#"<?xml version="1.0" encoding="UTF-8"?>
+                            )
+                            .with_request_checker(is_create_multipart_upload_request),
+                        // Well formed response to UploadPart
+                        MockRequestDispatcher::with_status(200)
+                            .with_request_checker(is_upload_part_request)
+                            .with_header("ETag", "fake-etag"),
+                        // Well formed response to CompleteMultipartUpload
+                        MockRequestDispatcher::with_status(200)
+                            .with_request_checker(is_complete_multipart_upload_request)
+                            .with_body(
+                                r#"<?xml version="1.0" encoding="UTF-8"?>
 <CompleteMultipartUploadResult>
    <Location>string</Location>
    <Bucket>fake-bucket</Bucket>
    <Key>fake-key</Key>
    <ETag>fake-etag</ETag>
 </CompleteMultipartUploadResult>"#,
-                        ),
-                    // Response to AbortMultipartUpload, expected because of
-                    // cancel_upload call
-                    MockRequestDispatcher::with_status(204)
-                        .with_request_checker(is_abort_multipart_upload_request),
-                ];
-                Ok(S3Client::new_with(
-                    MultipleMockRequestDispatcher::new(requests),
-                    MockCredentialsProvider,
-                    region.clone(),
-                ))
-            }),
+                            ),
+                        // Response to AbortMultipartUpload, expected because of
+                        // cancel_upload call
+                        MockRequestDispatcher::with_status(204)
+                            .with_request_checker(is_abort_multipart_upload_request),
+                    ];
+                    Ok(S3Client::new_with(
+                        MultipleMockRequestDispatcher::new(requests),
+                        credentials_provider,
+                        region.clone(),
+                    ))
+                },
+            ),
         );
 
         let mut writer = transport.put(TEST_KEY).unwrap();

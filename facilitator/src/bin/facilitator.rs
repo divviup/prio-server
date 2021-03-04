@@ -15,6 +15,7 @@ use uuid::Uuid;
 
 use facilitator::{
     aggregation::BatchAggregator,
+    aws_credentials,
     config::{Identity, ManifestKind, StoragePath, TaskQueueKind},
     intake::BatchIntaker,
     kubernetes::KubernetesClient,
@@ -223,6 +224,10 @@ impl<'a, 'b> AppArgumentAdder for App<'a, 'b> {
         let name_env = leak_string(upper_snake_case(name));
         let id = entity.suffix("-identity");
         let id_env = leak_string(upper_snake_case(id));
+        let use_default_aws_credentials_provider =
+            entity.suffix("-use-default-aws-credentials-provider");
+        let use_default_aws_credentials_provider_env =
+            leak_string(upper_snake_case(use_default_aws_credentials_provider));
         self.arg(
             Arg::with_name(name)
                 .long(name)
@@ -237,8 +242,48 @@ impl<'a, 'b> AppArgumentAdder for App<'a, 'b> {
                 .env(id_env)
                 .value_name("IAM_ROLE_OR_SERVICE_ACCOUNT")
                 .help(leak_string(format!(
-                    "Identity to assume when using S3 or GS storage APIs for {} bucket.",
+                    "Identity to assume when using S3 or GS APIs for {} bucket.",
                     entity.str()
+                )))
+                .long_help(leak_string(format!(
+                    "Identity to assume when using S3 or GS APIs for bucket \
+                    {}. May not be set if {} is true. Should only be set when \
+                    running in GKE.",
+                    entity.str(),
+                    use_default_aws_credentials_provider
+                ))),
+        )
+        // It's counterintuitive that users must explicitly opt into the
+        // default credentials provider. This was done to preserve backward
+        // compatibility with previous versions, which defaulted to a provider
+        // that would use web identity from Kubernetes environment.
+        .arg(
+            Arg::with_name(use_default_aws_credentials_provider)
+                .long(use_default_aws_credentials_provider)
+                .env(use_default_aws_credentials_provider_env)
+                .value_name("BOOL")
+                .possible_value("true")
+                .possible_value("false")
+                .default_value("false")
+                .help(leak_string(format!(
+                    "Whether to use the default AWS credentials provider when \
+                    using S3 APIs for {} bucket.",
+                    entity.str(),
+                )))
+                .long_help(leak_string(format!(
+                    "If true and {} is unset, the default AWS credentials \
+                    provider will be used when using S3 APIs for {} bucket. If \
+                    false or unset and {} is unset, a web identity provider \
+                    configured from the Kubernetes environment will be used. \
+                    If false or unset and {} is set, a web identity provider \
+                    configured from the GKE metadata service is used. May not \
+                    be set to true if {} is set. Should only be set to true if \
+                    running in AWS.",
+                    id,
+                    entity.str(),
+                    id,
+                    id,
+                    id,
                 ))),
         )
     }
@@ -353,7 +398,35 @@ impl<'a, 'b> AppArgumentAdder for App<'a, 'b> {
             Arg::with_name("task-queue-identity")
                 .long("task-queue-identity")
                 .env("TASK_QUEUE_IDENTITY")
-                .help("Identity to assume when accessing task queue"),
+                .help("Identity to assume when accessing task queue")
+                .long_help(
+                    "Identity to assume when accessing task queue. Should only \
+                    be set when running under GKE and task-queue-kind is PubSub.",
+                ),
+        )
+        // It's counterintuitive that users must explicitly opt into the
+        // default credentials provider. This was done to preserve backward
+        // compatibility with previous versions, which defaulted to a provider
+        // that would use web identity from Kubernetes environment.
+        .arg(
+            Arg::with_name("task-queue-use-default-aws-credentials-provider")
+                .long("task-queue-use-default-aws-credentials-provider")
+                .env("TASK_QUEUE_USE_DEFAULT_AWS_CREDENTIALS_PROVIDER")
+                .value_name("BOOL")
+                .possible_value("true")
+                .possible_value("false")
+                .default_value("false")
+                .help(
+                    "Whether to use the default AWS credentials provider when \
+                    using SQS APIs.",
+                )
+                .long_help(
+                    "Whether to use the default AWS credentials provider when \
+                    using SQS APIs. If unset and task-queue-kind is SQS, uses \
+                    a web identity provider configured from Kubernetes \
+                    environment. Should not be set unless task-queue-kind is \
+                    SQS.",
+                ),
         )
         .arg(
             Arg::with_name("gcp-project-id")
@@ -1651,7 +1724,16 @@ fn transport_for_path(
     };
 
     match path {
-        StoragePath::S3Path(path) => Ok(Box::new(S3Transport::new(path, identity))),
+        StoragePath::S3Path(path) => {
+            let credentials_provider = aws_credentials::Provider::new(
+                identity,
+                value_t!(
+                    matches.value_of("use-default-aws-credentials-provider"),
+                    bool
+                )?,
+            )?;
+            Ok(Box::new(S3Transport::new(path, credentials_provider)))
+        }
         StoragePath::GCSPath(path) => Ok(Box::new(GCSTransport::new(
             path,
             identity,
@@ -1708,7 +1790,18 @@ fn intake_task_queue_from_args(
             let sqs_region = matches
                 .value_of("aws-sqs-region")
                 .ok_or_else(|| anyhow!("aws-sqs-region is required"))?;
-            Ok(Box::new(AwsSqsTaskQueue::new(sqs_region, queue_name)?))
+            let credentials_provider = aws_credentials::Provider::new(
+                None,
+                value_t!(
+                    matches.value_of("use-default-aws-credentials-provider"),
+                    bool
+                )?,
+            )?;
+            Ok(Box::new(AwsSqsTaskQueue::new(
+                sqs_region,
+                queue_name,
+                credentials_provider,
+            )?))
         }
     }
 }
@@ -1743,7 +1836,18 @@ fn aggregation_task_queue_from_args(
             let sqs_region = matches
                 .value_of("aws-sqs-region")
                 .ok_or_else(|| anyhow!("aws-sqs-region is required"))?;
-            Ok(Box::new(AwsSqsTaskQueue::new(sqs_region, queue_name)?))
+            let credentials_provider = aws_credentials::Provider::new(
+                None,
+                value_t!(
+                    matches.value_of("use-default-aws-credentials-provider"),
+                    bool
+                )?,
+            )?;
+            Ok(Box::new(AwsSqsTaskQueue::new(
+                sqs_region,
+                queue_name,
+                credentials_provider,
+            )?))
         }
     }
 }

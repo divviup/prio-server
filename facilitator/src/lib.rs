@@ -3,7 +3,7 @@ use ring::{digest, signature::EcdsaKeyPair};
 use std::io::Write;
 
 pub mod aggregation;
-mod aws_credentials;
+pub mod aws_credentials;
 pub mod batch;
 pub mod config;
 mod gcp_oauth;

@@ -8,8 +8,9 @@ use rusoto_sqs::{
 use std::{convert::TryFrom, marker::PhantomData, str::FromStr, time::Duration};
 use tokio::runtime::Runtime;
 
+use crate::aws_credentials;
 use crate::{
-    aws_credentials::{basic_runtime, DefaultCredentialsProvider},
+    aws_credentials::basic_runtime,
     task::{Task, TaskHandle, TaskQueue},
 };
 
@@ -20,11 +21,17 @@ pub struct AwsSqsTaskQueue<T: Task> {
     region: Region,
     queue_url: String,
     runtime: Runtime,
+    #[derivative(Debug = "ignore")]
+    credentials_provider: aws_credentials::Provider,
     phantom_task: PhantomData<*const T>,
 }
 
 impl<T: Task> AwsSqsTaskQueue<T> {
-    pub fn new(region: &str, queue_url: &str) -> Result<AwsSqsTaskQueue<T>> {
+    pub fn new(
+        region: &str,
+        queue_url: &str,
+        credentials_provider: aws_credentials::Provider,
+    ) -> Result<Self> {
         let region = Region::from_str(region).context("invalid AWS region")?;
         let runtime = basic_runtime()?;
 
@@ -32,6 +39,7 @@ impl<T: Task> AwsSqsTaskQueue<T> {
             region,
             queue_url: queue_url.to_owned(),
             runtime,
+            credentials_provider,
             phantom_task: PhantomData,
         })
     }
@@ -39,7 +47,10 @@ impl<T: Task> AwsSqsTaskQueue<T> {
 
 impl<T: Task> TaskQueue<T> for AwsSqsTaskQueue<T> {
     fn dequeue(&mut self) -> Result<Option<TaskHandle<T>>> {
-        info!("pull task from {}", self.queue_url);
+        info!(
+            "pull task from {} as {}",
+            self.queue_url, self.credentials_provider
+        );
 
         let client = self.sqs_client()?;
 
@@ -98,8 +109,8 @@ impl<T: Task> TaskQueue<T> for AwsSqsTaskQueue<T> {
 
     fn acknowledge_task(&mut self, task: TaskHandle<T>) -> Result<()> {
         info!(
-            "acknowledging task {} in queue {}",
-            task.acknowledgment_id, self.queue_url
+            "acknowledging task {} in queue {} as {}",
+            task.acknowledgment_id, self.queue_url, self.credentials_provider,
         );
 
         let client = self.sqs_client()?;
@@ -119,8 +130,8 @@ impl<T: Task> TaskQueue<T> for AwsSqsTaskQueue<T> {
         // timeout to 0
         // https://docs.aws.amazon.com/AWSSimpleQueueService/latest/SQSDeveloperGuide/sqs-visibility-timeout.html#terminating-message-visibility-timeout
         info!(
-            "nacknowledging task {} in queue {}",
-            task.acknowledgment_id, self.queue_url
+            "nacknowledging task {} in queue {} as {}",
+            task.acknowledgment_id, self.queue_url, self.credentials_provider,
         );
 
         self.change_message_visibility(&task, &Duration::from_secs(0))
@@ -149,15 +160,9 @@ impl<T: Task> AwsSqsTaskQueue<T> {
         // https://github.com/rusoto/rusoto/issues/1686
         let http_client = rusoto_core::HttpClient::new().context("failed to create HTTP client")?;
 
-        // Credentials for authenticating to AWS are automatically
-        // sourced from environment variables or ~/.aws/credentials.
-        // https://github.com/rusoto/rusoto/blob/master/AWS-CREDENTIALS.md
-        let credentials_provider =
-            DefaultCredentialsProvider::new().context("failed to create credentials provider")?;
-
         Ok(SqsClient::new_with(
             http_client,
-            credentials_provider,
+            self.credentials_provider.clone(),
             self.region.clone(),
         ))
     }

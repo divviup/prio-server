@@ -30,6 +30,7 @@ prometheus = "0.12"
 rand = "0.8"
 ring = { version = "0.16.20", features = ["std"] }
 rusoto_core = { version = "^0.46", default_features = false, features = ["rustls"] }
+rusoto_mock = { version = "^0.46", default_features = false, features = ["rustls"] }
 rusoto_s3 = { version = "^0.46", default_features = false, features = ["rustls"] }
 rusoto_sqs = { version = "^0.46", default_features = false, features = ["rustls"] }
 rusoto_sts = { version = "^0.46", default_features = false, features = ["rustls"] }
@@ -47,5 +48,4 @@ warp = "^0.3"
 [dev-dependencies]
 assert_matches = "1.5.0"
 mockito = "0.29.0"
-rusoto_mock = { version = "^0.46", default_features = false, features = ["rustls"] }
 serde_test = "1.0"
