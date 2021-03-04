@@ -1,5 +1,6 @@
-use crate::BatchSigningKey;
+use crate::{manifest::PacketEncryptionCertificateSigningRequest, BatchSigningKey};
 use log::LevelFilter;
+use prio::encrypt::{PrivateKey, PublicKey};
 use ring::signature::{
     EcdsaKeyPair, KeyPair, UnparsedPublicKey, ECDSA_P256_SHA256_ASN1,
     ECDSA_P256_SHA256_ASN1_SIGNING,
@@ -44,6 +45,22 @@ pub const DEFAULT_PHA_SIGNING_PRIVATE_KEY: &str =
 pub const DEFAULT_PHA_SUBJECT_PUBLIC_KEY_INFO: &str =
     "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEIKh3MccE1cdSF4pnEb+U0MmGYfko\
     QzOl2aiaJ6D9ZudqDdGiyA9YSUq3yia56nYJh5mk+HlzTX+AufoNR2bfrg==";
+
+pub const DEFAULT_PACKET_ENCRYPTION_CSR: &str = "MIHuMIGVAgEAMDMxMTAvBgNVBAMTKHVzLWN0LnByb\
+2QtdXMuY2VydGlmaWNhdGVzLmlzcmctcHJpby5vcmcwWTATBgcqhkjOPQIBBggqhkjOPQMBBwNCAA\
+Tp7xFbJGwHeMlAW8W0cQ57qCPIBT5NBr2jR8a+Z1/QzQJRtJvR2pqbaJhWKw7y9ogp/TmcsaX+o\
+P74+SSGwrEYoAAwCgYIKoZIzj0EAwIDSAAwRQIgLSekh4unn6fLv9O9K4Lr6VxGEpLSqFz259+Lrk\
+7lwOkCIQCOzNvxwSb+iVFxJkaxUnxGYp2J+/2OnDGsKpyWY/wdhg==";
+
+pub const DEFAULT_PACKET_ENCRYPTION_CERTIFICATE_SIGNING_REQUEST: &str = "-----BEGIN CERTIFICATE REQUEST-----\nMIHyMIGZAgEAMDcxNTAzBgNVBAMTLG5hcm5pYS5hbWlyLWZhY2lsLmNlcnRpZmlj\nYXRlcy5pc3JnLXByaW8ub3JnMFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEImPq\nnZJKMV0RUt4liCn/pzj1YEs8G13wvHNyqQ8HVmvjc7fj29K4vq5wkEXRK6QGD6UO\nAZ9LiBsRN9cniLwysaAAMAoGCCqGSM49BAMCA0gAMEUCIQCqjVbLAabHDELRztvB\nZyzYemEzJoMqTRObEjpryr5gsgIgYAx8mMlBkI/GVJqCHvyBzMwRaz1hoQHme56H\nvjjDWyI=\n-----END CERTIFICATE REQUEST-----\n";
+pub const DEFAULT_PACKET_ENCRYPTION_CERTIFICATE_SIGNING_REQUEST_PRIVATE_KEY: &str = "BCJj6p2SSjFdEVLeJYgp/6c49WBLPBtd8LxzcqkPB1Zr43O349vSuL6ucJBF0SukBg+lDgGfS4gbETfXJ4i8MrHwu3/ts6VHR1/U9EIkHEFnEDZQ30r3NVASbEeJjd0/Ug==";
+
+pub fn default_packet_encryption_certificate_signing_request(
+) -> PacketEncryptionCertificateSigningRequest {
+    PacketEncryptionCertificateSigningRequest::new(String::from(
+        DEFAULT_PACKET_ENCRYPTION_CERTIFICATE_SIGNING_REQUEST,
+    ))
+}
 
 /// Constructs an EcdsaKeyPair from the default ingestor server.
 pub fn default_ingestor_private_key() -> BatchSigningKey {
@@ -123,4 +140,12 @@ pub fn log_init() {
         .filter_level(LevelFilter::Info)
         .is_test(true)
         .try_init();
+}
+
+pub fn default_pha_packet_encryption_public_key() -> PublicKey {
+    PublicKey::from(&PrivateKey::from_base64(DEFAULT_PHA_ECIES_PRIVATE_KEY).unwrap())
+}
+
+pub fn default_facilitator_packet_encryption_public_key() -> PublicKey {
+    PublicKey::from(&PrivateKey::from_base64(DEFAULT_FACILITATOR_ECIES_PRIVATE_KEY).unwrap())
 }

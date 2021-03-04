@@ -1,10 +1,7 @@
 package cmd
 
 import (
-	"crypto/rand"
-	"crypto/x509"
 	"fmt"
-	"time"
 
 	"github.com/abetterinternet/prio-server/manifest-updater/manifest"
 	"github.com/abetterinternet/prio-server/manifest-updater/secrets"
@@ -45,47 +42,6 @@ var runCmd = &cobra.Command{
 			},
 		).Info("Starting the updater...")
 
-		var packetEncryptionCertificate manifest.PacketEncryptionKeyCSRs
-		var ingestorSigningKeys map[string]manifest.BatchSigningPublicKeys
-
-		kube, _ := secrets.NewKube(locality, ingestors,
-			secrets.NewKeySpec(time.Duration(batchSigningExpiration), time.Duration(batchSigningRotation)),
-			secrets.NewKeySpec(time.Duration(packetEncryptionExpiration), time.Duration(packetEncryptionRotation)),
-		)
-
-		packetEncryptionKeys, err := kube.ReconcilePacketEncryptionKey()
-		if err != nil {
-			log.Fatal(err)
-		}
-		if packetEncryptionKeys != nil {
-			packetEncryptionCertificate = make(manifest.PacketEncryptionKeyCSRs)
-
-			for _, key := range packetEncryptionKeys {
-				csr, err := key.CreatePemEncodedCertificateRequest(rand.Reader, new(x509.CertificateRequest))
-				if err != nil {
-					log.Fatal(err)
-				}
-				packetEncryptionCertificate[*key.KubeIdentifier] = manifest.PacketEncryptionCertificate{CertificateSigningRequest: csr}
-			}
-		}
-
-		batchSigningKeys, err := kube.ReconcileBatchSigningKey()
-		if err != nil {
-			log.Fatal(err)
-		}
-		if batchSigningKeys != nil {
-			ingestorSigningKeys, err = prioKeysToBatchSigningManifests(batchSigningKeys)
-			if err != nil {
-				log.Fatal(err)
-			}
-		}
-
-		updater, _ := manifest.NewUpdater(environmentName, locality, manifestBucket, ingestors)
-		err = updater.UpdateDataShareSpecificManifest(ingestorSigningKeys, packetEncryptionCertificate)
-
-		if err != nil {
-			log.Fatal(err)
-		}
 		return nil
 	},
 }

@@ -1,6 +1,13 @@
 use crate::config::StoragePath;
 use crate::http;
 use anyhow::{anyhow, Context, Result};
+use elliptic_curve::sec1::{EncodedPoint, ToEncodedPoint};
+use log::debug;
+use p256::pkcs8::FromPublicKey;
+use p256::NistP256;
+use pkix::pem::{pem_to_der, PEM_CERTIFICATE_REQUEST};
+use pkix::pkcs10::DerCertificationRequest;
+use pkix::FromDer;
 use ring::signature::{UnparsedPublicKey, ECDSA_P256_SHA256_ASN1};
 use serde::Deserialize;
 use std::{collections::HashMap, str::FromStr};
@@ -28,13 +35,45 @@ struct BatchSigningPublicKey {
     expiration: String,
 }
 
-#[derive(Debug, Deserialize, PartialEq)]
+#[derive(Debug, Deserialize, PartialEq, Clone)]
 #[serde(deny_unknown_fields, rename_all = "kebab-case")]
-struct PacketEncryptionCertificateSigningRequest {
+pub struct PacketEncryptionCertificateSigningRequest {
     /// The PEM-armored base64 encoding of the ASN.1 encoding of a PKCS#10
     /// certificate signing request containing an ECDSA P256 key.
     certificate_signing_request: String,
 }
+
+impl PacketEncryptionCertificateSigningRequest {
+    pub fn new(certificate_signing_request: String) -> Self {
+        PacketEncryptionCertificateSigningRequest {
+            certificate_signing_request,
+        }
+    }
+
+    /// Gets the base64ed public key from the CSR that libprio-rs is expecting
+    pub fn base64_public_key(&self) -> Result<String> {
+        debug!("Packet Encryption Certificate Signing Request: {:?}", self);
+        let der = pem_to_der(
+            &self.certificate_signing_request,
+            Some(PEM_CERTIFICATE_REQUEST),
+        )
+        .context("failed to parse pem for packet encryption certificate signing request")?;
+        let csr = DerCertificationRequest::from_der(&der).context("failed to decode csr")?;
+
+        let decoded_public_key: elliptic_curve::PublicKey<NistP256> =
+            p256::PublicKey::from_public_key_der(&csr.reqinfo.spki.value)
+                .map_err(|e| anyhow!("error when getting public key from der: {:?}", e))?;
+
+        let encoded_point: EncodedPoint<NistP256> = decoded_public_key.to_encoded_point(false);
+
+        let base64_public_key = base64::encode(encoded_point);
+
+        Ok(base64_public_key)
+    }
+}
+
+pub type PacketEncryptionCertificateSigningRequests =
+    HashMap<String, PacketEncryptionCertificateSigningRequest>;
 
 /// Represents a global manifest advertised by a data share processor. See the
 /// design document for the full specification.
@@ -109,7 +148,7 @@ pub struct SpecificManifest {
     /// Certificate signing requests containing public keys that should be used
     /// to encrypt ingestion share packets intended for this data share
     /// processor.
-    packet_encryption_keys: HashMap<String, PacketEncryptionCertificateSigningRequest>,
+    packet_encryption_keys: PacketEncryptionCertificateSigningRequests,
 }
 
 impl SpecificManifest {
@@ -147,6 +186,10 @@ impl SpecificManifest {
         Ok(keys)
     }
 
+    pub fn packet_decryption_keys(&self) -> Result<PacketEncryptionCertificateSigningRequests> {
+        Ok(self.packet_encryption_keys.clone())
+    }
+
     /// Returns the StoragePath for the data share processor's validation
     /// bucket.
     pub fn validation_bucket(&self) -> Result<StoragePath> {
@@ -163,6 +206,14 @@ impl SpecificManifest {
             .context("bad manifest: valiation bucket")?;
         StoragePath::from_str(&self.ingestion_bucket).context("bad manifest: ingestion bucket")?;
         Ok(())
+    }
+
+    pub fn ingestion_identity(&self) -> Option<String> {
+        self.ingestion_identity.clone()
+    }
+
+    pub fn ingestion_bucket(&self) -> String {
+        self.ingestion_bucket.clone()
     }
 }
 
@@ -378,9 +429,16 @@ fn public_key_from_pem(pem_key: &str) -> Result<UnparsedPublicKey<Vec<u8>>> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::config::{GCSPath, S3Path};
     use crate::test_utils::{
         default_ingestor_private_key, DEFAULT_INGESTOR_SUBJECT_PUBLIC_KEY_INFO,
+        DEFAULT_PACKET_ENCRYPTION_CSR,
+    };
+    use crate::{
+        config::{GCSPath, S3Path},
+        test_utils::{
+            default_packet_encryption_certificate_signing_request,
+            DEFAULT_PACKET_ENCRYPTION_CERTIFICATE_SIGNING_REQUEST_PRIVATE_KEY,
+        },
     };
     use ring::rand::SystemRandom;
     use rusoto_core::Region;
@@ -516,7 +574,7 @@ mod tests {
     "format": 1,
     "packet-encryption-keys": {{
         "fake-key-1": {{
-            "certificate-signing-request": "who cares"
+            "certificate-signing-request": "-----BEGIN CERTIFICATE REQUEST-----\n{}\n-----END CERTIFICATE REQUEST-----\n"
         }}
     }},
     "batch-signing-public-keys": {{
@@ -530,7 +588,7 @@ mod tests {
     "peer-validation-bucket": "gs://validation/path/fragment"
 }}
     "#,
-            DEFAULT_INGESTOR_SUBJECT_PUBLIC_KEY_INFO
+            DEFAULT_PACKET_ENCRYPTION_CSR, DEFAULT_INGESTOR_SUBJECT_PUBLIC_KEY_INFO
         );
         let manifest = SpecificManifest::from_slice(json.as_bytes()).unwrap();
 
@@ -549,7 +607,10 @@ mod tests {
         expected_packet_encryption_csrs.insert(
             "fake-key-1".to_owned(),
             PacketEncryptionCertificateSigningRequest {
-                certificate_signing_request: "who cares".to_owned(),
+                certificate_signing_request: format!(
+                    "-----BEGIN CERTIFICATE REQUEST-----\n{}\n-----END CERTIFICATE REQUEST-----\n",
+                    DEFAULT_PACKET_ENCRYPTION_CSR
+                ),
             },
         );
         let expected_manifest = SpecificManifest {
@@ -584,6 +645,13 @@ mod tests {
         } else {
             assert!(false, "unexpected storage path type");
         }
+
+        let packet_decryption_keys = manifest.packet_decryption_keys().unwrap();
+
+        let packet_decryption_key = packet_decryption_keys.get("fake-key-1").unwrap();
+
+        // Just checks that getting the base64'd public key doesn't error
+        packet_decryption_key.base64_public_key().unwrap();
 
         manifest.validate().unwrap();
     }
@@ -1065,6 +1133,7 @@ mod tests {
     }
 
     use mockito::mock;
+    use prio::encrypt::{PrivateKey, PublicKey};
 
     #[test]
     fn ingestor_global_manifest() {
@@ -1191,5 +1260,16 @@ mod tests {
 
         mocked_global_get.assert();
         mocked_specific_get.assert();
+    }
+
+    #[test]
+    fn known_csr_and_private_key() {
+        let csr = default_packet_encryption_certificate_signing_request();
+        let private_key = DEFAULT_PACKET_ENCRYPTION_CERTIFICATE_SIGNING_REQUEST_PRIVATE_KEY;
+
+        let actual = PublicKey::from_base64(&csr.base64_public_key().unwrap()).unwrap();
+        let expected = PublicKey::from(&PrivateKey::from_base64(private_key).unwrap());
+
+        println!("expected:{:?}\nactual:{:?}", expected, actual)
     }
 }

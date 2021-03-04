@@ -6,10 +6,6 @@ variable "kubernetes_namespace" {
   type = string
 }
 
-variable "gcp_project" {
-  type = string
-}
-
 variable "manifest_bucket" {
   type = string
 }

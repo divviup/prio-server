@@ -6,10 +6,11 @@ use facilitator::{
     intake::BatchIntaker,
     sample::{generate_ingestion_sample, SampleOutput},
     test_utils::{
-        default_facilitator_signing_private_key, default_facilitator_signing_public_key,
-        default_ingestor_private_key, default_ingestor_public_key, default_pha_signing_private_key,
-        default_pha_signing_public_key, log_init, DEFAULT_FACILITATOR_ECIES_PRIVATE_KEY,
-        DEFAULT_PHA_ECIES_PRIVATE_KEY,
+        default_facilitator_packet_encryption_public_key, default_facilitator_signing_private_key,
+        default_facilitator_signing_public_key, default_ingestor_private_key,
+        default_ingestor_public_key, default_pha_packet_encryption_public_key,
+        default_pha_signing_private_key, default_pha_signing_public_key, log_init,
+        DEFAULT_FACILITATOR_ECIES_PRIVATE_KEY, DEFAULT_PHA_ECIES_PRIVATE_KEY,
     },
     transport::{
         LocalFileTransport, SignableTransport, VerifiableAndDecryptableTransport,
@@ -63,7 +64,7 @@ fn aggregation_including_invalid_batch() {
             )),
             batch_signing_key: default_ingestor_private_key(),
         },
-        packet_encryption_key: PrivateKey::from_base64(DEFAULT_PHA_ECIES_PRIVATE_KEY).unwrap(),
+        packet_encryption_public_key: default_pha_packet_encryption_public_key(),
         drop_nth_packet: None,
     };
 
@@ -74,8 +75,7 @@ fn aggregation_including_invalid_batch() {
             )),
             batch_signing_key: default_ingestor_private_key(),
         },
-        packet_encryption_key: PrivateKey::from_base64(DEFAULT_FACILITATOR_ECIES_PRIVATE_KEY)
-            .unwrap(),
+        packet_encryption_public_key: default_facilitator_packet_encryption_public_key(),
         drop_nth_packet: None,
     };
 
@@ -365,7 +365,8 @@ fn end_to_end_test(drop_nth_pha: Option<usize>, drop_nth_facilitator: Option<usi
             transport: Box::new(LocalFileTransport::new(pha_tempdir.path().to_path_buf())),
             batch_signing_key: default_ingestor_private_key(),
         },
-        packet_encryption_key: PrivateKey::from_base64(DEFAULT_PHA_ECIES_PRIVATE_KEY).unwrap(),
+        packet_encryption_public_key: default_pha_packet_encryption_public_key(),
+
         drop_nth_packet: drop_nth_pha,
     };
 
@@ -376,8 +377,7 @@ fn end_to_end_test(drop_nth_pha: Option<usize>, drop_nth_facilitator: Option<usi
             )),
             batch_signing_key: default_ingestor_private_key(),
         },
-        packet_encryption_key: PrivateKey::from_base64(DEFAULT_FACILITATOR_ECIES_PRIVATE_KEY)
-            .unwrap(),
+        packet_encryption_public_key: default_facilitator_packet_encryption_public_key(),
         drop_nth_packet: drop_nth_facilitator,
     };
 

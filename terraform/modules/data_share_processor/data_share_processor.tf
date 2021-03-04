@@ -18,9 +18,6 @@ variable "gcp_region" {
   type = string
 }
 
-variable "manifest_bucket" {
-  type = string
-}
 
 variable "use_aws" {
   type = bool
@@ -70,19 +67,6 @@ variable "portal_server_manifest_base_url" {
   type = string
 }
 
-variable "test_peer_environment" {
-  type = object({
-    env_with_ingestor            = string
-    env_without_ingestor         = string
-    localities_with_sample_maker = list(string)
-  })
-  default = {
-    env_with_ingestor            = ""
-    env_without_ingestor         = ""
-    localities_with_sample_maker = []
-  }
-  description = "See main.tf for discussion."
-}
 
 variable "is_first" {
   type = bool
@@ -112,7 +96,15 @@ variable "container_registry" {
   type = string
 }
 
+variable "workflow_manager_image" {
+  type = string
+}
+
 variable "workflow_manager_version" {
+  type = string
+}
+
+variable "facilitator_image" {
   type = string
 }
 
@@ -127,6 +119,7 @@ variable "intake_worker_count" {
 variable "aggregate_worker_count" {
   type = number
 }
+
 
 # We need the ingestion server's manifest so that we can discover the GCP
 # service account it will use to upload ingestion batches. Some ingestors
@@ -166,48 +159,27 @@ locals {
     ) : (
     jsondecode(data.http.ingestor_specific_manifest[0].body).server-identity.gcp-service-account-email
   )
-  resource_prefix         = "prio-${var.environment}-${var.data_share_processor_name}"
-  is_env_with_ingestor    = lookup(var.test_peer_environment, "env_with_ingestor", "") == var.environment
-  is_env_without_ingestor = lookup(var.test_peer_environment, "env_without_ingestor", "") == var.environment
-  create_sample_maker     = local.is_env_with_ingestor && contains(lookup(var.test_peer_environment, "localities_with_sample_maker", []), var.kubernetes_namespace)
+  ingestor_aws_iam_entity = local.ingestor_global_manifest_exists ? (
+    jsondecode(data.http.ingestor_global_manifest[0].body).server-identity.aws-iam-entity
+    ) : (
+    jsondecode(data.http.ingestor_specific_manifest[0].body).server-identity.aws-iam-entity
+  )
+  resource_prefix = "prio-${var.environment}-${var.data_share_processor_name}"
   # There are three cases for who is accessing this data share processor's
   # storage buckets, listed in the order we check for them:
   #
-  # 1 - This is a test environment that creates fake ingestors and whose storage
-  #     is exclusively in GCS.
-  # 2 - This is a test environment that does _not_ create fake ingestors and
-  #     whose storage is partially in S3.
-  # 3 - This is a non-test environment whose storage is exclusively in GCS and
-  #     for an ingestor that advertises a GCP service account email.
+  # 1 - This is a test environment that does *not* create fake ingestors and
+  #     whose storage is partially in s3. use_aws will be set to true for this.
+  # 2 - This is either a test, or non-test environment whose storage is
+  #     exclusively in GCS and for an ingestor that advertises a GCP service account email.
   #
   # The case we no longer support is a non-test environment for an ingestor that
   # advertises an AWS role.
-  bucket_access_identities = local.is_env_with_ingestor ? (
-    {
-      # Our sample-maker jobs write to our own ingestion bucket in GCS, so no
-      # special auth is needed
-      ingestion_bucket_writer = module.kubernetes.service_account_email
-      # No special auth is needed to read from the ingestion bucket in GCS
-      ingestion_bucket_reader = module.kubernetes.service_account_email
-      # The identity that GKE jobs should assume or impersonate to access the
-      # ingestion bucket.
-      ingestion_identity = ""
-      # We assume this AWS IAM role to write our validations to the peer DSP's
-      # bucket
-      remote_validation_bucket_writer = aws_iam_role.bucket_role.arn
-      # We permit the peer's GCP service account to write their validations to
-      # our bucket
-      peer_validation_bucket_writer = var.peer_share_processor_gcp_service_account_email
-      peer_validation_bucket_reader = module.kubernetes.service_account_email
-      # The identity that GKE jobs should assume or impersonate to access the
-      # local peer validation bucket
-      peer_validation_identity = ""
-    }
-    ) : local.is_env_without_ingestor ? (
+  bucket_access_identities = var.use_aws ? (
     {
       # In the test setup, the peer env hosts the sample-makers, so allow
       # entities in the peer's AWS account to write to our ingeston bucket
-      ingestion_bucket_writer = var.peer_share_processor_aws_account_id
+      ingestion_bucket_writer = local.ingestor_aws_iam_entity
       # We must assume this AWS role to read our ingestion bucket
       ingestion_bucket_reader = aws_iam_role.bucket_role.arn
       # The identity that GKE jobs should assume or impersonate to access the
@@ -260,14 +232,6 @@ locals {
     ) : (
     "gs://${local.peer_validation_bucket_name}"
   )
-  # If this environment creates fake ingestors, we make an educated guess about
-  # the name of the other test environment's ingestion bucket so our fake
-  # ingestors can write ingestion batches to them. This assumes that the
-  # other test environment follows our naming convention and that they are in
-  # the same AWS region as we are.
-  test_peer_ingestion_bucket = local.is_env_with_ingestor ? (
-    "s3://${var.aws_region}/prio-${var.test_peer_environment.env_without_ingestor}-${var.data_share_processor_name}-ingestion"
-  ) : ""
   own_validation_bucket_name = "${local.resource_prefix}-own-validation"
 }
 
@@ -391,7 +355,6 @@ module "cloud_storage_gcp" {
   ingestion_bucket_reader       = local.bucket_access_identities.ingestion_bucket_reader
   peer_validation_bucket_name   = local.peer_validation_bucket_name
   peer_validation_bucket_writer = local.bucket_access_identities.peer_validation_bucket_writer
-  peer_validation_bucket_reader = local.bucket_access_identities.peer_validation_bucket_reader
   # Ensure the GCS service account exists and has permission to use the KMS key
   # before creating buckets.
   depends_on = [google_kms_crypto_key_iam_binding.bucket_encryption_key]
@@ -426,7 +389,6 @@ module "kubernetes" {
   source                                  = "../../modules/kubernetes/"
   data_share_processor_name               = var.data_share_processor_name
   ingestor                                = var.ingestor
-  gcp_project                             = var.gcp_project
   environment                             = var.environment
   kubernetes_namespace                    = var.kubernetes_namespace
   ingestion_bucket                        = local.ingestion_bucket_url
@@ -441,15 +403,15 @@ module "kubernetes" {
   own_manifest_base_url                   = var.own_manifest_base_url
   sum_part_bucket_service_account_email   = var.remote_bucket_writer_gcp_service_account_email
   portal_server_manifest_base_url         = var.portal_server_manifest_base_url
-  create_sample_maker                     = local.create_sample_maker
-  test_peer_ingestion_bucket              = local.test_peer_ingestion_bucket
   is_first                                = var.is_first
   intake_max_age                          = var.intake_max_age
   aggregation_period                      = var.aggregation_period
   aggregation_grace_period                = var.aggregation_grace_period
   pushgateway                             = var.pushgateway
   container_registry                      = var.container_registry
+  workflow_manager_image                  = var.workflow_manager_image
   workflow_manager_version                = var.workflow_manager_version
+  facilitator_image                       = var.facilitator_image
   facilitator_version                     = var.facilitator_version
   intake_queue                            = module.pubsub["intake"].queue
   aggregate_queue                         = module.pubsub["aggregate"].queue
@@ -459,6 +421,10 @@ module "kubernetes" {
 
 output "data_share_processor_name" {
   value = var.data_share_processor_name
+}
+
+output "ingestor_name" {
+  value = var.ingestor
 }
 
 output "kubernetes_namespace" {
@@ -476,6 +442,7 @@ output "service_account_email" {
 output "specific_manifest" {
   value = {
     format                 = 1
+    ingestion-identity     = var.use_aws ? local.ingestor_aws_iam_entity : null
     ingestion-bucket       = local.ingestion_bucket_url,
     peer-validation-bucket = local.peer_validation_bucket_url,
     batch-signing-public-keys = {

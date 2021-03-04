@@ -146,9 +146,19 @@ variable "container_registry" {
   default = "letsencrypt"
 }
 
+variable "workflow_manager_image" {
+  type    = string
+  default = "prio-workflow-manager"
+}
+
 variable "workflow_manager_version" {
   type    = string
   default = "latest"
+}
+
+variable "facilitator_image" {
+  type    = string
+  default = "prio-facilitator"
 }
 
 variable "facilitator_version" {
@@ -180,7 +190,7 @@ variable "cluster_settings" {
 terraform {
   backend "gcs" {}
 
-  required_version = ">= 0.13.3"
+  required_version = ">= 0.14.4"
 
   required_providers {
     aws = {
@@ -355,6 +365,7 @@ locals {
     for pair in setproduct(toset(var.localities), keys(var.ingestors)) :
     "${pair[0]}-${pair[1]}" => {
       ingestor                                = pair[1]
+      locality                                = pair[0]
       kubernetes_namespace                    = kubernetes_namespace.namespaces[pair[0]].metadata[0].name
       packet_decryption_key_kubernetes_secret = kubernetes_secret.ingestion_packet_decryption_keys[pair[0]].metadata[0].name
       ingestor_manifest_base_url              = var.ingestors[pair[1]].manifest_base_url
@@ -365,13 +376,19 @@ locals {
   peer_share_processor_server_identity = jsondecode(data.http.peer_share_processor_global_manifest.body).server-identity
 }
 
+locals {
+  // Does this series of deployment have a fake ingestor (integration-tester)
+  deployment_has_ingestor = lookup(var.test_peer_environment, "env_with_ingestor", "") == "" ? false : true
+  // Does this specific environment home the ingestor
+  is_env_with_ingestor = local.deployment_has_ingestor && lookup(var.test_peer_environment, "env_with_ingestor", "") == var.environment ? true : false
+}
+
 # Call the locality_kubernetes module per
 # each locality/namespace
 module "locality_kubernetes" {
   for_each             = kubernetes_namespace.namespaces
   source               = "./modules/locality_kubernetes"
   environment          = var.environment
-  gcp_project          = var.gcp_project
   manifest_bucket      = module.manifest.bucket
   kubernetes_namespace = each.value.metadata[0].name
   ingestors            = keys(var.ingestors)
@@ -392,7 +409,6 @@ module "data_share_processors" {
   aws_region                                     = var.aws_region
   gcp_region                                     = var.gcp_region
   gcp_project                                    = var.gcp_project
-  manifest_bucket                                = module.manifest.bucket
   kubernetes_namespace                           = each.value.kubernetes_namespace
   certificate_domain                             = "${var.environment}.certificates.${var.manifest_domain}"
   ingestor_manifest_base_url                     = each.value.ingestor_manifest_base_url
@@ -403,14 +419,15 @@ module "data_share_processors" {
   remote_bucket_writer_gcp_service_account_email = google_service_account.sum_part_bucket_writer.email
   portal_server_manifest_base_url                = var.portal_server_manifest_base_url
   own_manifest_base_url                          = module.manifest.base_url
-  test_peer_environment                          = var.test_peer_environment
   is_first                                       = var.is_first
   intake_max_age                                 = var.intake_max_age
   aggregation_period                             = var.aggregation_period
   aggregation_grace_period                       = var.aggregation_grace_period
   kms_keyring                                    = module.gke.kms_keyring
   pushgateway                                    = var.pushgateway
+  workflow_manager_image                         = var.workflow_manager_image
   workflow_manager_version                       = var.workflow_manager_version
+  facilitator_image                              = var.facilitator_image
   facilitator_version                            = var.facilitator_version
   container_registry                             = var.container_registry
   intake_worker_count                            = each.value.intake_worker_count
@@ -435,13 +452,21 @@ resource "google_service_account_iam_binding" "data_share_processors_to_sum_part
 }
 
 module "fake_server_resources" {
-  count                        = lookup(var.test_peer_environment, "env_with_ingestor", "") == "" ? 0 : 1
+  count                        = local.is_env_with_ingestor ? 1 : 0
   source                       = "./modules/fake_server_resources"
   manifest_bucket              = module.manifest.bucket
   gcp_region                   = var.gcp_region
   environment                  = var.environment
   sum_part_bucket_writer_email = google_service_account.sum_part_bucket_writer.email
-  ingestors                    = keys(var.ingestors)
+  ingestor_pairs               = local.locality_ingestor_pairs
+  peer_manifest_base_url       = var.peer_share_processor_manifest_base_url
+  own_manifest_base_url        = module.manifest.base_url
+  pushgateway                  = var.pushgateway
+  container_registry           = var.container_registry
+  facilitator_image            = var.facilitator_image
+  facilitator_version          = var.facilitator_version
+
+  depends_on = [module.gke]
 }
 
 module "monitoring" {
@@ -466,11 +491,22 @@ output "gke_kubeconfig" {
 
 output "specific_manifests" {
   value = { for v in module.data_share_processors : v.data_share_processor_name => {
+    ingestor-name        = v.ingestor_name
     kubernetes-namespace = v.kubernetes_namespace
     certificate-fqdn     = v.certificate_fqdn
     specific-manifest    = v.specific_manifest
     }
   }
+}
+
+output "singleton_ingestor" {
+  value = local.is_env_with_ingestor ? {
+    aws_iam_entity              = module.fake_server_resources[0].aws_iam_entity
+    gcp_service_account_id      = module.fake_server_resources[0].gcp_service_account_id
+    gcp_service_account_email   = module.fake_server_resources[0].gcp_service_account_email
+    tester_kubernetes_namespace = module.fake_server_resources[0].test_kubernetes_namespace
+    batch_signing_key_name      = module.fake_server_resources[0].batch_signing_key_name
+  } : {}
 }
 
 output "own_manifest_base_url" {
@@ -479,4 +515,8 @@ output "own_manifest_base_url" {
 
 output "use_test_pha_decryption_key" {
   value = lookup(var.test_peer_environment, "env_without_ingestor", "") == var.environment
+}
+
+output "has_test_environment" {
+  value = lookup(var.test_peer_environment, "env_with_ingestor", "") == var.environment
 }

@@ -7,8 +7,8 @@ use crate::{
 };
 use anyhow::{anyhow, ensure, Context, Result};
 use chrono::NaiveDateTime;
-use log::info;
-use prio::{encrypt::PrivateKey, finite_field::Field, server::Server};
+use log::{debug, info, trace};
+use prio::{encrypt::PrivateKey, encrypt::PublicKey, finite_field::Field, server::Server};
 use ring::signature::UnparsedPublicKey;
 use std::{collections::HashMap, convert::TryFrom, iter::Iterator};
 use uuid::Uuid;
@@ -116,8 +116,13 @@ impl<'a> BatchIntaker<'a> {
         let mut servers = self
             .packet_decryption_keys
             .iter()
-            .map(|k| Server::new(ingestion_header.bins as usize, self.is_first, k.clone()))
+            .map(|k| {
+                debug!("Public key for server is: {:?}", PublicKey::from(k));
+                Server::new(ingestion_header.bins as usize, self.is_first, k.clone())
+            })
             .collect::<Vec<Server>>();
+
+        debug!("We have {} servers.", &servers.len());
 
         // Read all the ingestion packets, generate a verification message for
         // each, and write them to the validation batch.
@@ -152,7 +157,10 @@ impl<'a> BatchIntaker<'a> {
                         &packet.encrypted_payload,
                     ) {
                         Some(m) => m,
-                        None => continue,
+                        None => {
+                            trace!("Error when trying to create validation message - this might be that we picked the wrong packet decryption key");
+                            continue;
+                        }
                     };
 
                     let packet = ValidationPacket {
@@ -223,11 +231,13 @@ mod tests {
         sample::{generate_ingestion_sample, SampleOutput},
         test_utils::{
             default_facilitator_signing_private_key, default_ingestor_private_key,
-            default_ingestor_public_key, default_pha_signing_private_key,
-            DEFAULT_FACILITATOR_ECIES_PRIVATE_KEY, DEFAULT_PHA_ECIES_PRIVATE_KEY,
+            default_ingestor_public_key, default_packet_encryption_certificate_signing_request,
+            default_pha_signing_private_key,
+            DEFAULT_PACKET_ENCRYPTION_CERTIFICATE_SIGNING_REQUEST_PRIVATE_KEY,
         },
         transport::{LocalFileTransport, SignableTransport, VerifiableTransport},
     };
+    use prio::encrypt::PublicKey;
 
     #[test]
     fn share_validator() {
@@ -240,12 +250,17 @@ mod tests {
         let date = NaiveDateTime::from_timestamp(1234567890, 654321);
         let batch_uuid = Uuid::new_v4();
 
+        let packet_encryption_csr = default_packet_encryption_certificate_signing_request();
+
         let mut pha_output = SampleOutput {
             transport: SignableTransport {
                 transport: Box::new(LocalFileTransport::new(pha_tempdir.path().to_path_buf())),
                 batch_signing_key: default_ingestor_private_key(),
             },
-            packet_encryption_key: PrivateKey::from_base64(DEFAULT_PHA_ECIES_PRIVATE_KEY).unwrap(),
+            packet_encryption_public_key: PublicKey::from_base64(
+                &packet_encryption_csr.base64_public_key().unwrap(),
+            )
+            .unwrap(),
             drop_nth_packet: None,
         };
 
@@ -256,8 +271,10 @@ mod tests {
                 )),
                 batch_signing_key: default_ingestor_private_key(),
             },
-            packet_encryption_key: PrivateKey::from_base64(DEFAULT_FACILITATOR_ECIES_PRIVATE_KEY)
-                .unwrap(),
+            packet_encryption_public_key: PublicKey::from_base64(
+                &packet_encryption_csr.base64_public_key().unwrap(),
+            )
+            .unwrap(),
             drop_nth_packet: None,
         };
 
@@ -285,9 +302,10 @@ mod tests {
                 transport: Box::new(LocalFileTransport::new(pha_tempdir.path().to_path_buf())),
                 batch_signing_public_keys: ingestor_pub_keys.clone(),
             },
-            packet_decryption_keys: vec![
-                PrivateKey::from_base64(DEFAULT_PHA_ECIES_PRIVATE_KEY).unwrap()
-            ],
+            packet_decryption_keys: vec![PrivateKey::from_base64(
+                DEFAULT_PACKET_ENCRYPTION_CERTIFICATE_SIGNING_REQUEST_PRIVATE_KEY,
+            )
+            .unwrap()],
         };
 
         let mut facilitator_ingest_transport = VerifiableAndDecryptableTransport {
@@ -298,7 +316,7 @@ mod tests {
                 batch_signing_public_keys: ingestor_pub_keys.clone(),
             },
             packet_decryption_keys: vec![PrivateKey::from_base64(
-                DEFAULT_FACILITATOR_ECIES_PRIVATE_KEY,
+                DEFAULT_PACKET_ENCRYPTION_CERTIFICATE_SIGNING_REQUEST_PRIVATE_KEY,
             )
             .unwrap()],
         };

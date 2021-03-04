@@ -15,8 +15,7 @@ variable "container_registry" {
 }
 
 variable "workflow_manager_image" {
-  type    = string
-  default = "prio-workflow-manager"
+  type = string
 }
 
 variable "workflow_manager_version" {
@@ -24,15 +23,10 @@ variable "workflow_manager_version" {
 }
 
 variable "facilitator_image" {
-  type    = string
-  default = "prio-facilitator"
-}
-
-variable "facilitator_version" {
   type = string
 }
 
-variable "gcp_project" {
+variable "facilitator_version" {
   type = string
 }
 
@@ -88,10 +82,6 @@ variable "sum_part_bucket_service_account_email" {
   type = string
 }
 
-variable "test_peer_ingestion_bucket" {
-  type = string
-}
-
 variable "is_first" {
   type = bool
 }
@@ -128,10 +118,6 @@ variable "aggregate_worker_count" {
   type = number
 }
 
-variable "create_sample_maker" {
-  type = bool
-}
-
 data "aws_caller_identity" "current" {}
 
 # Workload identity[1] lets us map GCP service accounts to Kubernetes service
@@ -166,6 +152,12 @@ resource "kubernetes_secret" "batch_signing_key" {
   metadata {
     name      = "${var.environment}-${var.data_share_processor_name}-batch-signing-key"
     namespace = var.kubernetes_namespace
+    labels = {
+      "isrg-prio.org/type" : "batch-signing-key"
+      "isrg-prio.org/ingestor" : var.ingestor
+      "isrg-prio.org/locality" : var.kubernetes_namespace
+      "isrg-prio.org/instance" : var.data_share_processor_name
+    }
   }
 
   data = {
@@ -527,96 +519,6 @@ resource "kubernetes_deployment" "aggregate" {
     }
   }
 }
-
-locals {
-  # This sample maker acts as an ingestion server in our test setup. It only
-  # gets created in one of the two envs, and writes to both env's ingestion
-  # buckets.
-  sample_makers = var.create_sample_maker ? ["kittens-seen", "dogs-petted"] : []
-}
-
-resource "kubernetes_cron_job" "sample_maker" {
-  for_each = toset(local.sample_makers)
-
-  metadata {
-    name      = "sample-maker-${each.key}-${var.ingestor}-${var.environment}"
-    namespace = var.kubernetes_namespace
-
-    annotations = {
-      environment = var.environment
-    }
-  }
-  spec {
-    schedule                      = "* * * * *"
-    concurrency_policy            = "Forbid"
-    successful_jobs_history_limit = 5
-    failed_jobs_history_limit     = 3
-    job_template {
-      metadata {}
-      spec {
-        template {
-          metadata {}
-          spec {
-            restart_policy                  = "Never"
-            service_account_name            = module.account_mapping.kubernetes_account_name
-            automount_service_account_token = true
-            container {
-              name  = "sample-maker"
-              image = "${var.container_registry}/${var.facilitator_image}:${var.facilitator_version}"
-              args = [
-                "--pushgateway", var.pushgateway,
-                "generate-ingestion-sample",
-                "--peer-output", var.ingestion_bucket,
-                "--own-output", var.test_peer_ingestion_bucket,
-                "--own-identity", var.remote_peer_validation_bucket_identity,
-                "--aggregation-id", each.key,
-                # All instances of the sample maker use the same batch signing
-                # key, thus simulating being a single server.
-                "--batch-signing-private-key", "MIGHAgEAMBMGByqGSM49AgEGCCqGSM49AwEHBG0wawIBAQQggoa08rQR90Asvhy5bWIgFBDeGaO8FnVEF3PVpNVmDGChRANCAAQ2mZfm4UC73PkWsYz3Uub6UTIAFQCPGxouP1O1PlmntOpfLYdvyZDCuenAzv1oCfyToolNArNjwo/+harNn1fs",
-                "--batch-signing-private-key-identifier", "sample-maker-signing-key",
-                "--packet-count", "10",
-                # We use a fixed packet encryption key so that we can make sure
-                # to use the same one in the corresponding data share processor
-                # in the other env.
-                "--pha-ecies-private-key", "BIl6j+J6dYttxALdjISDv6ZI4/VWVEhUzaS05LgrsfswmbLOgNt9HUC2E0w+9RqZx3XMkdEHBHfNuCSMpOwofVSq3TfyKwn0NrftKisKKVSaTOt5seJ67P5QL4hxgPWvxw==",
-                # These parameters get recorded in Avro messages but otherwise
-                # do not affect any system behavior, so the values don't matter.
-                "--batch-start-time", "1000000000",
-                "--batch-end-time", "1000000100",
-                "--dimension", "123",
-                "--epsilon", "0.23",
-              ]
-              env {
-                name  = "RUST_LOG"
-                value = "info"
-              }
-              env {
-                name  = "RUST_BACKTRACE"
-                value = "1"
-              }
-              env {
-                name  = "AWS_ACCOUNT_ID"
-                value = data.aws_caller_identity.current.account_id
-              }
-              # We use the packet decryption key that was generated in this
-              # deploy to exercise that key provisioning flow.
-              env {
-                name = "FACILITATOR_ECIES_PRIVATE_KEY"
-                value_from {
-                  secret_key_ref {
-                    name = var.packet_decryption_key_kubernetes_secret
-                    key  = "secret_key"
-                  }
-                }
-              }
-            }
-          }
-        }
-      }
-    }
-  }
-}
-
 output "service_account_unique_id" {
   value = module.account_mapping.google_service_account_unique_id
 }
