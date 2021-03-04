@@ -10,7 +10,7 @@ managed_dns_zone = {
 }
 ingestors = {
   ingestor-1 = {
-    manifest_base_url = "storage.googleapis.com/prio-staging-facil-manifests/ingestor-1"
+    manifest_base_url = "storage.googleapis.com/prio-staging-facil-manifests/singleton-ingestor"
     localities = {
       narnia = {
         intake_worker_count    = 1
@@ -27,7 +27,7 @@ ingestors = {
     }
   }
   ingestor-2 = {
-    manifest_base_url = "storage.googleapis.com/prio-staging-facil-manifests/ingestor-2"
+    manifest_base_url = "storage.googleapis.com/prio-staging-facil-manifests/singleton-ingestor"
     localities = {
       narnia = {
         intake_worker_count    = 2
@@ -59,8 +59,8 @@ test_peer_environment = {
 }
 is_first                 = false
 use_aws                  = false
-workflow_manager_version = "0.6.8"
-facilitator_version      = "0.6.8"
+workflow_manager_version = "0.6.9"
+facilitator_version      = "0.6.9"
 pushgateway              = "prometheus-pushgateway.monitoring:9091"
 victorops_routing_key    = "prio-staging"
 aggregation_period       = "30m"
