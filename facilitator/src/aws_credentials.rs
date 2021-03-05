@@ -4,9 +4,13 @@ use crate::{
 };
 use anyhow::{Context, Result};
 use async_trait::async_trait;
-use rusoto_core::credential::{
-    AutoRefreshingProvider, AwsCredentials, CredentialsError, DefaultCredentialsProvider,
-    ProvideAwsCredentials, Secret, Variable,
+use log::{debug, info};
+use rusoto_core::{
+    credential::{
+        AutoRefreshingProvider, AwsCredentials, CredentialsError, DefaultCredentialsProvider,
+        ProvideAwsCredentials, Secret, Variable,
+    },
+    RusotoError, RusotoResult,
 };
 use rusoto_mock::MockCredentialsProvider;
 use rusoto_sts::WebIdentityProvider;
@@ -204,5 +208,54 @@ impl ProvideAwsCredentials for Provider {
             Self::WebIdentityFromKubernetesEnvironment(p) => p.credentials().await,
             Self::Mock(p) => p.credentials().await,
         }
+    }
+}
+
+/// We attempt AWS API requests up to three times (i.e., two retries)
+const MAX_ATTEMPT_COUNT: i32 = 3;
+
+/// Calls the provided closure, retrying up to MAX_ATTEMPT_COUNT times if it
+/// fails with RusotoError::HttpDispatch, which indicates a problem sending the
+/// request such as the connection getting closed under us.
+/// Additionally, in the case where there is an error while fetching credentials
+/// before making an actual request, the error will be RusotoError::Credentials,
+/// wrapping a rusoto_core::credential::CredentialsError, which can in turn
+/// contain an HttpDispatchError! Sadly, CredentialsError does not preserve the
+/// structure of the underlying error, just its message, so we must resort to
+/// matching on a substring in order to detect it.
+pub fn retry_request<F, T, E>(action: &str, mut f: F) -> RusotoResult<T, E>
+where
+    F: FnMut() -> RusotoResult<T, E>,
+    E: std::fmt::Debug,
+{
+    let mut attempts = 0;
+    loop {
+        match f() {
+            Err(err) if retryable(&err) => {
+                attempts += 1;
+                if attempts >= MAX_ATTEMPT_COUNT {
+                    break Err(err);
+                }
+                info!(
+                    "failed to {} (will retry {} more times): {:?}",
+                    action,
+                    MAX_ATTEMPT_COUNT - attempts,
+                    err
+                );
+            }
+            Err(err) => {
+                debug!("encountered non retryable error: {:?}", err);
+                break Err(err);
+            }
+            result => break result,
+        }
+    }
+}
+
+fn retryable<T>(error: &RusotoError<T>) -> bool {
+    match error {
+        RusotoError::HttpDispatch(_) => true,
+        RusotoError::Credentials(err) if err.message.contains("Error during dispatch") => true,
+        _ => false,
     }
 }
