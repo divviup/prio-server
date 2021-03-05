@@ -50,8 +50,6 @@ variable "facilitator_version" {
   type = string
 }
 
-
-
 # For our purposes, a fake portal server is simply a bucket where we can write
 # sum parts, as well as a correctly formed global manifest advertising that
 # bucket's name.
@@ -232,7 +230,7 @@ resource "kubernetes_deployment" "integration-tester" {
   for_each = var.ingestor_pairs
 
   metadata {
-    name      = "integration-tester-${each.value.ingestor}"
+    name      = "integration-tester-${each.value.locality}-${each.value.ingestor}"
     namespace = kubernetes_namespace.tester.metadata[0].name
   }
 
