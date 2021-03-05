@@ -51,7 +51,7 @@ cluster_settings = {
   machine_type       = "e2-standard-2"
 }
 peer_share_processor_manifest_base_url = "storage.googleapis.com/prio-staging-facil-manifests"
-portal_server_manifest_base_url        = "storage.googleapis.com/prio-staging-pha-manifests/portal-server"
+portal_server_manifest_base_url        = "storage.googleapis.com/prio-staging-facil-manifests/portal-server"
 test_peer_environment = {
   env_with_ingestor            = "staging-facil"
   env_without_ingestor         = "staging-pha"
