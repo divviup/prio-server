@@ -452,19 +452,29 @@ resource "google_service_account_iam_binding" "data_share_processors_to_sum_part
 }
 
 module "fake_server_resources" {
-  count                        = local.is_env_with_ingestor ? 1 : 0
-  source                       = "./modules/fake_server_resources"
+  count                  = local.is_env_with_ingestor ? 1 : 0
+  source                 = "./modules/fake_server_resources"
+  manifest_bucket        = module.manifest.bucket
+  gcp_region             = var.gcp_region
+  environment            = var.environment
+  ingestor_pairs         = local.locality_ingestor_pairs
+  peer_manifest_base_url = var.peer_share_processor_manifest_base_url
+  own_manifest_base_url  = module.manifest.base_url
+  pushgateway            = var.pushgateway
+  container_registry     = var.container_registry
+  facilitator_image      = var.facilitator_image
+  facilitator_version    = var.facilitator_version
+
+  depends_on = [module.gke]
+}
+
+module "portal_server_resources" {
+  count                        = local.deployment_has_ingestor ? 1 : 0
+  source                       = "./modules/portal_server_resources"
   manifest_bucket              = module.manifest.bucket
   gcp_region                   = var.gcp_region
   environment                  = var.environment
   sum_part_bucket_writer_email = google_service_account.sum_part_bucket_writer.email
-  ingestor_pairs               = local.locality_ingestor_pairs
-  peer_manifest_base_url       = var.peer_share_processor_manifest_base_url
-  own_manifest_base_url        = module.manifest.base_url
-  pushgateway                  = var.pushgateway
-  container_registry           = var.container_registry
-  facilitator_image            = var.facilitator_image
-  facilitator_version          = var.facilitator_version
 
   depends_on = [module.gke]
 }
