@@ -375,9 +375,9 @@ dependencies = [
 
 [[package]]
 name = "const-oid"
-version = "0.4.1"
+version = "0.4.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c5d82796b70971fbb603900a5edc797a4d9be0f9ec1257f83a1dba0aa374e3e9"
+checksum = "9f6b64db6932c7e49332728e3a6bd82c6b7e16016607d20923b537c3bc4c0d5f"
 
 [[package]]
 name = "const_fn"
@@ -471,9 +471,9 @@ dependencies = [
 
 [[package]]
 name = "der"
-version = "0.2.4"
+version = "0.2.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b70f809fb1678da4d5ea334095cbe8d6c64fea35fc52836db6c241caee68e17e"
+checksum = "ce93ba4502a73722aa4b955d97f4b1bd26f4f8da74315399ca58fb88fe2bdaae"
 dependencies = [
  "const-oid",
  "typenum",
@@ -572,9 +572,9 @@ checksum = "e78d4f1cc4ae33bbfc157ed5d5a5ef3bc29227303d595861deb238fcec4e9457"
 
 [[package]]
 name = "elliptic-curve"
-version = "0.9.3"
+version = "0.9.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4df0e7de89c5c4e29c5c9a8576d1484603c16b8156765923e650cf99864ddc1f"
+checksum = "203d2ca86d44931f12e9104dcf8f4735a632eb4dd8d8dfe583c87fe41bb8a862"
 dependencies = [
  "ff",
  "funty",
@@ -1611,9 +1611,9 @@ checksum = "8b870d8c151b6f2fb93e84a13146138f05d02ed11c7e7c54f8826aaaf7c9f184"
 
 [[package]]
 name = "pkcs8"
-version = "0.5.0"
+version = "0.5.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "cef7f3bd1bd1bb7b347609085a8ef84e326de2e400bc2b53eba16f77a3dc5bfb"
+checksum = "8ecfab38c6d0f60db6a80b1ee75f1fc980193f9963c43ee2d6f0ac6698e71d96"
 dependencies = [
  "base64ct",
  "der",
@@ -2385,9 +2385,9 @@ checksum = "6e63cff320ae2c57904679ba7cb63280a3dc4613885beafb148ee7bf9aa9042d"
 
 [[package]]
 name = "spki"
-version = "0.1.0"
+version = "0.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fc22de9c8a841f9508de9f6849b018d414199e4682cc094e5677286c81de80f8"
+checksum = "b8b07e839e486ce2c6120ace6660ed71e4891eb8c88d52eecdf141e1b70effea"
 dependencies = [
  "der",
 ]
