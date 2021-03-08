@@ -103,6 +103,7 @@ apply-bootstrap: prep ## Have terraform bring up the minimal resources needed to
 		-var-file="$(VARS)" \
 		-target=module.manifest \
 		-target=module.fake_server_resources \
+		-target=module.portal_server_resources
 		-target=module.gke
 	echo "If that succeeded, run 'terraform output --json | (cd ../deploy-tool/ ; go run main.go )'"
 
@@ -114,7 +115,8 @@ destroy-bootstrap: prep ## Have terraform destroy the resources brought up by ap
 		-refresh=true \
 		-var-file="$(VARS)" \
 		-target=module.manifest \
-		-target=module.fake_server_resources
+		-target=module.fake_server_resources \
+		-target=module.portal_server_resources \
 		-target=module.gke
 
 .PHONY: apply-target
