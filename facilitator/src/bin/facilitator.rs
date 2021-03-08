@@ -16,7 +16,7 @@ use uuid::Uuid;
 use facilitator::{
     aggregation::BatchAggregator,
     aws_credentials,
-    config::{Identity, ManifestKind, StoragePath, TaskQueueKind},
+    config::{leak_string, Entity, Identity, InOut, ManifestKind, StoragePath, TaskQueueKind},
     intake::BatchIntaker,
     kubernetes::KubernetesClient,
     logging::setup_env_logging,
@@ -112,56 +112,6 @@ const SHARED_HELP: &str = "Storage arguments: Any flag ending in -input or -outp
      keys are in the base64 encoded format expected by libprio-rs, or base64-encoded \
      PKCS#8, as documented. \
     ";
-
-/// The string "-input" or "-output", for appending to arg names.
-enum InOut {
-    Input,
-    Output,
-}
-
-impl InOut {
-    fn str(&self) -> &'static str {
-        match self {
-            InOut::Input => "-input",
-            InOut::Output => "-output",
-        }
-    }
-}
-
-/// One of the organizations participating in the Prio system.
-enum Entity {
-    /// Only used for SampleMaker
-    Facilitator,
-    Ingestor,
-    Peer,
-    Own,
-    Portal,
-}
-
-/// We need to be able to give &'static strs to `clap`, but sometimes we want to generate them
-/// with format!(), which generates a String. This leaks a String in order to give us a &'static str.
-fn leak_string(s: String) -> &'static str {
-    Box::leak(s.into_boxed_str())
-}
-
-impl Entity {
-    fn str(&self) -> &'static str {
-        match self {
-            Entity::Facilitator => "facilitator",
-            Entity::Ingestor => "ingestor",
-            Entity::Peer => "peer",
-            Entity::Own => "own",
-            Entity::Portal => "portal",
-        }
-    }
-
-    /// Return the lowercase name of this entity, plus a suffix.
-    /// Intentionally leak the resulting string so it can be used
-    /// as a &'static str by clap.
-    fn suffix(&self, s: &str) -> &'static str {
-        leak_string(format!("{}{}", self.str(), s))
-    }
-}
 
 fn upper_snake_case(s: &str) -> String {
     s.to_uppercase().replace("-", "_")
@@ -1087,7 +1037,12 @@ fn generate_sample(sub_matches: &ArgMatches) -> Result<(), anyhow::Error> {
 
     let mut peer_transport = SampleOutput {
         transport: SignableTransport {
-            transport: transport_for_path(peer_output_path, peer_identity.as_deref(), sub_matches)?,
+            transport: transport_for_path(
+                peer_output_path,
+                peer_identity.as_deref(),
+                Entity::Peer,
+                sub_matches,
+            )?,
             batch_signing_key: own_batch_signing_key,
         },
         packet_encryption_public_key,
@@ -1126,6 +1081,7 @@ fn generate_sample(sub_matches: &ArgMatches) -> Result<(), anyhow::Error> {
             transport: transport_for_path(
                 faciliator_output,
                 facilitator_identity.as_deref(),
+                Entity::Facilitator,
                 sub_matches,
             )?,
             batch_signing_key: own_batch_signing_key,
@@ -1170,24 +1126,29 @@ fn intake_batch<F: FnMut()>(
         if let Some(base_url) = sub_matches.value_of("peer-manifest-base-url") {
             SpecificManifest::from_https(base_url, sub_matches.value_of("instance-name").unwrap())?
                 .validation_bucket()
-        } else if let Some(path) = sub_matches.value_of("peer-output") {
+        } else if let Some(path) = sub_matches.value_of(Entity::Peer.suffix(InOut::Output.str())) {
             StoragePath::from_str(path)
         } else {
             Err(anyhow!("peer-output or peer-manifest-base-url required."))
         }?;
 
-    let peer_identity = sub_matches.value_of("peer-identity");
     let mut peer_validation_transport = SignableTransport {
-        transport: transport_for_path(peer_validation_bucket, peer_identity, sub_matches)?,
+        transport: transport_from_args(
+            Entity::Peer,
+            PathOrInOut::Path(peer_validation_bucket),
+            sub_matches,
+        )?,
         batch_signing_key: batch_signing_key_from_arg(sub_matches)?,
     };
 
     // We created the bucket to which we write copies of our validation
     // shares, so it is simply provided by argument.
-    let own_validation_bucket = StoragePath::from_str(sub_matches.value_of("own-output").unwrap())?;
-    let own_identity = sub_matches.value_of("own-identity");
     let mut own_validation_transport = SignableTransport {
-        transport: transport_for_path(own_validation_bucket, own_identity, sub_matches)?,
+        transport: transport_from_args(
+            Entity::Own,
+            PathOrInOut::InOut(InOut::Output),
+            sub_matches,
+        )?,
         batch_signing_key: batch_signing_key_from_arg(sub_matches)?,
     };
 
@@ -1308,10 +1269,8 @@ fn aggregate<F: FnMut()>(
 
     // We created the bucket to which we wrote copies of our validation
     // shares, so it is simply provided by argument.
-    let own_validation_bucket = StoragePath::from_str(sub_matches.value_of("own-input").unwrap())?;
-    let own_identity = sub_matches.value_of("own-identity");
     let own_validation_transport =
-        transport_for_path(own_validation_bucket, own_identity, sub_matches)?;
+        transport_from_args(Entity::Own, PathOrInOut::InOut(InOut::Input), sub_matches)?;
 
     // To read our own validation shares, we require our own public keys which
     // we discover in our own specific manifest. If no manifest is provided, use
@@ -1339,12 +1298,8 @@ fn aggregate<F: FnMut()>(
 
     // We created the bucket that peers wrote validations into, and so
     // it is simply provided via argument.
-    let peer_validation_bucket =
-        StoragePath::from_str(sub_matches.value_of("peer-input").unwrap())?;
-    let peer_identity = sub_matches.value_of("peer-identity");
-
     let peer_validation_transport =
-        transport_for_path(peer_validation_bucket, peer_identity, sub_matches)?;
+        transport_from_args(Entity::Peer, PathOrInOut::InOut(InOut::Input), sub_matches)?;
 
     // We need the public keys the peer data share processor used to
     // sign messages, which we can obtain by argument or by discovering
@@ -1384,8 +1339,11 @@ fn aggregate<F: FnMut()>(
             "portal-output or portal-manifest-base-url required"
         )),
     }?;
-    let portal_identity = sub_matches.value_of("portal-identity");
-    let aggregation_transport = transport_for_path(portal_bucket, portal_identity, sub_matches)?;
+    let aggregation_transport = transport_from_args(
+        Entity::Portal,
+        PathOrInOut::Path(portal_bucket),
+        sub_matches,
+    )?;
 
     // Get the key we will use to sign sum part messages sent to the
     // portal server.
@@ -1652,10 +1610,8 @@ fn intake_transport_from_args(matches: &ArgMatches) -> Result<VerifiableAndDecry
     // To read (intake) content from an ingestor's bucket, we need the bucket, which we
     // know because our deployment created it, so it is always provided via the
     // ingestor-input argument.
-    let ingestor_bucket = StoragePath::from_str(matches.value_of("ingestor-input").unwrap())?;
-    let ingestor_identity = matches.value_of("ingestor-identity");
-
-    let intake_transport = transport_for_path(ingestor_bucket, ingestor_identity, matches)?;
+    let intake_transport =
+        transport_from_args(Entity::Ingestor, PathOrInOut::InOut(InOut::Input), matches)?;
 
     // We also need the public keys the ingestor may have used to sign the
     // the batch, which can be provided either directly via command line or must
@@ -1701,9 +1657,45 @@ fn intake_transport_from_args(matches: &ArgMatches) -> Result<VerifiableAndDecry
     })
 }
 
+// transport_from_args can either be passed the StoragePath to construct the
+// Transport around, or an Entity and InOut with which to interpolate an
+// argument string so that it can extract the necessary argument from matches
+// and construct a StoragePath. Ideally we would always just pass Entity and
+// InOut to transport_from_args and let it figure out the rest, but in some cases
+// a manifest must be consulted to figure out the storage path, and it would
+// take more work to enable transport_from_args to generically handle the
+// various kinds of manifest.
+enum PathOrInOut {
+    Path(StoragePath),
+    InOut(InOut),
+}
+
+fn transport_from_args(
+    entity: Entity,
+    path_or_in_out: PathOrInOut,
+    matches: &ArgMatches,
+) -> Result<Box<dyn Transport>> {
+    let identity = matches.value_of(entity.suffix("-identity"));
+
+    let path = match path_or_in_out {
+        PathOrInOut::Path(path) => path,
+        PathOrInOut::InOut(in_out) => {
+            let path_arg = entity.suffix(in_out.str());
+            StoragePath::from_str(
+                matches
+                    .value_of(path_arg)
+                    .context(format!("{} is required", path_arg))?,
+            )?
+        }
+    };
+
+    transport_for_path(path, identity, entity, matches)
+}
+
 fn transport_for_path(
     path: StoragePath,
     identity: Identity,
+    entity: Entity,
     matches: &ArgMatches,
 ) -> Result<Box<dyn Transport>> {
     // We use the value "" to indicate that either ambient AWS credentials (for
@@ -1728,7 +1720,7 @@ fn transport_for_path(
             let credentials_provider = aws_credentials::Provider::new(
                 identity,
                 value_t!(
-                    matches.value_of("use-default-aws-credentials-provider"),
+                    matches.value_of(entity.suffix("-use-default-aws-credentials-provider")),
                     bool
                 )?,
             )?;
@@ -1793,7 +1785,7 @@ fn intake_task_queue_from_args(
             let credentials_provider = aws_credentials::Provider::new(
                 None,
                 value_t!(
-                    matches.value_of("use-default-aws-credentials-provider"),
+                    matches.value_of("task-queue-use-default-aws-credentials-provider"),
                     bool
                 )?,
             )?;
@@ -1839,7 +1831,7 @@ fn aggregation_task_queue_from_args(
             let credentials_provider = aws_credentials::Provider::new(
                 None,
                 value_t!(
-                    matches.value_of("use-default-aws-credentials-provider"),
+                    matches.value_of("task-queue-use-default-aws-credentials-provider"),
                     bool
                 )?,
             )?;
