@@ -83,3 +83,5 @@ kubectl describe service prometheus-server
 ```
 
 to find the LoadBalancer Ingress. You can visit that IP address to reach your Prometheus instance. The plan is to eventually put Grafana in front of Prometheus. Grafana offers a full-featured dashboard interface, and offers authentication via OAuth.
+
+
