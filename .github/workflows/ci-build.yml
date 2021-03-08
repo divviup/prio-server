@@ -44,7 +44,7 @@ jobs:
       - name: Install rust
         uses: actions-rs/toolchain@v1
         with:
-          toolchain: nightly # We have to use nightly for the coverage reports to be generated https://github.com/actions-rs/grcov#usage
+          toolchain: stable
           override: true
           default: true
       - name: Install grcov
@@ -52,9 +52,10 @@ jobs:
       - name: Test
         run: cargo test --all-features --no-fail-fast
         env:
+          RUSTC_BOOTSTRAP: '1' # https://github.com/mozilla/grcov#usage
           CARGO_INCREMENTAL: '0'
-          RUSTFLAGS: '-Zprofile -Ccodegen-units=1 -Cinline-threshold=0 -Clink-dead-code -Coverflow-checks=off -Cpanic=abort -Zpanic_abort_tests'
-          RUSTDOCFLAGS: '-Zprofile -Ccodegen-units=1 -Cinline-threshold=0 -Clink-dead-code -Coverflow-checks=off -Cpanic=abort -Zpanic_abort_tests'
+          RUSTFLAGS: '-Zprofile -Ccodegen-units=1 -Copt-level=0 -Clink-dead-code -Coverflow-checks=off -Cpanic=abort -Zpanic_abort_tests'
+          RUSTDOCFLAGS: '-Zprofile -Ccodegen-units=1 -Copt-level=0 -Clink-dead-code -Coverflow-checks=off -Cpanic=abort -Zpanic_abort_tests'
       - name: Get code coverage
         run: grcov ./target/debug -s . --llvm --branch --guess-directory-when-missing --ignore-not-existing -t lcov -o coverage.txt
       - name: Clean lcov file
