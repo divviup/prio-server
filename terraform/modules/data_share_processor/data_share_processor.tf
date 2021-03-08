@@ -18,7 +18,6 @@ variable "gcp_region" {
   type = string
 }
 
-
 variable "use_aws" {
   type = bool
 }
@@ -66,7 +65,6 @@ variable "remote_bucket_writer_gcp_service_account_email" {
 variable "portal_server_manifest_base_url" {
   type = string
 }
-
 
 variable "is_first" {
   type = bool
@@ -120,7 +118,6 @@ variable "aggregate_worker_count" {
   type = number
 }
 
-
 # We need the ingestion server's manifest so that we can discover the GCP
 # service account it will use to upload ingestion batches. Some ingestors
 # (Apple) are singletons, and advertise a single global manifest which contains
@@ -154,15 +151,10 @@ data "http" "ingestor_specific_manifest" {
 
 locals {
   ingestor_global_manifest_exists = data.external.global_manifest_http_status.result.http_code == "200"
-  ingestor_gcp_service_account_email = local.ingestor_global_manifest_exists ? (
-    jsondecode(data.http.ingestor_global_manifest[0].body).server-identity.gcp-service-account-email
+  ingestor_server_identity = local.ingestor_global_manifest_exists ? (
+    jsondecode(data.http.ingestor_global_manifest[0].body).server-identity
     ) : (
-    jsondecode(data.http.ingestor_specific_manifest[0].body).server-identity.gcp-service-account-email
-  )
-  ingestor_aws_iam_entity = local.ingestor_global_manifest_exists ? (
-    jsondecode(data.http.ingestor_global_manifest[0].body).server-identity.aws-iam-entity
-    ) : (
-    jsondecode(data.http.ingestor_specific_manifest[0].body).server-identity.aws-iam-entity
+    jsondecode(data.http.ingestor_specific_manifest[0].body).server-identity
   )
   resource_prefix = "prio-${var.environment}-${var.data_share_processor_name}"
   # There are three cases for who is accessing this data share processor's
@@ -179,7 +171,7 @@ locals {
     {
       # In the test setup, the peer env hosts the sample-makers, so allow
       # entities in the peer's AWS account to write to our ingeston bucket
-      ingestion_bucket_writer = local.ingestor_aws_iam_entity
+      ingestion_bucket_writer = local.ingestor_server_identity.aws-iam-entity
       # We must assume this AWS role to read our ingestion bucket
       ingestion_bucket_reader = aws_iam_role.bucket_role.arn
       # The identity that GKE jobs should assume or impersonate to access the
@@ -201,7 +193,7 @@ locals {
     {
       # Ingestors always act as a GCP service account, to which we grant write
       # permissions.
-      ingestion_bucket_writer = local.ingestor_gcp_service_account_email
+      ingestion_bucket_writer = local.ingestor_server_identity.gcp-service-account-email
       # No special auth is needed to read from the ingestion bucket in GCS
       ingestion_bucket_reader = module.kubernetes.service_account_email
       # The identity that GKE jobs should assume or impersonate to access the
@@ -442,7 +434,7 @@ output "service_account_email" {
 output "specific_manifest" {
   value = {
     format                 = 1
-    ingestion-identity     = var.use_aws ? local.ingestor_aws_iam_entity : null
+    ingestion-identity     = var.use_aws ? local.ingestor_server_identity.aws-iam-entity : null
     ingestion-bucket       = local.ingestion_bucket_url,
     peer-validation-bucket = local.peer_validation_bucket_url,
     batch-signing-public-keys = {
