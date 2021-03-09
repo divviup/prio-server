@@ -18,7 +18,7 @@ use std::{
     boxed::Box,
     convert::From,
     env,
-    fmt::{self, Display},
+    fmt::{self, Debug, Display},
     sync::Arc,
 };
 use tokio::runtime::{Builder, Runtime};
@@ -226,7 +226,7 @@ const MAX_ATTEMPT_COUNT: i32 = 3;
 pub fn retry_request<F, T, E>(action: &str, mut f: F) -> RusotoResult<T, E>
 where
     F: FnMut() -> RusotoResult<T, E>,
-    E: std::fmt::Debug,
+    E: Debug,
 {
     let mut attempts = 0;
     loop {
@@ -257,5 +257,92 @@ fn retryable<T>(error: &RusotoError<T>) -> bool {
         RusotoError::HttpDispatch(_) => true,
         RusotoError::Credentials(err) if err.message.contains("Error during dispatch") => true,
         _ => false,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use assert_matches::assert_matches;
+    use rusoto_core::request::HttpDispatchError;
+
+    #[test]
+    fn retry_request_success() {
+        let mut attempts = 0;
+
+        let result = retry_request::<_, _, RusotoError<String>>("successful request", || {
+            attempts += 1;
+            Ok("success")
+        });
+        assert_matches!(result, Ok("success"));
+        assert_eq!(attempts, 1);
+    }
+
+    #[test]
+    fn non_retryable_error() {
+        let mut attempts = 0;
+        let error_message = "not retryable";
+
+        let result: RusotoResult<String, String> = retry_request("not retryable", || {
+            attempts += 1;
+            Err(RusotoError::Validation(error_message.to_string()))
+        });
+        assert_matches!(result, Err(RusotoError::Validation(e)) => {
+            assert_eq!(e, error_message);
+        });
+        assert_eq!(attempts, 1);
+    }
+
+    #[test]
+    fn retry_request_http_dispatch_error() {
+        let mut attempts = 0;
+        let error_message = "http_dispatch_error";
+
+        let result: RusotoResult<String, String> = retry_request(error_message, || {
+            attempts += 1;
+            Err(RusotoError::HttpDispatch(HttpDispatchError::new(
+                error_message.to_string(),
+            )))
+        });
+        assert_matches!(result, Err(RusotoError::HttpDispatch(e)) => {
+            assert_eq!(e, HttpDispatchError::new(error_message.to_string()));
+        });
+        assert_eq!(attempts, MAX_ATTEMPT_COUNT);
+    }
+
+    #[test]
+    fn retry_request_credentials_http_dispatch_error() {
+        let mut attempts = 0;
+        let error_message = "something Error during dispatch something";
+
+        let result: RusotoResult<String, String> =
+            retry_request("credentials dispatch error", || {
+                attempts += 1;
+                Err(RusotoError::Credentials(CredentialsError::new(
+                    error_message.to_string(),
+                )))
+            });
+        assert_matches!(result, Err(RusotoError::Credentials(e)) => {
+            assert_eq!(e.message, error_message);
+        });
+        assert_eq!(attempts, MAX_ATTEMPT_COUNT);
+    }
+
+    #[test]
+    fn non_retryable_credentials_error() {
+        let mut attempts = 0;
+        let error_message = "not a dispatch error";
+
+        let result: RusotoResult<String, String> =
+            retry_request("non retryable credentials dispatch error", || {
+                attempts += 1;
+                Err(RusotoError::Credentials(CredentialsError::new(
+                    error_message.to_string(),
+                )))
+            });
+        assert_matches!(result, Err(RusotoError::Credentials(e)) => {
+            assert_eq!(e.message, error_message);
+        });
+        assert_eq!(attempts, 1);
     }
 }
