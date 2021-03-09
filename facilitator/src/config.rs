@@ -225,9 +225,58 @@ impl Display for TaskQueueKind {
     }
 }
 
+/// We need to be able to give &'static strs to `clap`, but sometimes we want to generate them
+/// with format!(), which generates a String. This leaks a String in order to give us a &'static str.
+pub fn leak_string(s: String) -> &'static str {
+    Box::leak(s.into_boxed_str())
+}
+
+/// The string "-input" or "-output", for appending to arg names.
+pub enum InOut {
+    Input,
+    Output,
+}
+
+impl InOut {
+    pub fn str(&self) -> &'static str {
+        match self {
+            InOut::Input => "-input",
+            InOut::Output => "-output",
+        }
+    }
+}
+
+/// One of the organizations participating in the Prio system.
+pub enum Entity {
+    Ingestor,
+    Peer,
+    Own,
+    Facilitator,
+    Portal,
+}
+
+impl Entity {
+    pub fn str(&self) -> &'static str {
+        match self {
+            Entity::Ingestor => "ingestor",
+            Entity::Peer => "peer",
+            Entity::Own => "own",
+            Entity::Facilitator => "facilitator",
+            Entity::Portal => "portal",
+        }
+    }
+
+    /// Return the lowercase name of this entity, plus a suffix.
+    /// Intentionally leak the resulting string so it can be used
+    /// as a &'static str by clap.
+    pub fn suffix(&self, s: &str) -> &'static str {
+        leak_string(format!("{}{}", self.str(), s))
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{GCSPath, GCSPathParseError, S3Path, S3PathParseError, StoragePath};
+    use super::*;
     use assert_matches::assert_matches;
     use rusoto_core::Region;
     use serde_test::{assert_de_tokens, Token};
@@ -327,5 +376,11 @@ mod tests {
         let p = GCSPath::from_str("gs://the-bucket/key-prefix").unwrap();
         let p = p.ensure_directory_prefix();
         assert_eq!(p.key, "key-prefix/");
+    }
+
+    #[test]
+    fn entity_suffix() {
+        let val = Entity::Peer.suffix(InOut::Input.str());
+        assert_eq!(val, "peer-input");
     }
 }
