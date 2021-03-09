@@ -32,8 +32,10 @@ variable "ingestors" {
   type = map(object({
     manifest_base_url = string
     localities = map(object({
-      intake_worker_count    = number
-      aggregate_worker_count = number
+      intake_worker_count                    = number
+      aggregate_worker_count                 = number
+      peer_share_processor_manifest_base_url = string
+      portal_server_manifest_base_url        = string
     }))
   }))
   description = "Map of ingestor names to per-ingestor configuration."
@@ -46,14 +48,6 @@ variable "manifest_domain" {
 
 variable "managed_dns_zone" {
   type = map(string)
-}
-
-variable "peer_share_processor_manifest_base_url" {
-  type = string
-}
-
-variable "portal_server_manifest_base_url" {
-  type = string
 }
 
 variable "test_peer_environment" {
@@ -312,11 +306,6 @@ module "gke" {
   ]
 }
 
-# We fetch the single global manifest for all the peer share processors.
-data "http" "peer_share_processor_global_manifest" {
-  url = "https://${var.peer_share_processor_manifest_base_url}/global-manifest.json"
-}
-
 # While we create a distinct data share processor for each (ingestor, locality)
 # pair, we only create one packet decryption key for each locality, and use it
 # for all ingestors. Since the secret must be in a namespace and accessible
@@ -371,9 +360,10 @@ locals {
       ingestor_manifest_base_url              = var.ingestors[pair[1]].manifest_base_url
       intake_worker_count                     = var.ingestors[pair[1]].localities[pair[0]].intake_worker_count
       aggregate_worker_count                  = var.ingestors[pair[1]].localities[pair[0]].aggregate_worker_count
+      peer_share_processor_manifest_base_url  = var.ingestors[pair[1]].localities[pair[0]].peer_share_processor_manifest_base_url
+      portal_server_manifest_base_url         = var.ingestors[pair[1]].localities[pair[0]].portal_server_manifest_base_url
     }
   }
-  peer_share_processor_server_identity = jsondecode(data.http.peer_share_processor_global_manifest.body).server-identity
 }
 
 locals {
@@ -413,11 +403,9 @@ module "data_share_processors" {
   certificate_domain                             = "${var.environment}.certificates.${var.manifest_domain}"
   ingestor_manifest_base_url                     = each.value.ingestor_manifest_base_url
   packet_decryption_key_kubernetes_secret        = each.value.packet_decryption_key_kubernetes_secret
-  peer_share_processor_aws_account_id            = local.peer_share_processor_server_identity.aws-account-id
-  peer_share_processor_gcp_service_account_email = local.peer_share_processor_server_identity.gcp-service-account-email
-  peer_share_processor_manifest_base_url         = var.peer_share_processor_manifest_base_url
+  peer_share_processor_manifest_base_url         = each.value.peer_share_processor_manifest_base_url
   remote_bucket_writer_gcp_service_account_email = google_service_account.sum_part_bucket_writer.email
-  portal_server_manifest_base_url                = var.portal_server_manifest_base_url
+  portal_server_manifest_base_url                = each.value.portal_server_manifest_base_url
   own_manifest_base_url                          = module.manifest.base_url
   is_first                                       = var.is_first
   intake_max_age                                 = var.intake_max_age
@@ -452,18 +440,17 @@ resource "google_service_account_iam_binding" "data_share_processors_to_sum_part
 }
 
 module "fake_server_resources" {
-  count                  = local.is_env_with_ingestor ? 1 : 0
-  source                 = "./modules/fake_server_resources"
-  manifest_bucket        = module.manifest.bucket
-  gcp_region             = var.gcp_region
-  environment            = var.environment
-  ingestor_pairs         = local.locality_ingestor_pairs
-  peer_manifest_base_url = var.peer_share_processor_manifest_base_url
-  own_manifest_base_url  = module.manifest.base_url
-  pushgateway            = var.pushgateway
-  container_registry     = var.container_registry
-  facilitator_image      = var.facilitator_image
-  facilitator_version    = var.facilitator_version
+  count                 = local.is_env_with_ingestor ? 1 : 0
+  source                = "./modules/fake_server_resources"
+  manifest_bucket       = module.manifest.bucket
+  gcp_region            = var.gcp_region
+  environment           = var.environment
+  ingestor_pairs        = local.locality_ingestor_pairs
+  own_manifest_base_url = module.manifest.base_url
+  pushgateway           = var.pushgateway
+  container_registry    = var.container_registry
+  facilitator_image     = var.facilitator_image
+  facilitator_version   = var.facilitator_version
 
   depends_on = [module.gke]
 }
