@@ -246,7 +246,7 @@ func main() {
 
 			batchSigningPublicKey, err := createBatchSigningPublicKey(manifestWrapper.KubernetesNamespace, name)
 			if err != nil {
-				log.Fatalf("Error when creating and signing public key: %v", batchSigningPublicKey)
+				log.Fatalf("Error when creating batch signing public key: %v", err)
 			}
 			newBatchSigningPublicKeys[name] = *batchSigningPublicKey
 		}
