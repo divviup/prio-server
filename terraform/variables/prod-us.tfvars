@@ -1,7 +1,7 @@
 environment     = "prod-us"
 gcp_region      = "us-west1"
 gcp_project     = "prio-prod-us"
-localities      = ["ta-ta", "us-ct", "us-md", "us-va", "us-wa", "us-ca"]
+localities      = ["ta-ta", "us-ct", "us-md", "us-va", "us-wa", "us-ca", "us-ut"]
 aws_region      = "us-west-1"
 manifest_domain = "isrg-prio.org"
 managed_dns_zone = {
@@ -50,6 +50,12 @@ ingestors = {
         peer_share_processor_manifest_base_url = "en-analytics.cancer.gov"
         portal_server_manifest_base_url        = "manifest.enpa-pha.io"
       }
+      us-ut = {
+        intake_worker_count                    = 5
+        aggregate_worker_count                 = 3
+        peer_share_processor_manifest_base_url = "en-analytics.cancer.gov"
+        portal_server_manifest_base_url        = "manifest.enpa-pha.io"
+      }
     }
   }
   g-enpa = {
@@ -93,6 +99,12 @@ ingestors = {
         peer_share_processor_manifest_base_url = "en-analytics.cancer.gov"
         portal_server_manifest_base_url        = "manifest.enpa-pha.io"
       }
+      us-ut = {
+        intake_worker_count                    = 3
+        aggregate_worker_count                 = 3
+        peer_share_processor_manifest_base_url = "en-analytics.cancer.gov"
+        portal_server_manifest_base_url        = "manifest.enpa-pha.io"
+      }
     }
   }
 }
@@ -106,8 +118,8 @@ is_first                                  = false
 use_aws                                   = false
 aggregation_period                        = "8h"
 aggregation_grace_period                  = "4h"
-workflow_manager_version                  = "0.6.8"
-facilitator_version                       = "0.6.8"
+workflow_manager_version                  = "0.6.10"
+facilitator_version                       = "0.6.10"
 pushgateway                               = "prometheus-pushgateway.monitoring:9091"
 prometheus_server_persistent_disk_size_gb = 1000
 victorops_routing_key                     = "prio-prod-us"
