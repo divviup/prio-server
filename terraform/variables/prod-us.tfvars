@@ -51,7 +51,7 @@ ingestors = {
         portal_server_manifest_base_url        = "manifest.enpa-pha.io"
       }
       us-ut = {
-        intake_worker_count                    = 5
+        intake_worker_count                    = 8
         aggregate_worker_count                 = 3
         peer_share_processor_manifest_base_url = "en-analytics.cancer.gov"
         portal_server_manifest_base_url        = "manifest.enpa-pha.io"
