@@ -118,6 +118,10 @@ variable "aggregate_worker_count" {
   type = number
 }
 
+variable "aggregate_thread_count" {
+  type = number
+}
+
 data "aws_caller_identity" "current" {}
 
 # Workload identity[1] lets us map GCP service accounts to Kubernetes service
@@ -241,6 +245,7 @@ resource "kubernetes_config_map" "aggregate_config_map" {
     TASK_QUEUE_KIND                      = "gcp-pubsub"
     TASK_QUEUE_NAME                      = var.aggregate_queue
     GCP_PROJECT_ID                       = data.google_project.project.project_id
+    THREAD_COUNT                         = var.aggregate_thread_count
   }
 }
 
@@ -477,15 +482,16 @@ resource "kubernetes_deployment" "aggregate" {
             protocol       = "TCP"
           }
           resources {
-            # As in the intake-batch case, aggregate jobs are single threaded
-            # and need to fit whole ingestion batches into memory.
+            # aggregations are multi-threaded, so we set the limits high enough
+            # to allow each worker thread to peg a CPU and fit a batch in
+            # memory, plus a safety margin.
             requests {
               memory = "50Mi"
               cpu    = "0.1"
             }
             limits {
-              memory = "550Mi"
-              cpu    = "1.5"
+              memory = "${550 * var.aggregate_thread_count}Mi"
+              cpu    = 1.5 * var.aggregate_thread_count
             }
           }
           env {

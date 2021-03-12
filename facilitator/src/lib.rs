@@ -18,6 +18,7 @@ pub mod sample;
 pub mod task;
 pub mod test_utils;
 pub mod transport;
+mod work_queue;
 
 pub const DATE_FORMAT: &str = "%Y/%m/%d/%H/%M";
 

@@ -44,7 +44,7 @@ pub(crate) fn prepare_request_without_agent(parameters: RequestParameters<'_>) -
     prepare_request(&create_agent(), parameters)
 }
 
-/// Defines a behavior responsible for produing bearer authorization tokens
+/// Defines a behavior responsible for producing bearer authorization tokens
 pub(crate) trait OauthTokenProvider: Debug {
     /// Returns a valid bearer authroization token
     fn ensure_oauth_token(&mut self) -> Result<String>;

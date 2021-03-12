@@ -5,21 +5,45 @@ use crate::{
         ValidationHeader, ValidationPacket,
     },
     metrics::AggregateMetricsCollector,
+    task::Watchdog,
     transport::{SignableTransport, VerifiableAndDecryptableTransport, VerifiableTransport},
+    work_queue::WorkQueue,
     BatchSigningKey, Error,
 };
 use anyhow::{anyhow, Context, Result};
 use avro_rs::Reader;
 use chrono::NaiveDateTime;
-use log::info;
-use prio::server::{Server, VerificationMessage};
+use log::{debug, info};
+use prio::{
+    finite_field::{merge_vector, Field},
+    server::{Server, VerificationMessage},
+    util::vector_with_length,
+};
 use std::{
     collections::{HashMap, HashSet},
     convert::TryFrom,
     io::Cursor,
+    thread::{self, JoinHandle},
 };
 use uuid::Uuid;
 
+/// A batch included in an aggregation.
+#[derive(Debug, Clone)]
+pub struct SumInput {
+    pub uuid: Uuid,
+    pub time: NaiveDateTime,
+}
+
+/// The result of summing an individual batch
+#[derive(Debug, Clone)]
+struct SumOutput {
+    individual_client_count: usize,
+    sum: Vec<Field>,
+    invalid_packet_uuids: Vec<Uuid>,
+}
+
+/// BatchAggregator aggregates over multiple batches of shares and produces a
+/// single SumPart.
 pub struct BatchAggregator<'a> {
     trace_id: &'a str,
     is_first: bool,
@@ -31,8 +55,8 @@ pub struct BatchAggregator<'a> {
     ingestion_transport: &'a mut VerifiableAndDecryptableTransport,
     aggregation_batch: BatchWriter<'a, SumPart, InvalidPacket>,
     share_processor_signing_key: &'a BatchSigningKey,
-    total_individual_clients: i64,
     metrics_collector: Option<&'a AggregateMetricsCollector>,
+    thread_count: u32,
 }
 
 impl<'a> BatchAggregator<'a> {
@@ -69,8 +93,8 @@ impl<'a> BatchAggregator<'a> {
                 &mut *aggregation_transport.transport,
             ),
             share_processor_signing_key: &aggregation_transport.batch_signing_key,
-            total_individual_clients: 0,
             metrics_collector: None,
+            thread_count: 1,
         })
     }
 
@@ -78,13 +102,18 @@ impl<'a> BatchAggregator<'a> {
         self.metrics_collector = Some(collector);
     }
 
+    /// Set the number of worker threads that will be spawned to sum batches
+    pub fn set_thread_count(&mut self, count: u32) {
+        self.thread_count = count;
+    }
+
     /// Compute the sum part for all the provided batch IDs and write it out to
     /// the aggregation transport. The provided callback is invoked after each
     /// batch is aggregated.
-    pub fn generate_sum_part<F: FnMut()>(
+    pub fn generate_sum_part<W: Watchdog>(
         &mut self,
-        batch_ids: &[(Uuid, NaiveDateTime)],
-        mut callback: F,
+        batches: Vec<SumInput>,
+        watchdog: &W,
     ) -> Result<()> {
         info!(
             "trace id {} processing intake from {}, own validity from {}, peer validity from {} and saving sum parts to {}",
@@ -94,27 +123,62 @@ impl<'a> BatchAggregator<'a> {
             self.peer_validation_transport.transport.path(),
             self.aggregation_batch.path(),
         );
-        let mut invalid_uuids = Vec::new();
-        let mut included_batch_uuids = Vec::new();
 
-        let ingestion_header = self.ingestion_header(&batch_ids[0].0, &batch_ids[0].1)?;
+        let included_batch_uuids: Vec<Uuid> = batches.iter().map(|b| b.uuid).collect();
+        let ingestion_header = self.ingestion_header(&batches[0].uuid, &batches[0].time)?;
+        let dimension = ingestion_header.bins as usize;
 
-        // Ideally, we would use the encryption_key_id in the ingestion packet
-        // to figure out which private key to use for decryption, but that field
-        // is optional. Instead we try all the keys we have available until one
-        // works.
-        // https://github.com/abetterinternet/prio-server/issues/73
-        let mut servers = self
-            .ingestion_transport
-            .packet_decryption_keys
-            .iter()
-            .map(|k| Server::new(ingestion_header.bins as usize, self.is_first, k.clone()))
-            .collect::<Vec<Server>>();
+        let work_queue: WorkQueue<SumInput, SumOutput> = WorkQueue::new(batches);
+        let mut thread_handles: Vec<JoinHandle<Result<()>>> = Vec::new();
 
-        for batch_id in batch_ids {
-            self.aggregate_share(&batch_id.0, &batch_id.1, &mut servers, &mut invalid_uuids)?;
-            included_batch_uuids.push(batch_id.0);
-            callback();
+        debug!("spawning {} aggregation worker threads", self.thread_count);
+        for _ in 0..self.thread_count {
+            // Clone various objects needed by workers so they can be safely
+            // moved into thread closure
+            let mut queue_clone = work_queue.clone();
+            let watchdog_clone = watchdog.clone();
+            let mut share_aggregator = ShareAggregator {
+                aggregation_name: self.aggregation_name.to_string(),
+                is_first: self.is_first,
+                own_validation_transport: self.own_validation_transport.clone(),
+                peer_validation_transport: self.peer_validation_transport.clone(),
+                ingestion_transport: self.ingestion_transport.clone(),
+                metrics_collector: self.metrics_collector.cloned(),
+                trace_id: self.trace_id.to_string(),
+                dimension,
+            };
+            thread_handles.push(thread::spawn(move || {
+                while let Some(job) = queue_clone.dequeue_job() {
+                    let sum_output = share_aggregator.aggregate(&job)?;
+
+                    queue_clone.send_results(sum_output);
+                    watchdog_clone.send_heartbeat();
+                }
+
+                // There are no jobs left for this worker
+                Ok(())
+            }));
+        }
+
+        for handle in thread_handles {
+            // handle::join() returns std::thread::Result<anyhow::Result<()>.
+            // The first ? unwraps the outer result from ThreadHandle::join()
+            // and the second handles the result from the thread closure.
+            handle
+                .join()
+                .map_err(|e| anyhow!("aggregation worker thread panicked: {:?}", e))??;
+        }
+
+        // Reduce over all the results produced by workers.
+        let results: Vec<SumOutput> = work_queue.results()?;
+
+        let mut accumulated_sum: Vec<Field> = vector_with_length(dimension as usize);
+        let mut total_individual_clients = 0;
+        let mut invalid_packet_uuids: Vec<Uuid> = Vec::new();
+        for mut result in results {
+            merge_vector(&mut accumulated_sum, &result.sum)?;
+            total_individual_clients += result.individual_client_count;
+            invalid_packet_uuids.append(&mut result.invalid_packet_uuids);
         }
 
         // TODO(timg) what exactly do we write out when there are no invalid
@@ -122,32 +186,24 @@ impl<'a> BatchAggregator<'a> {
         let invalid_packets_digest =
             self.aggregation_batch
                 .packet_file_writer(|mut packet_file_writer| {
-                    for invalid_uuid in invalid_uuids {
-                        InvalidPacket { uuid: invalid_uuid }.write(&mut packet_file_writer)?
+                    for invalid_uuid in &invalid_packet_uuids {
+                        InvalidPacket {
+                            uuid: *invalid_uuid,
+                        }
+                        .write(&mut packet_file_writer)?
                     }
                     Ok(())
                 })?;
 
-        // We have one Server for each packet decryption key, and each of those
-        // instances could contain some accumulated shares, depending on which
-        // key was used to encrypt an individual packet. We make a new Server
-        // instance into which we will aggregate them all together. It doesn't
-        // matter which private key we use here as we're not decrypting any
-        // packets with this Server instance, just accumulating data vectors.
-        let mut accumulator_server = Server::new(
-            ingestion_header.bins as usize,
-            self.is_first,
-            self.ingestion_transport.packet_decryption_keys[0].clone(),
-        );
-        for server in servers.iter() {
-            accumulator_server.merge_total_shares(server.total_shares());
-        }
-
-        let sum = accumulator_server
-            .total_shares()
+        // Convert Vec<Field> and usize into the types expected by the Avro
+        // encoding
+        let accumulated_sum: Vec<i64> = accumulated_sum
             .iter()
             .map(|f| u32::from(*f) as i64)
             .collect();
+
+        let total_individual_clients = i64::try_from(total_individual_clients)
+            .context("could not represent number of contributions as signed 64 bit integer")?;
 
         let sum_signature = self.aggregation_batch.put_header(
             &SumPart {
@@ -158,11 +214,11 @@ impl<'a> BatchAggregator<'a> {
                 prime: ingestion_header.prime,
                 number_of_servers: ingestion_header.number_of_servers,
                 hamming_weight: ingestion_header.hamming_weight,
-                sum,
+                sum: accumulated_sum,
                 aggregation_start_time: self.aggregation_start.timestamp_millis(),
                 aggregation_end_time: self.aggregation_end.timestamp_millis(),
                 packet_file_digest: invalid_packets_digest.as_ref().to_vec(),
-                total_individual_clients: self.total_individual_clients,
+                total_individual_clients: total_individual_clients as i64,
             },
             &self.share_processor_signing_key.key,
         )?;
@@ -187,30 +243,49 @@ impl<'a> BatchAggregator<'a> {
             .header(&self.ingestion_transport.transport.batch_signing_public_keys)?;
         Ok(ingestion_header)
     }
+}
 
-    /// Aggregate the batch for the provided batch_id into the provided server.
-    /// The UUIDs of packets for which aggregation fails are recorded in the
-    /// provided invalid_uuids vector.
-    fn aggregate_share(
-        &mut self,
-        batch_id: &Uuid,
-        batch_date: &NaiveDateTime,
-        servers: &mut Vec<Server>,
-        invalid_uuids: &mut Vec<Uuid>,
-    ) -> Result<()> {
+/// ShareAggregator produces sums over a single batch of shares. The intent is
+/// to make it easier to understand which objects owned by BatchAggregator are
+/// being cloned and sent into worker threads.
+struct ShareAggregator {
+    aggregation_name: String,
+    is_first: bool,
+    own_validation_transport: VerifiableTransport,
+    peer_validation_transport: VerifiableTransport,
+    ingestion_transport: VerifiableAndDecryptableTransport,
+    metrics_collector: Option<AggregateMetricsCollector>,
+    trace_id: String,
+    dimension: usize,
+}
+
+impl ShareAggregator {
+    /// Aggregate the shares in the provided batch. Returns a SumOutput
+    /// containing the result of this batch's sum.
+    fn aggregate(&mut self, sum_input: &SumInput) -> Result<SumOutput> {
         let mut ingestion_batch: BatchReader<'_, IngestionHeader, IngestionDataSharePacket> =
             BatchReader::new(
-                Batch::new_ingestion(self.aggregation_name, batch_id, batch_date),
+                Batch::new_ingestion(&self.aggregation_name, &sum_input.uuid, &sum_input.time),
                 &mut *self.ingestion_transport.transport.transport,
             );
         let mut own_validation_batch: BatchReader<'_, ValidationHeader, ValidationPacket> =
             BatchReader::new(
-                Batch::new_validation(self.aggregation_name, batch_id, batch_date, self.is_first),
+                Batch::new_validation(
+                    &self.aggregation_name,
+                    &sum_input.uuid,
+                    &sum_input.time,
+                    self.is_first,
+                ),
                 &mut *self.own_validation_transport.transport,
             );
         let mut peer_validation_batch: BatchReader<'_, ValidationHeader, ValidationPacket> =
             BatchReader::new(
-                Batch::new_validation(self.aggregation_name, batch_id, batch_date, !self.is_first),
+                Batch::new_validation(
+                    &self.aggregation_name,
+                    &sum_input.uuid,
+                    &sum_input.time,
+                    !self.is_first,
+                ),
                 &mut *self.peer_validation_transport.transport,
             );
 
@@ -219,7 +294,7 @@ impl<'a> BatchAggregator<'a> {
         {
             Ok(header) => header,
             Err(error) => {
-                if let Some(collector) = self.metrics_collector {
+                if let Some(collector) = &self.metrics_collector {
                     collector
                         .invalid_peer_validation_batches
                         .with_label_values(&["header"])
@@ -234,7 +309,7 @@ impl<'a> BatchAggregator<'a> {
         {
             Ok(header) => header,
             Err(error) => {
-                if let Some(collector) = self.metrics_collector {
+                if let Some(collector) = &self.metrics_collector {
                     collector
                         .invalid_own_validation_batches
                         .with_label_values(&["header"])
@@ -278,7 +353,7 @@ impl<'a> BatchAggregator<'a> {
             match peer_validation_batch.packet_file_reader(&peer_validation_header) {
                 Ok(reader) => reader,
                 Err(error) => {
-                    if let Some(collector) = self.metrics_collector {
+                    if let Some(collector) = &self.metrics_collector {
                         collector
                             .invalid_peer_validation_batches
                             .with_label_values(&["packet_file"])
@@ -294,7 +369,7 @@ impl<'a> BatchAggregator<'a> {
             match own_validation_batch.packet_file_reader(&own_validation_header) {
                 Ok(reader) => reader,
                 Err(error) => {
-                    if let Some(collector) = self.metrics_collector {
+                    if let Some(collector) = &self.metrics_collector {
                         collector
                             .invalid_own_validation_batches
                             .with_label_values(&["packet_file"])
@@ -307,11 +382,32 @@ impl<'a> BatchAggregator<'a> {
         let own_validation_packets: HashMap<Uuid, ValidationPacket> =
             validation_packet_map(&mut own_validation_packet_file_reader)?;
 
+        // We accumulate each batch's packets into a Server, which is
+        // responsible for decrypting shares and verifying proofs. Ideally, we
+        // would use the encryption_key_id in the ingestion packet to figure out
+        // which private key to use for decryption, but that field is
+        // optional[1]. Instead we try all the keys we have available until one
+        // works, meaning we have to create one Server per key.
+        //
+        // We have live mutable borrows of self which forbid us from immutably
+        // borrowing self in the closure passed to map()[2], so we have to make
+        // safe copies of these values.
+        //
+        // [1] https://github.com/abetterinternet/prio-server/issues/73
+        // [2] https://github.com/rust-lang/rust/issues/53488
+        let dimension = self.dimension;
+        let is_first = self.is_first;
+        let mut servers: Vec<Server> = self
+            .ingestion_transport
+            .packet_decryption_keys
+            .iter()
+            .map(|k| Server::new(dimension, is_first, k.clone()))
+            .collect();
         // Keep track of the ingestion packets we have seen so we can reject
         // duplicates.
         let mut processed_ingestion_packets = HashSet::new();
-
         let mut ingestion_packet_reader = ingestion_batch.packet_file_reader(&ingestion_header)?;
+        let mut invalid_packet_uuids: Vec<Uuid> = Vec::new();
 
         loop {
             let ingestion_packet =
@@ -333,7 +429,7 @@ impl<'a> BatchAggregator<'a> {
                 &ingestion_packet.uuid,
                 &peer_validation_packets,
                 "peer",
-                invalid_uuids,
+                &mut invalid_packet_uuids,
             );
             let peer_validation_packet: &ValidationPacket = match peer_validation_packet {
                 Some(p) => p,
@@ -344,7 +440,7 @@ impl<'a> BatchAggregator<'a> {
                 &ingestion_packet.uuid,
                 &own_validation_packets,
                 "own",
-                invalid_uuids,
+                &mut invalid_packet_uuids,
             );
             let own_validation_packet: &ValidationPacket = match own_validation_packet {
                 Some(p) => p,
@@ -367,9 +463,8 @@ impl<'a> BatchAggregator<'a> {
                                 "trace id {} rejecting packet {} due to invalid proof",
                                 self.trace_id, peer_validation_packet.uuid
                             );
-                            invalid_uuids.push(peer_validation_packet.uuid);
+                            invalid_packet_uuids.push(peer_validation_packet.uuid);
                         }
-                        self.total_individual_clients += 1;
                         did_aggregate_shares = true;
                         break;
                     }
@@ -392,7 +487,16 @@ impl<'a> BatchAggregator<'a> {
             }
         }
 
-        Ok(())
+        let mut sum: Vec<Field> = vector_with_length(self.dimension);
+        for server in &servers {
+            merge_vector(&mut sum, server.total_shares())
+                .context("unable to sum across per-packet-decryption-key servers")?;
+        }
+        Ok(SumOutput {
+            individual_client_count: processed_ingestion_packets.len(),
+            sum,
+            invalid_packet_uuids,
+        })
     }
 }
 
