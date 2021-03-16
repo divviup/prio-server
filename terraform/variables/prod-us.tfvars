@@ -1,7 +1,7 @@
 environment     = "prod-us"
 gcp_region      = "us-west1"
 gcp_project     = "prio-prod-us"
-localities      = ["ta-ta", "us-ct", "us-md", "us-va", "us-wa", "us-ca", "us-ut", "us-wi"]
+localities      = ["ta-ta", "us-ct", "us-md", "us-va", "us-wa", "us-ca", "us-ut", "us-wi", "us-ma"]
 aws_region      = "us-west-1"
 manifest_domain = "isrg-prio.org"
 managed_dns_zone = {
@@ -62,6 +62,12 @@ ingestors = {
         peer_share_processor_manifest_base_url = "en-analytics.cancer.gov"
         portal_server_manifest_base_url        = "manifest.enpa-pha.io"
       }
+      us-ma = {
+        intake_worker_count                    = 12
+        aggregate_worker_count                 = 3
+        peer_share_processor_manifest_base_url = "en-analytics.cancer.gov"
+        portal_server_manifest_base_url        = "manifest.enpa-pha.io"
+      }
     }
   }
   g-enpa = {
@@ -112,6 +118,12 @@ ingestors = {
         portal_server_manifest_base_url        = "manifest.enpa-pha.io"
       }
       us-wi = {
+        intake_worker_count                    = 3
+        aggregate_worker_count                 = 3
+        peer_share_processor_manifest_base_url = "en-analytics.cancer.gov"
+        portal_server_manifest_base_url        = "manifest.enpa-pha.io"
+      }
+      us-ma = {
         intake_worker_count                    = 3
         aggregate_worker_count                 = 3
         peer_share_processor_manifest_base_url = "en-analytics.cancer.gov"
