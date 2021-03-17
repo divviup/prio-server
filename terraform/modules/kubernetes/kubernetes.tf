@@ -110,14 +110,6 @@ variable "aggregate_queue" {
   type = string
 }
 
-variable "intake_worker_count" {
-  type = number
-}
-
-variable "aggregate_worker_count" {
-  type = number
-}
-
 data "aws_caller_identity" "current" {}
 
 # Workload identity[1] lets us map GCP service accounts to Kubernetes service
@@ -347,7 +339,6 @@ resource "kubernetes_deployment" "intake_batch" {
     namespace = var.kubernetes_namespace
   }
   spec {
-    replicas = var.intake_worker_count
     selector {
       match_labels = {
         app      = "intake-batch-worker"
@@ -418,6 +409,50 @@ resource "kubernetes_deployment" "intake_batch" {
       }
     }
   }
+
+  # The number of replicas is governed by the horizonal pod autoscaler we create
+  # below, so tell Terraform to ignore replica count so that it doesn't set the
+  # deployment size back to 1 on every `terraform apply`.
+  lifecycle {
+    ignore_changes = [
+      spec[0].replicas
+    ]
+  }
+}
+
+resource "kubernetes_horizontal_pod_autoscaler" "intake_batch" {
+  metadata {
+    name      = kubernetes_deployment.intake_batch.metadata[0].name
+    namespace = var.kubernetes_namespace
+  }
+
+  spec {
+    min_replicas = 3
+    max_replicas = 50
+    scale_target_ref {
+      api_version = "apps/v1"
+      kind        = "Deployment"
+      name        = kubernetes_deployment.intake_batch.metadata[0].name
+    }
+
+    metric {
+      type = "External"
+      external {
+        metric {
+          name = "pubsub.googleapis.com|subscription|num_undelivered_messages"
+          selector {
+            match_labels = {
+              "resource.labels.subscription_id" = var.intake_queue
+            }
+          }
+        }
+        target {
+          type          = "AverageValue"
+          average_value = 50
+        }
+      }
+    }
+  }
 }
 
 resource "kubernetes_service" "aggregate" {
@@ -451,7 +486,6 @@ resource "kubernetes_deployment" "aggregate" {
   }
 
   spec {
-    replicas = var.aggregate_worker_count
     selector {
       match_labels = {
         app      = "aggregate-worker"
@@ -518,7 +552,52 @@ resource "kubernetes_deployment" "aggregate" {
       }
     }
   }
+
+  # The number of replicas is governed by the horizonal pod autoscaler we create
+  # below, so tell Terraform to ignore replica count so that it doesn't set the
+  # deployment size back to 1 on every `terraform apply`.
+  lifecycle {
+    ignore_changes = [
+      spec[0].replicas
+    ]
+  }
 }
+
+resource "kubernetes_horizontal_pod_autoscaler" "aggregate" {
+  metadata {
+    name      = kubernetes_deployment.aggregate.metadata[0].name
+    namespace = var.kubernetes_namespace
+  }
+
+  spec {
+    min_replicas = 3
+    max_replicas = 50
+    scale_target_ref {
+      api_version = "apps/v1"
+      kind        = "Deployment"
+      name        = kubernetes_deployment.aggregate.metadata[0].name
+    }
+
+    metric {
+      type = "External"
+      external {
+        metric {
+          name = "pubsub.googleapis.com|subscription|num_undelivered_messages"
+          selector {
+            match_labels = {
+              "resource.labels.subscription_id" = var.aggregate_queue
+            }
+          }
+        }
+        target {
+          type          = "AverageValue"
+          average_value = 1
+        }
+      }
+    }
+  }
+}
+
 output "service_account_unique_id" {
   value = module.account_mapping.google_service_account_unique_id
 }

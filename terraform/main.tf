@@ -32,8 +32,6 @@ variable "ingestors" {
   type = map(object({
     manifest_base_url = string
     localities = map(object({
-      intake_worker_count                    = number
-      aggregate_worker_count                 = number
       peer_share_processor_manifest_base_url = string
       portal_server_manifest_base_url        = string
     }))
@@ -306,6 +304,12 @@ module "gke" {
   ]
 }
 
+
+module "custom_metrics_adapter" {
+  source      = "./modules/custom_metrics_adapter"
+  environment = var.environment
+}
+
 # While we create a distinct data share processor for each (ingestor, locality)
 # pair, we only create one packet decryption key for each locality, and use it
 # for all ingestors. Since the secret must be in a namespace and accessible
@@ -358,8 +362,6 @@ locals {
       kubernetes_namespace                    = kubernetes_namespace.namespaces[pair[0]].metadata[0].name
       packet_decryption_key_kubernetes_secret = kubernetes_secret.ingestion_packet_decryption_keys[pair[0]].metadata[0].name
       ingestor_manifest_base_url              = var.ingestors[pair[1]].manifest_base_url
-      intake_worker_count                     = var.ingestors[pair[1]].localities[pair[0]].intake_worker_count
-      aggregate_worker_count                  = var.ingestors[pair[1]].localities[pair[0]].aggregate_worker_count
       peer_share_processor_manifest_base_url  = var.ingestors[pair[1]].localities[pair[0]].peer_share_processor_manifest_base_url
       portal_server_manifest_base_url         = var.ingestors[pair[1]].localities[pair[0]].portal_server_manifest_base_url
     }
@@ -418,8 +420,6 @@ module "data_share_processors" {
   facilitator_image                              = var.facilitator_image
   facilitator_version                            = var.facilitator_version
   container_registry                             = var.container_registry
-  intake_worker_count                            = each.value.intake_worker_count
-  aggregate_worker_count                         = each.value.aggregate_worker_count
 }
 
 # The portal owns two sum part buckets (one for each data share processor) and

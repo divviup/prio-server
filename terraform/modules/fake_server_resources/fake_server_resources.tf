@@ -21,8 +21,6 @@ variable "ingestor_pairs" {
     kubernetes_namespace : string
     packet_decryption_key_kubernetes_secret : string
     ingestor_manifest_base_url : string
-    intake_worker_count : string
-    aggregate_worker_count : string
     peer_share_processor_manifest_base_url : string
   }))
 }
@@ -186,7 +184,7 @@ resource "kubernetes_deployment" "integration-tester" {
   }
 
   spec {
-    replicas = 1
+    replicas = 5
     selector {
       match_labels = {
         app      = "integration-tester-worker"
@@ -233,7 +231,7 @@ resource "kubernetes_deployment" "integration-tester" {
             "--batch-end-time", "1000000100",
             "--dimension", "123",
             "--epsilon", "0.23",
-            "--generation-interval", "60"
+            "--generation-interval", "30"
           ]
         }
       }

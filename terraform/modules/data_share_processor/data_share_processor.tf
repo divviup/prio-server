@@ -102,14 +102,6 @@ variable "facilitator_version" {
   type = string
 }
 
-variable "intake_worker_count" {
-  type = number
-}
-
-variable "aggregate_worker_count" {
-  type = number
-}
-
 # We need the ingestion server's manifest so that we can discover the GCP
 # service account it will use to upload ingestion batches. Some ingestors
 # (Apple) are singletons, and advertise a single global manifest which contains
@@ -408,8 +400,6 @@ module "kubernetes" {
   facilitator_version                     = var.facilitator_version
   intake_queue                            = module.pubsub["intake"].queue
   aggregate_queue                         = module.pubsub["aggregate"].queue
-  intake_worker_count                     = var.intake_worker_count
-  aggregate_worker_count                  = var.aggregate_worker_count
 }
 
 output "data_share_processor_name" {
