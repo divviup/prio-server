@@ -25,7 +25,7 @@ log = "0.4.11"
 p256 = "0.8.0-pre"
 pem = "0.8"
 pkix = "0.1.1"
-prio = "0.2"
+prio = "0.3"
 prometheus = "0.12"
 rand = "0.8"
 ring = { version = "0.16.20", features = ["std"] }
