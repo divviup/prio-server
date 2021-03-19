@@ -47,5 +47,5 @@ warp = "^0.3"
 
 [dev-dependencies]
 assert_matches = "1.5.0"
-mockito = "0.29.0"
+mockito = "0.30.0"
 serde_test = "1.0"
