@@ -9,12 +9,18 @@ use ring::signature::{
     ECDSA_P256_SHA256_ASN1_SIGNING,
 };
 use std::{
-    collections::HashMap, fs, fs::File, io::Read, str::FromStr, time::Duration, time::Instant,
+    collections::HashMap,
+    fs,
+    fs::File,
+    io::Read,
+    str::FromStr,
+    sync::{Arc, Mutex},
+    time::Duration,
 };
 use uuid::Uuid;
 
 use facilitator::{
-    aggregation::BatchAggregator,
+    aggregation::{BatchAggregator, SumInput},
     aws_credentials,
     config::{leak_string, Entity, Identity, InOut, ManifestKind, StoragePath, TaskQueueKind},
     intake::BatchIntaker,
@@ -26,7 +32,10 @@ use facilitator::{
     },
     metrics::{start_metrics_scrape_endpoint, AggregateMetricsCollector, IntakeMetricsCollector},
     sample::{generate_ingestion_sample, SampleOutput},
-    task::{AggregationTask, AwsSqsTaskQueue, GcpPubSubTaskQueue, IntakeBatchTask, TaskQueue},
+    task::{
+        AggregationTask, AwsSqsTaskQueue, GcpPubSubTaskQueue, IntakeBatchTask, NoOpWatchdog,
+        TaskQueue, TaskQueueWatchdog, Watchdog,
+    },
     transport::{
         GCSTransport, LocalFileTransport, S3Transport, SignableTransport, Transport,
         VerifiableAndDecryptableTransport, VerifiableTransport,
@@ -80,6 +89,8 @@ trait AppArgumentAdder {
     fn add_metrics_scrape_port_argument(self) -> Self;
 
     fn add_use_bogus_packet_file_digest_argument(self) -> Self;
+
+    fn add_thread_count_argument(self) -> Self;
 
     fn add_common_sample_maker_arguments(self) -> Self;
 }
@@ -436,6 +447,17 @@ impl<'a, 'b> AppArgumentAdder for App<'a, 'b> {
         )
     }
 
+    fn add_thread_count_argument(self: App<'a, 'b>) -> App<'a, 'b> {
+        self.arg(
+            Arg::with_name("thread-count")
+                .long("thread-count")
+                .env("THREAD_COUNT")
+                .help("number of worker threads to spawn")
+                .default_value("1")
+                .validator(num_validator::<u32>),
+        )
+    }
+
     fn add_common_sample_maker_arguments(self: App<'a, 'b>) -> App<'a, 'b> {
         self.add_gcp_service_account_key_file_argument()
             .add_storage_arguments(Entity::Peer, InOut::Output)
@@ -764,6 +786,7 @@ fn main() -> Result<(), anyhow::Error> {
                 .add_storage_arguments(Entity::Portal, InOut::Output)
                 .add_packet_decryption_key_argument()
                 .add_batch_signing_key_arguments(true)
+                .add_thread_count_argument()
         )
         .subcommand(
             SubCommand::with_name("lint-manifest")
@@ -849,6 +872,7 @@ fn main() -> Result<(), anyhow::Error> {
                 .add_batch_signing_key_arguments(true)
                 .add_task_queue_arguments()
                 .add_metrics_scrape_port_argument()
+                .add_thread_count_argument()
         )
         .get_matches();
 
@@ -1108,14 +1132,14 @@ fn generate_sample(sub_matches: &ArgMatches) -> Result<(), anyhow::Error> {
     Ok(())
 }
 
-fn intake_batch<F: FnMut()>(
+fn intake_batch<W: Watchdog>(
     trace_id: &str,
     aggregation_id: &str,
     batch_id: &str,
     date: &str,
     sub_matches: &ArgMatches,
     metrics_collector: Option<&IntakeMetricsCollector>,
-    callback: F,
+    watchdog: &mut W,
 ) -> Result<(), anyhow::Error> {
     let mut intake_transport = intake_transport_from_args(sub_matches)?;
 
@@ -1176,7 +1200,7 @@ fn intake_batch<F: FnMut()>(
         collector.intake_tasks_started.inc();
     }
 
-    let result = batch_intaker.generate_validation_share(callback);
+    let result = batch_intaker.generate_validation_share(watchdog);
 
     if let Some(collector) = metrics_collector {
         match result {
@@ -1202,7 +1226,7 @@ fn intake_batch_subcommand(sub_matches: &ArgMatches) -> Result<(), anyhow::Error
         sub_matches.value_of("date").unwrap(),
         sub_matches,
         None,
-        || {}, // no-op callback
+        &mut NoOpWatchdog {},
     )
 }
 
@@ -1210,18 +1234,18 @@ fn intake_batch_worker(sub_matches: &ArgMatches) -> Result<(), anyhow::Error> {
     let metrics_collector = IntakeMetricsCollector::new()?;
     let scrape_port = value_t!(sub_matches.value_of("metrics-scrape-port"), u16)?;
     let _runtime = start_metrics_scrape_endpoint(scrape_port)?;
-    let mut queue = intake_task_queue_from_args(sub_matches)?;
+    let queue = Arc::new(Mutex::new(intake_task_queue_from_args(sub_matches)?));
 
     loop {
-        if let Some(task_handle) = queue.dequeue()? {
-            info!("dequeued task: {}", task_handle);
-            let task_start = Instant::now();
-
+        let task_handle = { queue.lock().unwrap().dequeue()? };
+        if let Some(task_handle) = task_handle {
             let trace_id = task_handle
                 .task
                 .trace_id
                 .map(|id| id.to_string())
                 .unwrap_or(String::from("None"));
+
+            info!("trace id {} dequeued task: {}", trace_id, task_handle);
 
             let result = intake_batch(
                 &trace_id,
@@ -1230,20 +1254,23 @@ fn intake_batch_worker(sub_matches: &ArgMatches) -> Result<(), anyhow::Error> {
                 &task_handle.task.date,
                 sub_matches,
                 Some(&metrics_collector),
-                || {
-                    if let Err(e) =
-                        queue.maybe_extend_task_deadline(&task_handle, &task_start.elapsed())
-                    {
-                        error!("{}", e);
-                    }
-                },
+                &mut TaskQueueWatchdog::new(task_handle.clone(), queue.clone()),
             );
 
             match result {
-                Ok(_) => queue.acknowledge_task(task_handle)?,
+                Ok(_) => {
+                    info!(
+                        "trace id {} finished processing task {}",
+                        trace_id, task_handle
+                    );
+                    queue.lock().unwrap().acknowledge_task(task_handle)?;
+                }
                 Err(err) => {
-                    error!("error while processing task {}: {:?}", task_handle, err);
-                    queue.nacknowledge_task(task_handle)?;
+                    error!(
+                        "trace id {} error while processing task {}: {:?}",
+                        trace_id, task_handle, err
+                    );
+                    queue.lock().unwrap().nacknowledge_task(task_handle)?;
                 }
             }
         }
@@ -1252,7 +1279,7 @@ fn intake_batch_worker(sub_matches: &ArgMatches) -> Result<(), anyhow::Error> {
     // unreachable
 }
 
-fn aggregate<F: FnMut()>(
+fn aggregate<W: Watchdog>(
     trace_id: &str,
     aggregation_id: &str,
     start: &str,
@@ -1260,7 +1287,7 @@ fn aggregate<F: FnMut()>(
     batches: Vec<(&str, &str)>,
     sub_matches: &ArgMatches,
     metrics_collector: Option<&AggregateMetricsCollector>,
-    callback: F,
+    watchdog: &W,
 ) -> Result<()> {
     let instance_name = sub_matches.value_of("instance-name").unwrap();
     let is_first = is_first_from_arg(sub_matches);
@@ -1365,13 +1392,15 @@ fn aggregate<F: FnMut()>(
         batch_signing_key,
     };
 
-    let mut parsed_batches: Vec<(Uuid, NaiveDateTime)> = Vec::new();
+    let mut parsed_batches: Vec<SumInput> = Vec::new();
     for raw_batch in batches.iter() {
         let uuid = Uuid::parse_str(raw_batch.0).context("batch ID is not a UUID")?;
-        let date = NaiveDateTime::parse_from_str(raw_batch.1, DATE_FORMAT)
+        let time = NaiveDateTime::parse_from_str(raw_batch.1, DATE_FORMAT)
             .context("batch date is not in expected format")?;
-        parsed_batches.push((uuid, date));
+        parsed_batches.push(SumInput { uuid, time });
     }
+
+    let thread_count = value_t!(sub_matches.value_of("thread-count"), u32)?;
 
     let mut aggregator = BatchAggregator::new(
         trace_id,
@@ -1386,12 +1415,14 @@ fn aggregate<F: FnMut()>(
         &mut aggregation_transport,
     )?;
 
+    aggregator.set_thread_count(thread_count);
+
     if let Some(collector) = metrics_collector {
         aggregator.set_metrics_collector(collector);
         collector.aggregate_tasks_started.inc();
     }
 
-    let result = aggregator.generate_sum_part(&parsed_batches, callback);
+    let result = aggregator.generate_sum_part(parsed_batches, watchdog);
 
     if let Some(collector) = metrics_collector {
         match result {
@@ -1434,21 +1465,20 @@ fn aggregate_subcommand(sub_matches: &ArgMatches) -> Result<(), anyhow::Error> {
         batch_info,
         sub_matches,
         None,
-        || {}, // no-op callback
+        &NoOpWatchdog {},
     )
 }
 
 fn aggregate_worker(sub_matches: &ArgMatches) -> Result<(), anyhow::Error> {
-    let mut queue = aggregation_task_queue_from_args(sub_matches)?;
+    let queue = Arc::new(Mutex::new(aggregation_task_queue_from_args(sub_matches)?));
     let metrics_collector = AggregateMetricsCollector::new()?;
     let scrape_port = value_t!(sub_matches.value_of("metrics-scrape-port"), u16)?;
     let _runtime = start_metrics_scrape_endpoint(scrape_port)?;
 
     loop {
-        if let Some(task_handle) = queue.dequeue()? {
-            info!("dequeued task: {}", task_handle);
-            let task_start = Instant::now();
-
+        // Call queue.lock() in its own scope to ensure the lock is dropped
+        let task_handle = { queue.lock().unwrap().dequeue()? };
+        if let Some(task_handle) = task_handle {
             let batches: Vec<(&str, &str)> = task_handle
                 .task
                 .batches
@@ -1461,6 +1491,7 @@ fn aggregate_worker(sub_matches: &ArgMatches) -> Result<(), anyhow::Error> {
                 .trace_id
                 .map(|id| id.to_string())
                 .unwrap_or(String::from("None"));
+            info!("trace id {} dequeued task: {}", trace_id, task_handle);
 
             let result = aggregate(
                 &trace_id,
@@ -1470,20 +1501,23 @@ fn aggregate_worker(sub_matches: &ArgMatches) -> Result<(), anyhow::Error> {
                 batches,
                 sub_matches,
                 Some(&metrics_collector),
-                || {
-                    if let Err(e) =
-                        queue.maybe_extend_task_deadline(&task_handle, &task_start.elapsed())
-                    {
-                        error!("{}", e);
-                    }
-                },
+                &TaskQueueWatchdog::new(task_handle.clone(), queue.clone()),
             );
 
             match result {
-                Ok(_) => queue.acknowledge_task(task_handle)?,
+                Ok(_) => {
+                    info!(
+                        "trace id {} successfully handled task {}",
+                        trace_id, task_handle
+                    );
+                    queue.lock().unwrap().acknowledge_task(task_handle)?;
+                }
                 Err(err) => {
-                    error!("error while processing task {}: {:?}", task_handle, err);
-                    queue.nacknowledge_task(task_handle)?;
+                    error!(
+                        "trace id {} error while processing task {}: {:?}",
+                        trace_id, task_handle, err
+                    );
+                    queue.lock().unwrap().nacknowledge_task(task_handle)?;
                 }
             }
         }

@@ -12,6 +12,7 @@ base64 = "0.13.0"
 chrono = { version = "0.4", features = ["serde"] }
 clap = "2.33.3"
 derivative = "2.1.1"
+dyn-clone = "1.0.4"
 elliptic-curve = { version = "0.9.5", features = ["pem"] }
 env_logger = "0.8.3"
 http = "^0.2"
@@ -25,7 +26,7 @@ log = "0.4.11"
 p256 = "0.8.0-pre"
 pem = "0.8"
 pkix = "0.1.1"
-prio = "0.2"
+prio = "0.3"
 prometheus = "0.12"
 rand = "0.8"
 ring = { version = "0.16.20", features = ["std"] }

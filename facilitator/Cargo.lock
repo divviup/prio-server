@@ -553,6 +553,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "88d7ed2934d741c6b37e33e3832298e8850b53fd2d2bea03873375596c7cea4e"
 
 [[package]]
+name = "dyn-clone"
+version = "1.0.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ee2626afccd7561a06cf1367e2950c4718ea04565e20fb5029b6c7d8ad09abcf"
+
+[[package]]
 name = "ecdsa"
 version = "0.11.0-pre.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -623,6 +629,7 @@ dependencies = [
  "chrono",
  "clap",
  "derivative",
+ "dyn-clone",
  "elliptic-curve",
  "env_logger 0.8.3",
  "http",
@@ -1648,9 +1655,9 @@ checksum = "ac74c624d6b2d21f425f752262f42188365d7b8ff1aff74c82e45136510a4857"
 
 [[package]]
 name = "prio"
-version = "0.2.0"
+version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "74c293e32d9ab6c9afadf14e14d76df204f17618f4b74b38fa2adb18b352fbf2"
+checksum = "dfedfce2709d0fce3daf8ad4e86433726a77dafcc562837952b350af38b65589"
 dependencies = [
  "aes-ctr",
  "aes-gcm",
