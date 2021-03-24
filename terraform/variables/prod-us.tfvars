@@ -15,52 +15,68 @@ ingestors = {
       # ta-ta is reserved for integration testing with NCI and MITRE's staging
       # instances
       ta-ta = {
+        intake_worker_count                    = 1
+        aggregate_worker_count                 = 1
         aggregate_thread_count                 = 1
         peer_share_processor_manifest_base_url = "test-en-analytics.cancer.gov"
         portal_server_manifest_base_url        = "manifest.int.enpa-pha.io"
       }
       us-ct = {
+        intake_worker_count                    = 5
+        aggregate_worker_count                 = 3
         aggregate_thread_count                 = 4
         peer_share_processor_manifest_base_url = "en-analytics.cancer.gov"
         portal_server_manifest_base_url        = "manifest.enpa-pha.io"
       }
       us-md = {
+        intake_worker_count                    = 5
+        aggregate_worker_count                 = 3
         aggregate_thread_count                 = 4
         peer_share_processor_manifest_base_url = "en-analytics.cancer.gov"
         portal_server_manifest_base_url        = "manifest.enpa-pha.io"
       }
       us-va = {
+        intake_worker_count                    = 5
+        aggregate_worker_count                 = 3
         aggregate_thread_count                 = 4
         peer_share_processor_manifest_base_url = "en-analytics.cancer.gov"
         portal_server_manifest_base_url        = "manifest.enpa-pha.io"
       }
       us-wa = {
+        intake_worker_count                    = 5
+        aggregate_worker_count                 = 3
         aggregate_thread_count                 = 4
         peer_share_processor_manifest_base_url = "en-analytics.cancer.gov"
         portal_server_manifest_base_url        = "manifest.enpa-pha.io"
       }
       us-ca = {
+        intake_worker_count                    = 25
+        aggregate_worker_count                 = 7
         aggregate_thread_count                 = 4
         peer_share_processor_manifest_base_url = "en-analytics.cancer.gov"
         portal_server_manifest_base_url        = "manifest.enpa-pha.io"
       }
       us-ut = {
-        aggregate_thread_count                 = 4
+        intake_worker_count                    = 8
+        aggregate_worker_count                 = 3
         peer_share_processor_manifest_base_url = "en-analytics.cancer.gov"
         portal_server_manifest_base_url        = "manifest.enpa-pha.io"
       }
       us-wi = {
-        aggregate_thread_count                 = 4
+        intake_worker_count                    = 12
+        aggregate_worker_count                 = 3
         peer_share_processor_manifest_base_url = "en-analytics.cancer.gov"
         portal_server_manifest_base_url        = "manifest.enpa-pha.io"
       }
       us-ma = {
-        aggregate_thread_count                 = 4
+        intake_worker_count                    = 12
+        aggregate_worker_count                 = 3
         peer_share_processor_manifest_base_url = "en-analytics.cancer.gov"
         portal_server_manifest_base_url        = "manifest.enpa-pha.io"
       }
       us-nm = {
-        aggregate_thread_count                 = 4
+        intake_worker_count                    = 5
+        aggregate_worker_count                 = 3
         peer_share_processor_manifest_base_url = "en-analytics.cancer.gov"
         portal_server_manifest_base_url        = "manifest.enpa-pha.io"
       }
@@ -72,52 +88,68 @@ ingestors = {
       # ta-ta is reserved for integration testing with NCI and MITRE's staging
       # instances
       ta-ta = {
+        intake_worker_count                    = 1
+        aggregate_worker_count                 = 1
         aggregate_thread_count                 = 4
         peer_share_processor_manifest_base_url = "test-en-analytics.cancer.gov"
         portal_server_manifest_base_url        = "manifest.int.enpa-pha.io"
       }
       us-ct = {
+        intake_worker_count                    = 3
+        aggregate_worker_count                 = 3
         aggregate_thread_count                 = 4
         peer_share_processor_manifest_base_url = "en-analytics.cancer.gov"
         portal_server_manifest_base_url        = "manifest.enpa-pha.io"
       }
       us-md = {
+        intake_worker_count                    = 3
+        aggregate_worker_count                 = 3
         aggregate_thread_count                 = 4
         peer_share_processor_manifest_base_url = "en-analytics.cancer.gov"
         portal_server_manifest_base_url        = "manifest.enpa-pha.io"
       }
       us-va = {
+        intake_worker_count                    = 3
+        aggregate_worker_count                 = 3
         aggregate_thread_count                 = 4
         peer_share_processor_manifest_base_url = "en-analytics.cancer.gov"
         portal_server_manifest_base_url        = "manifest.enpa-pha.io"
       }
       us-wa = {
+        intake_worker_count                    = 3
+        aggregate_worker_count                 = 3
         aggregate_thread_count                 = 4
         peer_share_processor_manifest_base_url = "en-analytics.cancer.gov"
         portal_server_manifest_base_url        = "manifest.enpa-pha.io"
       }
       us-ca = {
+        intake_worker_count                    = 15
+        aggregate_worker_count                 = 3
         aggregate_thread_count                 = 4
         peer_share_processor_manifest_base_url = "en-analytics.cancer.gov"
         portal_server_manifest_base_url        = "manifest.enpa-pha.io"
       }
       us-ut = {
-        aggregate_thread_count                 = 4
+        intake_worker_count                    = 3
+        aggregate_worker_count                 = 3
         peer_share_processor_manifest_base_url = "en-analytics.cancer.gov"
         portal_server_manifest_base_url        = "manifest.enpa-pha.io"
       }
       us-wi = {
-        aggregate_thread_count                 = 4
+        intake_worker_count                    = 3
+        aggregate_worker_count                 = 3
         peer_share_processor_manifest_base_url = "en-analytics.cancer.gov"
         portal_server_manifest_base_url        = "manifest.enpa-pha.io"
       }
       us-ma = {
-        aggregate_thread_count                 = 4
+        intake_worker_count                    = 3
+        aggregate_worker_count                 = 3
         peer_share_processor_manifest_base_url = "en-analytics.cancer.gov"
         portal_server_manifest_base_url        = "manifest.enpa-pha.io"
       }
       us-nm = {
-        aggregate_thread_count                 = 4
+        intake_worker_count                    = 3
+        aggregate_worker_count                 = 3
         peer_share_processor_manifest_base_url = "en-analytics.cancer.gov"
         portal_server_manifest_base_url        = "manifest.enpa-pha.io"
       }

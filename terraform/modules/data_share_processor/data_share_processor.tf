@@ -102,6 +102,14 @@ variable "facilitator_version" {
   type = string
 }
 
+variable "intake_worker_count" {
+  type = number
+}
+
+variable "aggregate_worker_count" {
+  type = number
+}
+
 variable "aggregate_thread_count" {
   type = number
 }
@@ -404,6 +412,8 @@ module "kubernetes" {
   facilitator_version                     = var.facilitator_version
   intake_queue                            = module.pubsub["intake"].queue
   aggregate_queue                         = module.pubsub["aggregate"].queue
+  intake_worker_count                     = var.intake_worker_count
+  aggregate_worker_count                  = var.aggregate_worker_count
   aggregate_thread_count                  = var.aggregate_thread_count
 }
 
