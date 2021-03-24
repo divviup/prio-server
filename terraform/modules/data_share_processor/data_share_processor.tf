@@ -110,10 +110,6 @@ variable "aggregate_worker_count" {
   type = number
 }
 
-variable "aggregate_thread_count" {
-  type = number
-}
-
 # We need the ingestion server's manifest so that we can discover the GCP
 # service account it will use to upload ingestion batches. Some ingestors
 # (Apple) are singletons, and advertise a single global manifest which contains
@@ -414,7 +410,6 @@ module "kubernetes" {
   aggregate_queue                         = module.pubsub["aggregate"].queue
   intake_worker_count                     = var.intake_worker_count
   aggregate_worker_count                  = var.aggregate_worker_count
-  aggregate_thread_count                  = var.aggregate_thread_count
 }
 
 output "data_share_processor_name" {

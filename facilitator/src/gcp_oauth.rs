@@ -2,49 +2,27 @@ use anyhow::{anyhow, Context, Result};
 use chrono::{prelude::Utc, DateTime, Duration};
 use jsonwebtoken::{encode, Algorithm, EncodingKey, Header};
 use serde::{Deserialize, Serialize};
-use std::{
-    fmt,
-    io::Read,
-    sync::{Arc, RwLock},
-};
+use std::{fmt, io::Read};
 use ureq::{Agent, Response};
-use url::Url;
 
 use crate::http::{
     create_agent, prepare_request, send_json_request, Method, OauthTokenProvider,
     RequestParameters, StaticOauthTokenProvider,
 };
+use url::Url;
 
-const DEFAULT_METADATA_BASE_URL: &str = "http://metadata.google.internal:80";
-const DEFAULT_TOKEN_PATH: &str = "/computeMetadata/v1/instance/service-accounts/default/token";
-const DEFAULT_IAM_BASE_URL: &str = "https://iamcredentials.googleapis.com";
-
-fn default_oauth_token_url(base: &str) -> Url {
-    let mut request_url = Url::parse(base).expect("unable to parse metadata.google.internal url");
-    request_url.set_path(DEFAULT_TOKEN_PATH);
-    request_url
+fn default_oauth_token_url() -> Url {
+    Url::parse("http://metadata.google.internal:80/computeMetadata/v1/instance/service-accounts/default/token",)
+    .expect("unable to parse metadata.google.internal url")
 }
 
 // API reference:
 // https://cloud.google.com/iam/docs/reference/credentials/rest/v1/projects.serviceAccounts/generateAccessToken
-fn access_token_url_for_service_account(
-    base: &str,
-    service_account_to_impersonate: &str,
-) -> Result<Url> {
-    let request_url = format!(
-        "{}{}",
-        base,
-        access_token_path_for_service_account(service_account_to_impersonate)
-    );
+fn access_token_url_for_service_account(service_account_to_impersonate: &str) -> Result<Url> {
+    let request_url = format!("https://iamcredentials.googleapis.com/v1/projects/-/serviceAccounts/{}:generateAccessToken",
+            service_account_to_impersonate);
 
     Url::parse(&request_url).context(format!("failed to parse: {}", request_url))
-}
-
-fn access_token_path_for_service_account(service_account_to_impersonate: &str) -> String {
-    format!(
-        "/v1/projects/-/serviceAccounts/{}:generateAccessToken",
-        service_account_to_impersonate
-    )
 }
 
 /// Represents the claims encoded into JWTs when using a service account key
@@ -59,7 +37,6 @@ struct Claims {
 }
 
 /// A wrapper around an Oauth token and its expiration date.
-#[derive(Clone)]
 struct OauthToken {
     token: String,
     expiration: DateTime<Utc>,
@@ -94,7 +71,7 @@ struct GenerateAccessTokenResponse {
 
 /// This is the subset of a GCP service account key file that we need to parse
 /// to construct a signed JWT.
-#[derive(Clone, Debug, Deserialize, PartialEq)]
+#[derive(Debug, Deserialize, PartialEq)]
 struct ServiceAccountKeyFile {
     /// The PEM-armored base64 encoding of the ASN.1 encoding of the account's
     /// RSA private key.
@@ -111,12 +88,6 @@ struct ServiceAccountKeyFile {
 /// one for a GCP service account mapped to a Kubernetes service account, or the
 /// one found in a JSON key file) and an Oauth token used to impersonate another
 /// service account.
-///
-/// A note on thread safety: this struct stores any Oauth tokens it obtains in
-/// an Arc+Mutex, so an instance of GcpOauthTokenProvider may be .clone()d
-/// liberally and shared across threads, and credentials obtained from the GCP
-/// credentials API will be shared efficiently and safely.
-#[derive(Clone)]
 pub(crate) struct GcpOauthTokenProvider {
     /// The Oauth scope for which tokens should be requested.
     scope: String,
@@ -130,19 +101,15 @@ pub(crate) struct GcpOauthTokenProvider {
     /// This field is None after instantiation and is Some after the first
     /// successful request for a token for the default service account, though
     /// the contained token may be expired.
-    default_account_token: Arc<RwLock<Option<OauthToken>>>,
+    default_account_token: Option<OauthToken>,
     /// This field is None after instantiation and is Some after the first
     /// successful request for a token for the impersonated service account,
     /// though the contained token may be expired. This will always be None if
     /// account_to_impersonate is None.
-    impersonated_account_token: Arc<RwLock<Option<OauthToken>>>,
+    impersonated_account_token: Option<OauthToken>,
     /// The Agent will be used when making HTTP requests to GCP APIs to fetch
     /// Oauth tokens.
     agent: Agent,
-    /// Base URL at which to access GKE metadata service
-    metadata_service_base_url: &'static str,
-    /// Base URL at which to access GCP IAM service
-    iam_service_base_url: &'static str,
 }
 
 impl fmt::Debug for GcpOauthTokenProvider {
@@ -158,21 +125,11 @@ impl fmt::Debug for GcpOauthTokenProvider {
             )
             .field(
                 "default_account_token",
-                &self
-                    .default_account_token
-                    .read()
-                    .unwrap()
-                    .as_ref()
-                    .map(|_| "redacted"),
+                &self.default_account_token.as_ref().map(|_| "redacted"),
             )
             .field(
                 "impersonated_account_token",
-                &self
-                    .default_account_token
-                    .read()
-                    .unwrap()
-                    .as_ref()
-                    .map(|_| "redacted"),
+                &self.default_account_token.as_ref().map(|_| "redacted"),
             )
             .finish()
     }
@@ -200,7 +157,7 @@ impl GcpOauthTokenProvider {
         scope: &str,
         account_to_impersonate: Option<String>,
         key_file_reader: Option<Box<dyn Read>>,
-    ) -> Result<Self> {
+    ) -> Result<GcpOauthTokenProvider> {
         let key_file: Option<ServiceAccountKeyFile> = match key_file_reader {
             Some(reader) => {
                 serde_json::from_reader(reader).context("failed to deserialize JSON key file")?
@@ -213,11 +170,9 @@ impl GcpOauthTokenProvider {
             scope: scope.to_owned(),
             default_service_account_key_file: key_file,
             account_to_impersonate,
-            default_account_token: Arc::new(RwLock::new(None)),
-            impersonated_account_token: Arc::new(RwLock::new(None)),
+            default_account_token: None,
+            impersonated_account_token: None,
             agent,
-            metadata_service_base_url: DEFAULT_METADATA_BASE_URL,
-            iam_service_base_url: DEFAULT_IAM_BASE_URL,
         })
     }
 
@@ -226,13 +181,11 @@ impl GcpOauthTokenProvider {
     /// The returned value is an owned reference because the token owned by this
     /// struct could change while the caller is still holding the returned token
     fn ensure_default_account_token(&mut self) -> Result<String> {
-        if let Some(token) = &*self.default_account_token.read().unwrap() {
+        if let Some(token) = &self.default_account_token {
             if !token.expired() {
                 return Ok(token.token.clone());
             }
         }
-
-        let mut default_account_token = self.default_account_token.write().unwrap();
 
         let http_response = match &self.default_service_account_key_file {
             Some(key_file) => self.account_token_with_key_file(&key_file)?,
@@ -247,7 +200,7 @@ impl GcpOauthTokenProvider {
             return Err(anyhow!("unexpected token type {}", response.token_type));
         }
 
-        *default_account_token = Some(OauthToken {
+        self.default_account_token = Some(OauthToken {
             token: response.access_token.clone(),
             expiration: Utc::now() + Duration::seconds(response.expires_in),
         });
@@ -262,7 +215,8 @@ impl GcpOauthTokenProvider {
         let mut request = prepare_request(
             &self.agent,
             RequestParameters {
-                url: default_oauth_token_url(self.metadata_service_base_url),
+                url: default_oauth_token_url(),
+                method: Method::Get,
                 ..Default::default()
             },
         )?;
@@ -332,23 +286,19 @@ impl GcpOauthTokenProvider {
             return Err(anyhow!("no service account to impersonate was provided"));
         }
 
-        if let Some(token) = &*self.impersonated_account_token.read().unwrap() {
+        if let Some(token) = &self.impersonated_account_token {
             if !token.expired() {
                 return Ok(token.token.clone());
             }
         }
 
-        let default_token = self.ensure_default_account_token()?;
-        let mut impersonated_account_token = self.impersonated_account_token.write().unwrap();
         let service_account_to_impersonate = self.account_to_impersonate.clone().unwrap();
 
+        let default_token = self.ensure_default_account_token()?;
         let request = prepare_request(
             &self.agent,
             RequestParameters {
-                url: access_token_url_for_service_account(
-                    self.iam_service_base_url,
-                    &service_account_to_impersonate,
-                )?,
+                url: access_token_url_for_service_account(&service_account_to_impersonate)?,
                 method: Method::Post,
                 token_provider: Some(&mut StaticOauthTokenProvider::from(default_token)),
             },
@@ -368,172 +318,11 @@ impl GcpOauthTokenProvider {
         let response = http_response
             .into_json::<GenerateAccessTokenResponse>()
             .context("failed to deserialize response from IAM API")?;
-        *impersonated_account_token = Some(OauthToken {
+        self.impersonated_account_token = Some(OauthToken {
             token: response.access_token.clone(),
             expiration: response.expire_time,
         });
 
         Ok(response.access_token)
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use assert_matches::assert_matches;
-    use mockito::{mock, Matcher};
-    use serde_json::json;
-    use std::io::Cursor;
-
-    use crate::config::leak_string;
-
-    #[test]
-    fn get_default_token() {
-        let mocked_get = mock("GET", DEFAULT_TOKEN_PATH)
-            .match_header("Metadata-Flavor", "Google")
-            .with_status(200)
-            .with_body(
-                r#"{
-  "access_token": "fake-token",
-  "scope": "fake-scope",
-  "token_type": "Bearer",
-  "expires_in": 3600
-}
-"#,
-            )
-            .expect_at_most(1)
-            .create();
-
-        let mut provider = GcpOauthTokenProvider::new("fake-scope", None, None).unwrap();
-        provider.metadata_service_base_url = leak_string(mockito::server_url());
-        provider.iam_service_base_url = leak_string(mockito::server_url());
-
-        assert_matches!(provider.ensure_default_account_token(), Ok(token) => {
-            assert_eq!(token, "fake-token")
-        });
-
-        // Should fail because provider.account_to_impersonate = None
-        assert_matches!(
-            provider.ensure_impersonated_service_account_oauth_token(),
-            Err(_)
-        );
-
-        // Get the token again and we should not see any more network requests
-        assert_matches!(provider.ensure_default_account_token(), Ok(token) => {
-            assert_eq!(token, "fake-token")
-        });
-
-        mocked_get.assert();
-    }
-
-    #[test]
-    fn get_impersonated_token() {
-        let mocked_get_default = mock("GET", DEFAULT_TOKEN_PATH)
-            .match_header("Metadata-Flavor", "Google")
-            .with_status(200)
-            .with_body(
-                r#"{
-  "access_token": "fake-default-token",
-  "scope": "fake-scope",
-  "token_type": "Bearer",
-  "expires_in": 3600
-}
-"#,
-            )
-            .expect_at_most(1)
-            .create();
-
-        let access_token_path: &str =
-            &access_token_path_for_service_account("fake-service-account");
-        let mocked_post_impersonated = mock("POST", access_token_path)
-            .match_header("Authorization", "Bearer fake-default-token")
-            .match_body(Matcher::Json(json!({"scope": ["fake-scope"] })))
-            .with_status(200)
-            .with_body(
-                r#"
-{
-    "accessToken": "fake-impersonated-token",
-    "expireTime": "2099-10-02T15:01:23Z"
-}
-"#,
-            )
-            .expect_at_most(1)
-            .create();
-
-        let mut provider = GcpOauthTokenProvider::new(
-            "fake-scope",
-            Some("fake-service-account".to_string()),
-            None,
-        )
-        .unwrap();
-        provider.metadata_service_base_url = leak_string(mockito::server_url());
-        provider.iam_service_base_url = leak_string(mockito::server_url());
-
-        assert_matches!(provider.ensure_impersonated_service_account_oauth_token(), Ok(token) => {
-            assert_eq!(token, "fake-impersonated-token")
-        });
-
-        // Get the token again and we should not see any more network requests
-        assert_matches!(provider.ensure_impersonated_service_account_oauth_token(), Ok(token) => {
-            assert_eq!(token, "fake-impersonated-token")
-        });
-
-        mocked_get_default.assert();
-        mocked_post_impersonated.assert();
-    }
-
-    #[test]
-    fn get_token_with_key_file() {
-        let key_file = format!(
-            r#"{{
-    "private_key": "-----BEGIN RSA PRIVATE KEY-----\nMIIEowIBAAKCAQEAoEwmsVUxIOyq775Bmh2jPb6jtMR8BhWtLuT0O2YgrRMGkx6p\nLd9/svdZVs1AicgMOkv6FkLsXphFobJOyVU8E5E7d1Nk5YZKOdgDltYWtuL4hpAo\nTi2PaCqNDKM1JUG2ffIwNAUAkLoI3+7/aqNnc8pax9dSXknDKtK5Bn4KY0N4JFdo\nKXxGJG2jqnguI0hsOGdIpw1UtcQm/1KCMm5SiQcKwRD4gAyAKzkl8jiZzgo46JCK\nDRWFTjxC4TWjpD3t8CEZggWmaRB69cMXvrWzvKJTtno/ldI8cskhELJXEuvZ59p3\n5YVdHgV9+HycfGkLndei5yubeu9cpOi6moUXHwIDAQABAoIBACBd3/40lnvwbb+E\n6hglXd3MzZ9lgSl1XQe4ATyxLW3lBpHUQhLaKx3G5gop3Zs0gouO5cty7elX08+H\ngnMSu9Ozoo9AjoHt8LTnUio1xlZdVBNPrmPCvU8qMFrZ5ZRFRYT+zw7h57BRcBNP\nXdF5dx0hQd1SM/aH7FmMPQH7lztdhWNehmqVwtMTGq84uOWH+EqCM7bcTCJsG93E\nTMPFTcoUGTmpTo98gNSt/kTTf3zktfmTFL6CiwLaXaXl9LQc8XgTG+QZeOYkxk9g\nkzE7fn3r6f7N/Hfc2ZutIsFEC7VMX+cUwfKZLsQNeIWvszQOsPVXoQVbjKN9XEQP\nU5/oaXkCgYEAz2IhlQEvdMUfR+CX93vAJRHjEQ2lTkMTKSRYyVccaDfF/csurDtc\nS9MASiSojHtkiKPyudJxnBK7OMZHPxPx2VZVdfz/XFXEZ+jG6CkgE7suWa/4XJGm\nIVcPpMeR0mYQhzbF2HDHRow62ZPwPeflGOuTwtqnhakI2ehmBNfgG/sCgYEAxeA3\niAlTCgnlkXdb7Rj/KPFYZSgoOTxOZqcbVZzQJ1hlEPNICDH62lhwNREkLM9TWzgo\nJb6SUNvpCBaRGMkkLbr2Qfmm6ms/m2osylBfP/xMnCqHeO2XABxtCvOVseYFdCuL\nbGpe65Q+bwPpsdQvCj1AcanNxclZhl1+NWXcxC0CgYAc194p1jdee0glfBRGxHxt\n63X0WjyCjQuuLjL3FdmKmS89ZDQCmmL03Mzugvi6STMrWfoZZC6O8X/+nn0sRb7e\nZoaOWXi+w+MEPLjlc0rV07PXn4TggxVjD7PKTEN4yt9DnxeXSeA9bKWGu2+vfIA9\nng44DKc+DMuBWzRNOiUeXwKBgDcdQppjbnunUgf4ZORfSALRZjuWuc1nXLb+6IAq\nE1hCKLRV7sRJl4NliqtdQOQyQxdvRs9sizh2aCvWjUeIDsml/51UugclJCxXoG4h\ngMZDsdr1hZJLKvne8QhR3GoWlYJL9qOV5SZcvh8Rye+8F/YUJXUDRMtIT+U6+UJK\nQvlpAoGBAKff7Y0NethwzBEJJl9QGOstwgnsQKrqcDhj7wNX1PKa7r4zu6WdWSF8\n2/Hor4D6eW5dNFHhQgC4u/z9JgikHfeCaAgRPMJXxsKWnECP/i++NpiGdhXdtei7\njbxbE/VdW03+iXZyrnDNFAFAsRR+XgjeYheAUVLelg9qBjM7jYNf\n-----END RSA PRIVATE KEY-----",
-    "private_key_id": "fake-key-id",
-    "client_email": "fake@fake.fake",
-    "token_uri": "{}/fake-token-uri"
-}}
-"#,
-            mockito::server_url()
-        );
-
-        // We intentionally don't check the body here: if we did, we would have
-        // to re-implement most of account_token_with_key_file to construct the
-        // expected body, and all that does is prove we can copy code rather
-        // than prove that account_token_with_key_file is correct.
-        let mocked_post = mock("POST", "/fake-token-uri")
-            .with_status(200)
-            .with_body(
-                r#"{
-  "access_token": "fake-token",
-  "scope": "fake-scope",
-  "token_type": "Bearer",
-  "expires_in": 3600
-}
-"#,
-            )
-            .expect_at_most(1)
-            .create();
-
-        let mut provider =
-            GcpOauthTokenProvider::new("fake-scope", None, Some(Box::new(Cursor::new(key_file))))
-                .unwrap();
-        provider.metadata_service_base_url = leak_string(mockito::server_url());
-        provider.iam_service_base_url = leak_string(mockito::server_url());
-
-        assert_matches!(provider.ensure_default_account_token(), Ok(token) => {
-            assert_eq!(token, "fake-token")
-        });
-
-        // Should fail because provider.account_to_impersonate = None
-        assert_matches!(
-            provider.ensure_impersonated_service_account_oauth_token(),
-            Err(_)
-        );
-
-        // Get the token again and we should not see any more requests
-        assert_matches!(provider.ensure_default_account_token(), Ok(token) => {
-            assert_eq!(token, "fake-token")
-        });
-
-        mocked_post.assert();
     }
 }

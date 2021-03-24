@@ -34,7 +34,6 @@ variable "ingestors" {
     localities = map(object({
       intake_worker_count                    = number
       aggregate_worker_count                 = number
-      aggregate_thread_count                 = number
       peer_share_processor_manifest_base_url = string
       portal_server_manifest_base_url        = string
     }))
@@ -361,7 +360,6 @@ locals {
       ingestor_manifest_base_url              = var.ingestors[pair[1]].manifest_base_url
       intake_worker_count                     = var.ingestors[pair[1]].localities[pair[0]].intake_worker_count
       aggregate_worker_count                  = var.ingestors[pair[1]].localities[pair[0]].aggregate_worker_count
-      aggregate_thread_count                  = var.ingestors[pair[1]].localities[pair[0]].aggregate_thread_count
       peer_share_processor_manifest_base_url  = var.ingestors[pair[1]].localities[pair[0]].peer_share_processor_manifest_base_url
       portal_server_manifest_base_url         = var.ingestors[pair[1]].localities[pair[0]].portal_server_manifest_base_url
     }
@@ -422,7 +420,6 @@ module "data_share_processors" {
   container_registry                             = var.container_registry
   intake_worker_count                            = each.value.intake_worker_count
   aggregate_worker_count                         = each.value.aggregate_worker_count
-  aggregate_thread_count                         = each.value.aggregate_thread_count
 }
 
 # The portal owns two sum part buckets (one for each data share processor) and

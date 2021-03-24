@@ -1,11 +1,10 @@
 use chrono::NaiveDateTime;
 use facilitator::{
-    aggregation::{BatchAggregator, SumInput},
+    aggregation::BatchAggregator,
     batch::{Batch, BatchReader},
     idl::{InvalidPacket, Packet, SumPart},
     intake::BatchIntaker,
     sample::{generate_ingestion_sample, SampleOutput},
-    task::{NoOpWatchdog, Watchdog},
     test_utils::{
         default_facilitator_packet_encryption_public_key, default_facilitator_signing_private_key,
         default_facilitator_signing_public_key, default_ingestor_private_key,
@@ -20,23 +19,9 @@ use facilitator::{
     Error,
 };
 use prio::{encrypt::PrivateKey, util::reconstruct_shares};
-use std::{
-    collections::{HashMap, HashSet},
-    sync::{Arc, Mutex},
-};
+use std::collections::{HashMap, HashSet};
 use tempfile::TempDir;
 use uuid::Uuid;
-
-#[derive(Clone)]
-struct IncrementingWatchdog {
-    count: Arc<Mutex<u64>>,
-}
-
-impl Watchdog for IncrementingWatchdog {
-    fn send_heartbeat(&self) {
-        (*self.count.lock().unwrap()) += 1;
-    }
-}
 
 #[test]
 fn end_to_end() {
@@ -62,7 +47,7 @@ fn aggregation_including_invalid_batch() {
 
     let instance_name = "fake-instance";
     let aggregation_name = "fake-aggregation-1";
-    let time = NaiveDateTime::from_timestamp(2234567890, 654321);
+    let date = NaiveDateTime::from_timestamp(2234567890, 654321);
     let start_date = NaiveDateTime::from_timestamp(1234567890, 654321);
     let end_date = NaiveDateTime::from_timestamp(3234567890, 654321);
 
@@ -102,31 +87,19 @@ fn aggregation_including_invalid_batch() {
     //   - batch 4: facilitator will insert the wrong packet file digest into
     //     the header of the peer validation batch sent to PHA
     let batch_uuids_and_dates = vec![
-        SumInput {
-            uuid: Uuid::new_v4(),
-            time,
-        },
-        SumInput {
-            uuid: Uuid::new_v4(),
-            time,
-        },
-        SumInput {
-            uuid: Uuid::new_v4(),
-            time,
-        },
-        SumInput {
-            uuid: Uuid::new_v4(),
-            time,
-        },
+        (Uuid::new_v4(), date),
+        (Uuid::new_v4(), date),
+        (Uuid::new_v4(), date),
+        (Uuid::new_v4(), date),
     ];
 
     let mut reference_sums = vec![];
 
-    for sum_input in &batch_uuids_and_dates {
+    for (batch_uuid, _) in &batch_uuids_and_dates {
         let reference_sum = generate_ingestion_sample(
-            &sum_input.uuid,
+            batch_uuid,
             aggregation_name,
-            &sum_input.time,
+            &date,
             10,
             100,
             0.11,
@@ -222,7 +195,7 @@ fn aggregation_including_invalid_batch() {
 
     // Perform the intake over the batches, on the PHA and then facilitator,
     // tampering with signatures or batch headers as needed.
-    for (index, sum_input) in batch_uuids_and_dates.iter().enumerate() {
+    for (index, (uuid, _)) in batch_uuids_and_dates.iter().enumerate() {
         let pha_peer_validation_transport = if index == 2 {
             log::info!("pha using wrong key for peer validations");
             &mut pha_to_facilitator_validation_transport_wrong_key
@@ -233,8 +206,8 @@ fn aggregation_including_invalid_batch() {
         let mut pha_batch_intaker = BatchIntaker::new(
             "None",
             aggregation_name,
-            &sum_input.uuid,
-            &sum_input.time,
+            &uuid,
+            &date,
             &mut pha_ingest_transport,
             &mut pha_own_validation_transport,
             pha_peer_validation_transport,
@@ -245,8 +218,8 @@ fn aggregation_including_invalid_batch() {
         let mut facilitator_batch_intaker = BatchIntaker::new(
             "None",
             aggregation_name,
-            &sum_input.uuid,
-            &sum_input.time,
+            &uuid,
+            &date,
             &mut facilitator_ingest_transport,
             &mut facilitator_own_validation_transport,
             &mut facilitator_to_pha_validation_transport,
@@ -259,11 +232,9 @@ fn aggregation_including_invalid_batch() {
             facilitator_batch_intaker.set_use_bogus_packet_file_digest(true);
         }
 
-        pha_batch_intaker
-            .generate_validation_share(&mut NoOpWatchdog {})
-            .unwrap();
+        pha_batch_intaker.generate_validation_share(|| {}).unwrap();
         facilitator_batch_intaker
-            .generate_validation_share(&mut NoOpWatchdog {})
+            .generate_validation_share(|| {})
             .unwrap();
     }
 
@@ -328,7 +299,7 @@ fn aggregation_including_invalid_batch() {
     };
 
     // Perform the aggregation on PHA and facilitator
-    let mut batch_aggregator = BatchAggregator::new(
+    let err = BatchAggregator::new(
         "None",
         instance_name,
         aggregation_name,
@@ -340,15 +311,14 @@ fn aggregation_including_invalid_batch() {
         &mut pha_peer_validation_transport,
         &mut pha_aggregation_transport,
     )
-    .unwrap();
-    batch_aggregator.set_thread_count(4);
+    .unwrap()
+    .generate_sum_part(&batch_uuids_and_dates, || {})
+    .unwrap_err();
+    // Ideally we would be able to match on a variant in an error enum to check
+    // what the failure was but for now check the error description
+    assert!(err.to_string().contains("packet file digest in header"));
 
-    let err = batch_aggregator
-        .generate_sum_part(batch_uuids_and_dates.clone(), &NoOpWatchdog {})
-        .unwrap_err();
-    check_error(err);
-
-    let mut batch_aggregator = BatchAggregator::new(
+    let err = BatchAggregator::new(
         "None",
         instance_name,
         aggregation_name,
@@ -360,27 +330,12 @@ fn aggregation_including_invalid_batch() {
         &mut facilitator_peer_validation_transport,
         &mut facilitator_aggregation_transport,
     )
-    .unwrap();
-    batch_aggregator.set_thread_count(4);
-
-    let err = batch_aggregator
-        .generate_sum_part(batch_uuids_and_dates.clone(), &NoOpWatchdog {})
-        .unwrap_err();
-    check_error(err);
-}
-
-fn check_error(error: anyhow::Error) {
-    // Ideally we would be able to match on a variant in an error enum to check
-    // what the failure was but for now check the error description.
-    // Either of these errors could be returned depending on the order in which
-    // BatchAggregator sums batches, which is not deterministic.
-    let is_signing_key_error = error
+    .unwrap()
+    .generate_sum_part(&batch_uuids_and_dates, || {})
+    .unwrap_err();
+    assert!(err
         .to_string()
-        .contains("key identifier default-facilitator-signing-key not present in key map");
-    let is_digest_mismatch_error = error
-        .to_string()
-        .contains("does not match actual packet file digest");
-    assert!(is_signing_key_error || is_digest_mismatch_error);
+        .contains("key identifier default-facilitator-signing-key not present in key map"));
 }
 
 fn end_to_end_test(drop_nth_pha: Option<usize>, drop_nth_facilitator: Option<usize>) {
@@ -511,6 +466,7 @@ fn end_to_end_test(drop_nth_pha: Option<usize>, drop_nth_facilitator: Option<usi
         batch_signing_key: default_facilitator_signing_private_key(),
     };
 
+    let mut intake_callback_count = 0;
     let mut batch_intaker = BatchIntaker::new(
         "None",
         &aggregation_name,
@@ -522,17 +478,13 @@ fn end_to_end_test(drop_nth_pha: Option<usize>, drop_nth_facilitator: Option<usi
         true,
     )
     .unwrap();
-
-    let mut watchdog = IncrementingWatchdog {
-        count: Arc::new(Mutex::new(0)),
-    };
     batch_intaker.set_callback_cadence(2);
     batch_intaker
-        .generate_validation_share(&mut watchdog)
+        .generate_validation_share(|| intake_callback_count += 1)
         .unwrap();
 
     assert_eq!(
-        *watchdog.count.lock().unwrap() as usize,
+        intake_callback_count,
         (first_batch_packet_count - batch_1_reference_sum.pha_dropped_packets.len()) / 2
     );
 
@@ -547,7 +499,7 @@ fn end_to_end_test(drop_nth_pha: Option<usize>, drop_nth_facilitator: Option<usi
         true,
     )
     .unwrap()
-    .generate_validation_share(&mut NoOpWatchdog {})
+    .generate_validation_share(|| {})
     .unwrap();
 
     BatchIntaker::new(
@@ -561,7 +513,7 @@ fn end_to_end_test(drop_nth_pha: Option<usize>, drop_nth_facilitator: Option<usi
         false,
     )
     .unwrap()
-    .generate_validation_share(&mut NoOpWatchdog {})
+    .generate_validation_share(|| {})
     .unwrap();
 
     BatchIntaker::new(
@@ -575,19 +527,10 @@ fn end_to_end_test(drop_nth_pha: Option<usize>, drop_nth_facilitator: Option<usi
         false,
     )
     .unwrap()
-    .generate_validation_share(&mut NoOpWatchdog {})
+    .generate_validation_share(|| {})
     .unwrap();
 
-    let batch_ids_and_dates = vec![
-        SumInput {
-            uuid: batch_1_uuid,
-            time: date,
-        },
-        SumInput {
-            uuid: batch_2_uuid,
-            time: date,
-        },
-    ];
+    let batch_ids_and_dates = vec![(batch_1_uuid, date), (batch_2_uuid, date)];
 
     let mut pha_pub_keys = HashMap::new();
     pha_pub_keys.insert(
@@ -617,9 +560,7 @@ fn end_to_end_test(drop_nth_pha: Option<usize>, drop_nth_facilitator: Option<usi
         batch_signing_key: default_pha_signing_private_key(),
     };
 
-    let watchdog = IncrementingWatchdog {
-        count: Arc::new(Mutex::new(0)),
-    };
+    let mut aggregation_callback_count = 0;
     BatchAggregator::new(
         "None",
         instance_name,
@@ -633,11 +574,10 @@ fn end_to_end_test(drop_nth_pha: Option<usize>, drop_nth_facilitator: Option<usi
         &mut pha_aggregation_transport,
     )
     .unwrap()
-    .generate_sum_part(batch_ids_and_dates.clone(), &watchdog)
+    .generate_sum_part(&batch_ids_and_dates, || aggregation_callback_count += 1)
     .unwrap();
-    {
-        assert_eq!(*watchdog.count.lock().unwrap(), 2);
-    }
+
+    assert_eq!(aggregation_callback_count, 2);
 
     let mut facilitator_aggregation_transport = SignableTransport {
         transport: Box::new(LocalFileTransport::new(
@@ -646,6 +586,7 @@ fn end_to_end_test(drop_nth_pha: Option<usize>, drop_nth_facilitator: Option<usi
         batch_signing_key: default_facilitator_signing_private_key(),
     };
 
+    let mut aggregation_callback_count = 0;
     BatchAggregator::new(
         "None",
         instance_name,
@@ -659,11 +600,10 @@ fn end_to_end_test(drop_nth_pha: Option<usize>, drop_nth_facilitator: Option<usi
         &mut facilitator_aggregation_transport,
     )
     .unwrap()
-    .generate_sum_part(batch_ids_and_dates.clone(), &watchdog)
+    .generate_sum_part(&batch_ids_and_dates, || aggregation_callback_count += 1)
     .unwrap();
-    {
-        assert_eq!(*watchdog.count.lock().unwrap(), 4);
-    }
+
+    assert_eq!(aggregation_callback_count, 2);
 
     let mut pha_aggregation_batch_reader: BatchReader<'_, SumPart, InvalidPacket> =
         BatchReader::new(

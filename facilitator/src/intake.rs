@@ -2,7 +2,6 @@ use crate::{
     batch::{Batch, BatchReader, BatchWriter},
     idl::{IngestionDataSharePacket, IngestionHeader, Packet, ValidationHeader, ValidationPacket},
     metrics::IntakeMetricsCollector,
-    task::Watchdog,
     transport::{SignableTransport, VerifiableAndDecryptableTransport},
     BatchSigningKey, Error,
 };
@@ -93,7 +92,7 @@ impl<'a> BatchIntaker<'a> {
     /// and packet file, then computes validation shares and sends them to the
     /// peer share processor. The provided callback is invoked once for every
     /// thousand processed packets, unless set_callback_cadence has been called.
-    pub fn generate_validation_share<W: Watchdog>(&mut self, watchdog: &W) -> Result<()> {
+    pub fn generate_validation_share<F: FnMut()>(&mut self, mut callback: F) -> Result<()> {
         info!(
             "trace id {} processing intake from {} and saving validity to {} and {}",
             self.trace_id,
@@ -179,7 +178,7 @@ impl<'a> BatchIntaker<'a> {
                 }
                 processed_packets += 1;
                 if processed_packets % callback_cadence == 0 {
-                    watchdog.send_heartbeat();
+                    callback();
                 }
             },
         )?;
@@ -230,7 +229,6 @@ mod tests {
     use super::*;
     use crate::{
         sample::{generate_ingestion_sample, SampleOutput},
-        task::NoOpWatchdog,
         test_utils::{
             default_facilitator_signing_private_key, default_ingestor_private_key,
             default_ingestor_public_key, default_packet_encryption_certificate_signing_request,
@@ -362,7 +360,7 @@ mod tests {
         .unwrap();
 
         pha_ingestor
-            .generate_validation_share(&mut NoOpWatchdog {})
+            .generate_validation_share(|| {})
             .expect("PHA failed to generate validation");
 
         let mut facilitator_ingestor = BatchIntaker::new(
@@ -378,7 +376,7 @@ mod tests {
         .unwrap();
 
         facilitator_ingestor
-            .generate_validation_share(&mut NoOpWatchdog {})
+            .generate_validation_share(|| {})
             .expect("facilitator failed to generate validation");
     }
 }

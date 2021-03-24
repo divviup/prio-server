@@ -15,21 +15,18 @@ ingestors = {
       narnia = {
         intake_worker_count                    = 1
         aggregate_worker_count                 = 1
-        aggregate_thread_count                 = 2
         peer_share_processor_manifest_base_url = "storage.googleapis.com/prio-staging-pha-manifests"
         portal_server_manifest_base_url        = "storage.googleapis.com/prio-staging-facil-manifests/portal-server"
       }
       gondor = {
         intake_worker_count                    = 2
         aggregate_worker_count                 = 1
-        aggregate_thread_count                 = 2
         peer_share_processor_manifest_base_url = "storage.googleapis.com/prio-staging-pha-manifests"
         portal_server_manifest_base_url        = "storage.googleapis.com/prio-staging-facil-manifests/portal-server"
       }
       asgard = {
         intake_worker_count                    = 1
         aggregate_worker_count                 = 1
-        aggregate_thread_count                 = 2
         peer_share_processor_manifest_base_url = "storage.googleapis.com/prio-staging-pha-manifests"
         portal_server_manifest_base_url        = "storage.googleapis.com/prio-staging-facil-manifests/portal-server"
       }
@@ -41,21 +38,18 @@ ingestors = {
       narnia = {
         intake_worker_count                    = 2
         aggregate_worker_count                 = 1
-        aggregate_thread_count                 = 2
         peer_share_processor_manifest_base_url = "storage.googleapis.com/prio-staging-pha-manifests"
         portal_server_manifest_base_url        = "storage.googleapis.com/prio-staging-facil-manifests/portal-server"
       }
       gondor = {
         intake_worker_count                    = 1
         aggregate_worker_count                 = 1
-        aggregate_thread_count                 = 2
         peer_share_processor_manifest_base_url = "storage.googleapis.com/prio-staging-pha-manifests"
         portal_server_manifest_base_url        = "storage.googleapis.com/prio-staging-facil-manifests/portal-server"
       }
       asgard = {
         intake_worker_count                    = 1
         aggregate_worker_count                 = 1
-        aggregate_thread_count                 = 2
         peer_share_processor_manifest_base_url = "storage.googleapis.com/prio-staging-pha-manifests"
         portal_server_manifest_base_url        = "storage.googleapis.com/prio-staging-facil-manifests/portal-server"
       }
