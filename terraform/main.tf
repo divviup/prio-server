@@ -263,6 +263,10 @@ resource "google_project_service" "kms" {
   service = "cloudkms.googleapis.com"
 }
 
+resource "google_project_service" "secretmanager" {
+  service = "secretmanager.googleapis.com"
+}
+
 provider "aws" {
   # aws_s3_bucket resources will be created in the region specified in this
   # provider.
@@ -340,6 +344,19 @@ resource "kubernetes_secret" "ingestion_packet_decryption_keys" {
       data["secret_key"]
     ]
   }
+}
+
+# We use GCP Secret Manager to back up keys outside the Kubernetes cluster. The
+# secret is created here, and later `deploy-tool` adds versions of the secret
+# with the actual key.
+resource "google_secret_manager_secret" "ingestion_packet_decryption_keys" {
+  for_each = toset(var.localities)
+  secret_id = "${kubernetes_namespace.namespaces[each.key].metadata[0].name}-${kubernetes_secret.ingestion_packet_decryption_keys[each.key].metadata[0].name}"
+  replication {
+    automatic = true
+  }
+
+  depends_on = [google_project_service.secretmanager]
 }
 
 # We will receive ingestion batches from multiple ingestion servers for each
@@ -420,6 +437,8 @@ module "data_share_processors" {
   container_registry                             = var.container_registry
   intake_worker_count                            = each.value.intake_worker_count
   aggregate_worker_count                         = each.value.aggregate_worker_count
+
+  depends_on = [google_project_service.secretmanager]
 }
 
 # The portal owns two sum part buckets (one for each data share processor) and
@@ -515,4 +534,8 @@ output "use_test_pha_decryption_key" {
 
 output "has_test_environment" {
   value = length(module.fake_server_resources) != 0
+}
+
+output "gcp_project" {
+  value = var.gcp_project
 }

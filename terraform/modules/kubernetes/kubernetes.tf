@@ -176,6 +176,16 @@ resource "kubernetes_secret" "batch_signing_key" {
   }
 }
 
+# We use GCP Secret Manager to back up keys outside the Kubernetes cluster. The
+# secret is created here, and later `deploy-tool` adds versions of the secret
+# with the actual key.
+resource "google_secret_manager_secret" "batch_signing_key" {
+  secret_id = "${var.kubernetes_namespace}-${kubernetes_secret.batch_signing_key.metadata[0].name}"
+  replication {
+    automatic = true
+  }
+}
+
 # ConfigMap containing the parameters that are common to every intake-batch task
 # that will be handled in this data share processor, except for secrets.
 resource "kubernetes_config_map" "intake_batch_config_map" {
