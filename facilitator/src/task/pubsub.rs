@@ -93,13 +93,13 @@ struct GcpPubSubMessage {
 }
 
 /// A task queue backed by Google Cloud PubSub
-#[derive(Clone, Debug)]
+#[derive(Debug)]
 pub struct GcpPubSubTaskQueue<T: Task> {
     pubsub_api_endpoint: String,
     gcp_project_id: String,
     subscription_id: String,
     oauth_token_provider: GcpOauthTokenProvider,
-    phantom_task: PhantomData<T>,
+    phantom_task: PhantomData<*const T>,
     agent: Agent,
 }
 

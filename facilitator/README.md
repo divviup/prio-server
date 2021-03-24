@@ -44,14 +44,6 @@ AWS SNS/SQS support is experimental and has not been validated. To use it, pass 
 
 To support new task queues, simply add an implementation of the `TaskQueue` trait, defined in `src/task.rs`. Then, add the necessary argument handling and initialization logic to `src/bin/facilitator.rs`.
 
-## Configuration
-
-### `aggregate-worker` thread count
-
-The `aggregate` and `aggregate-worker` subcommands can be configured to spawn multiple worker threads that will sum over batches in an aggregation in parallel before reducing each batch's sum into a sum part that is transmitted to the portal server. By default, a single thread is used. Set either the `--thread-count` command line argument or the `THREAD_COUNT` environment variable (e.g., in a Kubernetes `ConfigMap`) to an integer value to spawn the corresponding number of threads.
-
-To make best use of a multithreaded `aggregate-worker` in Kubernetes, make sure to configure the CPU and memory limits appropriately so that multiple cores can be allocated. For instance, a CPU request of `0.1` and a CPU limit of `3` might work well for four worker threads, keeping in mind that since Prio batch processing involves a lot of network I/O, we would not expect four worker threads on four cores to see consistently high CPU utilization.
-
 ## References
 
 [Prio Data Share Batch IDL](https://docs.google.com/document/d/1L06dpE7OcC4CXho2UswrfHrnWKtbA9aSSmO_5o7Ku6I/edit#heading=h.3kq1yexquq2g)

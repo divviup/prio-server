@@ -6,6 +6,7 @@ use rusoto_sqs::{
     ChangeMessageVisibilityRequest, DeleteMessageRequest, ReceiveMessageRequest, Sqs, SqsClient,
 };
 use std::{convert::TryFrom, marker::PhantomData, str::FromStr, time::Duration};
+use tokio::runtime::Runtime;
 
 use crate::aws_credentials;
 use crate::{
@@ -14,14 +15,15 @@ use crate::{
 };
 
 /// A task queue backed by AWS SQS
-#[derive(Clone, Derivative)]
+#[derive(Derivative)]
 #[derivative(Debug)]
 pub struct AwsSqsTaskQueue<T: Task> {
     region: Region,
     queue_url: String,
+    runtime: Runtime,
     #[derivative(Debug = "ignore")]
     credentials_provider: aws_credentials::Provider,
-    phantom_task: PhantomData<T>,
+    phantom_task: PhantomData<*const T>,
 }
 
 impl<T: Task> AwsSqsTaskQueue<T> {
@@ -31,10 +33,12 @@ impl<T: Task> AwsSqsTaskQueue<T> {
         credentials_provider: aws_credentials::Provider,
     ) -> Result<Self> {
         let region = Region::from_str(region).context("invalid AWS region")?;
+        let runtime = basic_runtime()?;
 
         Ok(AwsSqsTaskQueue {
             region,
             queue_url: queue_url.to_owned(),
+            runtime,
             credentials_provider,
             phantom_task: PhantomData,
         })
@@ -49,7 +53,6 @@ impl<T: Task> TaskQueue<T> for AwsSqsTaskQueue<T> {
         );
 
         let client = self.sqs_client()?;
-        let runtime = basic_runtime()?;
 
         let response = retry_request("dequeue SQS message", || {
             let request = ReceiveMessageRequest {
@@ -67,7 +70,7 @@ impl<T: Task> TaskQueue<T> for AwsSqsTaskQueue<T> {
                 ..Default::default()
             };
 
-            runtime.block_on(client.receive_message(request))
+            self.runtime.block_on(client.receive_message(request))
         })
         .context("failed to dequeue message from SQS")?;
 
@@ -112,14 +115,13 @@ impl<T: Task> TaskQueue<T> for AwsSqsTaskQueue<T> {
         );
 
         let client = self.sqs_client()?;
-        let runtime = basic_runtime()?;
 
         retry_request("delete/acknowledge message in SQS", || {
             let request = DeleteMessageRequest {
                 queue_url: self.queue_url.clone(),
                 receipt_handle: task.acknowledgment_id.clone(),
             };
-            runtime.block_on(client.delete_message(request))
+            self.runtime.block_on(client.delete_message(request))
         })
         .context("failed to delete/acknowledge message in SQS")
     }
@@ -174,7 +176,6 @@ impl<T: Task> AwsSqsTaskQueue<T> {
         visibility_timeout: &Duration,
     ) -> Result<()> {
         let client = self.sqs_client()?;
-        let runtime = basic_runtime()?;
 
         let timeout = i64::try_from(visibility_timeout.as_secs()).context(format!(
             "timeout value {:?} cannot be encoded into ChangeMessageVisibilityRequest",
@@ -187,7 +188,8 @@ impl<T: Task> AwsSqsTaskQueue<T> {
                 receipt_handle: task.acknowledgment_id.clone(),
                 visibility_timeout: timeout,
             };
-            runtime.block_on(client.change_message_visibility(request))
+            self.runtime
+                .block_on(client.change_message_visibility(request))
         })
         .context("failed to change message visibility message in SQS")
     }

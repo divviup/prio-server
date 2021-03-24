@@ -13,17 +13,20 @@ ingestors = {
     manifest_base_url = "storage.googleapis.com/prio-staging-facil-manifests/singleton-ingestor"
     localities = {
       narnia = {
-        aggregate_thread_count                 = 2
+        intake_worker_count                    = 1
+        aggregate_worker_count                 = 1
         peer_share_processor_manifest_base_url = "storage.googleapis.com/prio-staging-facil-manifests"
         portal_server_manifest_base_url        = "storage.googleapis.com/prio-staging-pha-manifests/portal-server"
       }
       gondor = {
-        aggregate_thread_count                 = 2
+        intake_worker_count                    = 2
+        aggregate_worker_count                 = 1
         peer_share_processor_manifest_base_url = "storage.googleapis.com/prio-staging-facil-manifests"
         portal_server_manifest_base_url        = "storage.googleapis.com/prio-staging-pha-manifests/portal-server"
       }
       asgard = {
-        aggregate_thread_count                 = 2
+        intake_worker_count                    = 1
+        aggregate_worker_count                 = 1
         peer_share_processor_manifest_base_url = "storage.googleapis.com/prio-staging-facil-manifests"
         portal_server_manifest_base_url        = "storage.googleapis.com/prio-staging-pha-manifests/portal-server"
       }
@@ -33,17 +36,20 @@ ingestors = {
     manifest_base_url = "storage.googleapis.com/prio-staging-facil-manifests/singleton-ingestor"
     localities = {
       narnia = {
-        aggregate_thread_count                 = 2
+        intake_worker_count                    = 2
+        aggregate_worker_count                 = 1
         peer_share_processor_manifest_base_url = "storage.googleapis.com/prio-staging-facil-manifests"
         portal_server_manifest_base_url        = "storage.googleapis.com/prio-staging-pha-manifests/portal-server"
       }
       gondor = {
-        aggregate_thread_count                 = 2
+        intake_worker_count                    = 1
+        aggregate_worker_count                 = 1
         peer_share_processor_manifest_base_url = "storage.googleapis.com/prio-staging-facil-manifests"
         portal_server_manifest_base_url        = "storage.googleapis.com/prio-staging-pha-manifests/portal-server"
       }
       asgard = {
-        aggregate_thread_count                 = 2
+        intake_worker_count                    = 1
+        aggregate_worker_count                 = 1
         peer_share_processor_manifest_base_url = "storage.googleapis.com/prio-staging-facil-manifests"
         portal_server_manifest_base_url        = "storage.googleapis.com/prio-staging-pha-manifests/portal-server"
       }
@@ -63,8 +69,8 @@ test_peer_environment = {
 }
 is_first                 = true
 use_aws                  = true
-workflow_manager_version = "0.6.11"
-facilitator_version      = "0.6.11"
+workflow_manager_version = "0.6.10"
+facilitator_version      = "0.6.10"
 pushgateway              = "prometheus-pushgateway.monitoring:9091"
 victorops_routing_key    = "prio-staging"
 aggregation_period       = "30m"

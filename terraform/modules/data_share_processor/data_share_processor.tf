@@ -102,7 +102,11 @@ variable "facilitator_version" {
   type = string
 }
 
-variable "aggregate_thread_count" {
+variable "intake_worker_count" {
+  type = number
+}
+
+variable "aggregate_worker_count" {
   type = number
 }
 
@@ -404,7 +408,8 @@ module "kubernetes" {
   facilitator_version                     = var.facilitator_version
   intake_queue                            = module.pubsub["intake"].queue
   aggregate_queue                         = module.pubsub["aggregate"].queue
-  aggregate_thread_count                  = var.aggregate_thread_count
+  intake_worker_count                     = var.intake_worker_count
+  aggregate_worker_count                  = var.aggregate_worker_count
 }
 
 output "data_share_processor_name" {

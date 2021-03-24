@@ -113,8 +113,8 @@ pub struct BatchReader<'a, H, P> {
 
     // These next two fields are not real and are used because not using H and P
     // in the struct definition is an error.
-    phantom_header: PhantomData<H>,
-    phantom_packet: PhantomData<P>,
+    phantom_header: PhantomData<*const H>,
+    phantom_packet: PhantomData<*const P>,
 }
 
 impl<'a, H: Header, P: Packet> BatchReader<'a, H, P> {
@@ -219,8 +219,8 @@ pub struct BatchWriter<'a, H, P> {
     batch: Batch,
     transport: &'a mut dyn Transport,
     packet_schema: Schema,
-    phantom_header: PhantomData<H>,
-    phantom_packet: PhantomData<P>,
+    phantom_header: PhantomData<*const H>,
+    phantom_packet: PhantomData<*const P>,
 }
 
 impl<'a, H: Header, P: Packet> BatchWriter<'a, H, P> {

@@ -26,73 +26,60 @@ use tokio::{
 };
 
 /// ClientProvider allows mocking out a client for testing.
-pub trait ClientProvider: Sized + Clone + Send {
-    fn provide_client(
-        &self,
-        region: &Region,
-        credentials_provider: &aws_credentials::Provider,
-    ) -> Result<S3Client>;
-}
-
-#[derive(Clone)]
-pub struct ClientProviderImpl {}
-
-impl ClientProvider for ClientProviderImpl {
-    fn provide_client(
-        &self,
-        region: &Region,
-        credentials_provider: &aws_credentials::Provider,
-    ) -> Result<S3Client> {
-        // Rusoto uses Hyper which uses connection pools. The default
-        // timeout for those connections is 90 seconds[1]. Amazon S3's
-        // API closes idle client connections after 20 seconds[2]. If we
-        // use a default client via S3Client::new, this mismatch causes
-        // uploads to fail when Hyper tries to re-use a connection that
-        // has been idle too long. Until this is fixed in Rusoto[3], we
-        // construct our own HTTP request dispatcher whose underlying
-        // hyper::Client is configured to timeout idle connections after
-        // 10 seconds.
-        //
-        // [1]: https://docs.rs/hyper/0.13.8/hyper/client/struct.Builder.html#method.pool_idle_timeout
-        // [2]: https://aws.amazon.com/premiumsupport/knowledge-center/s3-socket-connection-timeout-error/
-        // [3]: https://github.com/rusoto/rusoto/issues/1686
-        let mut builder = hyper::Client::builder();
-        builder.pool_idle_timeout(Duration::from_secs(10));
-        let connector = HttpsConnector::with_native_roots();
-        let http_client = rusoto_core::HttpClient::from_builder(builder, connector);
-
-        Ok(S3Client::new_with(
-            http_client,
-            credentials_provider.clone(),
-            region.clone(),
-        ))
-    }
-}
+type ClientProvider = Box<dyn Fn(&Region, aws_credentials::Provider) -> Result<S3Client>>;
 
 /// Implementation of Transport that reads and writes objects from Amazon S3.
-#[derive(Clone, Derivative)]
+#[derive(Derivative)]
 #[derivative(Debug)]
-pub struct S3Transport<P: ClientProvider> {
+pub struct S3Transport {
     path: S3Path,
     #[derivative(Debug = "ignore")]
     credentials_provider: aws_credentials::Provider,
     // client_provider allows injection of mock S3Client for testing purposes
     #[derivative(Debug = "ignore")]
-    client_provider: P,
+    client_provider: ClientProvider,
 }
 
-impl S3Transport<ClientProviderImpl> {
+impl S3Transport {
     pub fn new(path: S3Path, credentials_provider: aws_credentials::Provider) -> Self {
-        S3Transport::new_with_client(path, credentials_provider, ClientProviderImpl {})
-    }
-}
+        S3Transport::new_with_client(
+            path,
+            credentials_provider,
+            Box::new(
+                |region: &Region, credentials_provider: aws_credentials::Provider| {
+                    // Rusoto uses Hyper which uses connection pools. The default
+                    // timeout for those connections is 90 seconds[1]. Amazon S3's
+                    // API closes idle client connections after 20 seconds[2]. If we
+                    // use a default client via S3Client::new, this mismatch causes
+                    // uploads to fail when Hyper tries to re-use a connection that
+                    // has been idle too long. Until this is fixed in Rusoto[3], we
+                    // construct our own HTTP request dispatcher whose underlying
+                    // hyper::Client is configured to timeout idle connections after
+                    // 10 seconds.
+                    //
+                    // [1]: https://docs.rs/hyper/0.13.8/hyper/client/struct.Builder.html#method.pool_idle_timeout
+                    // [2]: https://aws.amazon.com/premiumsupport/knowledge-center/s3-socket-connection-timeout-error/
+                    // [3]: https://github.com/rusoto/rusoto/issues/1686
+                    let mut builder = hyper::Client::builder();
+                    builder.pool_idle_timeout(Duration::from_secs(10));
+                    let connector = HttpsConnector::with_native_roots();
+                    let http_client = rusoto_core::HttpClient::from_builder(builder, connector);
 
-impl<P: ClientProvider> S3Transport<P> {
+                    Ok(S3Client::new_with(
+                        http_client,
+                        credentials_provider,
+                        region.clone(),
+                    ))
+                },
+            ),
+        )
+    }
+
     fn new_with_client(
         path: S3Path,
         credentials_provider: aws_credentials::Provider,
-        client_provider: P,
-    ) -> S3Transport<P> {
+        client_provider: ClientProvider,
+    ) -> Self {
         S3Transport {
             path: path.ensure_directory_prefix(),
             credentials_provider,
@@ -101,7 +88,7 @@ impl<P: ClientProvider> S3Transport<P> {
     }
 }
 
-impl<P: ClientProvider> Transport for S3Transport<P> {
+impl Transport for S3Transport {
     fn path(&self) -> String {
         self.path.to_string()
     }
@@ -109,9 +96,7 @@ impl<P: ClientProvider> Transport for S3Transport<P> {
     fn get(&mut self, key: &str) -> Result<Box<dyn Read>> {
         info!("get {}/{} as {}", self.path, key, self.credentials_provider);
         let runtime = basic_runtime()?;
-        let client = self
-            .client_provider
-            .provide_client(&self.path.region, &self.credentials_provider)?;
+        let client = (self.client_provider)(&self.path.region, self.credentials_provider.clone())?;
 
         let get_output = retry_request("get s3 object", || {
             runtime.block_on(client.get_object(GetObjectRequest {
@@ -135,8 +120,7 @@ impl<P: ClientProvider> Transport for S3Transport<P> {
             // Set buffer size to 5 MB, which is the minimum required by Amazon
             // https://docs.aws.amazon.com/AmazonS3/latest/dev/qfacts.html
             5_242_880,
-            self.client_provider
-                .provide_client(&self.path.region, &self.credentials_provider)?,
+            (self.client_provider)(&self.path.region, self.credentials_provider.clone())?,
         )?;
         Ok(Box::new(writer))
     }
@@ -610,56 +594,6 @@ mod tests {
         writer.complete_upload().unwrap_err();
     }
 
-    // Rusoto's MockRequestDispatcher and MultipleMockRequestDispatcher do not
-    // implement Clone so we must provide something that does, from which we can
-    // instantiate the mock dispatchers.
-    #[derive(Clone)]
-    struct MockRequest<F: Fn(&SignedRequest) + Send + Sync + Clone + 'static> {
-        status: u16,
-        request_checker: F,
-        header: Option<(&'static str, &'static str)>,
-        body: Option<&'static str>,
-    }
-
-    #[derive(Clone)]
-    struct MockClientProvider<F: Fn(&SignedRequest) + Send + Sync + Clone + 'static> {
-        requests: Vec<MockRequest<F>>,
-    }
-
-    impl<F: Fn(&SignedRequest) + Send + Sync + Clone + 'static> ClientProvider
-        for MockClientProvider<F>
-    {
-        fn provide_client(
-            &self,
-            region: &Region,
-            credentials_provider: &aws_credentials::Provider,
-        ) -> Result<S3Client> {
-            let mock_dispatchers: Vec<MockRequestDispatcher> = self
-                .requests
-                .iter()
-                .map(|r| {
-                    let mut mock_dispatcher = MockRequestDispatcher::with_status(r.status)
-                        .with_request_checker(r.request_checker.clone());
-
-                    if let Some(header) = r.header {
-                        mock_dispatcher = mock_dispatcher.with_header(header.0, header.1);
-                    }
-                    if let Some(body) = r.body {
-                        mock_dispatcher = mock_dispatcher.with_body(body);
-                    }
-
-                    mock_dispatcher
-                })
-                .collect();
-
-            Ok(S3Client::new_with(
-                MultipleMockRequestDispatcher::new(mock_dispatchers),
-                credentials_provider.clone(),
-                region.clone(),
-            ))
-        }
-    }
-
     #[test]
     fn roundtrip_s3_transport() {
         log_init();
@@ -669,17 +603,21 @@ mod tests {
             key: "".into(),
         };
 
+        let client_provider = Box::new(
+            |region: &Region, credentials_provider: aws_credentials::Provider| {
+                Ok(S3Client::new_with(
+                    // Failed GetObject request
+                    MockRequestDispatcher::with_status(404)
+                        .with_request_checker(is_get_object_request),
+                    credentials_provider,
+                    region.clone(),
+                ))
+            },
+        );
         let mut transport = S3Transport::new_with_client(
             s3_path.clone(),
             aws_credentials::Provider::new_mock(),
-            MockClientProvider {
-                requests: vec![MockRequest {
-                    status: 404,
-                    request_checker: is_get_object_request,
-                    header: None,
-                    body: None,
-                }],
-            },
+            client_provider,
         );
 
         let ret = transport.get(TEST_KEY);
@@ -688,17 +626,18 @@ mod tests {
         let mut transport = S3Transport::new_with_client(
             s3_path.clone(),
             aws_credentials::Provider::new_mock(),
-            MockClientProvider {
-                requests: vec![
-                    // Successful GetObject request
-                    MockRequest {
-                        status: 200,
-                        request_checker: is_get_object_request,
-                        header: None,
-                        body: Some("fake-content"),
-                    },
-                ],
-            },
+            Box::new(
+                |region: &Region, credentials_provider: aws_credentials::Provider| {
+                    Ok(S3Client::new_with(
+                        // Successful GetObject request
+                        MockRequestDispatcher::with_status(200)
+                            .with_request_checker(is_get_object_request)
+                            .with_body("fake-content"),
+                        credentials_provider,
+                        region.clone(),
+                    ))
+                },
+            ),
         );
 
         let mut reader = transport
@@ -708,65 +647,51 @@ mod tests {
         reader.read_to_end(&mut content).expect("failed to read");
         assert_eq!(Vec::from("fake-content"), content);
 
-        let requests = vec![
-            // Response to CreateMultipartUpload
-            MockRequest {
-                status: 200,
-                request_checker: is_create_multipart_upload_request
-                    as for<'r> fn(&'r SignedRequest),
-                header: None,
-                body: Some(
-                    r#"<?xml version="1.0" encoding="UTF-8"?>
+        let mut transport = S3Transport::new_with_client(
+            s3_path,
+            aws_credentials::Provider::new_mock(),
+            Box::new(
+                |region: &Region, credentials_provider: aws_credentials::Provider| {
+                    let requests = vec![
+                        // Response to CreateMultipartUpload
+                        MockRequestDispatcher::with_status(200)
+                            .with_body(
+                                r#"<?xml version="1.0" encoding="UTF-8"?>
 <InitiateMultipartUploadResult>
    <Bucket>fake-bucket</Bucket>
    <Key>fake-key</Key>
    <UploadId>upload-id</UploadId>
 </InitiateMultipartUploadResult>"#,
-                ),
-            },
-            // Well formed response to UploadPart
-            MockRequest {
-                status: 200,
-                request_checker: is_upload_part_request,
-                header: Some(("Etag", "fake-etag")),
-                body: Some(
-                    r#"<?xml version="1.0" encoding="UTF-8"?>
+                            )
+                            .with_request_checker(is_create_multipart_upload_request),
+                        // Well formed response to UploadPart
+                        MockRequestDispatcher::with_status(200)
+                            .with_request_checker(is_upload_part_request)
+                            .with_header("ETag", "fake-etag"),
+                        // Well formed response to CompleteMultipartUpload
+                        MockRequestDispatcher::with_status(200)
+                            .with_request_checker(is_complete_multipart_upload_request)
+                            .with_body(
+                                r#"<?xml version="1.0" encoding="UTF-8"?>
 <CompleteMultipartUploadResult>
    <Location>string</Location>
    <Bucket>fake-bucket</Bucket>
    <Key>fake-key</Key>
    <ETag>fake-etag</ETag>
 </CompleteMultipartUploadResult>"#,
-                ),
-            },
-            // Well formed response to CompleteMultipartUpload
-            MockRequest {
-                status: 200,
-                request_checker: is_complete_multipart_upload_request,
-                header: None,
-                body: Some(
-                    r#"<?xml version="1.0" encoding="UTF-8"?>
-<CompleteMultipartUploadResult>
-   <Location>string</Location>
-   <Bucket>fake-bucket</Bucket>
-   <Key>fake-key</Key>
-   <ETag>fake-etag</ETag>
-</CompleteMultipartUploadResult>"#,
-                ),
-            },
-            // Response to AbortMultipartUpload, expected because of
-            // cancel_upload call
-            MockRequest {
-                status: 204,
-                request_checker: is_abort_multipart_upload_request,
-                header: None,
-                body: None,
-            },
-        ];
-        let mut transport = S3Transport::new_with_client(
-            s3_path,
-            aws_credentials::Provider::new_mock(),
-            MockClientProvider { requests },
+                            ),
+                        // Response to AbortMultipartUpload, expected because of
+                        // cancel_upload call
+                        MockRequestDispatcher::with_status(204)
+                            .with_request_checker(is_abort_multipart_upload_request),
+                    ];
+                    Ok(S3Client::new_with(
+                        MultipleMockRequestDispatcher::new(requests),
+                        credentials_provider,
+                        region.clone(),
+                    ))
+                },
+            ),
         );
 
         let mut writer = transport.put(TEST_KEY).unwrap();

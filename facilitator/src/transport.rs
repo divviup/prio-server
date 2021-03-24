@@ -5,7 +5,6 @@ mod s3;
 use crate::{manifest::BatchSigningPublicKeys, BatchSigningKey};
 use anyhow::Result;
 use derivative::Derivative;
-use dyn_clone::{clone_trait_object, DynClone};
 use prio::encrypt::PrivateKey;
 use std::{
     boxed::Box,
@@ -19,7 +18,7 @@ pub use s3::S3Transport;
 
 /// A transport along with the public keys that can be used to verify signatures
 /// on the batches read from the transport.
-#[derive(Clone, Derivative)]
+#[derive(Derivative)]
 #[derivative(Debug)]
 pub struct VerifiableTransport {
     pub transport: Box<dyn Transport>,
@@ -27,7 +26,7 @@ pub struct VerifiableTransport {
     pub batch_signing_public_keys: BatchSigningPublicKeys,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Debug)]
 pub struct VerifiableAndDecryptableTransport {
     pub transport: VerifiableTransport,
     pub packet_decryption_keys: Vec<PrivateKey>,
@@ -65,7 +64,7 @@ impl<T: TransportWriter + ?Sized> TransportWriter for Box<T> {
 
 /// A transport moves object in and out of some data store, such as a cloud
 /// object store like Amazon S3, or local files, or buffers in memory.
-pub trait Transport: Debug + DynClone + Send {
+pub trait Transport: Debug {
     /// Returns an std::io::Read instance from which the contents of the value
     /// of the provided key may be read.
     fn get(&mut self, key: &str) -> Result<Box<dyn Read>>;
@@ -75,5 +74,3 @@ pub trait Transport: Debug + DynClone + Send {
 
     fn path(&self) -> String;
 }
-
-clone_trait_object!(Transport);

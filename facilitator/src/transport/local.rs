@@ -9,7 +9,7 @@ use std::{
 };
 
 /// A transport implementation backed by the local filesystem.
-#[derive(Clone, Debug)]
+#[derive(Debug)]
 pub struct LocalFileTransport {
     directory: PathBuf,
 }

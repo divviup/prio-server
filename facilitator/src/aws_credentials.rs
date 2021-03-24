@@ -31,7 +31,7 @@ pub(crate) fn basic_runtime() -> Result<Runtime> {
 
 /// The Provider enum allows us to generically handle different scenarios for
 /// authenticating to AWS APIs, while still having a concrete value that
-/// implements ProvideAwsCredentials and which can easily be used with Rusoto's
+/// implements provideAwsCredentials and which can easily be used with Rusoto's
 /// various client objects. It also provides a convenient place to implement
 /// std::fmt::Display, allowing facilitator's AWS clients to log something
 /// useful about the identity they use.
@@ -44,13 +44,6 @@ pub(crate) fn basic_runtime() -> Result<Runtime> {
 /// to eliminate boilerplate in facilitator.rs while also integrating gracefully
 /// with rusoto_s3::S3Client and rusoto_sqs::SqsClient, at the cost of some
 /// repetitive match arms in some of the enum's methods.
-///
-/// A note on thread safety and sharing Providers: each variant of this enum
-/// wraps an implementation of ProvideAwsCredentials which in turn uses an
-/// Arc<Mutex<>> to share the cached credentials across cloned instances. That
-/// means that even if a single instance of Provider is .clone()d many times and
-/// provided to multiple threads, they will efficiently share a single cached
-/// credential.
 #[derive(Clone)]
 pub enum Provider {
     /// Rusoto's default credentials provider, which attempts to source
