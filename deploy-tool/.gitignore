@@ -1,4 +1,3 @@
 deploy-tool
-config.toml
 vendor/
 coverage.coverprofile
