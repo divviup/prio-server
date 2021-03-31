@@ -1723,6 +1723,7 @@ fn transport_for_path(
                     matches.value_of(entity.suffix("-use-default-aws-credentials-provider")),
                     bool
                 )?,
+                "s3",
             )?;
             Ok(Box::new(S3Transport::new(path, credentials_provider)))
         }
@@ -1788,6 +1789,7 @@ fn intake_task_queue_from_args(
                     matches.value_of("task-queue-use-default-aws-credentials-provider"),
                     bool
                 )?,
+                "sqs",
             )?;
             Ok(Box::new(AwsSqsTaskQueue::new(
                 sqs_region,
@@ -1834,6 +1836,7 @@ fn aggregation_task_queue_from_args(
                     matches.value_of("task-queue-use-default-aws-credentials-provider"),
                     bool
                 )?,
+                "sqs",
             )?;
             Ok(Box::new(AwsSqsTaskQueue::new(
                 sqs_region,
