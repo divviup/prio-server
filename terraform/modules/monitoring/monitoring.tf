@@ -98,6 +98,10 @@ resource "google_compute_region_disk" "prometheus_server" {
   replica_zones = [data.google_compute_zones.available.names[0], data.google_compute_zones.available.names[1]]
   size          = var.prometheus_server_persistent_disk_size_gb
   region        = var.gcp_region
+
+  lifecycle {
+    ignore_changes = [labels]
+  }
 }
 
 # Create a Kubernetes persistent volume representing the GCP disk
