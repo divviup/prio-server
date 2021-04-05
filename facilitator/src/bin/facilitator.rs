@@ -1,7 +1,7 @@
 use anyhow::{anyhow, Context, Result};
 use chrono::{prelude::Utc, NaiveDateTime};
 use clap::{value_t, App, Arg, ArgGroup, ArgMatches, SubCommand};
-use kube::api::Meta;
+use kube::api::Resource;
 use log::{debug, error, info};
 use prio::encrypt::{PrivateKey, PublicKey};
 use ring::signature::{
