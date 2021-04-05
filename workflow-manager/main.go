@@ -17,7 +17,6 @@ import (
 	"github.com/rs/zerolog/log"
 
 	"github.com/letsencrypt/prio-server/workflow-manager/batchpath"
-	"github.com/letsencrypt/prio-server/workflow-manager/monitor"
 	"github.com/letsencrypt/prio-server/workflow-manager/storage"
 	"github.com/letsencrypt/prio-server/workflow-manager/task"
 	wftime "github.com/letsencrypt/prio-server/workflow-manager/time"
@@ -63,17 +62,107 @@ var awsSNSIdentity = flag.String("aws-sns-identity", "", "AWS IAM ARN of the rol
 // Argument names should be prefixed with the corresponding value of
 // task-queue-kind to avoid conflicts.
 
-// monitoring things
+// Metrics gauges. We must use gauges because workflow-manager runs as a
+// cronjob, and so if we used counters, they would be reset to zero with each
+// run.
 var (
-	intakesStarted            monitor.GaugeMonitor = &monitor.NoopGauge{}
-	intakesSkippedDueToMarker monitor.GaugeMonitor = &monitor.NoopGauge{}
+	ingestionBatchesFound = promauto.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Name: "workflow_manager_ingestions_found",
+			Help: "The number of ingestion batches found in the current aggregation interval",
+		},
+		[]string{"aggregation_id"},
+	)
+	incompleteIngestionBatchesFound = promauto.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Name: "workflow_manager_incomplete_ingestions_found",
+			Help: "The number of incomplete ingestion batches found in the current aggregation interval",
+		},
+		[]string{"aggregation_id"},
+	)
 
-	aggregationsStarted            monitor.GaugeMonitor = &monitor.NoopGauge{}
-	aggregationsSkippedDueToMarker monitor.GaugeMonitor = &monitor.NoopGauge{}
+	ownValidationsFound = promauto.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Name: "workflow_manager_own_validations_found",
+			Help: "The number of own validation batches found in the current aggregation interval",
+		},
+		[]string{"aggregation_id"},
+	)
+	incompleteOwnValidationsFound = promauto.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Name: "workflow_manager_incomplete_own_validations_found",
+			Help: "The number of incomplete own validation batches found in the current aggregation interval",
+		},
+		[]string{"aggregation_id"},
+	)
 
-	workflowManagerLastSuccess monitor.GaugeMonitor = &monitor.NoopGauge{}
-	workflowManagerLastFailure monitor.GaugeMonitor = &monitor.NoopGauge{}
-	workflowManagerRuntime     monitor.GaugeMonitor = &monitor.NoopGauge{}
+	peerValidationsFound = promauto.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Name: "workflow_manager_peer_validations_found",
+			Help: "The number of peer validation batches found in the current aggregation interval",
+		},
+		[]string{"aggregation_id"},
+	)
+	incompletePeerValidationsFound = promauto.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Name: "workflow_manager_incomplete_peer_validations_found",
+			Help: "The number of incomplete peer validation batches found in the current aggregation interval",
+		},
+		[]string{"aggregation_id"},
+	)
+
+	intakesStarted = promauto.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Name: "workflow_manager_intake_tasks_scheduled",
+			Help: "The number of intake-batch tasks successfully scheduled",
+		},
+		[]string{"aggregation_id"},
+	)
+	intakesSkippedDueToMarker = promauto.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Name: "workflow_manager_intake_tasks_skipped_due_to_marker",
+			Help: "The number of intake-batch tasks not scheduled because a task marker was found",
+		},
+		[]string{"aggregation_id"},
+	)
+
+	aggregationsStarted = promauto.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Name: "workflow_manager_aggregation_tasks_scheduled",
+			Help: "The number of aggregate tasks successfully scheduled",
+		},
+		[]string{"aggregation_id"},
+	)
+	aggregationsSkippedDueToMarker = promauto.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Name: "workflow_manager_aggregation_tasks_skipped_due_to_marker",
+			Help: "The number of aggregate tasks not scheduled because a task marker was found",
+		},
+		[]string{"aggregation_id"},
+	)
+	numberOfBatchesInAggregation = promauto.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Name: "workflow_manager_number_of_batches_in_aggregation",
+			Help: "The number of batches included in a scheduled aggregation",
+		},
+		[]string{"aggregation_id"},
+	)
+
+	// Unlike all the other metrics, these are not specific to a particular
+	// aggregation, and so do not have the `aggregation_id` label, and so we do
+	// not need a Gauge*Vec*.
+	workflowManagerLastSuccess = promauto.NewGauge(prometheus.GaugeOpts{
+		Name: "workflow_manager_last_success_seconds",
+		Help: "Time of last successful run of workflow-manager in seconds since UNIX epoch",
+	})
+	workflowManagerLastFailure = promauto.NewGauge(prometheus.GaugeOpts{
+		Name: "workflow_manager_last_failure_seconds",
+		Help: "Time of last failed run of workflow-manager in seconds since UNIX epoch",
+	})
+	workflowManagerRuntime = promauto.NewGauge(prometheus.GaugeOpts{
+		Name: "workflow_manager_runtime_seconds",
+		Help: "How long successful workflow-manager runs take",
+	})
 )
 
 func fail(format string, args ...interface{}) {
@@ -108,39 +197,6 @@ func main() {
 				log.Err(err).Msg("error occurred with pushing to prometheus")
 			}
 		}()
-
-		intakesStarted = promauto.NewGauge(prometheus.GaugeOpts{
-			Name: "workflow_manager_intake_tasks_scheduled",
-			Help: "The number of intake-batch tasks successfully scheduled",
-		})
-		intakesSkippedDueToMarker = promauto.NewGauge(prometheus.GaugeOpts{
-			Name: "workflow_manager_intake_tasks_skipped_due_to_marker",
-			Help: "The number of intake-batch tasks not scheduled because a task marker was found",
-		})
-
-		aggregationsStarted = promauto.NewGauge(prometheus.GaugeOpts{
-			Name: "workflow_manager_aggregation_tasks_scheduled",
-			Help: "The number of aggregate tasks successfully scheduled",
-		})
-		aggregationsSkippedDueToMarker = promauto.NewGauge(prometheus.GaugeOpts{
-			Name: "workflow_manager_aggregation_tasks_skipped_due_to_marker",
-			Help: "The number of aggregate tasks not scheduled because a task marker was found",
-		})
-
-		workflowManagerLastSuccess = promauto.NewGauge(prometheus.GaugeOpts{
-			Name: "workflow_manager_last_success_seconds",
-			Help: "Time of last successful run of workflow-manager in seconds since UNIX epoch",
-		})
-
-		workflowManagerLastFailure = promauto.NewGauge(prometheus.GaugeOpts{
-			Name: "workflow_manager_last_failure_seconds",
-			Help: "Time of last failed run of workflow-manager in seconds since UNIX epoch",
-		})
-
-		workflowManagerRuntime = promauto.NewGauge(prometheus.GaugeOpts{
-			Name: "workflow_manager_runtime_seconds",
-			Help: "How long successful workflow-manager runs take",
-		})
 	}
 
 	ownValidationBucket, err := storage.NewBucket(*ownValidationInput, *ownValidationIdentity, *dryRun)
@@ -326,6 +382,13 @@ func scheduleTasks(config scheduleTasksConfig) error {
 		return err
 	}
 
+	ingestionBatchesFound.WithLabelValues(config.aggregationID).Set(float64(intakeBatches.Batches.Len()))
+	incompleteIngestionBatchesFound.WithLabelValues(config.aggregationID).Set(float64(intakeBatches.IncompleteBatchCount))
+	log.Info().
+		Int("ingestion batches", intakeBatches.Batches.Len()).
+		Int("incomplete ingestion batches", intakeBatches.IncompleteBatchCount).
+		Msg("discovered ingestion batches")
+
 	// Make a set of the tasks for which we have marker objects for efficient
 	// lookup later.
 	intakeTaskMarkers, err := config.ownValidationBucket.ListIntakeTaskMarkers(config.aggregationID, intakeInterval)
@@ -339,7 +402,7 @@ func scheduleTasks(config scheduleTasksConfig) error {
 	}
 
 	err = enqueueIntakeTasks(
-		intakeBatches,
+		intakeBatches.Batches,
 		intakeTaskMarkersSet,
 		config.ownValidationBucket,
 		config.intakeTaskEnqueuer,
@@ -363,7 +426,12 @@ func scheduleTasks(config scheduleTasksConfig) error {
 		return err
 	}
 
-	log.Info().Int("own validations", len(ownValidationBatches)).Msgf("found %d own validations", len(ownValidationBatches))
+	ownValidationsFound.WithLabelValues(config.aggregationID).Set(float64(ownValidationBatches.Batches.Len()))
+	incompleteOwnValidationsFound.WithLabelValues(config.aggregationID).Set(float64(ownValidationBatches.IncompleteBatchCount))
+	log.Info().
+		Int("own validations", ownValidationBatches.Batches.Len()).
+		Int("incomplete own validations", ownValidationBatches.IncompleteBatchCount).
+		Msg("discovered own validations")
 
 	peerValidationFiles, err := config.peerValidationBucket.ListBatchFiles(config.aggregationID, aggInterval)
 	if err != nil {
@@ -376,7 +444,12 @@ func scheduleTasks(config scheduleTasksConfig) error {
 		return err
 	}
 
-	log.Info().Int("peer validations", len(peerValidationBatches)).Msgf("found %d peer validations", len(peerValidationBatches))
+	peerValidationsFound.WithLabelValues(config.aggregationID).Set(float64(peerValidationBatches.Batches.Len()))
+	incompletePeerValidationsFound.WithLabelValues(config.aggregationID).Set(float64(peerValidationBatches.IncompleteBatchCount))
+	log.Info().
+		Int("peer validations", peerValidationBatches.Batches.Len()).
+		Int("incomplete peer validations", peerValidationBatches.IncompleteBatchCount).
+		Msg("discovered peer validations")
 
 	// Take the intersection of the sets of own validations and peer validations
 	// to get the list of batches we can aggregate.
@@ -385,11 +458,11 @@ func scheduleTasks(config scheduleTasksConfig) error {
 	// type, and using a *batchPath wouldn't give us the lookup semantics we
 	// want.
 	ownValidationsSet := map[string]bool{}
-	for _, ownValidationBatch := range ownValidationBatches {
+	for _, ownValidationBatch := range ownValidationBatches.Batches {
 		ownValidationsSet[ownValidationBatch.ID] = true
 	}
 	aggregationBatches := batchpath.List{}
-	for _, peerValidationBatch := range peerValidationBatches {
+	for _, peerValidationBatch := range peerValidationBatches.Batches {
 		if _, ok := ownValidationsSet[peerValidationBatch.ID]; ok {
 			aggregationBatches = append(aggregationBatches, peerValidationBatch)
 		}
@@ -464,7 +537,7 @@ func enqueueAggregationTask(
 	if _, ok := taskMarkers[aggregationTask.Marker()]; ok {
 		aggregationTask.PrepareLog(log.Info()).
 			Msg("skipped aggregation task due to marker")
-		aggregationsSkippedDueToMarker.Inc()
+		aggregationsSkippedDueToMarker.WithLabelValues(aggregationID).Inc()
 		return nil
 	}
 
@@ -486,7 +559,8 @@ func enqueueAggregationTask(
 				Msgf("failed to write aggregation task marker: %s", err)
 		}
 
-		aggregationsStarted.Inc()
+		aggregationsStarted.WithLabelValues(aggregationID).Inc()
+		numberOfBatchesInAggregation.WithLabelValues(aggregationID).Set(float64(batchCount))
 	})
 
 	return nil
@@ -511,7 +585,7 @@ func enqueueIntakeTasks(
 
 		if _, ok := taskMarkers[intakeTask.Marker()]; ok {
 			skippedDueToMarker++
-			intakesSkippedDueToMarker.Inc()
+			intakesSkippedDueToMarker.WithLabelValues(batch.AggregationID).Inc()
 			continue
 		}
 
@@ -534,7 +608,7 @@ func enqueueIntakeTasks(
 				return
 			}
 
-			intakesStarted.Inc()
+			intakesStarted.WithLabelValues(batch.AggregationID).Inc()
 		})
 	}
 
