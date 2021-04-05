@@ -315,6 +315,12 @@ resource "kubernetes_cron_job" "workflow_manager" {
       }
     }
   }
+
+  lifecycle {
+    ignore_changes = [
+      spec[0].job_template[0].metadata[0].annotations["environment"]
+    ]
+  }
 }
 
 resource "kubernetes_service" "intake_batch" {
@@ -338,6 +344,12 @@ resource "kubernetes_service" "intake_batch" {
       app      = "intake-batch-worker"
       ingestor = var.ingestor
     }
+  }
+
+  lifecycle {
+    ignore_changes = [
+      metadata[0].annotations["cloud.google.com/neg"]
+    ]
   }
 }
 
@@ -441,6 +453,12 @@ resource "kubernetes_service" "aggregate" {
       app      = "aggregate-worker"
       ingestor = var.ingestor
     }
+  }
+
+  lifecycle {
+    ignore_changes = [
+      metadata[0].annotations["cloud.google.com/neg"]
+    ]
   }
 }
 
