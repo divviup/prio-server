@@ -7,8 +7,12 @@ use crate::{
 };
 use anyhow::{anyhow, ensure, Context, Result};
 use chrono::NaiveDateTime;
-use log::{debug, info, trace};
-use prio::{encrypt::PrivateKey, encrypt::PublicKey, finite_field::Field, server::Server};
+use log::{debug, info};
+use prio::{
+    encrypt::{PrivateKey, PublicKey},
+    field::Field32,
+    server::{Server, ServerError},
+};
 use ring::signature::UnparsedPublicKey;
 use std::{collections::HashMap, convert::TryFrom, iter::Iterator};
 use uuid::Uuid;
@@ -115,14 +119,14 @@ impl<'a> BatchIntaker<'a> {
         // is optional. Instead we try all the keys we have available until one
         // works.
         // https://github.com/abetterinternet/prio-server/issues/73
-        let mut servers = self
+        let mut servers: Vec<Server<Field32>> = self
             .packet_decryption_keys
             .iter()
             .map(|k| {
                 debug!("Public key for server is: {:?}", PublicKey::from(k));
                 Server::new(ingestion_header.bins as usize, self.is_first, k.clone())
             })
-            .collect::<Vec<Server>>();
+            .collect();
 
         debug!("We have {} servers.", &servers.len());
 
@@ -155,13 +159,22 @@ impl<'a> BatchIntaker<'a> {
                 let mut did_create_validation_packet = false;
                 for server in servers.iter_mut() {
                     let validation_message = match server.generate_verification_message(
-                        Field::from(r_pit),
+                        Field32::from(r_pit),
                         &packet.encrypted_payload,
                     ) {
-                        Some(m) => m,
-                        None => {
-                            trace!("Error when trying to create validation message - this might be that we picked the wrong packet decryption key");
+                        Ok(m) => m,
+                        Err(ServerError::Encrypt(e)) => {
+                            debug!(
+                                "Input share could not be decrypted. Will try \
+                                more packet decryption keys if available. \
+                                Decryption error: {:?}",
+                                e
+                            );
                             continue;
+                        }
+                        Err(e) => {
+                            return Err(anyhow::Error::new(e)
+                                .context("error generating verification message"));
                         }
                     };
 
@@ -176,7 +189,11 @@ impl<'a> BatchIntaker<'a> {
                     break;
                 }
                 if !did_create_validation_packet {
-                    return Err(anyhow!("failed to construct validation message for packet {} (likely packet decryption failure)", packet.uuid));
+                    return Err(anyhow!(
+                        "failed to construct validation message for packet {}, \
+                        probably due to packet decryption key mismatch",
+                        packet.uuid
+                    ));
                 }
                 processed_packets += 1;
                 if processed_packets % callback_cadence == 0 {
@@ -236,10 +253,12 @@ mod tests {
             default_ingestor_public_key, default_packet_encryption_certificate_signing_request,
             default_pha_signing_private_key,
             DEFAULT_PACKET_ENCRYPTION_CERTIFICATE_SIGNING_REQUEST_PRIVATE_KEY,
+            DEFAULT_PHA_ECIES_PRIVATE_KEY,
         },
         transport::{LocalFileTransport, SignableTransport, VerifiableTransport},
     };
-    use prio::encrypt::PublicKey;
+    use assert_matches::assert_matches;
+    use prio::{encrypt::PublicKey, server::ServerError, util::SerializeError};
 
     #[test]
     fn share_validator() {
@@ -289,6 +308,7 @@ mod tests {
             0.11,
             100,
             100,
+            None,
             &mut pha_output,
             &mut facilitator_output,
         )
@@ -382,5 +402,207 @@ mod tests {
         facilitator_ingestor
             .generate_validation_share(|| {})
             .expect("facilitator failed to generate validation");
+    }
+
+    #[test]
+    fn wrong_decryption_key() {
+        let pha_tempdir = tempfile::TempDir::new().unwrap();
+        let pha_copy_tempdir = tempfile::TempDir::new().unwrap();
+        let facilitator_tempdir = tempfile::TempDir::new().unwrap();
+
+        let aggregation_name = "fake-aggregation-1".to_owned();
+        let date = NaiveDateTime::from_timestamp(1234567890, 654321);
+        let batch_uuid = Uuid::new_v4();
+
+        let packet_encryption_csr = default_packet_encryption_certificate_signing_request();
+
+        let mut pha_output = SampleOutput {
+            transport: SignableTransport {
+                transport: Box::new(LocalFileTransport::new(pha_tempdir.path().to_path_buf())),
+                batch_signing_key: default_ingestor_private_key(),
+            },
+            packet_encryption_public_key: PublicKey::from_base64(
+                &packet_encryption_csr.base64_public_key().unwrap(),
+            )
+            .unwrap(),
+            drop_nth_packet: None,
+        };
+
+        let mut facilitator_output = SampleOutput {
+            transport: SignableTransport {
+                transport: Box::new(LocalFileTransport::new(
+                    facilitator_tempdir.path().to_path_buf(),
+                )),
+                batch_signing_key: default_ingestor_private_key(),
+            },
+            packet_encryption_public_key: PublicKey::from_base64(
+                &packet_encryption_csr.base64_public_key().unwrap(),
+            )
+            .unwrap(),
+            drop_nth_packet: None,
+        };
+
+        generate_ingestion_sample(
+            &batch_uuid,
+            &aggregation_name,
+            &date,
+            10,
+            10,
+            0.11,
+            100,
+            100,
+            Some(5),
+            &mut pha_output,
+            &mut facilitator_output,
+        )
+        .expect("failed to generate sample");
+
+        let mut ingestor_pub_keys = HashMap::new();
+        ingestor_pub_keys.insert(
+            default_ingestor_private_key().identifier,
+            default_ingestor_public_key(),
+        );
+        let mut pha_ingest_transport = VerifiableAndDecryptableTransport {
+            transport: VerifiableTransport {
+                transport: Box::new(LocalFileTransport::new(pha_tempdir.path().to_path_buf())),
+                batch_signing_public_keys: ingestor_pub_keys.clone(),
+            },
+            packet_decryption_keys: vec![
+                PrivateKey::from_base64(DEFAULT_PHA_ECIES_PRIVATE_KEY).unwrap()
+            ],
+        };
+
+        let mut pha_peer_validate_transport = SignableTransport {
+            transport: Box::new(LocalFileTransport::new(pha_tempdir.path().to_path_buf())),
+            batch_signing_key: default_pha_signing_private_key(),
+        };
+
+        let mut pha_own_validate_transport = SignableTransport {
+            transport: Box::new(LocalFileTransport::new(
+                pha_copy_tempdir.path().to_path_buf(),
+            )),
+            batch_signing_key: default_pha_signing_private_key(),
+        };
+
+        let mut pha_ingestor = BatchIntaker::new(
+            "None",
+            &aggregation_name,
+            &batch_uuid,
+            &date,
+            &mut pha_ingest_transport,
+            &mut pha_peer_validate_transport,
+            &mut pha_own_validate_transport,
+            true,
+            false,
+        )
+        .unwrap();
+
+        let err = pha_ingestor.generate_validation_share(|| {}).unwrap_err();
+        assert!(err
+            .to_string()
+            .contains("failed to construct validation message for packet",));
+    }
+
+    #[test]
+    fn wrong_packet_dimension() {
+        let pha_tempdir = tempfile::TempDir::new().unwrap();
+        let pha_copy_tempdir = tempfile::TempDir::new().unwrap();
+        let facilitator_tempdir = tempfile::TempDir::new().unwrap();
+
+        let aggregation_name = "fake-aggregation-1".to_owned();
+        let date = NaiveDateTime::from_timestamp(1234567890, 654321);
+        let batch_uuid = Uuid::new_v4();
+
+        let packet_encryption_csr = default_packet_encryption_certificate_signing_request();
+
+        let mut pha_output = SampleOutput {
+            transport: SignableTransport {
+                transport: Box::new(LocalFileTransport::new(pha_tempdir.path().to_path_buf())),
+                batch_signing_key: default_ingestor_private_key(),
+            },
+            packet_encryption_public_key: PublicKey::from_base64(
+                &packet_encryption_csr.base64_public_key().unwrap(),
+            )
+            .unwrap(),
+            drop_nth_packet: None,
+        };
+
+        let mut facilitator_output = SampleOutput {
+            transport: SignableTransport {
+                transport: Box::new(LocalFileTransport::new(
+                    facilitator_tempdir.path().to_path_buf(),
+                )),
+                batch_signing_key: default_ingestor_private_key(),
+            },
+            packet_encryption_public_key: PublicKey::from_base64(
+                &packet_encryption_csr.base64_public_key().unwrap(),
+            )
+            .unwrap(),
+            drop_nth_packet: None,
+        };
+
+        generate_ingestion_sample(
+            &batch_uuid,
+            &aggregation_name,
+            &date,
+            10,
+            10,
+            0.11,
+            100,
+            100,
+            Some(5),
+            &mut pha_output,
+            &mut facilitator_output,
+        )
+        .expect("failed to generate sample");
+
+        let mut ingestor_pub_keys = HashMap::new();
+        ingestor_pub_keys.insert(
+            default_ingestor_private_key().identifier,
+            default_ingestor_public_key(),
+        );
+        let mut pha_ingest_transport = VerifiableAndDecryptableTransport {
+            transport: VerifiableTransport {
+                transport: Box::new(LocalFileTransport::new(pha_tempdir.path().to_path_buf())),
+                batch_signing_public_keys: ingestor_pub_keys.clone(),
+            },
+            packet_decryption_keys: vec![PrivateKey::from_base64(
+                DEFAULT_PACKET_ENCRYPTION_CERTIFICATE_SIGNING_REQUEST_PRIVATE_KEY,
+            )
+            .unwrap()],
+        };
+
+        let mut pha_peer_validate_transport = SignableTransport {
+            transport: Box::new(LocalFileTransport::new(pha_tempdir.path().to_path_buf())),
+            batch_signing_key: default_pha_signing_private_key(),
+        };
+
+        let mut pha_own_validate_transport = SignableTransport {
+            transport: Box::new(LocalFileTransport::new(
+                pha_copy_tempdir.path().to_path_buf(),
+            )),
+            batch_signing_key: default_pha_signing_private_key(),
+        };
+
+        let mut pha_ingestor = BatchIntaker::new(
+            "None",
+            &aggregation_name,
+            &batch_uuid,
+            &date,
+            &mut pha_ingest_transport,
+            &mut pha_peer_validate_transport,
+            &mut pha_own_validate_transport,
+            true,
+            false,
+        )
+        .unwrap();
+
+        let err = pha_ingestor.generate_validation_share(|| {}).unwrap_err();
+        assert_matches!(
+            err.downcast(),
+            Ok(ServerError::Serialize(
+                SerializeError::UnpackInputSizeMismatch
+            ))
+        );
     }
 }

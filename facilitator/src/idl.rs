@@ -4,7 +4,7 @@ use avro_rs::{
     types::{Record, Value},
     Reader, Schema, Writer,
 };
-use prio::{finite_field::Field, server::VerificationMessage};
+use prio::{field::Field32, server::VerificationMessage};
 use serde::{Deserialize, Serialize};
 use std::{
     convert::TryFrom,
@@ -745,14 +745,14 @@ impl Packet for ValidationPacket {
     }
 }
 
-impl TryFrom<&ValidationPacket> for VerificationMessage {
+impl TryFrom<&ValidationPacket> for VerificationMessage<Field32> {
     type Error = TryFromIntError;
 
     fn try_from(p: &ValidationPacket) -> Result<Self, Self::Error> {
         Ok(VerificationMessage {
-            f_r: Field::from(u32::try_from(p.f_r)?),
-            g_r: Field::from(u32::try_from(p.g_r)?),
-            h_r: Field::from(u32::try_from(p.h_r)?),
+            f_r: Field32::from(u32::try_from(p.f_r)?),
+            g_r: Field32::from(u32::try_from(p.g_r)?),
+            h_r: Field32::from(u32::try_from(p.h_r)?),
         })
     }
 }
@@ -774,10 +774,10 @@ pub struct SumPart {
 }
 
 impl SumPart {
-    pub fn sum(&self) -> Result<Vec<Field>, TryFromIntError> {
+    pub fn sum(&self) -> Result<Vec<Field32>, TryFromIntError> {
         self.sum
             .iter()
-            .map(|i| Ok(Field::from(u32::try_from(*i)?)))
+            .map(|i| Ok(Field32::from(u32::try_from(*i)?)))
             .collect::<Result<Vec<_>, _>>()
     }
 }

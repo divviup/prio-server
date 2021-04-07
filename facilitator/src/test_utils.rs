@@ -20,6 +20,7 @@ pub const DEFAULT_INGESTOR_PRIVATE_KEY: &str =
     "MIGHAgEAMBMGByqGSM49AgEGCCqGSM49AwEHBG0wawIBAQQggoa08rQR90Asvhy5b\
     WIgFBDeGaO8FnVEF3PVpNVmDGChRANCAAQ2mZfm4UC73PkWsYz3Uub6UTIAFQCPGxo\
     uP1O1PlmntOpfLYdvyZDCuenAzv1oCfyToolNArNjwo/+harNn1fs";
+
 // We have selected PEM armored, ASN.1 encoded PKIX SubjectPublicKeyInfo
 // structures as the means of exchanging public keys with peer servers. However,
 // no Rust crate that we have found gives us an easy way to obtain a PKIX SPKI
@@ -46,14 +47,26 @@ pub const DEFAULT_PHA_SUBJECT_PUBLIC_KEY_INFO: &str =
     "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEIKh3MccE1cdSF4pnEb+U0MmGYfko\
     QzOl2aiaJ6D9ZudqDdGiyA9YSUq3yia56nYJh5mk+HlzTX+AufoNR2bfrg==";
 
-pub const DEFAULT_PACKET_ENCRYPTION_CSR: &str = "MIHuMIGVAgEAMDMxMTAvBgNVBAMTKHVzLWN0LnByb\
-2QtdXMuY2VydGlmaWNhdGVzLmlzcmctcHJpby5vcmcwWTATBgcqhkjOPQIBBggqhkjOPQMBBwNCAA\
-Tp7xFbJGwHeMlAW8W0cQ57qCPIBT5NBr2jR8a+Z1/QzQJRtJvR2pqbaJhWKw7y9ogp/TmcsaX+o\
-P74+SSGwrEYoAAwCgYIKoZIzj0EAwIDSAAwRQIgLSekh4unn6fLv9O9K4Lr6VxGEpLSqFz259+Lrk\
-7lwOkCIQCOzNvxwSb+iVFxJkaxUnxGYp2J+/2OnDGsKpyWY/wdhg==";
+pub const DEFAULT_PACKET_ENCRYPTION_CSR: &str =
+    "MIHuMIGVAgEAMDMxMTAvBgNVBAMTKHVzLWN0LnByb2QtdXMuY2VydGlmaWNhdGVzL\
+    mlzcmctcHJpby5vcmcwWTATBgcqhkjOPQIBBggqhkjOPQMBBwNCAATp7xFbJGwHeMl\
+    AW8W0cQ57qCPIBT5NBr2jR8a+Z1/QzQJRtJvR2pqbaJhWKw7y9ogp/TmcsaX+oP74+\
+    SSGwrEYoAAwCgYIKoZIzj0EAwIDSAAwRQIgLSekh4unn6fLv9O9K4Lr6VxGEpLSqFz\
+    259+Lrk7lwOkCIQCOzNvxwSb+iVFxJkaxUnxGYp2J+/2OnDGsKpyWY/wdhg==";
 
-pub const DEFAULT_PACKET_ENCRYPTION_CERTIFICATE_SIGNING_REQUEST: &str = "-----BEGIN CERTIFICATE REQUEST-----\nMIHyMIGZAgEAMDcxNTAzBgNVBAMTLG5hcm5pYS5hbWlyLWZhY2lsLmNlcnRpZmlj\nYXRlcy5pc3JnLXByaW8ub3JnMFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEImPq\nnZJKMV0RUt4liCn/pzj1YEs8G13wvHNyqQ8HVmvjc7fj29K4vq5wkEXRK6QGD6UO\nAZ9LiBsRN9cniLwysaAAMAoGCCqGSM49BAMCA0gAMEUCIQCqjVbLAabHDELRztvB\nZyzYemEzJoMqTRObEjpryr5gsgIgYAx8mMlBkI/GVJqCHvyBzMwRaz1hoQHme56H\nvjjDWyI=\n-----END CERTIFICATE REQUEST-----\n";
-pub const DEFAULT_PACKET_ENCRYPTION_CERTIFICATE_SIGNING_REQUEST_PRIVATE_KEY: &str = "BCJj6p2SSjFdEVLeJYgp/6c49WBLPBtd8LxzcqkPB1Zr43O349vSuL6ucJBF0SukBg+lDgGfS4gbETfXJ4i8MrHwu3/ts6VHR1/U9EIkHEFnEDZQ30r3NVASbEeJjd0/Ug==";
+pub const DEFAULT_PACKET_ENCRYPTION_CERTIFICATE_SIGNING_REQUEST: &str =
+    "-----BEGIN CERTIFICATE REQUEST-----\n\
+    MIHyMIGZAgEAMDcxNTAzBgNVBAMTLG5hcm5pYS5hbWlyLWZhY2lsLmNlcnRpZmlj\n\
+    YXRlcy5pc3JnLXByaW8ub3JnMFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEImPq\n\
+    nZJKMV0RUt4liCn/pzj1YEs8G13wvHNyqQ8HVmvjc7fj29K4vq5wkEXRK6QGD6UO\n\
+    AZ9LiBsRN9cniLwysaAAMAoGCCqGSM49BAMCA0gAMEUCIQCqjVbLAabHDELRztvB\n\
+    ZyzYemEzJoMqTRObEjpryr5gsgIgYAx8mMlBkI/GVJqCHvyBzMwRaz1hoQHme56H\n\
+    vjjDWyI=\n\
+    -----END CERTIFICATE REQUEST-----\n";
+
+pub const DEFAULT_PACKET_ENCRYPTION_CERTIFICATE_SIGNING_REQUEST_PRIVATE_KEY: &str =
+    "BCJj6p2SSjFdEVLeJYgp/6c49WBLPBtd8LxzcqkPB1Zr43O349vSuL6ucJBF0SukB\
+    g+lDgGfS4gbETfXJ4i8MrHwu3/ts6VHR1/U9EIkHEFnEDZQ30r3NVASbEeJjd0/Ug==";
 
 pub fn default_packet_encryption_certificate_signing_request(
 ) -> PacketEncryptionCertificateSigningRequest {

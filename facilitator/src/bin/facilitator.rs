@@ -1129,6 +1129,7 @@ fn generate_sample(sub_matches: &ArgMatches) -> Result<(), anyhow::Error> {
         value_t!(sub_matches.value_of("epsilon"), f64)?,
         value_t!(sub_matches.value_of("batch-start-time"), i64)?,
         value_t!(sub_matches.value_of("batch-end-time"), i64)?,
+        None,
         &mut peer_transport,
         &mut facilitator_transport,
     )?;

@@ -9,7 +9,7 @@ use log::info;
 use prio::{
     client::Client,
     encrypt::PublicKey,
-    finite_field::{Field, MODULUS},
+    field::{Field32, FieldElement},
 };
 use rand::{thread_rng, Rng};
 use uuid::Uuid;
@@ -31,7 +31,7 @@ pub struct SampleOutput {
 pub struct ReferenceSum {
     /// The reference sum, covering those packets whose shares appear in both
     /// PHA and facilitator ingestion batches.
-    pub sum: Vec<Field>,
+    pub sum: Vec<Field32>,
     /// The number of contributions that went into the reference sum.
     pub contributions: usize,
     /// UUIDs of PHA packets that were dropped
@@ -44,6 +44,10 @@ fn drop_packet(count: usize, drop_nth_packet: Option<usize>) -> bool {
     matches!(drop_nth_packet, Some(nth) if count % nth == 0)
 }
 
+fn short_packet(count: usize, generate_short_packet: Option<usize>) -> bool {
+    matches!(generate_short_packet, Some(nth) if count == nth)
+}
+
 #[allow(clippy::too_many_arguments)] // Grandfathered in
 pub fn generate_ingestion_sample(
     batch_uuid: &Uuid,
@@ -54,6 +58,12 @@ pub fn generate_ingestion_sample(
     epsilon: f64,
     batch_start_time: i64,
     batch_end_time: i64,
+    // If this is Some(n), then when generating the nth packet,
+    // generate_ingestion_sample will generate data with a smaller dimension
+    // than the rest, such that on the server end, decryption will succeed, but
+    // deserialization and proof unpacking will fail. This is intended for
+    // testing.
+    generate_short_packet: Option<usize>,
     pha_output: &mut SampleOutput,
     facilitator_output: &mut SampleOutput,
 ) -> Result<ReferenceSum> {
@@ -87,6 +97,13 @@ pub fn generate_ingestion_sample(
     )
     .context("failed to create client (bad dimension parameter?)")?;
 
+    let mut short_packet_client = Client::new(
+        (dim - 1) as usize,
+        pha_output.packet_encryption_public_key.clone(),
+        facilitator_output.packet_encryption_public_key.clone(),
+    )
+    .context("failed to create client (bad dimension parameter?)")?;
+
     // Borrowing distinct parts of a struct like the SampleOutputs works, but
     // not under closures: https://github.com/rust-lang/rust/issues/53488
     // The workaround is to borrow or copy fields outside the closure.
@@ -94,7 +111,7 @@ pub fn generate_ingestion_sample(
     let drop_nth_pha_packet = pha_output.drop_nth_packet;
     let drop_nth_facilitator_packet = facilitator_output.drop_nth_packet;
 
-    let mut reference_sum = vec![Field::from(0); dim as usize];
+    let mut reference_sum = vec![Field32::from(0); dim as usize];
     let mut contributions = 0;
     let mut pha_dropped_packets = Vec::new();
     let mut facilitator_dropped_packets = Vec::new();
@@ -106,9 +123,15 @@ pub fn generate_ingestion_sample(
                 |mut facilitator_packet_writer| {
                     for count in 0..packet_count {
                         // Generate random bit vector
-                        let data = (0..dim)
-                            .map(|_| Field::from(thread_rng.gen_range(0..2)))
-                            .collect::<Vec<Field>>();
+                        let data_len = if short_packet(count, generate_short_packet) {
+                            dim - 1
+                        } else {
+                            dim
+                        };
+
+                        let data: Vec<Field32> = (0..data_len)
+                            .map(|_| Field32::from(thread_rng.gen_range(0..2)))
+                            .collect();
 
                         // If we are dropping the packet from either output, do
                         // not include it in the reference sum
@@ -121,7 +144,13 @@ pub fn generate_ingestion_sample(
                             contributions += 1;
                         }
 
-                        let (pha_share, facilitator_share) = client
+                        let curr_client = if short_packet(count, generate_short_packet) {
+                            &mut short_packet_client
+                        } else {
+                            &mut client
+                        };
+
+                        let (pha_share, facilitator_share) = curr_client
                             .encode_simple(&data)
                             .context("failed to encode data")?;
 
@@ -181,7 +210,7 @@ pub fn generate_ingestion_sample(
                     name: aggregation_name.to_owned(),
                     bins: dim,
                     epsilon,
-                    prime: MODULUS as i64,
+                    prime: Field32::modulus() as i64,
                     number_of_servers: 2,
                     hamming_weight: None,
                     batch_start_time,
@@ -203,7 +232,7 @@ pub fn generate_ingestion_sample(
             name: aggregation_name.to_owned(),
             bins: dim,
             epsilon,
-            prime: MODULUS as i64,
+            prime: Field32::modulus() as i64,
             number_of_servers: 2,
             hamming_weight: None,
             batch_start_time,
@@ -279,6 +308,7 @@ mod tests {
             0.11,
             100,
             100,
+            None,
             &mut pha_output,
             &mut facilitator_output,
         );
@@ -304,7 +334,7 @@ mod tests {
             assert_eq!(parsed_header.name, "fake-aggregation".to_owned());
             assert_eq!(parsed_header.bins, 10);
             assert_eq!(parsed_header.epsilon, 0.11);
-            assert_eq!(parsed_header.prime, MODULUS as i64);
+            assert_eq!(parsed_header.prime, Field32::modulus() as i64);
             assert_eq!(parsed_header.number_of_servers, 2);
             assert_eq!(parsed_header.hamming_weight, None);
             assert_eq!(parsed_header.batch_start_time, 100);
