@@ -42,24 +42,24 @@ groups:
         more than 95% of the time in the last 8 hours"
   - alert: intake_task_queue_growth
     expr: stackdriver_pubsub_subscription_pubsub_googleapis_com_subscription_num_undelivered_messages{subscription_id!~".*-dead-letter",subscription_id=~".*-intake"} > 0
-    for: 30m
+    for: 3h
     labels:
       severity: page
       environment: ${environment}
     annotations:
       summary: "PubSub subscription {{ $labels.subscription_id }} not emptying"
       description: "PubSub subscription {{ $labels.subscription_id }} in
-      environment ${environment} has had undelivered messages for 30 minutes"
+      environment ${environment} has had undelivered messages for 3 hours"
   - alert: aggregate_task_queue_growth
     expr: stackdriver_pubsub_subscription_pubsub_googleapis_com_subscription_num_undelivered_messages{subscription_id!~".*-dead-letter",subscription_id=~".*-aggregate"} > 0
-    for: 5h
+    for: 10h
     labels:
       severity: page
       environment: ${environment}
     annotations:
       summary: "PubSub subscription {{ $labels.subscription_id }} not emptying"
       description: "PubSub subscription {{ $labels.subscription_id }} in
-      environment ${environment} has had undelivered messages for 5 hours"
+      environment ${environment} has had undelivered messages for 10 hours"
   - alert: dead_letter_queue
     expr: stackdriver_pubsub_subscription_pubsub_googleapis_com_subscription_num_undelivered_messages{subscription_id=~".*-dead-letter"} > 0
     for: 5m
