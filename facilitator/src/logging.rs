@@ -1,7 +1,7 @@
 use env_logger::fmt::Formatter;
 use log::{Level, Record};
 use serde::Serialize;
-use std::io::Write;
+use std::{io::Write, thread};
 
 /// Severity maps `log::Level` to Google Cloud Platform's notion of Severity.
 /// https://cloud.google.com/logging/docs/reference/v2/rest/v2/LogEntry#LogSeverity
@@ -28,18 +28,26 @@ impl Severity {
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
-struct LogEntry {
+struct LogEntry<'a> {
     message: String,
     severity: Severity,
     time: String,
+    module_path: Option<&'a str>,
+    file: Option<&'a str>,
+    line: Option<u32>,
+    thread_id: String,
 }
 
-impl LogEntry {
-    fn from_record(fmt: &Formatter, record: &Record) -> LogEntry {
+impl<'a> LogEntry<'a> {
+    fn from_record(fmt: &Formatter, record: &'a Record) -> LogEntry<'a> {
         LogEntry {
             severity: Severity::from_log_level(record.level()),
             time: fmt.timestamp().to_string(),
             message: record.args().to_string(),
+            module_path: record.module_path(),
+            file: record.file(),
+            line: record.line(),
+            thread_id: format!("{:?}", thread::current().id()),
         }
     }
 }
