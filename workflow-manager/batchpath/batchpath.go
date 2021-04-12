@@ -122,8 +122,16 @@ func (b *BatchPath) isComplete() bool {
 	return b.metadata && b.avro && b.sig
 }
 
-// ReadyBatches gets a List from a list of files and infix
-func ReadyBatches(files []string, infix string) (List, error) {
+type ReadyBatchesResult struct {
+	Batches              List
+	IncompleteBatchCount int
+}
+
+// ReadyBatches scans the provided list of files looking for batches made up of
+// a header, packet file and a signature, corresponding to the given infix. On
+// success, returns the list of discovered batches and a count of batches
+// ignored because they were incomplete. Returns an error on failure.
+func ReadyBatches(files []string, infix string) (*ReadyBatchesResult, error) {
 	batches := make(map[string]*BatchPath)
 	for _, name := range files {
 		// Ignore task marker objects
@@ -152,6 +160,7 @@ func ReadyBatches(files []string, infix string) (List, error) {
 	}
 
 	var output []*BatchPath
+	incompleteBatchCount := 0
 	for _, v := range batches {
 		// A validation or ingestion batch is not ready unless all three files
 		// are present. This isn't true for sum parts, but workflow-manager
@@ -160,11 +169,12 @@ func ReadyBatches(files []string, infix string) (List, error) {
 			output = append(output, v)
 		} else {
 			log.Info().Msgf("ignoring incomplete batch %s", v)
+			incompleteBatchCount++
 		}
 	}
 	sort.Sort(List(output))
 
-	return output, nil
+	return &ReadyBatchesResult{Batches: output, IncompleteBatchCount: incompleteBatchCount}, nil
 }
 
 // basename returns s, with any type suffixes stripped off. The type suffixes are determined by
