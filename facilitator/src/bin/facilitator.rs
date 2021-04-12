@@ -82,6 +82,8 @@ trait AppArgumentAdder {
     fn add_use_bogus_packet_file_digest_argument(self) -> Self;
 
     fn add_common_sample_maker_arguments(self) -> Self;
+
+    fn add_permit_malformed_batch_argument(self) -> Self;
 }
 
 const SHARED_HELP: &str = "Storage arguments: Any flag ending in -input or -output can take an \
@@ -595,6 +597,27 @@ impl<'a, 'b> AppArgumentAdder for App<'a, 'b> {
             )
             .add_batch_signing_key_arguments(false)
     }
+
+    fn add_permit_malformed_batch_argument(self: App<'a, 'b>) -> App<'a, 'b> {
+        self.arg(
+            Arg::with_name("permit-malformed-batch")
+                .long("permit-malformed-batch")
+                .env("PERMIT_MALFORMED_BATCH")
+                .help("Permit intake or aggregation of malformed batches")
+                .long_help(
+                    "Whether to permit malformed batches. When malformed \
+                    batches are permitted, facilitator does not abort batch \
+                    intake or aggregation if an a batch with an invalid \
+                    signature or an incorrect packet file digest is \
+                    encountered. If the batch can still be parsed and is \
+                    otherwise valid, it will be processed.",
+                )
+                .value_name("BOOL")
+                .possible_value("true")
+                .possible_value("false")
+                .default_value("false"),
+        )
+    }
 }
 
 fn main() -> Result<(), anyhow::Error> {
@@ -691,6 +714,7 @@ fn main() -> Result<(), anyhow::Error> {
                 .add_storage_arguments(Entity::Peer, InOut::Output)
                 .add_storage_arguments(Entity::Own, InOut::Output)
                 .add_use_bogus_packet_file_digest_argument()
+                .add_permit_malformed_batch_argument()
         )
         .subcommand(
             SubCommand::with_name("aggregate")
@@ -764,6 +788,7 @@ fn main() -> Result<(), anyhow::Error> {
                 .add_storage_arguments(Entity::Portal, InOut::Output)
                 .add_packet_decryption_key_argument()
                 .add_batch_signing_key_arguments(true)
+                .add_permit_malformed_batch_argument()
         )
         .subcommand(
             SubCommand::with_name("lint-manifest")
@@ -828,6 +853,7 @@ fn main() -> Result<(), anyhow::Error> {
                 .add_task_queue_arguments()
                 .add_metrics_scrape_port_argument()
                 .add_use_bogus_packet_file_digest_argument()
+                .add_permit_malformed_batch_argument()
         )
         .subcommand(
             SubCommand::with_name("aggregate-worker")
@@ -849,6 +875,7 @@ fn main() -> Result<(), anyhow::Error> {
                 .add_batch_signing_key_arguments(true)
                 .add_task_queue_arguments()
                 .add_metrics_scrape_port_argument()
+                .add_permit_malformed_batch_argument()
         )
         .get_matches();
 
@@ -1165,6 +1192,7 @@ fn intake_batch<F: FnMut()>(
         &mut peer_validation_transport,
         &mut own_validation_transport,
         is_first_from_arg(sub_matches),
+        Some("true") == sub_matches.value_of("permit-malformed-batch"),
     )?;
 
     if let Some("true") = sub_matches.value_of("use-bogus-packet-file-digest") {
@@ -1380,6 +1408,7 @@ fn aggregate<F: FnMut()>(
         &start,
         &end,
         is_first,
+        Some("true") == sub_matches.value_of("permit-malformed-batch"),
         &mut intake_transport,
         &mut own_validation_transport,
         &mut peer_validation_transport,
@@ -1570,8 +1599,7 @@ fn lint_manifest(sub_matches: &ArgMatches) -> Result<(), anyhow::Error> {
 }
 
 fn is_first_from_arg(matches: &ArgMatches) -> bool {
-    let is_first = matches.value_of("is-first").unwrap();
-    is_first == "true"
+    Some("true") == matches.value_of("is-first")
 }
 
 fn public_key_map_from_arg(

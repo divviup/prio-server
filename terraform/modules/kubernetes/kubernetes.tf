@@ -206,7 +206,6 @@ resource "kubernetes_config_map" "intake_batch_config_map" {
     TASK_QUEUE_KIND                      = "gcp-pubsub"
     TASK_QUEUE_NAME                      = var.intake_queue
     GCP_PROJECT_ID                       = data.google_project.project.project_id
-
   }
 }
 
@@ -241,6 +240,7 @@ resource "kubernetes_config_map" "aggregate_config_map" {
     TASK_QUEUE_KIND                      = "gcp-pubsub"
     TASK_QUEUE_NAME                      = var.aggregate_queue
     GCP_PROJECT_ID                       = data.google_project.project.project_id
+    PERMIT_MALFORMED_BATCH               = "true"
   }
 }
 

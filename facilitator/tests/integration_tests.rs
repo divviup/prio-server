@@ -211,7 +211,8 @@ fn aggregation_including_invalid_batch() {
             &mut pha_ingest_transport,
             &mut pha_own_validation_transport,
             pha_peer_validation_transport,
-            true, // is_first
+            true,  // is_first
+            false, // permissive
         )
         .unwrap();
 
@@ -224,6 +225,7 @@ fn aggregation_including_invalid_batch() {
             &mut facilitator_own_validation_transport,
             &mut facilitator_to_pha_validation_transport,
             false, // is_first
+            false, // permissive
         )
         .unwrap();
 
@@ -305,7 +307,8 @@ fn aggregation_including_invalid_batch() {
         aggregation_name,
         &start_date,
         &end_date,
-        true, // is_first
+        true,  // is_first
+        false, // permissive
         &mut pha_ingest_transport,
         &mut pha_own_validation_transport,
         &mut pha_peer_validation_transport,
@@ -325,6 +328,7 @@ fn aggregation_including_invalid_batch() {
         &start_date,
         &end_date,
         false, // is_first
+        false, // permissive
         &mut facilitator_ingest_transport,
         &mut facilitator_own_validation_transport,
         &mut facilitator_peer_validation_transport,
@@ -476,6 +480,7 @@ fn end_to_end_test(drop_nth_pha: Option<usize>, drop_nth_facilitator: Option<usi
         &mut pha_peer_validate_signable_transport,
         &mut pha_own_validate_signable_transport,
         true,
+        false,
     )
     .unwrap();
     batch_intaker.set_callback_cadence(2);
@@ -497,6 +502,7 @@ fn end_to_end_test(drop_nth_pha: Option<usize>, drop_nth_facilitator: Option<usi
         &mut pha_peer_validate_signable_transport,
         &mut pha_own_validate_signable_transport,
         true,
+        false,
     )
     .unwrap()
     .generate_validation_share(|| {})
@@ -511,6 +517,7 @@ fn end_to_end_test(drop_nth_pha: Option<usize>, drop_nth_facilitator: Option<usi
         &mut facilitator_peer_validate_signable_transport,
         &mut facilitator_own_validate_signable_transport,
         false,
+        false,
     )
     .unwrap()
     .generate_validation_share(|| {})
@@ -524,6 +531,7 @@ fn end_to_end_test(drop_nth_pha: Option<usize>, drop_nth_facilitator: Option<usi
         &mut facilitator_ingest_transport,
         &mut facilitator_peer_validate_signable_transport,
         &mut facilitator_own_validate_signable_transport,
+        false,
         false,
     )
     .unwrap()
@@ -568,6 +576,7 @@ fn end_to_end_test(drop_nth_pha: Option<usize>, drop_nth_facilitator: Option<usi
         &start_date,
         &end_date,
         true,
+        false,
         &mut pha_ingest_transport,
         &mut pha_validate_verifiable_transport,
         &mut facilitator_validate_verifiable_transport,
@@ -594,6 +603,7 @@ fn end_to_end_test(drop_nth_pha: Option<usize>, drop_nth_facilitator: Option<usi
         &start_date,
         &end_date,
         false,
+        false,
         &mut facilitator_ingest_transport,
         &mut facilitator_validate_verifiable_transport,
         &mut pha_validate_verifiable_transport,
@@ -615,6 +625,7 @@ fn end_to_end_test(drop_nth_pha: Option<usize>, drop_nth_facilitator: Option<usi
                 true,
             ),
             &mut *pha_aggregation_transport.transport,
+            false,
         );
     let pha_sum_part = pha_aggregation_batch_reader.header(&pha_pub_keys).unwrap();
     assert_eq!(
@@ -633,7 +644,9 @@ fn end_to_end_test(drop_nth_pha: Option<usize>, drop_nth_facilitator: Option<usi
                 false,
             ),
             &mut *facilitator_aggregation_transport.transport,
+            false, // permissive
         );
+
     let facilitator_sum_part = facilitator_aggregation_batch_reader
         .header(&facilitator_pub_keys)
         .unwrap();

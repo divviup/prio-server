@@ -41,12 +41,14 @@ impl<'a> BatchIntaker<'a> {
         own_validation_transport: &'a mut SignableTransport,
         peer_validation_transport: &'a mut SignableTransport,
         is_first: bool,
+        permit_malformed_batch: bool,
     ) -> Result<BatchIntaker<'a>> {
         Ok(BatchIntaker {
             trace_id,
             intake_batch: BatchReader::new(
                 Batch::new_ingestion(aggregation_name, batch_id, date),
                 &mut *ingestion_transport.transport.transport,
+                permit_malformed_batch,
             ),
             intake_public_keys: &ingestion_transport.transport.batch_signing_public_keys,
             packet_decryption_keys: &ingestion_transport.packet_decryption_keys,
@@ -174,7 +176,7 @@ impl<'a> BatchIntaker<'a> {
                     break;
                 }
                 if !did_create_validation_packet {
-                    return Err(anyhow!("failed to construct validation message"));
+                    return Err(anyhow!("failed to construct validation message for packet {} (likely packet decryption failure)", packet.uuid));
                 }
                 processed_packets += 1;
                 if processed_packets % callback_cadence == 0 {
@@ -356,6 +358,7 @@ mod tests {
             &mut pha_peer_validate_transport,
             &mut pha_own_validate_transport,
             true,
+            false,
         )
         .unwrap();
 
@@ -371,6 +374,7 @@ mod tests {
             &mut facilitator_ingest_transport,
             &mut facilitator_peer_validate_transport,
             &mut facilitator_own_validate_transport,
+            false,
             false,
         )
         .unwrap();

@@ -1,6 +1,7 @@
 use crate::{
     hex_dump,
     idl::{BatchSignature, Header, Packet},
+    metrics::BatchReaderMetricsCollector,
     transport::{Transport, TransportWriter},
     DigestWriter, SidecarWriter, DATE_FORMAT,
 };
@@ -110,6 +111,8 @@ pub struct BatchReader<'a, H, P> {
     batch: Batch,
     transport: &'a mut dyn Transport,
     packet_schema: Schema,
+    permit_malformed_batch: bool,
+    metrics_collector: Option<&'a BatchReaderMetricsCollector>,
 
     // These next two fields are not real and are used because not using H and P
     // in the struct definition is an error.
@@ -118,14 +121,27 @@ pub struct BatchReader<'a, H, P> {
 }
 
 impl<'a, H: Header, P: Packet> BatchReader<'a, H, P> {
-    pub fn new(batch: Batch, transport: &'a mut dyn Transport) -> Self {
+    /// Create a new BatchReader which will fetch the specified batch from the
+    /// provided transport. If permissive is true, then invalid signatures or
+    /// packet file digest mismatches will be ignored.
+    pub fn new(
+        batch: Batch,
+        transport: &'a mut dyn Transport,
+        permit_malformed_batch: bool,
+    ) -> Self {
         BatchReader {
             batch,
             transport,
             packet_schema: P::schema(),
+            permit_malformed_batch,
+            metrics_collector: None,
             phantom_header: PhantomData,
             phantom_packet: PhantomData,
         }
+    }
+
+    pub fn set_metrics_collector(&mut self, collector: &'a BatchReaderMetricsCollector) {
+        self.metrics_collector = Some(collector);
     }
 
     pub fn path(&self) -> String {
@@ -149,17 +165,31 @@ impl<'a, H: Header, P: Packet> BatchReader<'a, H, P> {
             .read_to_end(&mut header_buf)
             .context("failed to read header from transport")?;
 
-        public_keys
+        let sig_valid = public_keys
             .get(&signature.key_identifier)
             .context(format!(
-                "key identifier {} not present in key map",
+                "key identifier {} not present in key map {:?}",
                 signature.key_identifier,
+                public_keys.keys(),
             ))?
-            .verify(&header_buf, &signature.batch_header_signature)
-            .context(format!(
-                "invalid signature on header with key {}",
-                signature.key_identifier,
-            ))?;
+            .verify(&header_buf, &signature.batch_header_signature);
+        if let Err(e) = sig_valid {
+            let message = format!(
+                "invalid signature on header with key {}: {:?}",
+                signature.key_identifier, e
+            );
+            if let Some(collector) = self.metrics_collector {
+                collector
+                    .invalid_validation_batches
+                    .with_label_values(&["header"])
+                    .inc();
+            }
+            if self.permit_malformed_batch {
+                log::warn!("{}", message);
+            } else {
+                return Err(anyhow!("{}", message));
+            }
+        }
         Ok(H::read(Cursor::new(header_buf))?)
     }
 
@@ -192,11 +222,22 @@ impl<'a, H: Header, P: Packet> BatchReader<'a, H, P> {
         // ... then verify the digest over it ...
         let packet_file_digest = sidecar_writer.sidecar.finish();
         if header.packet_file_digest().as_slice() != packet_file_digest.as_ref() {
-            return Err(anyhow!(
+            let message = format!(
                 "packet file digest in header {} does not match actual packet file digest {}",
                 hex_dump(header.packet_file_digest()),
                 hex_dump(packet_file_digest.as_ref())
-            ));
+            );
+            if let Some(collector) = self.metrics_collector {
+                collector
+                    .invalid_validation_batches
+                    .with_label_values(&["packet_file"])
+                    .inc();
+            }
+            if self.permit_malformed_batch {
+                log::warn!("{}", message);
+            } else {
+                return Err(anyhow!("{}", message));
+            }
         }
 
         // pop() should always succeed here because sidecar_writers.writers is
@@ -492,6 +533,7 @@ mod tests {
             BatchReader::new(
                 Batch::new_ingestion(&aggregation_name, &batch_id, &date),
                 &mut read_transport,
+                false,
             );
         let base_path = format!(
             "{}/{}/{}",
@@ -561,6 +603,7 @@ mod tests {
             BatchReader::new(
                 Batch::new_validation(&aggregation_name, &batch_id, &date, is_first),
                 &mut read_transport,
+                false,
             );
         let base_path = format!(
             "{}/{}/{}",
@@ -642,6 +685,7 @@ mod tests {
             BatchReader::new(
                 Batch::new_sum(instance_name, &aggregation_name, &start, &end, is_first),
                 &mut read_transport,
+                false,
             );
         let batch_path = format!(
             "{}/{}/{}-{}",
@@ -681,5 +725,115 @@ mod tests {
             &read_key,
             keys_match,
         )
+    }
+
+    #[test]
+    fn permit_malformed_batch() {
+        let tempdir = tempfile::TempDir::new().unwrap();
+        let mut write_transport = LocalFileTransport::new(tempdir.path().to_path_buf());
+        let mut read_transport = LocalFileTransport::new(tempdir.path().to_path_buf());
+
+        let instance_name = "fake-instance";
+        let aggregation_name = "fake-aggregation";
+        let batch_id = Uuid::new_v4();
+        let start = NaiveDateTime::from_timestamp(1234567890, 654321);
+        let end = NaiveDateTime::from_timestamp(2234567890, 654321);
+
+        let mut batch_writer: BatchWriter<'_, IngestionHeader, IngestionDataSharePacket> =
+            BatchWriter::new(
+                Batch::new_sum(&instance_name, &aggregation_name, &start, &end, true),
+                &mut write_transport,
+            );
+        let mut batch_reader: BatchReader<'_, IngestionHeader, IngestionDataSharePacket> =
+            BatchReader::new(
+                Batch::new_sum(instance_name, &aggregation_name, &start, &end, true),
+                &mut read_transport,
+                true, // permit_malformed_batch
+            );
+
+        let metrics_collector = BatchReaderMetricsCollector::new("test").unwrap();
+        batch_reader.set_metrics_collector(&metrics_collector);
+
+        let packet = IngestionDataSharePacket {
+            uuid: Uuid::new_v4(),
+            encrypted_payload: vec![0u8, 1u8, 2u8, 3u8],
+            encryption_key_id: Some("fake-key-1".to_owned()),
+            r_pit: 1,
+            version_configuration: Some("config-1".to_owned()),
+            device_nonce: None,
+        };
+
+        batch_writer
+            .packet_file_writer(|mut packet_writer| {
+                packet.write(&mut packet_writer)?;
+                Ok(())
+            })
+            .expect("failed to write packets");
+
+        let header = IngestionHeader {
+            batch_uuid: batch_id,
+            name: aggregation_name.to_string(),
+            bins: 2,
+            epsilon: 1.601,
+            prime: 17,
+            number_of_servers: 2,
+            hamming_weight: None,
+            batch_start_time: 789456123,
+            batch_end_time: 789456321,
+            // Use bogus packet file digest
+            packet_file_digest: vec![0u8, 1u8, 2u8, 3u8, 4u8, 5u8, 6u8, 7u8, 8u8],
+        };
+
+        let header_signature = batch_writer
+            .put_header(&header, &default_ingestor_private_key().key)
+            .expect("failed to write header");
+
+        let res = batch_writer.put_signature(&header_signature, "key-identifier");
+        assert!(res.is_ok(), "failed to put signature: {:?}", res.err());
+
+        // Verify with different key than we signed with
+        let mut key_map = HashMap::new();
+        key_map.insert(
+            "key-identifier".to_owned(),
+            default_facilitator_signing_public_key().clone(),
+        );
+
+        assert_eq!(
+            metrics_collector
+                .invalid_validation_batches
+                .with_label_values(&["header"])
+                .get(),
+            0
+        );
+
+        assert_eq!(
+            metrics_collector
+                .invalid_validation_batches
+                .with_label_values(&["packet_file"])
+                .get(),
+            0
+        );
+
+        let header_again = batch_reader.header(&key_map).unwrap();
+
+        assert_eq!(
+            metrics_collector
+                .invalid_validation_batches
+                .with_label_values(&["header"])
+                .get(),
+            1
+        );
+
+        batch_reader
+            .packet_file_reader(&header_again)
+            .expect("failed to get packet file reader");
+
+        assert_eq!(
+            metrics_collector
+                .invalid_validation_batches
+                .with_label_values(&["packet_file"])
+                .get(),
+            1
+        );
     }
 }
