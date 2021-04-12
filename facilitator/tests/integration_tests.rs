@@ -105,6 +105,7 @@ fn aggregation_including_invalid_batch() {
             0.11,
             100,
             100,
+            None,
             &mut pha_output,
             &mut facilitator_output,
         )
@@ -396,6 +397,7 @@ fn end_to_end_test(drop_nth_pha: Option<usize>, drop_nth_facilitator: Option<usi
         0.11,
         100,
         100,
+        None,
         &mut pha_output,
         &mut facilitator_output,
     )
@@ -410,6 +412,7 @@ fn end_to_end_test(drop_nth_pha: Option<usize>, drop_nth_facilitator: Option<usi
         0.11,
         100,
         100,
+        None,
         &mut pha_output,
         &mut facilitator_output,
     )

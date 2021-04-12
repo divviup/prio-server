@@ -12,7 +12,10 @@ use anyhow::{anyhow, Context, Result};
 use avro_rs::Reader;
 use chrono::NaiveDateTime;
 use log::info;
-use prio::server::{Server, VerificationMessage};
+use prio::{
+    field::Field32,
+    server::{Server, VerificationMessage},
+};
 use std::{
     collections::{HashMap, HashSet},
     convert::TryFrom,
@@ -107,12 +110,12 @@ impl<'a> BatchAggregator<'a> {
         // is optional. Instead we try all the keys we have available until one
         // works.
         // https://github.com/abetterinternet/prio-server/issues/73
-        let mut servers = self
+        let mut servers: Vec<Server<Field32>> = self
             .ingestion_transport
             .packet_decryption_keys
             .iter()
             .map(|k| Server::new(ingestion_header.bins as usize, self.is_first, k.clone()))
-            .collect::<Vec<Server>>();
+            .collect();
 
         for batch_id in batch_ids {
             self.aggregate_share(&batch_id.0, &batch_id.1, &mut servers, &mut invalid_uuids)?;
@@ -143,7 +146,9 @@ impl<'a> BatchAggregator<'a> {
             self.ingestion_transport.packet_decryption_keys[0].clone(),
         );
         for server in servers.iter() {
-            accumulator_server.merge_total_shares(server.total_shares());
+            accumulator_server
+                .merge_total_shares(server.total_shares())
+                .context("failed to accumulate shares")?;
         }
 
         let sum = accumulator_server
@@ -199,7 +204,7 @@ impl<'a> BatchAggregator<'a> {
         &mut self,
         batch_id: &Uuid,
         batch_date: &NaiveDateTime,
-        servers: &mut Vec<Server>,
+        servers: &mut Vec<Server<Field32>>,
         invalid_uuids: &mut Vec<Uuid>,
     ) -> Result<()> {
         let mut ingestion_batch: BatchReader<'_, IngestionHeader, IngestionDataSharePacket> =
