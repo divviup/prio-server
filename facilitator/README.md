@@ -34,11 +34,11 @@ To use the PubSub task queue, pass `--task-queue-kind=gcp-pubsub` and see the pr
 
 Google provides a [PubSub emulator](https://cloud.google.com/pubsub/docs/emulator) useful for local testing. See the emulator documentation for information getting it set up, then simply set the `--pubsub-api-endpoint` argument to the emulator's address.
 
-### [AWS SNS](https://docs.aws.amazon.com/sns/latest/dg/welcome.html) (**EXPERIMENTAL SUPPORT**)
+### [AWS SNS](https://docs.aws.amazon.com/sns/latest/dg/welcome.html)
 
-Implemented in `SqsTaskQueue` in `src/task/sqs.rs`. `facilitator` expects that an SQS queue already exists and is subscribed to an SNS topic to which a `workflow-manager` instance is publishing tasks. `facilitator` can share a single SQS queue with multiple instances of `facilitator`.
+Implemented in `SqsTaskQueue` in `src/task/sqs.rs`. `facilitator` expects that an SQS queue already exists and is subscribed to an SNS topic to which a `workflow-manager` instance is publishing tasks. `facilitator` can share a single SQS queue with multiple instances of `facilitator`. `facilitator` does not expect messages wrapped in metadata, and so [raw message delivery](https://docs.aws.amazon.com/sns/latest/dg/sns-large-payload-raw-message-delivery.html) should be enabled when configuring SQS queues.
 
-AWS SNS/SQS support is experimental and has not been validated. To use it, pass `--task-queue-kind=aws-sqs` and see the program's usage for other required parameters.
+To use it, pass `--task-queue-kind=aws-sqs` and see the program's usage for other required parameters.
 
 ### Implementing new task queues
 

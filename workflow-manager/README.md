@@ -18,11 +18,11 @@ Google provides a [PubSub emulator](https://cloud.google.com/pubsub/docs/emulato
 
 `workflow-manager` expects the topics to which it writes messages to already have been created in Terraform, and `gcloud` cannot be used to interact with the emulator, so `workflow-manager` takes the `--create-pubsub-topics` flag. When set, `workflow-manager` will create topics with the names provided to the `--intake-tasks-topic` and `--aggregate-tasks-topic` parameters before doing any work.
 
-### [AWS SNS](https://docs.aws.amazon.com/sns/latest/dg/welcome.html) (**EXPERIMENTAL SUPPORT**)
+### [AWS SNS](https://docs.aws.amazon.com/sns/latest/dg/welcome.html)
 
-Implemented in `AWSSNSEnqueuer` in `task/task.go`. The model here is that each `workflow-manager` instance uses distinct SNS topics for intake and aggregation tasks, so at a higher level, there are distinct SNS topics for each (locality, ingestor, task) tuple. It is assumed that  There is one SQS queue for each topic, shared among pools of `intake-batch-worker` and `aggregate-worker` instances of `facilitator`. `workflow-manager` assumes that SNS topics and SQS queues with appropriate names, permissions and configurations already exist.
+Implemented in `AWSSNSEnqueuer` in `task/task.go`. The model here is that each `workflow-manager` instance uses distinct SNS topics for intake and aggregation tasks, so at a higher level, there are distinct SNS topics for each (locality, ingestor, task) tuple. It is assumed that there is one SQS queue for each topic, shared among pools of `intake-batch-worker` and `aggregate-worker` instances of `facilitator`. `workflow-manager` assumes that SNS topics and SQS queues with appropriate names, permissions and configurations already exist. `facilitator` does not expect messages wrapped in SQS metadata, and so [raw message delivery](https://docs.aws.amazon.com/sns/latest/dg/sns-large-payload-raw-message-delivery.html) should be enabled on SQS queues.
 
-AWS SNS/SQS support is experimental and has not been validated. To use it, invoke `workflow-manager` with `--task-queue-kind=aws-sns`, and provide other `--aws-sns-` parameters as appropriate for your deployment.
+To use it, invoke `workflow-manager` with `--task-queue-kind=aws-sns`, and provide other `--aws-sns-` parameters as appropriate for your deployment.
 
 ### Implementing new task queues
 
