@@ -1,9 +1,9 @@
 use anyhow::{Context, Result};
 use http::Response;
-use log::{error, info};
 use prometheus::{
     register_int_counter, register_int_counter_vec, Encoder, IntCounter, IntCounterVec, TextEncoder,
 };
+use slog_scope::{error, info};
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use tokio::runtime::Runtime;
 use warp::Filter;

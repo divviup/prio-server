@@ -1,8 +1,8 @@
 use anyhow::{anyhow, Context, Result};
 use chrono::{prelude::Utc, DateTime, Duration};
 use jsonwebtoken::{encode, Algorithm, EncodingKey, Header};
-use log::debug;
 use serde::{Deserialize, Serialize};
+use slog_scope::debug;
 use std::{fmt, io::Read};
 use ureq::{Agent, Response};
 use url::Url;

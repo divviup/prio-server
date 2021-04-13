@@ -4,7 +4,6 @@ use crate::{
 };
 use anyhow::{Context, Result};
 use async_trait::async_trait;
-use log::{debug, info};
 use rusoto_core::{
     credential::{
         AutoRefreshingProvider, AwsCredentials, CredentialsError, DefaultCredentialsProvider,
@@ -14,6 +13,7 @@ use rusoto_core::{
 };
 use rusoto_mock::MockCredentialsProvider;
 use rusoto_sts::WebIdentityProvider;
+use slog_scope::{debug, info};
 use std::{
     boxed::Box,
     convert::From,

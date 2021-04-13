@@ -7,13 +7,13 @@ use crate::{
 };
 use anyhow::{anyhow, ensure, Context, Result};
 use chrono::NaiveDateTime;
-use log::{debug, info};
 use prio::{
     encrypt::{PrivateKey, PublicKey},
     field::Field32,
     server::{Server, ServerError},
 };
 use ring::signature::UnparsedPublicKey;
+use slog_scope::{debug, info};
 use std::{collections::HashMap, convert::TryFrom, iter::Iterator};
 use uuid::Uuid;
 

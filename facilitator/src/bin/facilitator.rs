@@ -2,12 +2,12 @@ use anyhow::{anyhow, Context, Result};
 use chrono::{prelude::Utc, NaiveDateTime};
 use clap::{value_t, App, Arg, ArgGroup, ArgMatches, SubCommand};
 use kube::api::Resource;
-use log::{debug, error, info};
 use prio::encrypt::{PrivateKey, PublicKey};
 use ring::signature::{
     EcdsaKeyPair, KeyPair, UnparsedPublicKey, ECDSA_P256_SHA256_ASN1,
     ECDSA_P256_SHA256_ASN1_SIGNING,
 };
+use slog::{error, info, Logger};
 use std::{
     collections::HashMap, fs, fs::File, io::Read, str::FromStr, time::Duration, time::Instant,
 };
@@ -19,7 +19,7 @@ use facilitator::{
     config::{leak_string, Entity, Identity, InOut, ManifestKind, StoragePath, TaskQueueKind},
     intake::BatchIntaker,
     kubernetes::KubernetesClient,
-    logging::setup_env_logging,
+    logging::{setup_logging, LoggingConfiguration, EVENT_KEY_TASK_HANDLE, EVENT_KEY_TRACE_ID},
     manifest::{
         DataShareProcessorGlobalManifest, IngestionServerManifest, PortalServerGlobalManifest,
         SpecificManifest,
@@ -616,14 +616,6 @@ impl<'a, 'b> AppArgumentAdder for App<'a, 'b> {
 }
 
 fn main() -> Result<(), anyhow::Error> {
-    setup_env_logging();
-    let args: Vec<String> = std::env::args().collect();
-    info!(
-        "starting {} version {}. Args: [{}]",
-        args[0],
-        option_env!("BUILD_INFO").unwrap_or("(BUILD_INFO unavailable)"),
-        args[1..].join(" "),
-    );
     let matches = App::new("facilitator")
         .about("Prio data share processor")
         .arg(
@@ -631,6 +623,16 @@ fn main() -> Result<(), anyhow::Error> {
                 .long("pushgateway")
                 .env("PUSHGATEWAY")
                 .help("Address of a Prometheus pushgateway to push metrics to, in host:port form"),
+        )
+        .arg(
+            Arg::with_name("force-json-log-output")
+                .long("force-json-log-output")
+                .env("FORCE_JSON_LOG_OUTPUT")
+                .help("Force log output to JSON format")
+                .value_name("BOOL")
+                .possible_value("true")
+                .possible_value("false")
+                .default_value("false"),
         )
         .subcommand(
             SubCommand::with_name("generate-ingestion-sample")
@@ -864,6 +866,24 @@ fn main() -> Result<(), anyhow::Error> {
         )
         .get_matches();
 
+    let force_json_log_output = value_t!(matches.value_of("force-json-log-output"), bool)?;
+
+    // We must keep _scope_logger_guard live or the global logger will be
+    // dropped and messages from modules that don't use their own slog::Logger
+    // will be discarded.
+    let (root_logger, _scope_logger_guard) = setup_logging(&LoggingConfiguration {
+        force_json_output: force_json_log_output,
+        version_string: option_env!("BUILD_INFO").unwrap_or("(BUILD_INFO unavailable)"),
+        log_level: option_env!("RUST_LOG").unwrap_or("INFO"),
+    })?;
+    let args: Vec<String> = std::env::args().collect();
+    info!(
+        root_logger,
+        "starting {}. Args: [{}]",
+        args[0],
+        args[1..].join(" "),
+    );
+
     let result = match matches.subcommand() {
         // The configuration of the Args above should guarantee that the
         // various parameters are present and valid, so it is safe to use
@@ -874,8 +894,8 @@ fn main() -> Result<(), anyhow::Error> {
         }
         ("intake-batch", Some(sub_matches)) => intake_batch_subcommand(sub_matches),
         ("intake-batch-worker", Some(sub_matches)) => intake_batch_worker(sub_matches),
-        ("aggregate", Some(sub_matches)) => aggregate_subcommand(sub_matches),
-        ("aggregate-worker", Some(sub_matches)) => aggregate_worker(sub_matches),
+        ("aggregate", Some(sub_matches)) => aggregate_subcommand(sub_matches, &root_logger),
+        ("aggregate-worker", Some(sub_matches)) => aggregate_worker(sub_matches, &root_logger),
         ("lint-manifest", Some(sub_matches)) => lint_manifest(sub_matches),
         (_, _) => Ok(()),
     };
@@ -887,12 +907,12 @@ fn generate_sample_worker(sub_matches: &ArgMatches) -> Result<(), anyhow::Error>
     let interval = value_t!(sub_matches.value_of("generation-interval"), u64)?;
 
     loop {
-        info!("Starting a sample generation job.");
+        slog_scope::info!("Starting a sample generation job.");
         let result = generate_sample(&sub_matches);
 
         match result {
-            Ok(()) => info!("\tSuccess"),
-            Err(e) => error!("\tError: {:?}", e),
+            Ok(()) => slog_scope::info!("\tSuccess"),
+            Err(e) => slog_scope::error!("\tError: {:?}", e),
         }
         std::thread::sleep(Duration::from_secs(interval))
     }
@@ -940,9 +960,10 @@ fn get_ecies_public_key(
                 let public_key = PublicKey::from_base64(&public_key)
                     .context("unable to create public key from base64 ecies key")?;
 
-                debug!(
+                slog_scope::debug!(
                     "Picked packet decryption key with ID: {} - public key {:?}",
-                    key_identifier, &public_key
+                    key_identifier,
+                    &public_key
                 );
 
                 Ok(public_key)
@@ -1049,8 +1070,8 @@ fn generate_sample(sub_matches: &ArgMatches) -> Result<(), anyhow::Error> {
         ingestor_name,
         locality_name,
     )?;
-    info!(
-        "peer-idenity: {}, peer_output_path: {}",
+    slog_scope::info!(
+        "peer-identity: {}, peer_output_path: {}",
         &peer_identity.as_deref().unwrap_or("None"),
         &peer_output_path
     );
@@ -1086,8 +1107,8 @@ fn generate_sample(sub_matches: &ArgMatches) -> Result<(), anyhow::Error> {
         locality_name,
     )?;
 
-    info!(
-        "facilitator-idenity: {}, facilitator_output_path: {}",
+    slog_scope::info!(
+        "facilitator-identity: {}, facilitator_output_path: {}",
         &facilitator_identity.as_deref().unwrap_or("None"),
         &faciliator_output
     );
@@ -1247,7 +1268,7 @@ fn intake_batch_worker(sub_matches: &ArgMatches) -> Result<(), anyhow::Error> {
 
     loop {
         if let Some(task_handle) = queue.dequeue()? {
-            info!("dequeued task: {}", task_handle);
+            slog_scope::info!("dequeued task: {}", task_handle);
             let task_start = Instant::now();
 
             let trace_id = task_handle
@@ -1267,7 +1288,7 @@ fn intake_batch_worker(sub_matches: &ArgMatches) -> Result<(), anyhow::Error> {
                     if let Err(e) =
                         queue.maybe_extend_task_deadline(&task_handle, &task_start.elapsed())
                     {
-                        error!("{}", e);
+                        slog_scope::error!("{}", e);
                     }
                 },
             );
@@ -1275,7 +1296,7 @@ fn intake_batch_worker(sub_matches: &ArgMatches) -> Result<(), anyhow::Error> {
             match result {
                 Ok(_) => queue.acknowledge_task(task_handle)?,
                 Err(err) => {
-                    error!("error while processing task {}: {:?}", task_handle, err);
+                    slog_scope::error!("error while processing task {}: {:?}", task_handle, err);
                     queue.nacknowledge_task(task_handle)?;
                 }
             }
@@ -1285,7 +1306,7 @@ fn intake_batch_worker(sub_matches: &ArgMatches) -> Result<(), anyhow::Error> {
     // unreachable
 }
 
-fn aggregate<F: FnMut()>(
+fn aggregate<F>(
     trace_id: &str,
     aggregation_id: &str,
     start: &str,
@@ -1293,8 +1314,12 @@ fn aggregate<F: FnMut()>(
     batches: Vec<(&str, &str)>,
     sub_matches: &ArgMatches,
     metrics_collector: Option<&AggregateMetricsCollector>,
+    logger: &Logger,
     callback: F,
-) -> Result<()> {
+) -> Result<()>
+where
+    F: FnMut(&Logger),
+{
     let instance_name = sub_matches.value_of("instance-name").unwrap();
     let is_first = is_first_from_arg(sub_matches);
 
@@ -1418,6 +1443,7 @@ fn aggregate<F: FnMut()>(
         &mut own_validation_transport,
         &mut peer_validation_transport,
         &mut aggregation_transport,
+        logger,
     )?;
 
     if let Some(collector) = metrics_collector {
@@ -1443,7 +1469,10 @@ fn aggregate<F: FnMut()>(
     result
 }
 
-fn aggregate_subcommand(sub_matches: &ArgMatches) -> Result<(), anyhow::Error> {
+fn aggregate_subcommand(
+    sub_matches: &ArgMatches,
+    parent_logger: &Logger,
+) -> Result<(), anyhow::Error> {
     let batch_ids: Vec<&str> = sub_matches
         .values_of("batch-id")
         .context("no batch-id")?
@@ -1468,11 +1497,12 @@ fn aggregate_subcommand(sub_matches: &ArgMatches) -> Result<(), anyhow::Error> {
         batch_info,
         sub_matches,
         None,
-        || {}, // no-op callback
+        parent_logger,
+        |_| {}, // no-op callback
     )
 }
 
-fn aggregate_worker(sub_matches: &ArgMatches) -> Result<(), anyhow::Error> {
+fn aggregate_worker(sub_matches: &ArgMatches, parent_logger: &Logger) -> Result<(), anyhow::Error> {
     let mut queue = aggregation_task_queue_from_args(sub_matches)?;
     let metrics_collector = AggregateMetricsCollector::new()?;
     let scrape_port = value_t!(sub_matches.value_of("metrics-scrape-port"), u16)?;
@@ -1480,7 +1510,10 @@ fn aggregate_worker(sub_matches: &ArgMatches) -> Result<(), anyhow::Error> {
 
     loop {
         if let Some(task_handle) = queue.dequeue()? {
-            info!("dequeued task: {}", task_handle);
+            info!(
+                parent_logger, "dequeued task";
+                EVENT_KEY_TASK_HANDLE => format!("{}", task_handle)
+            );
             let task_start = Instant::now();
 
             let batches: Vec<(&str, &str)> = task_handle
@@ -1504,11 +1537,12 @@ fn aggregate_worker(sub_matches: &ArgMatches) -> Result<(), anyhow::Error> {
                 batches,
                 sub_matches,
                 Some(&metrics_collector),
-                || {
+                parent_logger,
+                |logger| {
                     if let Err(e) =
                         queue.maybe_extend_task_deadline(&task_handle, &task_start.elapsed())
                     {
-                        error!("{}", e);
+                        error!(logger, "{}", e);
                     }
                 },
             );
@@ -1516,7 +1550,11 @@ fn aggregate_worker(sub_matches: &ArgMatches) -> Result<(), anyhow::Error> {
             match result {
                 Ok(_) => queue.acknowledge_task(task_handle)?,
                 Err(err) => {
-                    error!("error while processing task {}: {:?}", task_handle, err);
+                    error!(
+                        parent_logger, "error while processing task: {:?}", err;
+                        EVENT_KEY_TRACE_ID => trace_id,
+                        EVENT_KEY_TASK_HANDLE => format!("{}", task_handle)
+                    );
                     queue.nacknowledge_task(task_handle)?;
                 }
             }
