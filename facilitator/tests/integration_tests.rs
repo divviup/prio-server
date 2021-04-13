@@ -4,7 +4,7 @@ use facilitator::{
     batch::{Batch, BatchReader},
     idl::{InvalidPacket, Packet, SumPart},
     intake::BatchIntaker,
-    sample::{generate_ingestion_sample, SampleOutput},
+    sample::{SampleGenerator, SampleOutput},
     test_utils::{
         default_facilitator_packet_encryption_public_key, default_facilitator_signing_private_key,
         default_facilitator_signing_public_key, default_ingestor_private_key,
@@ -95,21 +95,20 @@ fn aggregation_including_invalid_batch() {
 
     let mut reference_sums = vec![];
 
-    for (batch_uuid, _) in &batch_uuids_and_dates {
-        let reference_sum = generate_ingestion_sample(
-            batch_uuid,
-            aggregation_name,
-            &date,
-            10,
-            100,
-            0.11,
-            100,
-            100,
-            None,
-            &mut pha_output,
-            &mut facilitator_output,
-        )
-        .unwrap();
+    let mut sample_generator = SampleGenerator::new(
+        aggregation_name,
+        10,
+        0.11,
+        100,
+        100,
+        &mut pha_output,
+        &mut facilitator_output,
+    );
+
+    for (batch_uuid, date) in &batch_uuids_and_dates {
+        let reference_sum = sample_generator
+            .generate_ingestion_sample(batch_uuid, date, 100)
+            .unwrap();
 
         reference_sums.push(reference_sum);
     }
@@ -388,35 +387,23 @@ fn end_to_end_test(drop_nth_pha: Option<usize>, drop_nth_facilitator: Option<usi
 
     let first_batch_packet_count = 16;
 
-    let batch_1_reference_sum = generate_ingestion_sample(
-        &batch_1_uuid,
+    let mut sample_generator = SampleGenerator::new(
         &aggregation_name,
-        &date,
         10,
-        first_batch_packet_count,
         0.11,
         100,
         100,
-        None,
         &mut pha_output,
         &mut facilitator_output,
-    )
-    .unwrap();
+    );
 
-    let batch_2_reference_sum = generate_ingestion_sample(
-        &batch_2_uuid,
-        &aggregation_name,
-        &date,
-        10,
-        14,
-        0.11,
-        100,
-        100,
-        None,
-        &mut pha_output,
-        &mut facilitator_output,
-    )
-    .unwrap();
+    let batch_1_reference_sum = sample_generator
+        .generate_ingestion_sample(&batch_1_uuid, &date, first_batch_packet_count)
+        .unwrap();
+
+    let batch_2_reference_sum = sample_generator
+        .generate_ingestion_sample(&batch_2_uuid, &date, 14)
+        .unwrap();
 
     let mut ingestor_pub_keys = HashMap::new();
     ingestor_pub_keys.insert(

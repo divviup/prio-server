@@ -25,7 +25,7 @@ use facilitator::{
         SpecificManifest,
     },
     metrics::{start_metrics_scrape_endpoint, AggregateMetricsCollector, IntakeMetricsCollector},
-    sample::{generate_ingestion_sample, SampleOutput},
+    sample::{SampleGenerator, SampleOutput},
     task::{AggregationTask, AwsSqsTaskQueue, GcpPubSubTaskQueue, IntakeBatchTask, TaskQueue},
     transport::{
         GCSTransport, LocalFileTransport, S3Transport, SignableTransport, Transport,
@@ -90,7 +90,7 @@ const SHARED_HELP: &str = "Storage arguments: Any flag ending in -input or -outp
      S3 bucket (s3://<region>/<bucket>), a Google Storage bucket (gs://), \
      or a local directory name. The corresponding -identity flag specifies \
      what identity to use with a bucket.
-     
+
      For S3 buckets: An identity flag may contain an AWS IAM role, specified \
      using an ARN (i.e. \"arn:...\"). Facilitator will assume that role \
      using an OIDC auth token obtained from the GKE metadata service. \
@@ -1117,21 +1117,23 @@ fn generate_sample(sub_matches: &ArgMatches) -> Result<(), anyhow::Error> {
         drop_nth_packet: None,
     };
 
-    generate_ingestion_sample(
-        &value_t!(sub_matches.value_of("batch-id"), Uuid).unwrap_or_else(|_| Uuid::new_v4()),
+    let mut sample_generator = SampleGenerator::new(
         &sub_matches.value_of("aggregation-id").unwrap(),
+        value_t!(sub_matches.value_of("dimension"), i32)?,
+        value_t!(sub_matches.value_of("epsilon"), f64)?,
+        value_t!(sub_matches.value_of("batch-start-time"), i64)?,
+        value_t!(sub_matches.value_of("batch-end-time"), i64)?,
+        &mut peer_transport,
+        &mut facilitator_transport,
+    );
+
+    sample_generator.generate_ingestion_sample(
+        &value_t!(sub_matches.value_of("batch-id"), Uuid).unwrap_or_else(|_| Uuid::new_v4()),
         &sub_matches.value_of("date").map_or_else(
             || Utc::now().naive_utc(),
             |v| NaiveDateTime::parse_from_str(&v, DATE_FORMAT).unwrap(),
         ),
-        value_t!(sub_matches.value_of("dimension"), i32)?,
         value_t!(sub_matches.value_of("packet-count"), usize)?,
-        value_t!(sub_matches.value_of("epsilon"), f64)?,
-        value_t!(sub_matches.value_of("batch-start-time"), i64)?,
-        value_t!(sub_matches.value_of("batch-end-time"), i64)?,
-        None,
-        &mut peer_transport,
-        &mut facilitator_transport,
     )?;
     Ok(())
 }
