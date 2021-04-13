@@ -5,8 +5,8 @@ use crate::{
     task::{Task, TaskHandle, TaskQueue},
 };
 use anyhow::{anyhow, Context, Result};
-use log::info;
 use serde::Deserialize;
+use slog_scope::info;
 use std::{io::Cursor, marker::PhantomData, time::Duration};
 use ureq::{Agent, AgentBuilder};
 use url::Url;

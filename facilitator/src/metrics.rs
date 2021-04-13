@@ -1,6 +1,6 @@
 use anyhow::{Context, Result};
 use http::Response;
-use log::{error, info};
+use slog_scope::{error, info};
 use prometheus::{
     register_int_counter, register_int_counter_vec, Encoder, IntCounter, IntCounterVec, TextEncoder,
 };

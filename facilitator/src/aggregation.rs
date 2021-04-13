@@ -4,6 +4,10 @@ use crate::{
         IngestionDataSharePacket, IngestionHeader, InvalidPacket, Packet, SumPart,
         ValidationHeader, ValidationPacket,
     },
+    logging::{
+        AGGREGATION_NAME_EVENT_KEY, INGESTION_PATH_EVENT_KEY, OWN_VALIDATION_PATH_EVENT_KEY,
+        PACKET_UUID_EVENT_KEY, PEER_VALIDATION_PATH_EVENT_KEY, TRACE_ID_EVENT_KEY,
+    },
     metrics::AggregateMetricsCollector,
     transport::{SignableTransport, VerifiableAndDecryptableTransport, VerifiableTransport},
     BatchSigningKey, Error,
@@ -11,11 +15,11 @@ use crate::{
 use anyhow::{anyhow, Context, Result};
 use avro_rs::Reader;
 use chrono::NaiveDateTime;
-use log::info;
 use prio::{
     field::Field32,
     server::{Server, VerificationMessage},
 };
+use slog::{info, o, Logger};
 use std::{
     collections::{HashMap, HashSet},
     convert::TryFrom,
@@ -37,6 +41,7 @@ pub struct BatchAggregator<'a> {
     share_processor_signing_key: &'a BatchSigningKey,
     total_individual_clients: i64,
     metrics_collector: Option<&'a AggregateMetricsCollector>,
+    logger: Logger,
 }
 
 impl<'a> BatchAggregator<'a> {
@@ -53,7 +58,15 @@ impl<'a> BatchAggregator<'a> {
         own_validation_transport: &'a mut VerifiableTransport,
         peer_validation_transport: &'a mut VerifiableTransport,
         aggregation_transport: &'a mut SignableTransport,
+        parent_logger: &Logger,
     ) -> Result<BatchAggregator<'a>> {
+        let logger = parent_logger.new(o!(
+            TRACE_ID_EVENT_KEY => trace_id.to_owned(),
+            AGGREGATION_NAME_EVENT_KEY => aggregation_name.to_owned(),
+            INGESTION_PATH_EVENT_KEY => ingestion_transport.transport.transport.path(),
+            OWN_VALIDATION_PATH_EVENT_KEY => own_validation_transport.transport.path(),
+            PEER_VALIDATION_PATH_EVENT_KEY => peer_validation_transport.transport.path(),
+        ));
         Ok(BatchAggregator {
             trace_id,
             is_first,
@@ -77,6 +90,7 @@ impl<'a> BatchAggregator<'a> {
             share_processor_signing_key: &aggregation_transport.batch_signing_key,
             total_individual_clients: 0,
             metrics_collector: None,
+            logger,
         })
     }
 
@@ -87,19 +101,15 @@ impl<'a> BatchAggregator<'a> {
     /// Compute the sum part for all the provided batch IDs and write it out to
     /// the aggregation transport. The provided callback is invoked after each
     /// batch is aggregated.
-    pub fn generate_sum_part<F: FnMut()>(
+    pub fn generate_sum_part<F>(
         &mut self,
         batch_ids: &[(Uuid, NaiveDateTime)],
         mut callback: F,
-    ) -> Result<()> {
-        info!(
-            "trace id {} processing intake from {}, own validity from {}, peer validity from {} and saving sum parts to {}",
-            self.trace_id,
-            self.ingestion_transport.transport.transport.path(),
-            self.own_validation_transport.transport.path(),
-            self.peer_validation_transport.transport.path(),
-            self.aggregation_batch.path(),
-        );
+    ) -> Result<()>
+    where
+        F: FnMut(&Logger),
+    {
+        info!(self.logger, "processing aggregation task");
         let mut invalid_uuids = Vec::new();
         let mut included_batch_uuids = Vec::new();
 
@@ -120,7 +130,7 @@ impl<'a> BatchAggregator<'a> {
         for batch_id in batch_ids {
             self.aggregate_share(&batch_id.0, &batch_id.1, &mut servers, &mut invalid_uuids)?;
             included_batch_uuids.push(batch_id.0);
-            callback();
+            callback(&self.logger);
         }
 
         // TODO(timg) what exactly do we write out when there are no invalid
@@ -245,16 +255,14 @@ impl<'a> BatchAggregator<'a> {
         // Make sure all the parameters in the headers line up
         if !peer_validation_header.check_parameters(&own_validation_header) {
             return Err(anyhow!(
-                "trace id {} validation headers do not match. Peer: {:?}\nOwn: {:?}",
-                self.trace_id,
+                "validation headers do not match. Peer: {:?}\nOwn: {:?}",
                 peer_validation_header,
                 own_validation_header
             ));
         }
         if !ingestion_header.check_parameters(&peer_validation_header) {
             return Err(anyhow!(
-                "trace id {} ingestion header does not match peer validation header. Ingestion: {:?}\nPeer:{:?}",
-                self.trace_id,
+                "ingestion header does not match peer validation header. Ingestion: {:?}\nPeer:{:?}",
                 ingestion_header,
                 peer_validation_header
             ));
@@ -283,8 +291,12 @@ impl<'a> BatchAggregator<'a> {
         // Keep track of the ingestion packets we have seen so we can reject
         // duplicates.
         let mut processed_ingestion_packets = HashSet::new();
-
         let mut ingestion_packet_reader = ingestion_batch.packet_file_reader(&ingestion_header)?;
+
+        // Borrowing distinct parts of a struct works, but not under closures:
+        // https://github.com/rust-lang/rust/issues/53488
+        // The workaround is to borrow or copy fields outside the closure.
+        let logger = &self.logger;
 
         loop {
             let ingestion_packet =
@@ -296,7 +308,10 @@ impl<'a> BatchAggregator<'a> {
 
             // Ignore duplicate packets
             if processed_ingestion_packets.contains(&ingestion_packet.uuid) {
-                info!("ignoring duplicate packet {}", ingestion_packet.uuid);
+                info!(
+                    logger, "ignoring duplicate packet";
+                    PACKET_UUID_EVENT_KEY => ingestion_packet.uuid.to_string()
+                );
                 continue;
             }
 
@@ -307,6 +322,7 @@ impl<'a> BatchAggregator<'a> {
                 &peer_validation_packets,
                 "peer",
                 invalid_uuids,
+                logger,
             );
             let peer_validation_packet: &ValidationPacket = match peer_validation_packet {
                 Some(p) => p,
@@ -318,6 +334,7 @@ impl<'a> BatchAggregator<'a> {
                 &own_validation_packets,
                 "own",
                 invalid_uuids,
+                logger,
             );
             let own_validation_packet: &ValidationPacket = match own_validation_packet {
                 Some(p) => p,
@@ -337,8 +354,8 @@ impl<'a> BatchAggregator<'a> {
                     Ok(valid) => {
                         if !valid {
                             info!(
-                                "trace id {} rejecting packet {} due to invalid proof",
-                                self.trace_id, peer_validation_packet.uuid
+                                logger, "rejecting packet due to invalid proof";
+                                PACKET_UUID_EVENT_KEY => peer_validation_packet.uuid.to_string(),
                             );
                             invalid_uuids.push(peer_validation_packet.uuid);
                         }
@@ -389,10 +406,14 @@ fn get_validation_packet<'a>(
     validation_packets: &'a HashMap<Uuid, ValidationPacket>,
     kind: &str,
     invalid_uuids: &mut Vec<Uuid>,
+    logger: &Logger,
 ) -> Option<&'a ValidationPacket> {
     match validation_packets.get(uuid) {
         None => {
-            info!("no {} validation packet for {}", kind, uuid);
+            info!(
+                logger, "no {} validation packet", kind;
+                PACKET_UUID_EVENT_KEY => uuid.to_string()
+            );
             invalid_uuids.push(*uuid);
             None
         }

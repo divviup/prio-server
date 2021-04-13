@@ -9,7 +9,7 @@ use crate::{
     Error,
 };
 use anyhow::{anyhow, Context, Result};
-use log::info;
+use slog_scope::info;
 use std::{
     io,
     io::{Read, Write},
