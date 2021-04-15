@@ -21,25 +21,25 @@ ingestors = {
         portal_server_manifest_base_url        = "manifest.int.enpa-pha.io"
       }
       us-ct = {
-        intake_worker_count                    = 5
+        intake_worker_count                    = 8
         aggregate_worker_count                 = 3
         peer_share_processor_manifest_base_url = "en-analytics.cancer.gov"
         portal_server_manifest_base_url        = "manifest.enpa-pha.io"
       }
       us-md = {
-        intake_worker_count                    = 5
+        intake_worker_count                    = 8
         aggregate_worker_count                 = 3
         peer_share_processor_manifest_base_url = "en-analytics.cancer.gov"
         portal_server_manifest_base_url        = "manifest.enpa-pha.io"
       }
       us-va = {
-        intake_worker_count                    = 5
+        intake_worker_count                    = 8
         aggregate_worker_count                 = 3
         peer_share_processor_manifest_base_url = "en-analytics.cancer.gov"
         portal_server_manifest_base_url        = "manifest.enpa-pha.io"
       }
       us-wa = {
-        intake_worker_count                    = 5
+        intake_worker_count                    = 10
         aggregate_worker_count                 = 3
         peer_share_processor_manifest_base_url = "en-analytics.cancer.gov"
         portal_server_manifest_base_url        = "manifest.enpa-pha.io"
@@ -51,7 +51,7 @@ ingestors = {
         portal_server_manifest_base_url        = "manifest.enpa-pha.io"
       }
       us-ut = {
-        intake_worker_count                    = 8
+        intake_worker_count                    = 10
         aggregate_worker_count                 = 3
         peer_share_processor_manifest_base_url = "en-analytics.cancer.gov"
         portal_server_manifest_base_url        = "manifest.enpa-pha.io"
@@ -178,8 +178,8 @@ is_first                                  = false
 use_aws                                   = false
 aggregation_period                        = "8h"
 aggregation_grace_period                  = "4h"
-workflow_manager_version                  = "0.6.10"
-facilitator_version                       = "0.6.10"
+workflow_manager_version                  = "0.6.12"
+facilitator_version                       = "0.6.12"
 pushgateway                               = "prometheus-pushgateway.monitoring:9091"
 prometheus_server_persistent_disk_size_gb = 1000
 victorops_routing_key                     = "prio-prod-us"
