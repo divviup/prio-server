@@ -247,7 +247,7 @@ impl<'a> BatchIntaker<'a> {
 mod tests {
     use super::*;
     use crate::{
-        sample::{generate_ingestion_sample, SampleOutput},
+        sample::{SampleGenerator, SampleOutput},
         test_utils::{
             default_facilitator_signing_private_key, default_ingestor_private_key,
             default_ingestor_public_key, default_packet_encryption_certificate_signing_request,
@@ -299,20 +299,19 @@ mod tests {
             drop_nth_packet: None,
         };
 
-        generate_ingestion_sample(
-            &batch_uuid,
+        let mut sample_generator = SampleGenerator::new(
             &aggregation_name,
-            &date,
-            10,
             10,
             0.11,
             100,
             100,
-            None,
             &mut pha_output,
             &mut facilitator_output,
-        )
-        .expect("failed to generate sample");
+        );
+
+        sample_generator
+            .generate_ingestion_sample(&batch_uuid, &date, 10)
+            .unwrap();
 
         let mut ingestor_pub_keys = HashMap::new();
         ingestor_pub_keys.insert(
@@ -442,20 +441,19 @@ mod tests {
             drop_nth_packet: None,
         };
 
-        generate_ingestion_sample(
-            &batch_uuid,
+        let mut sample_generator = SampleGenerator::new(
             &aggregation_name,
-            &date,
-            10,
             10,
             0.11,
             100,
             100,
-            Some(5),
             &mut pha_output,
             &mut facilitator_output,
-        )
-        .expect("failed to generate sample");
+        );
+
+        sample_generator
+            .generate_ingestion_sample(&batch_uuid, &date, 10)
+            .unwrap();
 
         let mut ingestor_pub_keys = HashMap::new();
         ingestor_pub_keys.insert(
@@ -541,20 +539,20 @@ mod tests {
             drop_nth_packet: None,
         };
 
-        generate_ingestion_sample(
-            &batch_uuid,
+        let mut sample_generator = SampleGenerator::new(
             &aggregation_name,
-            &date,
-            10,
             10,
             0.11,
             100,
             100,
-            Some(5),
             &mut pha_output,
             &mut facilitator_output,
-        )
-        .expect("failed to generate sample");
+        );
+        sample_generator.set_generate_short_packet(5);
+
+        sample_generator
+            .generate_ingestion_sample(&batch_uuid, &date, 10)
+            .unwrap();
 
         let mut ingestor_pub_keys = HashMap::new();
         ingestor_pub_keys.insert(
