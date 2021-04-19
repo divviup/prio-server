@@ -1,14 +1,14 @@
 use crate::{
     config::Identity,
     gcp_oauth::GcpOauthTokenProvider,
-    http::{prepare_request, send_json_request, Method, RequestParameters},
+    http::{Method, RequestParameters, RetryingAgent},
     task::{Task, TaskHandle, TaskQueue},
 };
 use anyhow::{anyhow, Context, Result};
 use serde::Deserialize;
 use slog_scope::info;
 use std::{io::Cursor, marker::PhantomData, time::Duration};
-use ureq::{Agent, AgentBuilder};
+use ureq::AgentBuilder;
 use url::Url;
 
 const PUBSUB_API_BASE_URL: &str = "https://pubsub.googleapis.com";
@@ -100,7 +100,7 @@ pub struct GcpPubSubTaskQueue<T: Task> {
     subscription_id: String,
     oauth_token_provider: GcpOauthTokenProvider,
     phantom_task: PhantomData<*const T>,
-    agent: Agent,
+    agent: RetryingAgent,
 }
 
 impl<T: Task> GcpPubSubTaskQueue<T> {
@@ -110,6 +110,21 @@ impl<T: Task> GcpPubSubTaskQueue<T> {
         subscription_id: &str,
         identity: Identity,
     ) -> Result<GcpPubSubTaskQueue<T>> {
+        let ureq_agent = AgentBuilder::new()
+            // Empirically, if there are no messages available in the
+            // subscription, the PubSub API will wait about 90 seconds to send
+            // an HTTP 200 with an empty JSON body. We set higher timeouts than
+            // usual to allow for this.
+            .timeout(Duration::from_secs(180))
+            .build();
+        let retrying_agent = RetryingAgent::new(
+            ureq_agent,
+            // Per Google documentation, 429 Too Many Requests should be retried
+            // with exponential backoff
+            // https://cloud.google.com/pubsub/docs/reference/error-codes
+            vec![429],
+        );
+
         Ok(GcpPubSubTaskQueue {
             pubsub_api_endpoint: pubsub_api_endpoint
                 .unwrap_or(PUBSUB_API_BASE_URL)
@@ -124,13 +139,7 @@ impl<T: Task> GcpPubSubTaskQueue<T> {
                 None, // GCP key file; never used
             )?,
             phantom_task: PhantomData,
-            agent: AgentBuilder::new()
-                // Empirically, if there are no messages available in the
-                // subscription, the PubSub API will wait about 90 seconds to send
-                // an HTTP 200 with an empty JSON body. We set higher timeouts than
-                // usual to allow for this.
-                .timeout(Duration::from_secs(180))
-                .build(),
+            agent: retrying_agent,
         })
     }
 }
@@ -142,27 +151,26 @@ impl<T: Task> TaskQueue<T> for GcpPubSubTaskQueue<T> {
             self.gcp_project_id, self.subscription_id, self.oauth_token_provider
         );
 
-        let request = prepare_request(
-            &self.agent,
-            RequestParameters {
-                url: gcp_pubsub_pull_url(
-                    &self.pubsub_api_endpoint,
-                    &self.gcp_project_id,
-                    &self.subscription_id,
-                )?,
-                method: Method::Post,
-                token_provider: Some(&mut self.oauth_token_provider),
-            },
-        )?;
+        let request = self.agent.prepare_request(RequestParameters {
+            url: gcp_pubsub_pull_url(
+                &self.pubsub_api_endpoint,
+                &self.gcp_project_id,
+                &self.subscription_id,
+            )?,
+            method: Method::Post,
+            token_provider: Some(&mut self.oauth_token_provider),
+        })?;
 
-        let http_response = send_json_request(
-            request,
-            ureq::json!({
-                // Dequeue one task at a time
-                "maxMessages": 1
-            }),
-        )
-        .context("failed to pull messages from PubSub topic")?;
+        let http_response = self
+            .agent
+            .send_json_request(
+                &request,
+                &ureq::json!({
+                    // Dequeue one task at a time
+                    "maxMessages": 1
+                }),
+            )
+            .context("failed to pull messages from PubSub topic")?;
 
         let response = http_response
             .into_json::<PullResponse>()
@@ -208,26 +216,24 @@ impl<T: Task> TaskQueue<T> for GcpPubSubTaskQueue<T> {
             self.oauth_token_provider
         );
 
-        let request = prepare_request(
-            &self.agent,
-            RequestParameters {
-                url: gcp_pubsub_ack_url(
-                    &self.pubsub_api_endpoint,
-                    &self.gcp_project_id,
-                    &self.subscription_id,
-                )?,
-                method: Method::Post,
-                token_provider: Some(&mut self.oauth_token_provider),
-            },
-        )?;
+        let request = self.agent.prepare_request(RequestParameters {
+            url: gcp_pubsub_ack_url(
+                &self.pubsub_api_endpoint,
+                &self.gcp_project_id,
+                &self.subscription_id,
+            )?,
+            method: Method::Post,
+            token_provider: Some(&mut self.oauth_token_provider),
+        })?;
 
-        send_json_request(
-            request,
-            ureq::json!({
-                "ackIds": [handle.acknowledgment_id]
-            }),
-        )
-        .context(format!("failed to acknowledge task {:?}", handle,))?;
+        self.agent
+            .send_json_request(
+                &request,
+                &ureq::json!({
+                    "ackIds": [handle.acknowledgment_id]
+                }),
+            )
+            .context(format!("failed to acknowledge task {:?}", handle,))?;
 
         Ok(())
     }
@@ -275,30 +281,28 @@ impl<T: Task> GcpPubSubTaskQueue<T> {
             return Err(anyhow!("invalid ack deadline {:?}", ack_deadline));
         }
 
-        let request = prepare_request(
-            &self.agent,
-            RequestParameters {
-                url: gcp_pubsub_modify_ack_deadline(
-                    &self.pubsub_api_endpoint,
-                    &self.gcp_project_id,
-                    &self.subscription_id,
-                )?,
-                method: Method::Post,
-                token_provider: Some(&mut self.oauth_token_provider),
-            },
-        )?;
+        let request = self.agent.prepare_request(RequestParameters {
+            url: gcp_pubsub_modify_ack_deadline(
+                &self.pubsub_api_endpoint,
+                &self.gcp_project_id,
+                &self.subscription_id,
+            )?,
+            method: Method::Post,
+            token_provider: Some(&mut self.oauth_token_provider),
+        })?;
 
-        send_json_request(
-            request,
-            ureq::json!({
-                "ackIds": [handle.acknowledgment_id],
-                "ackDeadlineSeconds": ack_deadline.as_secs(),
-            }),
-        )
-        .context(format!(
-            "failed to modify ack deadline on task {:?}",
-            handle,
-        ))?;
+        self.agent
+            .send_json_request(
+                &request,
+                &ureq::json!({
+                    "ackIds": [handle.acknowledgment_id],
+                    "ackDeadlineSeconds": ack_deadline.as_secs(),
+                }),
+            )
+            .context(format!(
+                "failed to modify ack deadline on task {:?}",
+                handle,
+            ))?;
 
         Ok(())
     }

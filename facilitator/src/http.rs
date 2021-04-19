@@ -1,8 +1,9 @@
 use anyhow::{Context, Result};
-use std::fmt::Debug;
-use std::time::Duration;
+use std::{convert::From, default::Default, fmt::Debug, time::Duration};
 use ureq::{Agent, AgentBuilder, Request, Response, SerdeValue};
 use url::Url;
+
+use crate::retries::retry_request;
 
 /// Method contains the HTTP methods supported by this crate.
 #[derive(Debug)]
@@ -25,23 +26,111 @@ impl Method {
     }
 }
 
-/// Creates an agent with a timeout of 10 seconds
-pub(crate) fn create_agent() -> Agent {
-    AgentBuilder::new().timeout(Duration::from_secs(10)).build()
+/// An HTTP agent that can be configured to manage "Authorization" headers and
+/// retries using exponential backoff.
+#[derive(Debug, Clone)]
+pub(crate) struct RetryingAgent {
+    /// Agent to use for constructing HTTP requests.
+    agent: Agent,
+    /// Requests which fail due to transport problems or which return any HTTP
+    /// status code in this list or in the 5xx range will be retried with
+    /// exponential backoff.
+    additional_retryable_http_status_codes: Vec<u16>,
 }
 
-/// Prepares a request by taking in an agent and the RequestParameters. Could
-/// return an Error if the OauthTokenProvider returns an error when supplying
-/// the request with an Oauth token.
-pub(crate) fn prepare_request(agent: &Agent, parameters: RequestParameters<'_>) -> Result<Request> {
-    let request = agent.request_url(parameters.method.to_primitive_string(), &parameters.url);
-    parameters.authenticated_request(request)
+impl Default for RetryingAgent {
+    fn default() -> Self {
+        Self::new(
+            AgentBuilder::new().timeout(Duration::from_secs(10)).build(),
+            vec![],
+        )
+    }
 }
 
-/// Prepares a request and wraps it with an agent that has a timeout of 10
-/// seconds. Read prepare_request for more information.
-pub(crate) fn prepare_request_without_agent(parameters: RequestParameters<'_>) -> Result<Request> {
-    prepare_request(&create_agent(), parameters)
+impl RetryingAgent {
+    pub fn new(agent: Agent, additional_retryable_http_status_codes: Vec<u16>) -> Self {
+        Self {
+            agent,
+            additional_retryable_http_status_codes,
+        }
+    }
+
+    /// Prepares a request for the provided `RequestParameters`. Returns a
+    /// `ureq::Request` permitting the caller to further customize the request
+    /// (e.g., with HTTP headers or query parameters). Callers may use methods
+    /// like `send()` or `send_bytes()` directly on the returned `Request`, but
+    /// must use `RetryingAgent::send_json_request`, `::send_bytes` or
+    /// `::send_string` to get retries.
+    /// Returns an Error if the OauthTokenProvider returns an error when
+    /// supplying the request with an OauthToken.
+    pub(crate) fn prepare_request(&self, parameters: RequestParameters) -> Result<Request> {
+        let mut request = self
+            .agent
+            .request_url(parameters.method.to_primitive_string(), &parameters.url);
+        if let Some(token_provider) = parameters.token_provider {
+            let token = token_provider.ensure_oauth_token()?;
+            request = request.set("Authorization", &format!("Bearer {}", token));
+        }
+        Ok(request)
+    }
+
+    fn is_http_status_retryable(&self, http_status: u16) -> bool {
+        http_status >= 500
+            || self
+                .additional_retryable_http_status_codes
+                .contains(&http_status)
+    }
+
+    fn is_error_retryable(&self, error: &ureq::Error) -> bool {
+        match error {
+            ureq::Error::Status(http_status, _) => self.is_http_status_retryable(*http_status),
+            ureq::Error::Transport(_) => true,
+        }
+    }
+
+    /// Send the provided request with the provided JSON body.
+    pub(crate) fn send_json_request(
+        &self,
+        request: &Request,
+        body: &SerdeValue,
+    ) -> Result<Response> {
+        retry_request(
+            "send json request",
+            || request.clone().send_json(body.clone()),
+            |ureq_error| self.is_error_retryable(ureq_error),
+        )
+        .context("failed to send JSON request")
+    }
+
+    /// Send the provided request with the provided bytes as the body.
+    pub(crate) fn send_bytes(&self, request: &Request, data: &[u8]) -> Result<Response> {
+        retry_request(
+            "send bytes",
+            || request.clone().send_bytes(data),
+            |ureq_error| self.is_error_retryable(ureq_error),
+        )
+        .context("failed to send request with bytes body")
+    }
+
+    /// Send the provided request with the provided string as the body.
+    pub(crate) fn send_string(&self, request: &Request, data: &str) -> Result<Response> {
+        retry_request(
+            "send string",
+            || request.clone().send_string(data),
+            |ureq_error| self.is_error_retryable(ureq_error),
+        )
+        .context("failed to send request with string body")
+    }
+
+    /// Send the provided request with no body.
+    pub(crate) fn call(&self, request: &Request) -> Result<Response> {
+        retry_request(
+            "send request without body",
+            || request.clone().call(),
+            |ureq_error| self.is_error_retryable(ureq_error),
+        )
+        .context("failed to make request")
+    }
 }
 
 /// Defines a behavior responsible for produing bearer authorization tokens
@@ -64,7 +153,7 @@ impl OauthTokenProvider for StaticOauthTokenProvider {
     }
 }
 
-impl std::convert::From<String> for StaticOauthTokenProvider {
+impl From<String> for StaticOauthTokenProvider {
     fn from(token: String) -> Self {
         StaticOauthTokenProvider { token }
     }
@@ -83,7 +172,7 @@ pub(crate) struct RequestParameters<'a> {
     pub token_provider: Option<&'a mut dyn OauthTokenProvider>,
 }
 
-impl std::default::Default for RequestParameters<'_> {
+impl Default for RequestParameters<'_> {
     fn default() -> Self {
         let default_url = Url::parse("https://example.com").expect("example url did not parse");
 
@@ -95,44 +184,106 @@ impl std::default::Default for RequestParameters<'_> {
     }
 }
 
-impl RequestParameters<'_> {
-    fn authenticated_request(self, request: Request) -> Result<Request> {
-        let token = match self.token_provider {
-            Some(token_provider) => match token_provider.ensure_oauth_token() {
-                Ok(token) => Ok(Some(token)),
-                Err(err) => Err(err),
-            },
-            None => Ok(None),
-        }?;
-
-        match token {
-            Some(token) => Ok(request.set("Authorization", &format!("Bearer {}", token))),
-            None => Ok(request),
-        }
-    }
-}
-
-/// Send the provided request with the provided JSON body. See
-/// prepare_request for more details.
-pub(crate) fn send_json_request(request: Request, body: SerdeValue) -> Result<Response> {
-    request
-        .send_json(body)
-        .context("failed to send json request")
-}
-
 /// simple_get_request does a HTTP request to a URL and returns the body as a
 // string.
 pub(crate) fn simple_get_request(url: Url) -> Result<String> {
-    let request = prepare_request_without_agent(RequestParameters {
-        url,
-        method: Method::Get,
-        ..Default::default()
-    })
-    .context("creating simple_get_request failed")?;
+    let agent = RetryingAgent::default();
+    let request = agent
+        .prepare_request(RequestParameters {
+            url,
+            method: Method::Get,
+            ..Default::default()
+        })
+        .context("creating simple_get_request failed")?;
 
-    request
-        .call()
-        .context("Failed to GET resource")?
+    agent
+        .call(&request)?
         .into_string()
         .context("failed to convert GET response body into string")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use mockito::{mock, Matcher};
+
+    #[test]
+    fn retryable_error() {
+        let http_400 = ureq::Error::Status(400, Response::new(400, "", "").unwrap());
+        let http_429 = ureq::Error::Status(429, Response::new(429, "", "").unwrap());
+        let http_500 = ureq::Error::Status(500, Response::new(500, "", "").unwrap());
+        let http_503 = ureq::Error::Status(503, Response::new(503, "", "").unwrap());
+        // There is currently no way to create a ureq::Error::Transport so we
+        // settle for testing different HTTP status codes.
+        // https://github.com/algesten/ureq/issues/373
+
+        let mut agent = RetryingAgent::default();
+        assert!(!agent.is_error_retryable(&http_400));
+        assert!(!agent.is_error_retryable(&http_429));
+        assert!(agent.is_error_retryable(&http_500));
+        assert!(agent.is_error_retryable(&http_503));
+
+        agent.additional_retryable_http_status_codes = vec![429];
+
+        assert!(!agent.is_error_retryable(&http_400));
+        assert!(agent.is_error_retryable(&http_429));
+        assert!(agent.is_error_retryable(&http_500));
+        assert!(agent.is_error_retryable(&http_503));
+    }
+
+    #[test]
+    fn authenticated_request() {
+        let mocked_get = mock("GET", "/resource")
+            .match_header("Authorization", "Bearer fake-token")
+            .with_status(200)
+            .with_body("fake body")
+            .expect_at_most(1)
+            .create();
+
+        let mut oauth_token_provider = StaticOauthTokenProvider {
+            token: "fake-token".to_string(),
+        };
+
+        let request_parameters = RequestParameters {
+            url: Url::parse(&format!("{}/resource", mockito::server_url())).unwrap(),
+            method: Method::Get,
+            token_provider: Some(&mut oauth_token_provider),
+        };
+
+        let agent = RetryingAgent::default();
+        let request = agent.prepare_request(request_parameters).unwrap();
+
+        let response = agent.call(&request).unwrap();
+
+        mocked_get.assert();
+
+        assert_eq!(response.status(), 200);
+        assert_eq!(response.into_string().unwrap(), "fake body");
+    }
+
+    #[test]
+    fn unauthenticated_request() {
+        let mocked_get = mock("GET", "/resource")
+            .match_header("Authorization", Matcher::Missing)
+            .with_status(200)
+            .with_body("fake body")
+            .expect_at_most(1)
+            .create();
+
+        let request_parameters = RequestParameters {
+            url: Url::parse(&format!("{}/resource", mockito::server_url())).unwrap(),
+            method: Method::Get,
+            token_provider: None,
+        };
+
+        let agent = RetryingAgent::default();
+        let request = agent.prepare_request(request_parameters).unwrap();
+
+        let response = agent.call(&request).unwrap();
+
+        mocked_get.assert();
+
+        assert_eq!(response.status(), 200);
+        assert_eq!(response.into_string().unwrap(), "fake body");
+    }
 }

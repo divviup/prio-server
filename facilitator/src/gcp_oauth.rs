@@ -4,12 +4,11 @@ use jsonwebtoken::{encode, Algorithm, EncodingKey, Header};
 use serde::{Deserialize, Serialize};
 use slog_scope::debug;
 use std::{fmt, io::Read};
-use ureq::{Agent, Response};
+use ureq::Response;
 use url::Url;
 
 use crate::http::{
-    create_agent, prepare_request, send_json_request, Method, OauthTokenProvider,
-    RequestParameters, StaticOauthTokenProvider,
+    Method, OauthTokenProvider, RequestParameters, RetryingAgent, StaticOauthTokenProvider,
 };
 
 fn default_oauth_token_url() -> Url {
@@ -108,9 +107,9 @@ pub(crate) struct GcpOauthTokenProvider {
     /// though the contained token may be expired. This will always be None if
     /// account_to_impersonate is None.
     impersonated_account_token: Option<OauthToken>,
-    /// The Agent will be used when making HTTP requests to GCP APIs to fetch
+    /// The agent will be used when making HTTP requests to GCP APIs to fetch
     /// Oauth tokens.
-    agent: Agent,
+    agent: RetryingAgent,
 }
 
 impl fmt::Debug for GcpOauthTokenProvider {
@@ -165,7 +164,6 @@ impl GcpOauthTokenProvider {
             }
             None => None,
         };
-        let agent = create_agent();
 
         Ok(GcpOauthTokenProvider {
             scope: scope.to_owned(),
@@ -173,7 +171,7 @@ impl GcpOauthTokenProvider {
             account_to_impersonate,
             default_account_token: None,
             impersonated_account_token: None,
-            agent,
+            agent: RetryingAgent::default(),
         })
     }
 
@@ -221,19 +219,17 @@ impl GcpOauthTokenProvider {
             "obtaining default account token from GKE metadata service. Scope: {}",
             self.scope
         );
-        let mut request = prepare_request(
-            &self.agent,
-            RequestParameters {
-                url: default_oauth_token_url(),
-                method: Method::Get,
-                ..Default::default()
-            },
-        )?;
+
+        let mut request = self.agent.prepare_request(RequestParameters {
+            url: default_oauth_token_url(),
+            method: Method::Get,
+            ..Default::default()
+        })?;
 
         request = request.set("Metadata-Flavor", "Google");
 
-        request
-            .call()
+        self.agent
+            .call(&request)
             .context("failed to query GKE metadata service")
     }
 
@@ -274,21 +270,18 @@ impl GcpOauthTokenProvider {
             token
         );
 
-        let request = prepare_request(
-            &self.agent,
-            RequestParameters {
-                url: Url::parse(&key_file.token_uri).context(format!(
-                    "failed to parse key_file.token_uri: {}",
-                    &key_file.token_uri
-                ))?,
-                method: Method::Post,
-                ..Default::default()
-            },
-        )?;
+        let request = self.agent.prepare_request(RequestParameters {
+            url: Url::parse(&key_file.token_uri).context(format!(
+                "failed to parse key_file.token_uri: {}",
+                &key_file.token_uri
+            ))?,
+            method: Method::Post,
+            ..Default::default()
+        })?;
 
-        request
-            .set("Content-Type", "application/x-www-form-urlencoded")
-            .send_string(&request_body)
+        let request = request.set("Content-Type", "application/x-www-form-urlencoded");
+        self.agent
+            .send_string(&request, &request_body)
             .context("failed to get account token with key file")
     }
 
@@ -312,29 +305,30 @@ impl GcpOauthTokenProvider {
         let service_account_to_impersonate = self.account_to_impersonate.clone().unwrap();
 
         let default_token = self.ensure_default_account_token()?;
-        let request = prepare_request(
-            &self.agent,
-            RequestParameters {
-                url: access_token_url_for_service_account(&service_account_to_impersonate)?,
-                method: Method::Post,
-                token_provider: Some(&mut StaticOauthTokenProvider::from(default_token)),
-            },
-        )?;
+
+        let request = self.agent.prepare_request(RequestParameters {
+            url: access_token_url_for_service_account(&service_account_to_impersonate)?,
+            method: Method::Post,
+            token_provider: Some(&mut StaticOauthTokenProvider::from(default_token)),
+        })?;
 
         debug!(
             "obtaining token for service account {:?} and scope {:?}",
             self.account_to_impersonate, self.scope
         );
-        let http_response = send_json_request(
-            request,
-            ureq::json!({
-                "scope": [self.scope]
-            }),
-        )
-        .context(format!(
-            "failed to get Oauth token to impersonate service account {}",
-            service_account_to_impersonate
-        ))?;
+
+        let http_response = self
+            .agent
+            .send_json_request(
+                &request,
+                &ureq::json!({
+                    "scope": [self.scope]
+                }),
+            )
+            .context(format!(
+                "failed to get Oauth token to impersonate service account {}",
+                service_account_to_impersonate
+            ))?;
 
         let response = http_response
             .into_json::<GenerateAccessTokenResponse>()
