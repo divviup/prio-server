@@ -544,15 +544,12 @@ impl<'a, 'b> AppArgumentAdder for App<'a, 'b> {
                     .long("ingestor-manifest-base-url")
                     .env("INGESTOR_MANIFEST_BASE_URL")
                     .value_name("URL")
-                    .help("Base URL of this ingestor's manifest")
-                    .required(true),
+                    .help("Base URL of this ingestor's manifest"),
             )
-            .arg(
-                Arg::with_name("ingestor-batch-signing-key")
-                    .long("ingestor-batch-signing-key")
-                    .env("INGESTOR_BATCH_SIGNING_KEY")
-                    .value_name("B64")
-                    .help("Base64 "),
+            .group(
+                ArgGroup::with_name("ingestor_information")
+                    .args(&["ingestor-manifest-base-url", "batch-signing-private-key"])
+                    .required(true),
             )
             .arg(
                 Arg::with_name("epsilon")
@@ -585,15 +582,13 @@ impl<'a, 'b> AppArgumentAdder for App<'a, 'b> {
                 Arg::with_name("locality-name")
                     .long("locality-name")
                     .value_name("STRING")
-                    .help("Name of the locality this ingestor is targeting")
-                    .required(true),
+                    .help("Name of the locality this ingestor is targeting"),
             )
             .arg(
                 Arg::with_name("ingestor-name")
                     .long("ingestor-name")
                     .value_name("STRING")
-                    .help("Name of this ingestor")
-                    .required(true),
+                    .help("Name of this ingestor"),
             )
             .add_batch_signing_key_arguments(false)
     }
@@ -641,16 +636,6 @@ fn main() -> Result<(), anyhow::Error> {
             SubCommand::with_name("generate-ingestion-sample")
                 .about("Generate sample data files")
                 .add_common_sample_maker_arguments()
-                .arg(
-                    Arg::with_name("kube-namespace")
-                        .long("kube-namespace")
-                        .env("KUBE_NAMESPACE")
-                        .value_name("STRING")
-                        .help(
-                            "Name of the kubernetes namespace"
-                        )
-                        .required(false)
-                )
         )
         .subcommand(
             SubCommand::with_name("generate-ingestion-sample-worker")
@@ -916,16 +901,29 @@ fn generate_sample_worker(sub_matches: &ArgMatches) -> Result<(), anyhow::Error>
 fn get_ecies_public_key(
     key_option: Option<&str>,
     manifest_url: Option<&str>,
-    ingestor_name: &str,
-    locality_name: &str,
+    ingestor_name: Option<&str>,
+    locality_name: Option<&str>,
 ) -> Result<PublicKey> {
-    let peer_name = &format!("{}-{}", locality_name, ingestor_name);
     match key_option {
         Some(key) => {
-            PublicKey::from_base64(key).context("unable to create public key from base64 ecies key")
+            // Try to parse the provided base64 as a private key from which we
+            // extract the public portion. If that fails, fall back to parsing
+            // the base64 as a public key.
+            match PrivateKey::from_base64(key) {
+                Ok(key) => Ok(PublicKey::from(&key)),
+                Err(_) => PublicKey::from_base64(key)
+                    .context("unable to create public key from base64 ecies key"),
+            }
         }
         None => match manifest_url {
             Some(manifest_url) => {
+                let ingestor_name = ingestor_name.ok_or_else(|| {
+                    anyhow!("ingestor-name must be provided with ingestor-manifest-base-url")
+                })?;
+                let locality_name = locality_name.ok_or_else(|| {
+                    anyhow!("locality-name must be provided with ingestor-manifest-base-url")
+                })?;
+                let peer_name = &format!("{}-{}", locality_name, ingestor_name);
                 let manifest = SpecificManifest::from_https(manifest_url, peer_name).context(
                     format!("unable to read SpecificManifest from {}", manifest_url),
                 )?;
@@ -960,13 +958,17 @@ fn get_ingestion_identity_and_bucket(
     identity: Option<&str>,
     bucket: Option<&str>,
     manifest_url: Option<&str>,
-    ingestor_name: &str,
-    locality_name: &str,
+    ingestor_name: Option<&str>,
+    locality_name: Option<&str>,
 ) -> Result<(Option<String>, String)> {
-    let peer_name = &format!("{}-{}", locality_name, ingestor_name);
     match bucket {
         Some(bucket) => Ok((identity.map(String::from), String::from(bucket))),
         None => {
+            let ingestor_name = ingestor_name
+                .ok_or_else(|| anyhow!("ingestor-name must be provided with manifest-base-url"))?;
+            let locality_name = locality_name
+                .ok_or_else(|| anyhow!("locality-name must be provided with manifest-base-url"))?;
+            let peer_name = &format!("{}-{}", locality_name, ingestor_name);
             let manifest_url = manifest_url.ok_or_else(|| {
                 anyhow!("If bucket is not provided, manifest_url must be provided")
             })?;
@@ -1008,8 +1010,8 @@ fn get_valid_batch_signing_key(
 
             match secret {
                 None => Err(anyhow!(
-            "unable to find a batch signing key from the manifest and kubernetes secret store"
-        )),
+                    "unable to find a batch signing key from the manifest and kubernetes secret store"
+                )),
                 Some(secret) => {
                     let secret_name = secret.name();
                     let secret_data =
@@ -1034,8 +1036,8 @@ fn generate_sample(sub_matches: &ArgMatches) -> Result<(), anyhow::Error> {
     let kube_namespace = sub_matches.value_of("kube-namespace");
     let ingestor_manifest_base_url = sub_matches.value_of("ingestor-manifest-base-url");
 
-    let ingestor_name = sub_matches.value_of("ingestor-name").unwrap();
-    let locality_name = sub_matches.value_of("locality-name").unwrap();
+    let ingestor_name = sub_matches.value_of("ingestor-name");
+    let locality_name = sub_matches.value_of("locality-name");
 
     let own_batch_signing_key =
         get_valid_batch_signing_key(kube_namespace, ingestor_manifest_base_url, sub_matches)?;
