@@ -1,6 +1,6 @@
 use crate::{
     config::Identity,
-    http::{prepare_request_without_agent, Method, RequestParameters},
+    http::{Method, RequestParameters, RetryingAgent},
 };
 use anyhow::{Context, Result};
 use async_trait::async_trait;
@@ -136,16 +136,18 @@ impl Provider {
                 .append_pair("audience", &format!("sts.amazonaws.com/{}", aws_account_id))
                 .finish();
 
-            let mut request = prepare_request_without_agent(RequestParameters {
-                url,
-                method: Method::Get,
-                ..Default::default()
-            })
-            .map_err(|e| CredentialsError::new(format!("failed to create request: {:?}", e)))?;
+            let agent = RetryingAgent::default();
+            let mut request = agent
+                .prepare_request(RequestParameters {
+                    url,
+                    method: Method::Get,
+                    ..Default::default()
+                })
+                .map_err(|e| CredentialsError::new(format!("failed to create request: {:?}", e)))?;
 
             request = request.set("Metadata-Flavor", "Google");
 
-            let response = request.call().map_err(|e| {
+            let response = agent.call(request).map_err(|e| {
                 CredentialsError::new(format!(
                     "failed to fetch {} auth token from metadata service: {:?}",
                     purpose, e
