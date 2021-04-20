@@ -892,8 +892,10 @@ fn main() -> Result<(), anyhow::Error> {
         ("generate-ingestion-sample-worker", Some(sub_matches)) => {
             generate_sample_worker(&sub_matches)
         }
-        ("intake-batch", Some(sub_matches)) => intake_batch_subcommand(sub_matches),
-        ("intake-batch-worker", Some(sub_matches)) => intake_batch_worker(sub_matches),
+        ("intake-batch", Some(sub_matches)) => intake_batch_subcommand(sub_matches, &root_logger),
+        ("intake-batch-worker", Some(sub_matches)) => {
+            intake_batch_worker(sub_matches, &root_logger)
+        }
         ("aggregate", Some(sub_matches)) => aggregate_subcommand(sub_matches, &root_logger),
         ("aggregate-worker", Some(sub_matches)) => aggregate_worker(sub_matches, &root_logger),
         ("lint-manifest", Some(sub_matches)) => lint_manifest(sub_matches),
@@ -1161,15 +1163,19 @@ fn generate_sample(sub_matches: &ArgMatches) -> Result<(), anyhow::Error> {
     Ok(())
 }
 
-fn intake_batch<F: FnMut()>(
+fn intake_batch<F>(
     trace_id: &str,
     aggregation_id: &str,
     batch_id: &str,
     date: &str,
     sub_matches: &ArgMatches,
     metrics_collector: Option<&IntakeMetricsCollector>,
+    parent_logger: &Logger,
     callback: F,
-) -> Result<(), anyhow::Error> {
+) -> Result<(), anyhow::Error>
+where
+    F: FnMut(&Logger),
+{
     let mut intake_transport = intake_transport_from_args(sub_matches)?;
 
     // We need the bucket to which we will write validations for the
@@ -1219,6 +1225,7 @@ fn intake_batch<F: FnMut()>(
         &mut own_validation_transport,
         is_first_from_arg(sub_matches),
         Some("true") == sub_matches.value_of("permit-malformed-batch"),
+        parent_logger,
     )?;
 
     if let Some("true") = sub_matches.value_of("use-bogus-packet-file-digest") {
@@ -1248,7 +1255,10 @@ fn intake_batch<F: FnMut()>(
     result
 }
 
-fn intake_batch_subcommand(sub_matches: &ArgMatches) -> Result<(), anyhow::Error> {
+fn intake_batch_subcommand(
+    sub_matches: &ArgMatches,
+    parent_logger: &Logger,
+) -> Result<(), anyhow::Error> {
     intake_batch(
         "None",
         sub_matches.value_of("aggregation-id").unwrap(),
@@ -1256,11 +1266,15 @@ fn intake_batch_subcommand(sub_matches: &ArgMatches) -> Result<(), anyhow::Error
         sub_matches.value_of("date").unwrap(),
         sub_matches,
         None,
-        || {}, // no-op callback
+        parent_logger,
+        |_| {}, // no-op callback
     )
 }
 
-fn intake_batch_worker(sub_matches: &ArgMatches) -> Result<(), anyhow::Error> {
+fn intake_batch_worker(
+    sub_matches: &ArgMatches,
+    parent_logger: &Logger,
+) -> Result<(), anyhow::Error> {
     let metrics_collector = IntakeMetricsCollector::new()?;
     let scrape_port = value_t!(sub_matches.value_of("metrics-scrape-port"), u16)?;
     let _runtime = start_metrics_scrape_endpoint(scrape_port)?;
@@ -1268,7 +1282,9 @@ fn intake_batch_worker(sub_matches: &ArgMatches) -> Result<(), anyhow::Error> {
 
     loop {
         if let Some(task_handle) = queue.dequeue()? {
-            slog_scope::info!("dequeued task: {}", task_handle);
+            info!(parent_logger, "dequeued intake task";
+                EVENT_KEY_TASK_HANDLE => task_handle.clone(),
+            );
             let task_start = Instant::now();
 
             let trace_id = task_handle
@@ -1284,11 +1300,16 @@ fn intake_batch_worker(sub_matches: &ArgMatches) -> Result<(), anyhow::Error> {
                 &task_handle.task.date,
                 sub_matches,
                 Some(&metrics_collector),
-                || {
+                parent_logger,
+                |logger| {
                     if let Err(e) =
                         queue.maybe_extend_task_deadline(&task_handle, &task_start.elapsed())
                     {
-                        slog_scope::error!("{}", e);
+                        error!(
+                            logger, "{}", e;
+                            EVENT_KEY_TRACE_ID => trace_id.clone(),
+                            EVENT_KEY_TASK_HANDLE => task_handle.clone(),
+                        );
                     }
                 },
             );
@@ -1296,7 +1317,11 @@ fn intake_batch_worker(sub_matches: &ArgMatches) -> Result<(), anyhow::Error> {
             match result {
                 Ok(_) => queue.acknowledge_task(task_handle)?,
                 Err(err) => {
-                    slog_scope::error!("error while processing task {}: {:?}", task_handle, err);
+                    error!(
+                        parent_logger, "error while processing intake task: {:?}", err;
+                        EVENT_KEY_TASK_HANDLE => task_handle.clone(),
+                        EVENT_KEY_TRACE_ID => trace_id,
+                    );
                     queue.nacknowledge_task(task_handle)?;
                 }
             }
@@ -1511,8 +1536,8 @@ fn aggregate_worker(sub_matches: &ArgMatches, parent_logger: &Logger) -> Result<
     loop {
         if let Some(task_handle) = queue.dequeue()? {
             info!(
-                parent_logger, "dequeued task";
-                EVENT_KEY_TASK_HANDLE => format!("{}", task_handle)
+                parent_logger, "dequeued aggregate task";
+                EVENT_KEY_TASK_HANDLE => task_handle.clone(),
             );
             let task_start = Instant::now();
 
@@ -1542,7 +1567,11 @@ fn aggregate_worker(sub_matches: &ArgMatches, parent_logger: &Logger) -> Result<
                     if let Err(e) =
                         queue.maybe_extend_task_deadline(&task_handle, &task_start.elapsed())
                     {
-                        error!(logger, "{}", e);
+                        error!(
+                            logger, "{}", e;
+                            EVENT_KEY_TRACE_ID => trace_id.clone(),
+                            EVENT_KEY_TASK_HANDLE => task_handle.clone(),
+                        );
                     }
                 },
             );
@@ -1553,7 +1582,7 @@ fn aggregate_worker(sub_matches: &ArgMatches, parent_logger: &Logger) -> Result<
                     error!(
                         parent_logger, "error while processing task: {:?}", err;
                         EVENT_KEY_TRACE_ID => trace_id,
-                        EVENT_KEY_TASK_HANDLE => format!("{}", task_handle)
+                        EVENT_KEY_TASK_HANDLE => task_handle.clone(),
                     );
                     queue.nacknowledge_task(task_handle)?;
                 }
