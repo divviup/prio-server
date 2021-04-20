@@ -2,7 +2,6 @@ use crate::config::StoragePath;
 use crate::http;
 use anyhow::{anyhow, Context, Result};
 use elliptic_curve::sec1::{EncodedPoint, ToEncodedPoint};
-use log::debug;
 use p256::pkcs8::FromPublicKey;
 use p256::NistP256;
 use pkix::pem::{pem_to_der, PEM_CERTIFICATE_REQUEST};
@@ -10,6 +9,7 @@ use pkix::pkcs10::DerCertificationRequest;
 use pkix::FromDer;
 use ring::signature::{UnparsedPublicKey, ECDSA_P256_SHA256_ASN1};
 use serde::Deserialize;
+use slog_scope::debug;
 use std::{collections::HashMap, str::FromStr};
 
 // See discussion in SpecificManifest::batch_signing_public_key

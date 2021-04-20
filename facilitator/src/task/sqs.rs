@@ -1,10 +1,10 @@
 use anyhow::{anyhow, Context, Result};
 use derivative::Derivative;
-use log::info;
 use rusoto_core::Region;
 use rusoto_sqs::{
     ChangeMessageVisibilityRequest, DeleteMessageRequest, ReceiveMessageRequest, Sqs, SqsClient,
 };
+use slog_scope::info;
 use std::{convert::TryFrom, marker::PhantomData, str::FromStr, time::Duration};
 use tokio::runtime::Runtime;
 

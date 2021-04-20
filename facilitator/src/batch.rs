@@ -13,6 +13,7 @@ use ring::{
     rand::SystemRandom,
     signature::{EcdsaKeyPair, Signature, UnparsedPublicKey},
 };
+use slog_scope::warn;
 use std::{
     collections::HashMap,
     io::{Cursor, Read},
@@ -185,7 +186,7 @@ impl<'a, H: Header, P: Packet> BatchReader<'a, H, P> {
                     .inc();
             }
             if self.permit_malformed_batch {
-                log::warn!("{}", message);
+                warn!("{}", message);
             } else {
                 return Err(anyhow!("{}", message));
             }
@@ -234,7 +235,7 @@ impl<'a, H: Header, P: Packet> BatchReader<'a, H, P> {
                     .inc();
             }
             if self.permit_malformed_batch {
-                log::warn!("{}", message);
+                warn!("{}", message);
             } else {
                 return Err(anyhow!("{}", message));
             }

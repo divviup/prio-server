@@ -5,13 +5,13 @@ use crate::{
 };
 use anyhow::{anyhow, Context, Result};
 use chrono::NaiveDateTime;
-use log::info;
 use prio::{
     client::Client,
     encrypt::PublicKey,
     field::{Field32, FieldElement},
 };
 use rand::{thread_rng, Rng};
+use slog_scope::info;
 use uuid::Uuid;
 
 /// Configuration for output from sample generation.

@@ -4,12 +4,13 @@ use facilitator::{
     batch::{Batch, BatchReader},
     idl::{InvalidPacket, Packet, SumPart},
     intake::BatchIntaker,
+    logging::setup_test_logging,
     sample::{SampleGenerator, SampleOutput},
     test_utils::{
         default_facilitator_packet_encryption_public_key, default_facilitator_signing_private_key,
         default_facilitator_signing_public_key, default_ingestor_private_key,
         default_ingestor_public_key, default_pha_packet_encryption_public_key,
-        default_pha_signing_private_key, default_pha_signing_public_key, log_init,
+        default_pha_signing_private_key, default_pha_signing_public_key,
         DEFAULT_FACILITATOR_ECIES_PRIVATE_KEY, DEFAULT_PHA_ECIES_PRIVATE_KEY,
     },
     transport::{
@@ -19,6 +20,7 @@ use facilitator::{
     Error,
 };
 use prio::{encrypt::PrivateKey, util::reconstruct_shares};
+use slog::info;
 use std::collections::{HashMap, HashSet};
 use tempfile::TempDir;
 use uuid::Uuid;
@@ -40,7 +42,7 @@ fn inconsistent_ingestion_batches() {
 /// an invalid packet file digest.
 #[test]
 fn aggregation_including_invalid_batch() {
-    log_init();
+    let logger = setup_test_logging();
 
     let pha_tempdir = TempDir::new().unwrap();
     let facilitator_tempdir = TempDir::new().unwrap();
@@ -197,7 +199,7 @@ fn aggregation_including_invalid_batch() {
     // tampering with signatures or batch headers as needed.
     for (index, (uuid, _)) in batch_uuids_and_dates.iter().enumerate() {
         let pha_peer_validation_transport = if index == 2 {
-            log::info!("pha using wrong key for peer validations");
+            info!(logger, "pha using wrong key for peer validations");
             &mut pha_to_facilitator_validation_transport_wrong_key
         } else {
             &mut pha_to_facilitator_validation_transport_valid_key
@@ -313,9 +315,10 @@ fn aggregation_including_invalid_batch() {
         &mut pha_own_validation_transport,
         &mut pha_peer_validation_transport,
         &mut pha_aggregation_transport,
+        &logger,
     )
     .unwrap()
-    .generate_sum_part(&batch_uuids_and_dates, || {})
+    .generate_sum_part(&batch_uuids_and_dates, |_| {})
     .unwrap_err();
     // Ideally we would be able to match on a variant in an error enum to check
     // what the failure was but for now check the error description
@@ -333,9 +336,10 @@ fn aggregation_including_invalid_batch() {
         &mut facilitator_own_validation_transport,
         &mut facilitator_peer_validation_transport,
         &mut facilitator_aggregation_transport,
+        &logger,
     )
     .unwrap()
-    .generate_sum_part(&batch_uuids_and_dates, || {})
+    .generate_sum_part(&batch_uuids_and_dates, |_| {})
     .unwrap_err();
     assert!(err
         .to_string()
@@ -343,7 +347,7 @@ fn aggregation_including_invalid_batch() {
 }
 
 fn end_to_end_test(drop_nth_pha: Option<usize>, drop_nth_facilitator: Option<usize>) {
-    log_init();
+    let logger = setup_test_logging();
     let pha_tempdir = TempDir::new().unwrap();
     let pha_copy_tempdir = TempDir::new().unwrap();
     let facilitator_tempdir = TempDir::new().unwrap();
@@ -571,9 +575,10 @@ fn end_to_end_test(drop_nth_pha: Option<usize>, drop_nth_facilitator: Option<usi
         &mut pha_validate_verifiable_transport,
         &mut facilitator_validate_verifiable_transport,
         &mut pha_aggregation_transport,
+        &logger,
     )
     .unwrap()
-    .generate_sum_part(&batch_ids_and_dates, || aggregation_callback_count += 1)
+    .generate_sum_part(&batch_ids_and_dates, |_| aggregation_callback_count += 1)
     .unwrap();
 
     assert_eq!(aggregation_callback_count, 2);
@@ -598,9 +603,10 @@ fn end_to_end_test(drop_nth_pha: Option<usize>, drop_nth_facilitator: Option<usi
         &mut facilitator_validate_verifiable_transport,
         &mut pha_validate_verifiable_transport,
         &mut facilitator_aggregation_transport,
+        &logger,
     )
     .unwrap()
-    .generate_sum_part(&batch_ids_and_dates, || aggregation_callback_count += 1)
+    .generate_sum_part(&batch_ids_and_dates, |_| aggregation_callback_count += 1)
     .unwrap();
 
     assert_eq!(aggregation_callback_count, 2);

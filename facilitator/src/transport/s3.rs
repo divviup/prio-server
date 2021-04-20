@@ -8,12 +8,12 @@ use crate::{
 use anyhow::{Context, Result};
 use derivative::Derivative;
 use hyper_rustls::HttpsConnector;
-use log::info;
 use rusoto_core::{ByteStream, Region};
 use rusoto_s3::{
     AbortMultipartUploadRequest, CompleteMultipartUploadRequest, CompletedMultipartUpload,
     CompletedPart, CreateMultipartUploadRequest, GetObjectRequest, S3Client, UploadPartRequest, S3,
 };
+use slog_scope::info;
 use std::{
     io::{Read, Write},
     mem,
@@ -338,7 +338,7 @@ impl TransportWriter for MultipartUploadWriter {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::test_utils::log_init;
+    use crate::logging::setup_test_logging;
     use rusoto_core::{request::HttpDispatchError, signature::SignedRequest};
     use rusoto_mock::{MockRequestDispatcher, MultipleMockRequestDispatcher};
     use rusoto_s3::CreateMultipartUploadError;
@@ -445,7 +445,7 @@ mod tests {
 
     #[test]
     fn multipart_upload_create_fails() {
-        log_init();
+        setup_test_logging();
         let err = MultipartUploadWriter::new(
             String::from(TEST_BUCKET),
             String::from(TEST_KEY),
@@ -467,7 +467,7 @@ mod tests {
 
     #[test]
     fn multipart_upload_create_no_upload_id() {
-        log_init();
+        setup_test_logging();
         // Response body format from
         // https://docs.aws.amazon.com/AmazonS3/latest/API/API_Operations_Amazon_Simple_Storage_Service.html
         MultipartUploadWriter::new(
@@ -493,7 +493,7 @@ mod tests {
 
     #[test]
     fn multipart_upload() {
-        log_init();
+        setup_test_logging();
         // Response body format from
         // https://docs.aws.amazon.com/AmazonS3/latest/API/API_Operations_Amazon_Simple_Storage_Service.html
         let mut writer =
@@ -596,7 +596,7 @@ mod tests {
 
     #[test]
     fn roundtrip_s3_transport() {
-        log_init();
+        setup_test_logging();
         let s3_path = S3Path {
             region: Region::UsWest2,
             bucket: TEST_BUCKET.into(),
