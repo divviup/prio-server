@@ -1,9 +1,14 @@
 use crate::{
     config::Identity,
     http::{Method, RequestParameters, RetryingAgent},
+    retries,
 };
 use anyhow::{Context, Result};
 use async_trait::async_trait;
+use rusoto_core::proto::xml::{
+    error::XmlErrorDeserializer,
+    util::{find_start_element, XmlResponse},
+};
 use rusoto_core::{
     credential::{
         AutoRefreshingProvider, AwsCredentials, CredentialsError, DefaultCredentialsProvider,
@@ -13,16 +18,18 @@ use rusoto_core::{
 };
 use rusoto_mock::MockCredentialsProvider;
 use rusoto_sts::WebIdentityProvider;
-use slog_scope::{debug, info};
+use slog_scope::debug;
 use std::{
     boxed::Box,
     convert::From,
+    default::Default,
     env,
     fmt::{self, Debug, Display},
     sync::Arc,
 };
 use tokio::runtime::{Builder, Runtime};
 use url::Url;
+use xml::EventReader;
 
 /// Constructs a basic runtime suitable for use in our single threaded context
 pub(crate) fn basic_runtime() -> Result<Runtime> {
@@ -218,51 +225,68 @@ impl ProvideAwsCredentials for Provider {
     }
 }
 
-/// We attempt AWS API requests up to three times (i.e., two retries)
-const MAX_ATTEMPT_COUNT: i32 = 3;
-
-/// Calls the provided closure, retrying up to MAX_ATTEMPT_COUNT times if it
-/// fails with RusotoError::HttpDispatch, which indicates a problem sending the
-/// request such as the connection getting closed under us.
-/// Additionally, in the case where there is an error while fetching credentials
-/// before making an actual request, the error will be RusotoError::Credentials,
-/// wrapping a rusoto_core::credential::CredentialsError, which can in turn
-/// contain an HttpDispatchError! Sadly, CredentialsError does not preserve the
-/// structure of the underlying error, just its message, so we must resort to
-/// matching on a substring in order to detect it.
-pub fn retry_request<F, T, E>(action: &str, mut f: F) -> RusotoResult<T, E>
+/// Calls the provided closure, retrying with exponential backoff on failure if
+/// the error is retryable (see retryable() in this module and its comments for
+/// details).
+pub(crate) fn retry_request<F, T, E>(action: &str, f: F) -> RusotoResult<T, E>
 where
     F: FnMut() -> RusotoResult<T, E>,
     E: Debug,
 {
-    let mut attempts = 0;
-    loop {
-        match f() {
-            Err(err) if retryable(&err) => {
-                attempts += 1;
-                if attempts >= MAX_ATTEMPT_COUNT {
-                    break Err(err);
-                }
-                info!(
-                    "failed to {} (will retry {} more times): {:?}",
-                    action,
-                    MAX_ATTEMPT_COUNT - attempts,
-                    err
-                );
-            }
-            Err(err) => {
-                debug!("encountered non retryable error: {:?}", err);
-                break Err(err);
-            }
-            result => break result,
-        }
-    }
+    retries::retry_request(action, f, |rusoto_error| retryable(rusoto_error))
 }
 
+/// Returns true if the error is transient and should be retried, false
+/// otherwise.
 fn retryable<T>(error: &RusotoError<T>) -> bool {
     match error {
+        // RusotoError::HttpDispatch indicates a problem sending the request
+        // such as a timeout or the connection getting closed under us. Rusoto
+        // doesn't expose any structured information about the underlying
+        // problem (`rusoto_core::request::HttpDispatchError` only wraps a
+        // string) so we assume any `HttpDispatch` is retryable.
         RusotoError::HttpDispatch(_) => true,
-        RusotoError::Credentials(err) if err.message.contains("Error during dispatch") => true,
+        // Rusoto might need to use the AWS STS API to obtain credentials to use
+        // with whatever service we are accessing. If something goes wrong
+        // during that phase, the error will be `RusotoError::Credentials`,
+        // wrapping a `rusoto_core::credential::CredentialsError`, which can in
+        // turn contain an `HttpDispatchError`! Sadly, `CredentialsError` does
+        // not preserve the structure of the underlying error, so we cannot
+        // distinguish between access being denied or something like a timeout
+        // or the STS API being temporarily unavailable. We err on the side of
+        // caution and unconditionally retry in the face of a credentials error.
+        // Exponential backoff means we shouldn't be abusing the AWS endpoint
+        // too badly even if we are futilely retrying a request that cannot
+        // succeed.
+        RusotoError::Credentials(_) => true,
+        // Finally, any AWS error that isn't explicitly handled by
+        // `RusotoError::Service` will be reported as `RusotoError::Unknown`.
+        // Happily this variant does let us see the HTTP response, including the
+        // status code, so we can be more selective about when to retry. AWS'
+        // general guidance on retries[1] is that we should "should retry
+        // original requests that receive server (5xx) or throttling errors".
+        // Per the AWS S3[2] and SQS[3] API guides, throttling errors may appear
+        // as HTTP 503 or HTTP 403 with error code ThrottlingException. Sadly
+        // there are other causes of HTTP 403 than throttling, so we must
+        // examine the response's *error* code (not the HTTP status code). To
+        // get at the error code we have to parse the XML response body, using
+        // code borrowed from Rusoto[4].
+        //
+        // [1]: https://docs.aws.amazon.com/general/latest/gr/api-retries.html
+        // [2]: https://docs.aws.amazon.com/AmazonS3/latest/API/ErrorResponses.html#ErrorCodeList
+        // [3]: https://docs.aws.amazon.com/AWSSimpleQueueService/latest/APIReference/CommonErrors.html
+        // [4]: https://github.com/rusoto/rusoto/blob/31cf1506f9f4bd7af7a1f86ced3cec436913d518/rusoto/services/sqs/src/generated.rs#L2796
+        RusotoError::Unknown(response) if response.status.is_server_error() => true,
+        RusotoError::Unknown(response) if response.status == 403 => {
+            let reader = EventReader::new(response.body.as_ref());
+            let mut stack = XmlResponse::new(reader.into_iter().peekable());
+            find_start_element(&mut stack);
+            if let Ok(parsed_error) = XmlErrorDeserializer::deserialize("Error", &mut stack) {
+                parsed_error.code == "ThrottlingException"
+            } else {
+                false
+            }
+        }
         _ => false,
     }
 }
@@ -270,86 +294,101 @@ fn retryable<T>(error: &RusotoError<T>) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use assert_matches::assert_matches;
-    use rusoto_core::request::HttpDispatchError;
+    use bytes::Bytes;
+    use http::{status::StatusCode, HeaderMap};
+    use rusoto_core::request::{BufferedHttpResponse, HttpDispatchError};
 
     #[test]
-    fn retry_request_success() {
-        let mut attempts = 0;
+    fn error_is_retryable() {
+        struct TestCase {
+            // RusotoError<bool> is nonsense, but the compiler insists that we
+            // specify what specialization of RusotoError we use
+            error: RusotoError<bool>,
+            is_retryable: bool,
+        }
 
-        let result = retry_request::<_, _, RusotoError<String>>("successful request", || {
-            attempts += 1;
-            Ok("success")
-        });
-        assert_matches!(result, Ok("success"));
-        assert_eq!(attempts, 1);
-    }
+        // XML representation of AWS errors obtained from production logs
+        let throttling_exception_xml = r#"
+<Error>
+    <Code>ThrottlingException</Code>
+    <Message>test</Message>
+    <RequestId>W7E5GN21PBFBZWHV</RequestId>
+    <HostId>l7cXCunu8uBfGqFG9bVFVUouCLPihMJlC2EUqFHb484TMNpNixSsFxBvLYKQpu373YHhkIaaEQ8=</HostId>
+</Error>
+"#;
 
-    #[test]
-    fn non_retryable_error() {
-        let mut attempts = 0;
-        let error_message = "not retryable";
+        let other_exception_xml = r#"
+<Error>
+    <Code>SomeOtherException</Code>
+    <Message>test</Message>
+    <RequestId>W7E5GN21PBFBZWHV</RequestId>
+    <HostId>l7cXCunu8uBfGqFG9bVFVUouCLPihMJlC2EUqFHb484TMNpNixSsFxBvLYKQpu373YHhkIaaEQ8=</HostId>
+</Error>
+"#;
 
-        let result: RusotoResult<String, String> = retry_request("not retryable", || {
-            attempts += 1;
-            Err(RusotoError::Validation(error_message.to_string()))
-        });
-        assert_matches!(result, Err(RusotoError::Validation(e)) => {
-            assert_eq!(e, error_message);
-        });
-        assert_eq!(attempts, 1);
-    }
+        let test_cases = vec![
+            TestCase {
+                error: RusotoError::HttpDispatch(HttpDispatchError::new(
+                    "http_dispatch_error".to_string(),
+                )),
+                is_retryable: true,
+            },
+            TestCase {
+                error: RusotoError::Credentials(CredentialsError::new("message")),
+                is_retryable: true,
+            },
+            TestCase {
+                error: RusotoError::Service(true),
+                is_retryable: false,
+            },
+            TestCase {
+                error: RusotoError::Validation("message".to_string()),
+                is_retryable: false,
+            },
+            TestCase {
+                error: RusotoError::ParseError("message".to_string()),
+                is_retryable: false,
+            },
+            TestCase {
+                error: RusotoError::Blocking,
+                is_retryable: false,
+            },
+            TestCase {
+                error: RusotoError::Unknown(BufferedHttpResponse {
+                    status: StatusCode::from_u16(404).unwrap(),
+                    headers: HeaderMap::with_capacity(0),
+                    body: Bytes::new(),
+                }),
+                is_retryable: false,
+            },
+            TestCase {
+                error: RusotoError::Unknown(BufferedHttpResponse {
+                    status: StatusCode::from_u16(500).unwrap(),
+                    headers: HeaderMap::with_capacity(0),
+                    body: Bytes::new(),
+                }),
+                is_retryable: true,
+            },
+            TestCase {
+                error: RusotoError::Unknown(BufferedHttpResponse {
+                    status: StatusCode::from_u16(403).unwrap(),
+                    headers: HeaderMap::with_capacity(0),
+                    body: Bytes::from_static(throttling_exception_xml.as_bytes()),
+                }),
+                is_retryable: true,
+            },
+            TestCase {
+                error: RusotoError::Unknown(BufferedHttpResponse {
+                    status: StatusCode::from_u16(403).unwrap(),
+                    headers: HeaderMap::with_capacity(0),
+                    body: Bytes::from_static(other_exception_xml.as_bytes()),
+                }),
+                is_retryable: false,
+            },
+        ];
 
-    #[test]
-    fn retry_request_http_dispatch_error() {
-        let mut attempts = 0;
-        let error_message = "http_dispatch_error";
-
-        let result: RusotoResult<String, String> = retry_request(error_message, || {
-            attempts += 1;
-            Err(RusotoError::HttpDispatch(HttpDispatchError::new(
-                error_message.to_string(),
-            )))
-        });
-        assert_matches!(result, Err(RusotoError::HttpDispatch(e)) => {
-            assert_eq!(e, HttpDispatchError::new(error_message.to_string()));
-        });
-        assert_eq!(attempts, MAX_ATTEMPT_COUNT);
-    }
-
-    #[test]
-    fn retry_request_credentials_http_dispatch_error() {
-        let mut attempts = 0;
-        let error_message = "something Error during dispatch something";
-
-        let result: RusotoResult<String, String> =
-            retry_request("credentials dispatch error", || {
-                attempts += 1;
-                Err(RusotoError::Credentials(CredentialsError::new(
-                    error_message.to_string(),
-                )))
-            });
-        assert_matches!(result, Err(RusotoError::Credentials(e)) => {
-            assert_eq!(e.message, error_message);
-        });
-        assert_eq!(attempts, MAX_ATTEMPT_COUNT);
-    }
-
-    #[test]
-    fn non_retryable_credentials_error() {
-        let mut attempts = 0;
-        let error_message = "not a dispatch error";
-
-        let result: RusotoResult<String, String> =
-            retry_request("non retryable credentials dispatch error", || {
-                attempts += 1;
-                Err(RusotoError::Credentials(CredentialsError::new(
-                    error_message.to_string(),
-                )))
-            });
-        assert_matches!(result, Err(RusotoError::Credentials(e)) => {
-            assert_eq!(e.message, error_message);
-        });
-        assert_eq!(attempts, 1);
+        for test_case in test_cases {
+            assert_eq!(retryable(&test_case.error), test_case.is_retryable);
+        }
     }
 }

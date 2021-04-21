@@ -645,6 +645,7 @@ dependencies = [
  "avro-rs",
  "backoff",
  "base64 0.13.0",
+ "bytes",
  "chrono",
  "clap",
  "derivative",
@@ -685,6 +686,7 @@ dependencies = [
  "urlencoding",
  "uuid",
  "warp",
+ "xml-rs",
 ]
 
 [[package]]
