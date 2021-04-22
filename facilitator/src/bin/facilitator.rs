@@ -7,7 +7,7 @@ use ring::signature::{
     EcdsaKeyPair, KeyPair, UnparsedPublicKey, ECDSA_P256_SHA256_ASN1,
     ECDSA_P256_SHA256_ASN1_SIGNING,
 };
-use slog::{error, info, Logger};
+use slog::{debug, error, info, Logger};
 use std::{
     collections::HashMap, fs, fs::File, io::Read, str::FromStr, time::Duration, time::Instant,
 };
@@ -888,9 +888,11 @@ fn main() -> Result<(), anyhow::Error> {
         // The configuration of the Args above should guarantee that the
         // various parameters are present and valid, so it is safe to use
         // unwrap() here.
-        ("generate-ingestion-sample", Some(sub_matches)) => generate_sample(sub_matches),
+        ("generate-ingestion-sample", Some(sub_matches)) => {
+            generate_sample(&Uuid::new_v4(), sub_matches, &root_logger)
+        }
         ("generate-ingestion-sample-worker", Some(sub_matches)) => {
-            generate_sample_worker(&sub_matches)
+            generate_sample_worker(&sub_matches, &root_logger)
         }
         ("intake-batch", Some(sub_matches)) => intake_batch_subcommand(sub_matches, &root_logger),
         ("intake-batch-worker", Some(sub_matches)) => {
@@ -905,16 +907,21 @@ fn main() -> Result<(), anyhow::Error> {
     result
 }
 
-fn generate_sample_worker(sub_matches: &ArgMatches) -> Result<(), anyhow::Error> {
+fn generate_sample_worker(
+    sub_matches: &ArgMatches,
+    root_logger: &Logger,
+) -> Result<(), anyhow::Error> {
     let interval = value_t!(sub_matches.value_of("generation-interval"), u64)?;
 
     loop {
-        slog_scope::info!("Starting a sample generation job.");
-        let result = generate_sample(&sub_matches);
+        let trace_id = Uuid::new_v4();
+        let result = generate_sample(&trace_id, &sub_matches, root_logger);
 
-        match result {
-            Ok(()) => slog_scope::info!("\tSuccess"),
-            Err(e) => slog_scope::error!("\tError: {:?}", e),
+        if let Err(e) = result {
+            error!(
+                root_logger, "Error: {:?}", e;
+                EVENT_KEY_TRACE_ID => trace_id.to_string(),
+            );
         }
         std::thread::sleep(Duration::from_secs(interval))
     }
@@ -925,6 +932,7 @@ fn get_ecies_public_key(
     manifest_url: Option<&str>,
     ingestor_name: Option<&str>,
     locality_name: Option<&str>,
+    logger: &Logger,
 ) -> Result<PublicKey> {
     match key_option {
         Some(key) => {
@@ -962,7 +970,8 @@ fn get_ecies_public_key(
                 let public_key = PublicKey::from_base64(&public_key)
                     .context("unable to create public key from base64 ecies key")?;
 
-                slog_scope::debug!(
+                debug!(
+                    logger,
                     "Picked packet decryption key with ID: {} - public key {:?}",
                     key_identifier,
                     &public_key
@@ -1055,7 +1064,11 @@ fn get_valid_batch_signing_key(
     }
 }
 
-fn generate_sample(sub_matches: &ArgMatches) -> Result<(), anyhow::Error> {
+fn generate_sample(
+    trace_id: &Uuid,
+    sub_matches: &ArgMatches,
+    logger: &Logger,
+) -> Result<(), anyhow::Error> {
     let kube_namespace = sub_matches.value_of("kube-namespace");
     let ingestor_manifest_base_url = sub_matches.value_of("ingestor-manifest-base-url");
 
@@ -1072,11 +1085,6 @@ fn generate_sample(sub_matches: &ArgMatches) -> Result<(), anyhow::Error> {
         ingestor_name,
         locality_name,
     )?;
-    slog_scope::info!(
-        "peer-identity: {}, peer_output_path: {}",
-        &peer_identity.as_deref().unwrap_or("None"),
-        &peer_output_path
-    );
 
     let peer_output_path = StoragePath::from_str(&peer_output_path)?;
 
@@ -1085,6 +1093,7 @@ fn generate_sample(sub_matches: &ArgMatches) -> Result<(), anyhow::Error> {
         sub_matches.value_of("pha-manifest-base-url"),
         ingestor_name,
         locality_name,
+        logger,
     )?;
 
     let mut peer_transport = SampleOutput {
@@ -1109,12 +1118,6 @@ fn generate_sample(sub_matches: &ArgMatches) -> Result<(), anyhow::Error> {
         locality_name,
     )?;
 
-    slog_scope::info!(
-        "facilitator-identity: {}, facilitator_output_path: {}",
-        &facilitator_identity.as_deref().unwrap_or("None"),
-        &faciliator_output
-    );
-
     let faciliator_output = StoragePath::from_str(&faciliator_output)?;
 
     let packet_encryption_public_key = get_ecies_public_key(
@@ -1122,6 +1125,7 @@ fn generate_sample(sub_matches: &ArgMatches) -> Result<(), anyhow::Error> {
         sub_matches.value_of("facilitator-manifest-base-url"),
         ingestor_name,
         locality_name,
+        logger,
     )
     .unwrap();
 
@@ -1150,9 +1154,11 @@ fn generate_sample(sub_matches: &ArgMatches) -> Result<(), anyhow::Error> {
         value_t!(sub_matches.value_of("batch-end-time"), i64)?,
         &mut peer_transport,
         &mut facilitator_transport,
+        logger,
     );
 
     sample_generator.generate_ingestion_sample(
+        &trace_id.to_string(),
         &value_t!(sub_matches.value_of("batch-id"), Uuid).unwrap_or_else(|_| Uuid::new_v4()),
         &sub_matches.value_of("date").map_or_else(
             || Utc::now().naive_utc(),

@@ -1,7 +1,11 @@
 use crate::{
     batch::{Batch, BatchWriter},
     idl::{IngestionDataSharePacket, IngestionHeader, Packet},
+    logging::{
+        EVENT_KEY_AGGREGATION_NAME, EVENT_KEY_BATCH_DATE, EVENT_KEY_BATCH_ID, EVENT_KEY_TRACE_ID,
+    },
     transport::SignableTransport,
+    DATE_FORMAT,
 };
 use anyhow::{anyhow, Context, Result};
 use chrono::NaiveDateTime;
@@ -11,7 +15,7 @@ use prio::{
     field::{Field32, FieldElement},
 };
 use rand::{thread_rng, Rng};
-use slog_scope::info;
+use slog::{info, o, Logger};
 use uuid::Uuid;
 
 /// Configuration for output from sample generation.
@@ -86,6 +90,8 @@ pub struct SampleGenerator<'a> {
     /// Describes where the facilitator/"second" server's shares should be
     /// written and how
     facilitator_output: &'a mut SampleOutput,
+    /// Logger to which events will be written
+    logger: Logger,
 }
 
 impl<'a> SampleGenerator<'a> {
@@ -99,7 +105,11 @@ impl<'a> SampleGenerator<'a> {
         batch_end_time: i64,
         pha_output: &'a mut SampleOutput,
         facilitator_output: &'a mut SampleOutput,
+        parent_logger: &Logger,
     ) -> Self {
+        let logger = parent_logger.new(o!(
+            EVENT_KEY_AGGREGATION_NAME => aggregation_name.to_owned(),
+        ));
         Self {
             aggregation_name,
             dimension,
@@ -109,6 +119,7 @@ impl<'a> SampleGenerator<'a> {
             generate_short_packet: None,
             pha_output,
             facilitator_output,
+            logger,
         }
     }
 
@@ -141,10 +152,20 @@ impl<'a> SampleGenerator<'a> {
     /// Returns a `ReferenceSum` containing the sum over the unshared data.
     pub fn generate_ingestion_sample(
         &mut self,
+        trace_id: &str,
         batch_uuid: &Uuid,
         date: &NaiveDateTime,
         packet_count: usize,
     ) -> Result<ReferenceSum> {
+        let local_logger = self.logger.new(o!(
+            EVENT_KEY_TRACE_ID => trace_id.to_owned(),
+            EVENT_KEY_BATCH_ID => batch_uuid.to_string(),
+            EVENT_KEY_BATCH_DATE => date.format(DATE_FORMAT).to_string(),
+            "pha_output_path" => self.pha_output.transport.transport.path(),
+            "facilitator_output_path" => self.facilitator_output.transport.transport.path(),
+        ));
+
+        info!(self.logger, "Starting a sample generation job.");
         if self.dimension <= 0 {
             return Err(anyhow!("dimension must be an integer greater than zero"));
         }
@@ -259,8 +280,10 @@ impl<'a> SampleGenerator<'a> {
 
                             if SampleOutput::drop_packet(drop_nth_pha_packet, count) {
                                 info!(
+                                    local_logger,
                                     "dropping packet #{} {} from PHA ingestion batch",
-                                    count, packet_uuid
+                                    count,
+                                    packet_uuid
                                 );
                                 pha_dropped_packets.push(packet_uuid);
                             } else {
@@ -278,8 +301,10 @@ impl<'a> SampleGenerator<'a> {
 
                             if SampleOutput::drop_packet(drop_nth_facilitator_packet, count) {
                                 info!(
+                                    local_logger,
                                     "dropping packet #{} {} from facilitator ingestion batch",
-                                    count, packet_uuid
+                                    count,
+                                    packet_uuid
                                 );
                                 facilitator_dropped_packets.push(packet_uuid);
                             } else {
@@ -331,7 +356,7 @@ impl<'a> SampleGenerator<'a> {
             &self.pha_output.transport.batch_signing_key.identifier,
         )?;
 
-        info!("done");
+        info!(local_logger, "done");
         Ok(ReferenceSum {
             sum: reference_sum,
             contributions,
@@ -346,6 +371,7 @@ mod tests {
     use super::*;
     use crate::{
         idl::Header,
+        logging::setup_test_logging,
         test_utils::{
             default_ingestor_private_key, DEFAULT_FACILITATOR_ECIES_PRIVATE_KEY,
             DEFAULT_PHA_ECIES_PRIVATE_KEY,
@@ -358,6 +384,7 @@ mod tests {
     #[test]
     #[allow(clippy::float_cmp)] // No arithmetic done on floats
     fn write_sample() {
+        let logger = setup_test_logging();
         let tempdir = tempfile::TempDir::new().unwrap();
         let batch_uuid = Uuid::new_v4();
 
@@ -394,10 +421,12 @@ mod tests {
             100,
             &mut pha_output,
             &mut facilitator_output,
+            &logger,
         );
 
         sample_generator
             .generate_ingestion_sample(
+                "trace-id",
                 &batch_uuid,
                 &NaiveDate::from_ymd(2009, 2, 13).and_hms(23, 31, 0),
                 10,

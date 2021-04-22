@@ -105,11 +105,12 @@ fn aggregation_including_invalid_batch() {
         100,
         &mut pha_output,
         &mut facilitator_output,
+        &logger,
     );
 
     for (batch_uuid, date) in &batch_uuids_and_dates {
         let reference_sum = sample_generator
-            .generate_ingestion_sample(batch_uuid, date, 100)
+            .generate_ingestion_sample("trace-id", batch_uuid, date, 100)
             .unwrap();
 
         reference_sums.push(reference_sum);
@@ -401,14 +402,15 @@ fn end_to_end_test(drop_nth_pha: Option<usize>, drop_nth_facilitator: Option<usi
         100,
         &mut pha_output,
         &mut facilitator_output,
+        &logger,
     );
 
     let batch_1_reference_sum = sample_generator
-        .generate_ingestion_sample(&batch_1_uuid, &date, first_batch_packet_count)
+        .generate_ingestion_sample("trace-id", &batch_1_uuid, &date, first_batch_packet_count)
         .unwrap();
 
     let batch_2_reference_sum = sample_generator
-        .generate_ingestion_sample(&batch_2_uuid, &date, 14)
+        .generate_ingestion_sample("trace-id", &batch_2_uuid, &date, 14)
         .unwrap();
 
     let mut ingestor_pub_keys = HashMap::new();
