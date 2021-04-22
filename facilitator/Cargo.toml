@@ -13,7 +13,7 @@ base64 = "0.13.0"
 chrono = { version = "0.4", features = ["serde"] }
 clap = "2.33.3"
 derivative = "2.1.1"
-elliptic-curve = { version = "0.9.6", features = ["pem"] }
+elliptic-curve = { version = "0.9.11", features = ["pem"] }
 http = "^0.2"
 hyper = "^0.14"
 hyper-rustls = "^0.22"
