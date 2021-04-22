@@ -74,3 +74,13 @@ When instantiating a new GKE cluster, you will want to merge its configuration i
 ## Formatting
 
 Our continuous integration is set up to do basic validation of Terraform files on pull requests. Besides any other testing, make sure to run `terraform fmt --recursive` or you will get build failures!
+
+## Secrets backup in GCP
+
+`terraform` and `deploy-tool` conspire to create and populate Kubernetes secrets in which we store batch signing and packet decryption private keys. These Kubernetes secrets are the source of truth since they are used to plumb the keys into containers via environment variables. However, for disaster recovery, we also support backing up Kubernetes secrets into [GCP Secret Manager](https://cloud.google.com/secret-manager/docs) to enable disaster recovery.
+
+If `deploy-tool` is invoked with the `--key-backup-gcp-project` argument, it will iterate over all Kubernetes namespaces and back up the packet decryption key as well as the batch signing keys into GCP Secret Manager, in the specified GCP project, which must already exist and must already have the Secret Manager API enabled. The GCP secret will have a label `kubernetes_uid` whose value will be the Kubernetes secret's `.metadata.uid` field, allowing operators to ensure the correct, current version of a secret is backed up.
+
+The secrets backup is intentionally managed completely outside of Terraform so that it cannot be destroyed or tampered with by an accidental `terraform destroy`. Further, `deploy-tool` never deletes or replaces GCP secrets, and if it detects something unusual it simply tells the human operator about it rather than trying to clean up on its own.
+
+`prio-server` does not currently have any disaster recovery features, but having copies of the keys should at least enable manual reconstruction of a destroyed or damaged cluster without requiring new keys to be exchanged with partners.

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
@@ -8,14 +9,20 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"encoding/pem"
+	"flag"
 	"fmt"
-	"io"
-	"io/ioutil"
 	"log"
 	"net/http"
 	"os"
-	"os/exec"
+	"os/user"
+	"path"
 	"time"
+
+	k8smetav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/client-go/kubernetes"
+	k8scorev1 "k8s.io/client-go/kubernetes/typed/core/v1"
+	_ "k8s.io/client-go/plugin/pkg/client/auth/gcp"
+	"k8s.io/client-go/tools/clientcmd"
 
 	"github.com/abetterinternet/prio-server/deploy-tool/key"
 	"github.com/abetterinternet/prio-server/manifest-updater/manifest"
@@ -28,6 +35,15 @@ import (
 // struct definitions here MUST be kept in sync with the output variable in
 // terraform/modules/facilitator/facilitator.tf and the corresponding structs in
 // facilitator/src/manifest.rs.
+
+// SpecificManifestWrapper is a struct that wraps a specific manifest with some
+// metadata inserted by Terraform
+type SpecificManifestWrapper struct {
+	IngestorName        string                                      `json:"ingestor-name"`
+	KubernetesNamespace string                                      `json:"kubernetes-namespace"`
+	CertificateFQDN     string                                      `json:"certificate-fqdn"`
+	SpecificManifest    manifest.DataShareProcessorSpecificManifest `json:"specific-manifest"`
+}
 
 // TerraformOutput represents the JSON output from `terraform apply` or
 // `terraform output --json`. This struct must match the output variables
@@ -43,12 +59,7 @@ type TerraformOutput struct {
 		Value string
 	} `json:"own_manifest_base_url"`
 	SpecificManifests struct {
-		Value map[string]struct {
-			IngestorName        string                                      `json:"ingestor-name"`
-			KubernetesNamespace string                                      `json:"kubernetes-namespace"`
-			CertificateFQDN     string                                      `json:"certificate-fqdn"`
-			SpecificManifest    manifest.DataShareProcessorSpecificManifest `json:"specific-manifest"`
-		}
+		Value map[string]SpecificManifestWrapper
 	} `json:"specific_manifests"`
 	HasTestEnvironment struct {
 		Value bool
@@ -89,7 +100,11 @@ func marshalPKCS8PrivateKey(ecdsaKey *ecdsa.PrivateKey) ([]byte, error) {
 // encoded PKCS#8 encoding of that key in a Kubernetes secret with the provided
 // keyName, in the provided namespace. Returns the private key so the caller may
 // use it to populate specific manifests.
-func generateAndDeployKeyPair(namespace, keyName string, keyMarshaler privateKeyMarshaler) (*ecdsa.PrivateKey, error) {
+func generateAndDeployKeyPair(
+	k8sSecretsClient k8scorev1.SecretInterface,
+	namespace, keyName string,
+	keyMarshaler privateKeyMarshaler,
+) (*ecdsa.PrivateKey, error) {
 	p256Key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	if err != nil {
 		return nil, fmt.Errorf("failed to generate P-256 key: %w", err)
@@ -100,49 +115,18 @@ func generateAndDeployKeyPair(namespace, keyName string, keyMarshaler privateKey
 		return nil, fmt.Errorf("failed to marshal key to PKCS#8 document: %w", err)
 	}
 
-	// Put the private keys into Kubernetes secrets. There's no straightforward
-	// way to update a secret value using kubectl, so we use the trick from[1].
-	// There's no particular reason to use `-o=json` but we must set some output
-	// format or nothing is written to stdout.
-	// [1] https://blog.atomist.com/updating-a-kubernetes-secret-or-configmap/
-	//
-	// We can't provide the base64 encoding of the key to --from-literal because
-	// then kubectl would base64 the base64, so we have to write the b64 to a
-	// temp file and then provide that to --from-file.
 	log.Printf("updating Kubernetes secret %s/%s", namespace, keyName)
-	tempFile, err := ioutil.TempFile("", "pkcs8-private-key-")
+	secret, err := k8sSecretsClient.Get(context.Background(), keyName, k8smetav1.GetOptions{})
 	if err != nil {
-		return nil, fmt.Errorf("failed to create temp file: %v", err)
-	}
-	defer tempFile.Close()
-	defer os.Remove(tempFile.Name())
-
-	base64PrivateKey := base64.StdEncoding.EncodeToString(marshaledPrivateKey)
-	if err := ioutil.WriteFile(tempFile.Name(), []byte(base64PrivateKey), 0600); err != nil {
-		return nil, fmt.Errorf("failed to write out PKCS#8 private key: %v", err)
+		return nil, fmt.Errorf("could not locate kubernetes secret %s/%s: %w", namespace, keyName, err)
 	}
 
-	secretArgument := fmt.Sprintf("--from-file=secret_key=%s", tempFile.Name())
-	kubectlCreate := exec.Command("kubectl", "-n", namespace, "create",
-		"secret", "generic", keyName, secretArgument, "--dry-run=client", "-o=json")
+	secret.StringData = map[string]string{
+		"secret_key": base64.StdEncoding.EncodeToString(marshaledPrivateKey),
+	}
 
-	kubectlApply := exec.Command("kubectl", "apply", "-f", "-")
-
-	read, write := io.Pipe()
-	kubectlApply.Stdin = read
-	kubectlCreate.Stdout = write
-
-	// Do this async because if we don't close `kubectl create`'s stdout,
-	// `kubectl apply` will never make progress.
-	go func() {
-		defer write.Close()
-		if err := kubectlCreate.Run(); err != nil {
-			log.Fatalf("failed to run kubectl create: %v", err)
-		}
-	}()
-
-	if output, err := kubectlApply.CombinedOutput(); err != nil {
-		return nil, fmt.Errorf("failed to run kubectl apply: %v\nCombined output: %s", err, output)
+	if _, err := k8sSecretsClient.Update(context.Background(), secret, k8smetav1.UpdateOptions{}); err != nil {
+		return nil, fmt.Errorf("failed to update kubernetes secret %s/%s: %w", namespace, keyName, err)
 	}
 
 	return p256Key, nil
@@ -161,8 +145,16 @@ func manifestExists(fqdn, dsp string) bool {
 	return resp.StatusCode == 200
 }
 
-func setupTestEnvironment(ingestor *SingletonIngestor, manifestBucket string) error {
-	batchSigningPublicKey, err := createBatchSigningPublicKey(ingestor.TesterKubernetesNamespace, ingestor.BatchSigningKeyName)
+func setupTestEnvironment(
+	k8sClient *kubernetes.Clientset,
+	ingestor *SingletonIngestor,
+	manifestBucket string,
+) error {
+	batchSigningPublicKey, err := createBatchSigningPublicKey(
+		k8sClient.CoreV1().Secrets(ingestor.TesterKubernetesNamespace),
+		ingestor.TesterKubernetesNamespace,
+		ingestor.BatchSigningKeyName,
+	)
 	if err != nil {
 		return fmt.Errorf("error when creating the batch signing public key for the test environment")
 	}
@@ -183,8 +175,11 @@ func setupTestEnvironment(ingestor *SingletonIngestor, manifestBucket string) er
 	return writer.WriteIngestorGlobalManifest(globalManifest, "singleton-ingestor/global-manifest.json")
 }
 
-func createBatchSigningPublicKey(kubernetesNamespace, name string) (*manifest.BatchSigningPublicKey, error) {
-	privateKey, err := generateAndDeployKeyPair(kubernetesNamespace, name, marshalPKCS8PrivateKey)
+func createBatchSigningPublicKey(
+	k8sSecretsClient k8scorev1.SecretInterface,
+	kubernetesNamespace, name string,
+) (*manifest.BatchSigningPublicKey, error) {
+	privateKey, err := generateAndDeployKeyPair(k8sSecretsClient, kubernetesNamespace, name, marshalPKCS8PrivateKey)
 	if err != nil {
 		return nil, fmt.Errorf("error generating and deploying key pair: %v", err)
 	}
@@ -211,92 +206,197 @@ func createBatchSigningPublicKey(kubernetesNamespace, name string) (*manifest.Ba
 	}, nil
 }
 
+func createManifest(
+	k8sClient *kubernetes.Clientset,
+	terraformOutput *TerraformOutput,
+	dataShareProcessorName string,
+	manifestWrapper *SpecificManifestWrapper,
+) error {
+	if manifestExists(terraformOutput.OwnManifestBaseURL.Value, dataShareProcessorName) {
+		log.Printf("manifest for %s exists - ignoring", dataShareProcessorName)
+		return nil
+	}
+
+	k8sSecretsClient := k8sClient.CoreV1().Secrets(manifestWrapper.KubernetesNamespace)
+
+	newBatchSigningPublicKeys := manifest.BatchSigningPublicKeys{}
+	for name, batchSigningPublicKey := range manifestWrapper.SpecificManifest.BatchSigningPublicKeys {
+		if batchSigningPublicKey.PublicKey != "" {
+			newBatchSigningPublicKeys[name] = batchSigningPublicKey
+			continue
+		}
+		log.Printf("generating ECDSA P256 key %s", name)
+
+		batchSigningPublicKey, err := createBatchSigningPublicKey(
+			k8sSecretsClient,
+			manifestWrapper.KubernetesNamespace,
+			name,
+		)
+		if err != nil {
+			return fmt.Errorf("error when creating batch signing public key: %v", err)
+		}
+		newBatchSigningPublicKeys[name] = *batchSigningPublicKey
+	}
+
+	manifestWrapper.SpecificManifest.BatchSigningPublicKeys = newBatchSigningPublicKeys
+
+	certificatesByNamespace := manifest.PacketEncryptionKeyCSRs{}
+	newCertificates := manifest.PacketEncryptionKeyCSRs{}
+	for name, packetEncryptionCertificate := range manifestWrapper.SpecificManifest.PacketEncryptionKeyCSRs {
+		if packetEncryptionCertificate.CertificateSigningRequest != "" {
+			newCertificates[name] = packetEncryptionCertificate
+			continue
+		}
+
+		// Packet encryption keys are shared among the data share processors
+		// in a namespace, so avoid creating and certifying the key twice
+		if certificate, ok := certificatesByNamespace[manifestWrapper.KubernetesNamespace]; ok {
+			newCertificates[name] = certificate
+			continue
+		}
+
+		log.Printf("generating and certifying P256 key %s", name)
+		keyMarshaler := marshalX962UncompressedPrivateKey
+		privKey, err := generateAndDeployKeyPair(
+			k8sSecretsClient,
+			manifestWrapper.KubernetesNamespace,
+			name,
+			keyMarshaler,
+		)
+		if err != nil {
+			return err
+		}
+
+		prioKey := key.NewPrioKey(privKey)
+		csrTemplate := key.GetPrioCSRTemplate(manifestWrapper.CertificateFQDN)
+
+		pemCSR, err := prioKey.CreatePemEncodedCertificateRequest(rand.Reader, csrTemplate)
+		if err != nil {
+			return err
+		}
+
+		packetEncryptionCertificate := manifest.PacketEncryptionCertificate{CertificateSigningRequest: pemCSR}
+
+		certificatesByNamespace[manifestWrapper.KubernetesNamespace] = packetEncryptionCertificate
+		newCertificates[name] = packetEncryptionCertificate
+	}
+
+	manifestWrapper.SpecificManifest.PacketEncryptionKeyCSRs = newCertificates
+
+	// Put the specific manifests into the manifest bucket.
+	destination := fmt.Sprintf("%s-manifest.json", dataShareProcessorName)
+	writer := manifest.NewWriter(terraformOutput.ManifestBucket.Value)
+
+	err := writer.WriteDataShareSpecificManifest(manifestWrapper.SpecificManifest, destination)
+	if err != nil {
+		return fmt.Errorf("could not write data share specific manifest: %s", err)
+	}
+
+	return nil
+}
+
+func backupKeys(
+	k8sClient *kubernetes.Clientset,
+	gcpProjectName string,
+	manifestWrapper *SpecificManifestWrapper,
+) error {
+	context := context.Background()
+
+	if gcpProjectName == "" {
+		log.Printf("no GCP project name -- skipping key backup")
+		return nil
+	}
+	// Build the list of batch signing and packet decryption keys that may need
+	// to be backed up
+	keyNames := []string{}
+
+	for keyName := range manifestWrapper.SpecificManifest.BatchSigningPublicKeys {
+		keyNames = append(keyNames, keyName)
+	}
+
+	for keyName := range manifestWrapper.SpecificManifest.PacketEncryptionKeyCSRs {
+		keyNames = append(keyNames, keyName)
+	}
+
+	k8sSecretsClient := k8sClient.CoreV1().Secrets(manifestWrapper.KubernetesNamespace)
+	secretsBackup, err := key.NewGCPSecretManagerBackup(gcpProjectName)
+	if err != nil {
+		return fmt.Errorf("failed to create secret backup client: %w", err)
+	}
+
+	for _, keyName := range keyNames {
+		secret, err := k8sSecretsClient.Get(context, keyName, k8smetav1.GetOptions{})
+		if err != nil {
+			return fmt.Errorf("could not locate kubernetes secret %s/%s: %w", manifestWrapper.KubernetesNamespace, keyName, err)
+		}
+
+		if err := secretsBackup.BackupSecret(context, secret); err != nil {
+			return fmt.Errorf("failed to backup secret %s: %w", secret.ObjectMeta.Name, err)
+		}
+	}
+
+	return nil
+}
+
+func kubernetesClient(kubeConfigPath string) (*kubernetes.Clientset, error) {
+	config, err := clientcmd.BuildConfigFromFlags("", kubeConfigPath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create Kubernetes client config: %w", err)
+	}
+
+	client, err := kubernetes.NewForConfig(config)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create Kubernetes client: %w", err)
+	}
+
+	return client, nil
+}
+
+var kubeConfigPath = flag.String("kube-config-path", "", "Path to Kubernetes config file to use for Kubernetes API requests. Default: ~/.kube/config")
+var keyBackupGCPProject = flag.String("key-backup-gcp-project", "", "GCP project in which to store key backups.")
+
 func main() {
+	flag.Parse()
+
+	if *kubeConfigPath == "" {
+		currentUser, err := user.Current()
+		if err != nil {
+			log.Fatalf("failed to lookup current user: %s", err)
+		}
+
+		*kubeConfigPath = path.Join(currentUser.HomeDir, ".kube", "config")
+	}
+
 	var terraformOutput TerraformOutput
 
 	if err := json.NewDecoder(os.Stdin).Decode(&terraformOutput); err != nil {
 		log.Fatalf("failed to parse specific manifests: %v", err)
 	}
 
-	certificatesByNamespace := manifest.PacketEncryptionKeyCSRs{}
+	k8sClient, err := kubernetesClient(*kubeConfigPath)
+	if err != nil {
+		log.Fatalf("%s", err)
+	}
 
 	if terraformOutput.HasTestEnvironment.Value && terraformOutput.SingletonIngestor.Value != nil {
 		if manifestExists(terraformOutput.OwnManifestBaseURL.Value, "singleton-ingestor/global") {
 			log.Println("global ingestor manifest exists - ignoring")
-		} else {
-			err := setupTestEnvironment(terraformOutput.SingletonIngestor.Value, terraformOutput.ManifestBucket.Value)
-			if err != nil {
-				log.Fatalf("%s", err)
-			}
+		} else if err := setupTestEnvironment(
+			k8sClient,
+			terraformOutput.SingletonIngestor.Value,
+			terraformOutput.ManifestBucket.Value,
+		); err != nil {
+			log.Fatalf("%s", err)
 		}
 	}
 
 	for dataShareProcessorName, manifestWrapper := range terraformOutput.SpecificManifests.Value {
-		if manifestExists(terraformOutput.OwnManifestBaseURL.Value, dataShareProcessorName) {
-			log.Printf("manifest for %s exists - ignoring", dataShareProcessorName)
-			continue
-		}
-		newBatchSigningPublicKeys := manifest.BatchSigningPublicKeys{}
-		for name, batchSigningPublicKey := range manifestWrapper.SpecificManifest.BatchSigningPublicKeys {
-			if batchSigningPublicKey.PublicKey != "" {
-				newBatchSigningPublicKeys[name] = batchSigningPublicKey
-				continue
-			}
-			log.Printf("generating ECDSA P256 key %s", name)
-
-			batchSigningPublicKey, err := createBatchSigningPublicKey(manifestWrapper.KubernetesNamespace, name)
-			if err != nil {
-				log.Fatalf("Error when creating batch signing public key: %v", err)
-			}
-			newBatchSigningPublicKeys[name] = *batchSigningPublicKey
+		if err := createManifest(k8sClient, &terraformOutput, dataShareProcessorName, &manifestWrapper); err != nil {
+			log.Fatalf("%s", err)
 		}
 
-		manifestWrapper.SpecificManifest.BatchSigningPublicKeys = newBatchSigningPublicKeys
-
-		newCertificates := manifest.PacketEncryptionKeyCSRs{}
-		for name, packetEncryptionCertificate := range manifestWrapper.SpecificManifest.PacketEncryptionKeyCSRs {
-			if packetEncryptionCertificate.CertificateSigningRequest != "" {
-				newCertificates[name] = packetEncryptionCertificate
-				continue
-			}
-
-			// Packet encryption keys are shared among the data share processors
-			// in a namespace, so avoid creating and certifying the key twice
-			if certificate, ok := certificatesByNamespace[manifestWrapper.KubernetesNamespace]; ok {
-				newCertificates[name] = certificate
-				continue
-			}
-
-			log.Printf("generating and certifying P256 key %s", name)
-			keyMarshaler := marshalX962UncompressedPrivateKey
-			privKey, err := generateAndDeployKeyPair(manifestWrapper.KubernetesNamespace, name, keyMarshaler)
-			if err != nil {
-				log.Fatalf("%s", err)
-			}
-
-			prioKey := key.NewPrioKey(privKey)
-			csrTemplate := key.GetPrioCSRTemplate(manifestWrapper.CertificateFQDN)
-
-			pemCSR, err := prioKey.CreatePemEncodedCertificateRequest(rand.Reader, csrTemplate)
-			if err != nil {
-				log.Fatalf("%s", err)
-			}
-
-			packetEncryptionCertificate := manifest.PacketEncryptionCertificate{CertificateSigningRequest: pemCSR}
-
-			certificatesByNamespace[manifestWrapper.KubernetesNamespace] = packetEncryptionCertificate
-			newCertificates[name] = packetEncryptionCertificate
-		}
-
-		manifestWrapper.SpecificManifest.PacketEncryptionKeyCSRs = newCertificates
-
-		// Put the specific manifests into the manifest bucket.
-		destination := fmt.Sprintf("%s-manifest.json", dataShareProcessorName)
-		writer := manifest.NewWriter(terraformOutput.ManifestBucket.Value)
-
-		err := writer.WriteDataShareSpecificManifest(manifestWrapper.SpecificManifest, destination)
-		if err != nil {
-			log.Fatalf("could not write data share specific manifest: %s", err)
+		if err := backupKeys(k8sClient, *keyBackupGCPProject, &manifestWrapper); err != nil {
+			log.Fatalf("%s", err)
 		}
 	}
 }
