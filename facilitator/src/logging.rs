@@ -32,6 +32,10 @@ pub(crate) const EVENT_KEY_OWN_VALIDATION_PATH: EventKey = "own_validation_path"
 pub(crate) const EVENT_KEY_PEER_VALIDATION_PATH: EventKey = "peer_validation_path";
 /// The UUID of a packet that something happened to
 pub(crate) const EVENT_KEY_PACKET_UUID: EventKey = "packet_uuid";
+/// The ID (usually a UUID) of a batch that something happened to
+pub(crate) const EVENT_KEY_BATCH_ID: EventKey = "batch_id";
+/// The date of a batch that something happened to
+pub(crate) const EVENT_KEY_BATCH_DATE: EventKey = "batch_date";
 
 /// Severity maps `log::Level` to Google Cloud Platform's notion of Severity.
 /// https://cloud.google.com/logging/docs/reference/v2/rest/v2/LogEntry#LogSeverity

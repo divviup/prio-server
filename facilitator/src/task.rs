@@ -3,6 +3,7 @@ mod sqs;
 
 use anyhow::Result;
 use serde::Deserialize;
+use slog::{Key, Record, Serializer, Value};
 use std::{
     fmt,
     fmt::{Debug, Display},
@@ -61,10 +62,10 @@ pub trait TaskQueue<T: Task>: Debug {
 }
 
 /// Represents a task that can be assigned to a worker
-pub trait Task: Debug + Display + Sized + serde::de::DeserializeOwned {}
+pub trait Task: Debug + Display + Sized + serde::de::DeserializeOwned + Clone {}
 
 /// Represents an intake batch task to be executed
-#[derive(Debug, Deserialize, PartialEq)]
+#[derive(Clone, Debug, Deserialize, PartialEq)]
 #[serde(rename_all = "kebab-case")]
 pub struct IntakeBatchTask {
     /// The trace identifier for the intake
@@ -95,7 +96,7 @@ impl Display for IntakeBatchTask {
 }
 
 /// Represents an aggregation task to be executed
-#[derive(Debug, Deserialize, PartialEq)]
+#[derive(Clone, Debug, Deserialize, PartialEq)]
 #[serde(rename_all = "kebab-case")]
 pub struct AggregationTask {
     /// The trace identifier for the aggregation
@@ -132,7 +133,7 @@ impl Display for AggregationTask {
 }
 
 /// Represents a batch included in an aggregation
-#[derive(Debug, Deserialize, PartialEq)]
+#[derive(Clone, Debug, Deserialize, PartialEq)]
 #[serde(rename_all = "kebab-case")]
 pub struct Batch {
     /// The identifier of the batch. Typically a UUID.
@@ -144,12 +145,20 @@ pub struct Batch {
 
 /// A TaskHandle wraps a Task along with whatever metadata is needed by a
 /// TaskQueue implementation
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct TaskHandle<T: Task> {
     /// The acknowledgment ID for the task
     acknowledgment_id: String,
     /// The task
     pub task: T,
+}
+
+// Implementing slog::Value allows us to put TaskHandles in structured events
+// with minimal ceremony.
+impl<T: Task> Value for TaskHandle<T> {
+    fn serialize(&self, _: &Record<'_>, key: Key, serializer: &mut dyn Serializer) -> slog::Result {
+        serializer.emit_str(key, &format!("{}", self))
+    }
 }
 
 impl<T: Task> Display for TaskHandle<T> {

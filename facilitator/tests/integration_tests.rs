@@ -215,6 +215,7 @@ fn aggregation_including_invalid_batch() {
             pha_peer_validation_transport,
             true,  // is_first
             false, // permissive
+            &logger,
         )
         .unwrap();
 
@@ -228,6 +229,7 @@ fn aggregation_including_invalid_batch() {
             &mut facilitator_to_pha_validation_transport,
             false, // is_first
             false, // permissive
+            &logger,
         )
         .unwrap();
 
@@ -236,9 +238,9 @@ fn aggregation_including_invalid_batch() {
             facilitator_batch_intaker.set_use_bogus_packet_file_digest(true);
         }
 
-        pha_batch_intaker.generate_validation_share(|| {}).unwrap();
+        pha_batch_intaker.generate_validation_share(|_| {}).unwrap();
         facilitator_batch_intaker
-            .generate_validation_share(|| {})
+            .generate_validation_share(|_| {})
             .unwrap();
     }
 
@@ -475,11 +477,12 @@ fn end_to_end_test(drop_nth_pha: Option<usize>, drop_nth_facilitator: Option<usi
         &mut pha_own_validate_signable_transport,
         true,
         false,
+        &logger,
     )
     .unwrap();
     batch_intaker.set_callback_cadence(2);
     batch_intaker
-        .generate_validation_share(|| intake_callback_count += 1)
+        .generate_validation_share(|_| intake_callback_count += 1)
         .unwrap();
 
     assert_eq!(
@@ -497,9 +500,10 @@ fn end_to_end_test(drop_nth_pha: Option<usize>, drop_nth_facilitator: Option<usi
         &mut pha_own_validate_signable_transport,
         true,
         false,
+        &logger,
     )
     .unwrap()
-    .generate_validation_share(|| {})
+    .generate_validation_share(|_| {})
     .unwrap();
 
     BatchIntaker::new(
@@ -512,9 +516,10 @@ fn end_to_end_test(drop_nth_pha: Option<usize>, drop_nth_facilitator: Option<usi
         &mut facilitator_own_validate_signable_transport,
         false,
         false,
+        &logger,
     )
     .unwrap()
-    .generate_validation_share(|| {})
+    .generate_validation_share(|_| {})
     .unwrap();
 
     BatchIntaker::new(
@@ -527,9 +532,10 @@ fn end_to_end_test(drop_nth_pha: Option<usize>, drop_nth_facilitator: Option<usi
         &mut facilitator_own_validate_signable_transport,
         false,
         false,
+        &logger,
     )
     .unwrap()
-    .generate_validation_share(|| {})
+    .generate_validation_share(|_| {})
     .unwrap();
 
     let batch_ids_and_dates = vec![(batch_1_uuid, date), (batch_2_uuid, date)];

@@ -1,9 +1,14 @@
 use crate::{
     batch::{Batch, BatchReader, BatchWriter},
     idl::{IngestionDataSharePacket, IngestionHeader, Packet, ValidationHeader, ValidationPacket},
+    logging::{
+        EVENT_KEY_AGGREGATION_NAME, EVENT_KEY_BATCH_DATE, EVENT_KEY_BATCH_ID,
+        EVENT_KEY_INGESTION_PATH, EVENT_KEY_OWN_VALIDATION_PATH, EVENT_KEY_PACKET_UUID,
+        EVENT_KEY_PEER_VALIDATION_PATH, EVENT_KEY_TRACE_ID,
+    },
     metrics::IntakeMetricsCollector,
     transport::{SignableTransport, VerifiableAndDecryptableTransport},
-    BatchSigningKey, Error,
+    BatchSigningKey, Error, DATE_FORMAT,
 };
 use anyhow::{anyhow, ensure, Context, Result};
 use chrono::NaiveDateTime;
@@ -13,7 +18,7 @@ use prio::{
     server::{Server, ServerError},
 };
 use ring::signature::UnparsedPublicKey;
-use slog_scope::{debug, info};
+use slog::{debug, info, o, Logger};
 use std::{collections::HashMap, convert::TryFrom, iter::Iterator};
 use uuid::Uuid;
 
@@ -21,7 +26,6 @@ use uuid::Uuid;
 /// sent by the ingestion server and emitting validation shares to the other
 /// share processor.
 pub struct BatchIntaker<'a> {
-    trace_id: &'a str,
     intake_batch: BatchReader<'a, IngestionHeader, IngestionDataSharePacket>,
     intake_public_keys: &'a HashMap<String, UnparsedPublicKey<Vec<u8>>>,
     packet_decryption_keys: &'a Vec<PrivateKey>,
@@ -33,6 +37,7 @@ pub struct BatchIntaker<'a> {
     callback_cadence: u32,
     metrics_collector: Option<&'a IntakeMetricsCollector>,
     use_bogus_packet_file_digest: bool,
+    logger: Logger,
 }
 
 impl<'a> BatchIntaker<'a> {
@@ -46,9 +51,18 @@ impl<'a> BatchIntaker<'a> {
         peer_validation_transport: &'a mut SignableTransport,
         is_first: bool,
         permit_malformed_batch: bool,
+        parent_logger: &Logger,
     ) -> Result<BatchIntaker<'a>> {
+        let logger = parent_logger.new(o!(
+            EVENT_KEY_TRACE_ID => trace_id.to_owned(),
+            EVENT_KEY_AGGREGATION_NAME => aggregation_name.to_owned(),
+            EVENT_KEY_BATCH_ID => batch_id.to_string(),
+            EVENT_KEY_BATCH_DATE => date.format(DATE_FORMAT).to_string(),
+            EVENT_KEY_INGESTION_PATH => ingestion_transport.transport.transport.path(),
+            EVENT_KEY_OWN_VALIDATION_PATH => own_validation_transport.transport.path(),
+            EVENT_KEY_PEER_VALIDATION_PATH => peer_validation_transport.transport.path(),
+        ));
         Ok(BatchIntaker {
-            trace_id,
             intake_batch: BatchReader::new(
                 Batch::new_ingestion(aggregation_name, batch_id, date),
                 &mut *ingestion_transport.transport.transport,
@@ -70,6 +84,7 @@ impl<'a> BatchIntaker<'a> {
             callback_cadence: 1000,
             metrics_collector: None,
             use_bogus_packet_file_digest: false,
+            logger,
         })
     }
 
@@ -98,14 +113,11 @@ impl<'a> BatchIntaker<'a> {
     /// and packet file, then computes validation shares and sends them to the
     /// peer share processor. The provided callback is invoked once for every
     /// thousand processed packets, unless set_callback_cadence has been called.
-    pub fn generate_validation_share<F: FnMut()>(&mut self, mut callback: F) -> Result<()> {
-        info!(
-            "trace id {} processing intake from {} and saving validity to {} and {}",
-            self.trace_id,
-            self.intake_batch.path(),
-            self.own_validation_batch.path(),
-            self.peer_validation_batch.path()
-        );
+    pub fn generate_validation_share<F>(&mut self, mut callback: F) -> Result<()>
+    where
+        F: FnMut(&Logger),
+    {
+        info!(self.logger, "processing batch intake task");
 
         let ingestion_header = self.intake_batch.header(self.intake_public_keys)?;
         ensure!(
@@ -123,12 +135,16 @@ impl<'a> BatchIntaker<'a> {
             .packet_decryption_keys
             .iter()
             .map(|k| {
-                debug!("Public key for server is: {:?}", PublicKey::from(k));
+                debug!(
+                    self.logger,
+                    "Public key for server is: {:?}",
+                    PublicKey::from(k)
+                );
                 Server::new(ingestion_header.bins as usize, self.is_first, k.clone())
             })
             .collect();
 
-        debug!("We have {} servers.", &servers.len());
+        debug!(self.logger, "We have {} servers.", &servers.len());
 
         // Read all the ingestion packets, generate a verification message for
         // each, and write them to the validation batch.
@@ -136,8 +152,11 @@ impl<'a> BatchIntaker<'a> {
             self.intake_batch.packet_file_reader(&ingestion_header)?;
 
         let mut processed_packets = 0;
-        // Copy of callback_cadence that's safe to use in the closure
+        // Borrowing distinct parts of a struct works, but not under closures:
+        // https://github.com/rust-lang/rust/issues/53488
+        // The workaround is to borrow or copy fields outside the closure.
         let callback_cadence = self.callback_cadence;
+        let logger = &self.logger;
 
         let packet_file_digest = self.peer_validation_batch.multi_packet_file_writer(
             vec![&mut self.own_validation_batch],
@@ -165,10 +184,13 @@ impl<'a> BatchIntaker<'a> {
                         Ok(m) => m,
                         Err(ServerError::Encrypt(e)) => {
                             debug!(
+                                logger,
                                 "Input share could not be decrypted. Will try \
-                                more packet decryption keys if available. \
-                                Decryption error: {:?}",
-                                e
+                                more packet decryption keys if available.";
+                                o!(
+                                    "decryption_error" => format!("{:?}", e),
+                                    EVENT_KEY_PACKET_UUID => packet.uuid.to_string(),
+                                )
                             );
                             continue;
                         }
@@ -197,7 +219,7 @@ impl<'a> BatchIntaker<'a> {
                 }
                 processed_packets += 1;
                 if processed_packets % callback_cadence == 0 {
-                    callback();
+                    callback(&logger);
                 }
             },
         )?;
@@ -207,7 +229,7 @@ impl<'a> BatchIntaker<'a> {
         // digest. This is meant to simulate a buggy peer data share processor,
         // so that we can test how the aggregation step behaves.
         let packet_file_digest = if self.use_bogus_packet_file_digest {
-            info!("using bogus packet file digest");
+            info!(self.logger, "using bogus packet file digest");
             vec![0u8, 1u8, 2u8, 3u8, 4u8, 5u8, 6u8, 7u8, 8u8]
         } else {
             packet_file_digest.as_ref().to_vec()
@@ -247,6 +269,7 @@ impl<'a> BatchIntaker<'a> {
 mod tests {
     use super::*;
     use crate::{
+        logging::setup_test_logging,
         sample::{SampleGenerator, SampleOutput},
         test_utils::{
             default_facilitator_signing_private_key, default_ingestor_private_key,
@@ -262,6 +285,7 @@ mod tests {
 
     #[test]
     fn share_validator() {
+        let logger = setup_test_logging();
         let pha_tempdir = tempfile::TempDir::new().unwrap();
         let pha_copy_tempdir = tempfile::TempDir::new().unwrap();
         let facilitator_tempdir = tempfile::TempDir::new().unwrap();
@@ -378,11 +402,12 @@ mod tests {
             &mut pha_own_validate_transport,
             true,
             false,
+            &logger,
         )
         .unwrap();
 
         pha_ingestor
-            .generate_validation_share(|| {})
+            .generate_validation_share(|_| {})
             .expect("PHA failed to generate validation");
 
         let mut facilitator_ingestor = BatchIntaker::new(
@@ -395,16 +420,18 @@ mod tests {
             &mut facilitator_own_validate_transport,
             false,
             false,
+            &logger,
         )
         .unwrap();
 
         facilitator_ingestor
-            .generate_validation_share(|| {})
+            .generate_validation_share(|_| {})
             .expect("facilitator failed to generate validation");
     }
 
     #[test]
     fn wrong_decryption_key() {
+        let logger = setup_test_logging();
         let pha_tempdir = tempfile::TempDir::new().unwrap();
         let pha_copy_tempdir = tempfile::TempDir::new().unwrap();
         let facilitator_tempdir = tempfile::TempDir::new().unwrap();
@@ -492,10 +519,11 @@ mod tests {
             &mut pha_own_validate_transport,
             true,
             false,
+            &logger,
         )
         .unwrap();
 
-        let err = pha_ingestor.generate_validation_share(|| {}).unwrap_err();
+        let err = pha_ingestor.generate_validation_share(|_| {}).unwrap_err();
         assert!(err
             .to_string()
             .contains("failed to construct validation message for packet",));
@@ -503,6 +531,7 @@ mod tests {
 
     #[test]
     fn wrong_packet_dimension() {
+        let logger = setup_test_logging();
         let pha_tempdir = tempfile::TempDir::new().unwrap();
         let pha_copy_tempdir = tempfile::TempDir::new().unwrap();
         let facilitator_tempdir = tempfile::TempDir::new().unwrap();
@@ -592,10 +621,11 @@ mod tests {
             &mut pha_own_validate_transport,
             true,
             false,
+            &logger,
         )
         .unwrap();
 
-        let err = pha_ingestor.generate_validation_share(|| {}).unwrap_err();
+        let err = pha_ingestor.generate_validation_share(|_| {}).unwrap_err();
         assert_matches!(
             err.downcast(),
             Ok(ServerError::Serialize(
