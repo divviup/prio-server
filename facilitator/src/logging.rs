@@ -35,6 +35,13 @@ pub(crate) const EVENT_KEY_PACKET_UUID: EventKey = "packet_uuid";
 pub(crate) const EVENT_KEY_BATCH_ID: EventKey = "batch_id";
 /// The date of a batch that something happened to
 pub(crate) const EVENT_KEY_BATCH_DATE: EventKey = "batch_date";
+/// The path to some object store (e.g., an S3 bucket or a local directory)
+pub(crate) const EVENT_KEY_STORAGE_PATH: EventKey = "path";
+/// The key for an object in some object store
+pub(crate) const EVENT_KEY_STORAGE_KEY: EventKey = "key";
+/// An identity used while accessing some cloud resource (e.g., an AWS role ARN
+/// or a GCP service account email)
+pub(crate) const EVENT_KEY_IDENTITY: EventKey = "identity";
 
 /// Severity maps `log::Level` to Google Cloud Platform's notion of Severity.
 /// https://cloud.google.com/logging/docs/reference/v2/rest/v2/LogEntry#LogSeverity

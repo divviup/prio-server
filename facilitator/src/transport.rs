@@ -63,14 +63,19 @@ impl<T: TransportWriter + ?Sized> TransportWriter for Box<T> {
 }
 
 /// A transport moves object in and out of some data store, such as a cloud
-/// object store like Amazon S3, or local files, or buffers in memory.
+/// object store like Amazon S3, or local files, or buffers in memory. The get()
+/// and put() methods take a trace_id parameter which should be the unique trace
+/// ID of the task that the get or put operation is a part of. These are
+/// provided as parameters to these methods rather than being fields on the
+/// Transport's own Logger because a single Transport could be re-used across
+/// many tasks.
 pub trait Transport: Debug {
     /// Returns an std::io::Read instance from which the contents of the value
     /// of the provided key may be read.
-    fn get(&mut self, key: &str) -> Result<Box<dyn Read>>;
+    fn get(&mut self, key: &str, trace_id: &str) -> Result<Box<dyn Read>>;
     /// Returns an std::io::Write instance into which the contents of the value
     /// may be written.
-    fn put(&mut self, key: &str) -> Result<Box<dyn TransportWriter>>;
+    fn put(&mut self, key: &str, trace_id: &str) -> Result<Box<dyn TransportWriter>>;
 
     fn path(&self) -> String;
 }
