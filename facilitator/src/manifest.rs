@@ -429,17 +429,16 @@ fn public_key_from_pem(pem_key: &str) -> Result<UnparsedPublicKey<Vec<u8>>> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::test_utils::{
-        default_ingestor_private_key, DEFAULT_INGESTOR_SUBJECT_PUBLIC_KEY_INFO,
-        DEFAULT_PACKET_ENCRYPTION_CSR,
-    };
     use crate::{
-        config::{GCSPath, S3Path},
+        config::{GcsPath, S3Path},
         test_utils::{
-            default_packet_encryption_certificate_signing_request,
+            default_ingestor_private_key, default_packet_encryption_certificate_signing_request,
+            DEFAULT_INGESTOR_SUBJECT_PUBLIC_KEY_INFO,
             DEFAULT_PACKET_ENCRYPTION_CERTIFICATE_SIGNING_REQUEST_PRIVATE_KEY,
+            DEFAULT_PACKET_ENCRYPTION_CSR,
         },
     };
+    use assert_matches::assert_matches;
     use ring::rand::SystemRandom;
     use rusoto_core::Region;
     use url::Url;
@@ -634,17 +633,15 @@ mod tests {
             .verify(content, signature.as_ref())
             .unwrap();
 
-        if let StoragePath::GCSPath(path) = manifest.validation_bucket().unwrap() {
-            assert_eq!(
-                path,
-                GCSPath {
+        assert_matches!(
+            manifest.validation_bucket(),
+            Ok(StoragePath::GcsPath(path)) => {
+                assert_eq!(path, GcsPath {
                     bucket: "validation".to_owned(),
                     key: "path/fragment".to_owned(),
-                }
-            );
-        } else {
-            assert!(false, "unexpected storage path type");
-        }
+                });
+            }
+        );
 
         let packet_decryption_keys = manifest.packet_decryption_keys().unwrap();
 
@@ -1056,29 +1053,26 @@ mod tests {
             "#;
 
         let manifest = PortalServerGlobalManifest::from_slice(manifest.as_bytes()).unwrap();
-        if let StoragePath::GCSPath(path) = manifest.sum_part_bucket(false).unwrap() {
-            assert_eq!(
-                path,
-                GCSPath {
+
+        assert_matches!(
+            manifest.sum_part_bucket(false),
+            Ok(StoragePath::GcsPath(path)) => {
+                assert_eq!(path, GcsPath {
                     bucket: "facilitator-bucket".to_owned(),
                     key: "".to_owned(),
-                }
-            );
-        } else {
-            assert!(false, "unexpected storage path type");
-        }
-        if let StoragePath::S3Path(path) = manifest.sum_part_bucket(true).unwrap() {
-            assert_eq!(
-                path,
-                S3Path {
+                });
+            }
+        );
+        assert_matches!(
+            manifest.sum_part_bucket(true),
+            Ok(StoragePath::S3Path(path)) => {
+                assert_eq!(path, S3Path {
                     region: Region::UsWest1,
                     bucket: "pha-bucket".to_owned(),
                     key: "".to_owned(),
-                }
-            );
-        } else {
-            assert!(false, "unexpected storage path type");
-        }
+                });
+            }
+        );
     }
 
     #[test]

@@ -81,20 +81,20 @@ impl FromStr for S3Path {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct GCSPath {
+pub struct GcsPath {
     pub bucket: String,
     pub key: String,
 }
 
 #[derive(Debug, thiserror::Error)]
-pub enum GCSPathParseError {
+pub enum GcsPathParseError {
     #[error("Not a gcp path")]
     NoPath,
     #[error("GCP path must be in the format `gs://{{bucket name}}/{{optional key prefix}}`")]
     InvalidFormat,
 }
 
-impl GCSPath {
+impl GcsPath {
     /// Returns `self`, possibly adding '/' at the end of the key to ensure it can be combined with another path as a directory prefix.
     pub fn ensure_directory_prefix(mut self) -> Self {
         if !self.key.is_empty() && !self.key.ends_with('/') {
@@ -104,35 +104,35 @@ impl GCSPath {
     }
 }
 
-impl Display for GCSPath {
+impl Display for GcsPath {
     fn fmt(&self, f: &mut Formatter) -> fmt::Result {
         write!(f, "gs://{}/{}", self.bucket, self.key)
     }
 }
 
-impl FromStr for GCSPath {
-    type Err = GCSPathParseError;
+impl FromStr for GcsPath {
+    type Err = GcsPathParseError;
 
-    fn from_str(s: &str) -> Result<Self, GCSPathParseError> {
-        let bucket_and_prefix = s.strip_prefix("gs://").ok_or(GCSPathParseError::NoPath)?;
+    fn from_str(s: &str) -> Result<Self, GcsPathParseError> {
+        let bucket_and_prefix = s.strip_prefix("gs://").ok_or(GcsPathParseError::NoPath)?;
 
         let mut components = bucket_and_prefix
             .splitn(2, '/')
             .take_while(|s| !s.is_empty());
         let bucket = components
             .next()
-            .ok_or(GCSPathParseError::InvalidFormat)?
+            .ok_or(GcsPathParseError::InvalidFormat)?
             .to_owned();
         let key = components.next().map(|s| s.to_owned()).unwrap_or_default();
         assert!(components.next().is_none());
 
-        Ok(GCSPath { bucket, key })
+        Ok(GcsPath { bucket, key })
     }
 }
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum StoragePath {
-    GCSPath(GCSPath),
+    GcsPath(GcsPath),
     S3Path(S3Path),
     LocalPath(PathBuf),
 }
@@ -146,9 +146,9 @@ impl FromStr for StoragePath {
             p => return Ok(StoragePath::S3Path(p.context("parsing an S3 path")?)),
         }
 
-        match GCSPath::from_str(s) {
-            Err(GCSPathParseError::NoPath) => {}
-            p => return Ok(StoragePath::GCSPath(p.context("parsing a GCS path")?)),
+        match GcsPath::from_str(s) {
+            Err(GcsPathParseError::NoPath) => {}
+            p => return Ok(StoragePath::GcsPath(p.context("parsing a GCS path")?)),
         }
 
         Ok(StoragePath::LocalPath(s.into()))
@@ -348,15 +348,15 @@ mod tests {
 
     #[test]
     fn parse_gcspath() {
-        let p1 = GCSPath::from_str("gs://the-bucket/path/to/object").unwrap();
+        let p1 = GcsPath::from_str("gs://the-bucket/path/to/object").unwrap();
         assert_eq!(p1.bucket, "the-bucket");
         assert_eq!(p1.key, "path/to/object");
     }
 
     #[test]
     fn parse_gcspath_no_key() {
-        let p1 = GCSPath::from_str("gs://the-bucket").unwrap();
-        let p2 = GCSPath::from_str("gs://the-bucket/").unwrap();
+        let p1 = GcsPath::from_str("gs://the-bucket").unwrap();
+        let p2 = GcsPath::from_str("gs://the-bucket/").unwrap();
         assert_eq!(p1.key, "");
         assert_eq!(p1, p2);
     }
@@ -364,16 +364,16 @@ mod tests {
     #[test]
     fn parse_gcs_invalid_paths() {
         // no bucket name
-        let e = GCSPath::from_str("gs://").unwrap_err();
-        assert_matches!(e, GCSPathParseError::InvalidFormat);
+        let e = GcsPath::from_str("gs://").unwrap_err();
+        assert_matches!(e, GcsPathParseError::InvalidFormat);
         // wrong scheme
-        let e = GCSPath::from_str("s3://bucket-name/key").unwrap_err();
-        assert_matches!(e, GCSPathParseError::NoPath);
+        let e = GcsPath::from_str("s3://bucket-name/key").unwrap_err();
+        assert_matches!(e, GcsPathParseError::NoPath);
     }
 
     #[test]
     fn gcspath_ensure_prefix() {
-        let p = GCSPath::from_str("gs://the-bucket/key-prefix").unwrap();
+        let p = GcsPath::from_str("gs://the-bucket/key-prefix").unwrap();
         let p = p.ensure_directory_prefix();
         assert_eq!(p.key, "key-prefix/");
     }

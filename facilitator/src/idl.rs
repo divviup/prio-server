@@ -1048,6 +1048,7 @@ impl Packet for InvalidPacket {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use assert_matches::assert_matches;
 
     #[test]
     fn roundtrip_batch_signature() {
@@ -1152,10 +1153,10 @@ mod tests {
         }
 
         // Do one more read. This should yield EOF.
-        match IngestionDataSharePacket::read(&mut reader) {
-            Err(Error::EofError) => (),
-            v => assert!(false, "wrong error {:?}", v),
-        }
+        assert_matches!(
+            IngestionDataSharePacket::read(&mut reader),
+            Err(Error::EofError)
+        );
     }
 
     #[test]
@@ -1232,10 +1233,7 @@ mod tests {
         }
 
         // Do one more read. This should yield EOF.
-        match ValidationPacket::read(&mut reader) {
-            Err(Error::EofError) => (),
-            v => assert!(false, "wrong error {:?}", v),
-        }
+        assert_matches!(ValidationPacket::read(&mut reader), Err(Error::EofError));
     }
 
     #[test]
@@ -1311,9 +1309,6 @@ mod tests {
         }
 
         // Do one more read. This should yield EOF.
-        match InvalidPacket::read(&mut reader) {
-            Err(Error::EofError) => (),
-            v => assert!(false, "wrong error {:?}", v),
-        }
+        assert_matches!(InvalidPacket::read(&mut reader), Err(Error::EofError));
     }
 }

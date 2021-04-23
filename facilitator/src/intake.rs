@@ -41,6 +41,7 @@ pub struct BatchIntaker<'a> {
 }
 
 impl<'a> BatchIntaker<'a> {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         trace_id: &'a str,
         aggregation_name: &str,
@@ -359,7 +360,7 @@ mod tests {
                 transport: Box::new(LocalFileTransport::new(
                     facilitator_tempdir.path().to_path_buf(),
                 )),
-                batch_signing_public_keys: ingestor_pub_keys.clone(),
+                batch_signing_public_keys: ingestor_pub_keys,
             },
             packet_decryption_keys: vec![PrivateKey::from_base64(
                 DEFAULT_PACKET_ENCRYPTION_CERTIFICATE_SIGNING_REQUEST_PRIVATE_KEY,
@@ -492,7 +493,7 @@ mod tests {
         let mut pha_ingest_transport = VerifiableAndDecryptableTransport {
             transport: VerifiableTransport {
                 transport: Box::new(LocalFileTransport::new(pha_tempdir.path().to_path_buf())),
-                batch_signing_public_keys: ingestor_pub_keys.clone(),
+                batch_signing_public_keys: ingestor_pub_keys,
             },
             packet_decryption_keys: vec![
                 PrivateKey::from_base64(DEFAULT_PHA_ECIES_PRIVATE_KEY).unwrap()
@@ -594,7 +595,7 @@ mod tests {
         let mut pha_ingest_transport = VerifiableAndDecryptableTransport {
             transport: VerifiableTransport {
                 transport: Box::new(LocalFileTransport::new(pha_tempdir.path().to_path_buf())),
-                batch_signing_public_keys: ingestor_pub_keys.clone(),
+                batch_signing_public_keys: ingestor_pub_keys,
             },
             packet_decryption_keys: vec![PrivateKey::from_base64(
                 DEFAULT_PACKET_ENCRYPTION_CERTIFICATE_SIGNING_REQUEST_PRIVATE_KEY,

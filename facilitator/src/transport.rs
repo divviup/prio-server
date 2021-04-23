@@ -12,7 +12,7 @@ use std::{
     io::{Read, Write},
 };
 
-pub use gcs::GCSTransport;
+pub use gcs::GcsTransport;
 pub use local::LocalFileTransport;
 pub use s3::S3Transport;
 

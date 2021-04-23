@@ -85,7 +85,7 @@ impl Task for IntakeBatchTask {}
 impl Display for IntakeBatchTask {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         if let Some(id) = self.trace_id {
-            write!(f, "trace ID: {}\n", id)?;
+            writeln!(f, "trace ID: {}", id)?;
         }
         write!(
             f,
@@ -119,7 +119,7 @@ impl Task for AggregationTask {}
 impl Display for AggregationTask {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         if let Some(id) = self.trace_id {
-            write!(f, "trace ID: {}\n", id)?;
+            writeln!(f, "trace ID: {}", id)?;
         }
         write!(
             f,
