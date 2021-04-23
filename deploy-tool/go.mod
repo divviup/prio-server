@@ -9,7 +9,7 @@ require (
 	google.golang.org/genproto v0.0.0-20210402141018-6c239bbf2bb1
 	google.golang.org/grpc v1.37.0
 	k8s.io/api v0.19.3
-	k8s.io/apimachinery v0.19.3
+	k8s.io/apimachinery v0.21.0
 	k8s.io/client-go v0.19.3
 )
 
