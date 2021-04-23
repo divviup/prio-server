@@ -630,6 +630,8 @@ fn end_to_end_test(drop_nth_pha: Option<usize>, drop_nth_facilitator: Option<usi
             ),
             &mut *pha_aggregation_transport.transport,
             false,
+            "trace-id",
+            &logger,
         );
     let pha_sum_part = pha_aggregation_batch_reader.header(&pha_pub_keys).unwrap();
     assert_eq!(
@@ -649,6 +651,8 @@ fn end_to_end_test(drop_nth_pha: Option<usize>, drop_nth_facilitator: Option<usi
             ),
             &mut *facilitator_aggregation_transport.transport,
             false, // permissive
+            "trace-id",
+            &logger,
         );
 
     let facilitator_sum_part = facilitator_aggregation_batch_reader

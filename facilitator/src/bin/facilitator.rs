@@ -1103,6 +1103,7 @@ fn generate_sample(
                 peer_identity.as_deref(),
                 Entity::Peer,
                 sub_matches,
+                logger,
             )?,
             batch_signing_key: own_batch_signing_key,
         },
@@ -1139,6 +1140,7 @@ fn generate_sample(
                 facilitator_identity.as_deref(),
                 Entity::Facilitator,
                 sub_matches,
+                logger,
             )?,
             batch_signing_key: own_batch_signing_key,
         },
@@ -1183,7 +1185,7 @@ fn intake_batch<F>(
 where
     F: FnMut(&Logger),
 {
-    let mut intake_transport = intake_transport_from_args(sub_matches)?;
+    let mut intake_transport = intake_transport_from_args(sub_matches, parent_logger)?;
 
     // We need the bucket to which we will write validations for the
     // peer data share processor, which can either be fetched from the
@@ -1203,6 +1205,7 @@ where
             Entity::Peer,
             PathOrInOut::Path(peer_validation_bucket),
             sub_matches,
+            parent_logger,
         )?,
         batch_signing_key: batch_signing_key_from_arg(sub_matches)?,
     };
@@ -1214,6 +1217,7 @@ where
             Entity::Own,
             PathOrInOut::InOut(InOut::Output),
             sub_matches,
+            parent_logger,
         )?,
         batch_signing_key: batch_signing_key_from_arg(sub_matches)?,
     };
@@ -1356,12 +1360,16 @@ where
     let instance_name = sub_matches.value_of("instance-name").unwrap();
     let is_first = is_first_from_arg(sub_matches);
 
-    let mut intake_transport = intake_transport_from_args(sub_matches)?;
+    let mut intake_transport = intake_transport_from_args(sub_matches, logger)?;
 
     // We created the bucket to which we wrote copies of our validation
     // shares, so it is simply provided by argument.
-    let own_validation_transport =
-        transport_from_args(Entity::Own, PathOrInOut::InOut(InOut::Input), sub_matches)?;
+    let own_validation_transport = transport_from_args(
+        Entity::Own,
+        PathOrInOut::InOut(InOut::Input),
+        sub_matches,
+        logger,
+    )?;
 
     // To read our own validation shares, we require our own public keys which
     // we discover in our own specific manifest. If no manifest is provided, use
@@ -1389,8 +1397,12 @@ where
 
     // We created the bucket that peers wrote validations into, and so
     // it is simply provided via argument.
-    let peer_validation_transport =
-        transport_from_args(Entity::Peer, PathOrInOut::InOut(InOut::Input), sub_matches)?;
+    let peer_validation_transport = transport_from_args(
+        Entity::Peer,
+        PathOrInOut::InOut(InOut::Input),
+        sub_matches,
+        logger,
+    )?;
 
     // We need the public keys the peer data share processor used to
     // sign messages, which we can obtain by argument or by discovering
@@ -1434,6 +1446,7 @@ where
         Entity::Portal,
         PathOrInOut::Path(portal_bucket),
         sub_matches,
+        logger,
     )?;
 
     // Get the key we will use to sign sum part messages sent to the
@@ -1714,12 +1727,19 @@ fn batch_signing_key_from_arg(matches: &ArgMatches) -> Result<BatchSigningKey> {
     })
 }
 
-fn intake_transport_from_args(matches: &ArgMatches) -> Result<VerifiableAndDecryptableTransport> {
+fn intake_transport_from_args(
+    matches: &ArgMatches,
+    logger: &Logger,
+) -> Result<VerifiableAndDecryptableTransport> {
     // To read (intake) content from an ingestor's bucket, we need the bucket, which we
     // know because our deployment created it, so it is always provided via the
     // ingestor-input argument.
-    let intake_transport =
-        transport_from_args(Entity::Ingestor, PathOrInOut::InOut(InOut::Input), matches)?;
+    let intake_transport = transport_from_args(
+        Entity::Ingestor,
+        PathOrInOut::InOut(InOut::Input),
+        matches,
+        logger,
+    )?;
 
     // We also need the public keys the ingestor may have used to sign the
     // the batch, which can be provided either directly via command line or must
@@ -1782,6 +1802,7 @@ fn transport_from_args(
     entity: Entity,
     path_or_in_out: PathOrInOut,
     matches: &ArgMatches,
+    logger: &Logger,
 ) -> Result<Box<dyn Transport>> {
     let identity = matches.value_of(entity.suffix("-identity"));
 
@@ -1797,7 +1818,7 @@ fn transport_from_args(
         }
     };
 
-    transport_for_path(path, identity, entity, matches)
+    transport_for_path(path, identity, entity, matches, logger)
 }
 
 fn transport_for_path(
@@ -1805,6 +1826,7 @@ fn transport_for_path(
     identity: Identity,
     entity: Entity,
     matches: &ArgMatches,
+    logger: &Logger,
 ) -> Result<Box<dyn Transport>> {
     // We use the value "" to indicate that either ambient AWS credentials (for
     // S3) or the default service account Oauth token (for GCS) should be used
@@ -1833,12 +1855,17 @@ fn transport_for_path(
                 )?,
                 "s3",
             )?;
-            Ok(Box::new(S3Transport::new(path, credentials_provider)))
+            Ok(Box::new(S3Transport::new(
+                path,
+                credentials_provider,
+                logger,
+            )))
         }
         StoragePath::GcsPath(path) => Ok(Box::new(GcsTransport::new(
             path,
             identity,
             key_file_reader,
+            logger,
         )?)),
         StoragePath::LocalPath(path) => Ok(Box::new(LocalFileTransport::new(path))),
     }

@@ -13,9 +13,10 @@ use ring::{
     rand::SystemRandom,
     signature::{EcdsaKeyPair, Signature, UnparsedPublicKey},
 };
-use slog_scope::warn;
+use slog::{o, warn, Logger};
 use std::{
     collections::HashMap,
+    fmt::{self, Display, Formatter},
     io::{Cursor, Read},
     marker::PhantomData,
 };
@@ -106,14 +107,22 @@ impl Batch {
     }
 }
 
+impl Display for Batch {
+    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+        write!(f, "{}", self.header_key())
+    }
+}
+
 /// Allows reading files, including signature validation, from an ingestion or
 /// validation batch containing a header, a packet file and a signature.
 pub struct BatchReader<'a, H, P> {
+    trace_id: &'a str,
     batch: Batch,
     transport: &'a mut dyn Transport,
     packet_schema: Schema,
     permit_malformed_batch: bool,
     metrics_collector: Option<&'a BatchReaderMetricsCollector>,
+    logger: Logger,
 
     // These next two fields are not real and are used because not using H and P
     // in the struct definition is an error.
@@ -129,13 +138,21 @@ impl<'a, H: Header, P: Packet> BatchReader<'a, H, P> {
         batch: Batch,
         transport: &'a mut dyn Transport,
         permit_malformed_batch: bool,
+        trace_id: &'a str,
+        parent_logger: &Logger,
     ) -> Self {
+        let logger = parent_logger.new(o!(
+            "batch" => batch.to_string(),
+            "transport" => transport.path(),
+        ));
         BatchReader {
+            trace_id,
             batch,
             transport,
             packet_schema: P::schema(),
             permit_malformed_batch,
             metrics_collector: None,
+            logger,
             phantom_header: PhantomData,
             phantom_packet: PhantomData,
         }
@@ -158,11 +175,14 @@ impl<'a, H: Header, P: Packet> BatchReader<'a, H, P> {
         &mut self,
         public_keys: &HashMap<String, UnparsedPublicKey<Vec<u8>>>,
     ) -> Result<H> {
-        let signature = BatchSignature::read(self.transport.get(self.batch.signature_key())?)?;
+        let signature = BatchSignature::read(
+            self.transport
+                .get(self.batch.signature_key(), self.trace_id)?,
+        )?;
 
         let mut header_buf = Vec::new();
         self.transport
-            .get(self.batch.header_key())?
+            .get(self.batch.header_key(), self.trace_id)?
             .read_to_end(&mut header_buf)
             .context("failed to read header from transport")?;
 
@@ -186,7 +206,7 @@ impl<'a, H: Header, P: Packet> BatchReader<'a, H, P> {
                     .inc();
             }
             if self.permit_malformed_batch {
-                warn!("{}", message);
+                warn!(self.logger, "{}", message);
             } else {
                 return Err(anyhow!("{}", message));
             }
@@ -210,7 +230,9 @@ impl<'a, H: Header, P: Packet> BatchReader<'a, H, P> {
         // will be no more than 300-400 MB, which fits quite reasonably into the
         // memory of anything we're going to run the facilitator on, so we load
         // the entire packet file into memory ...
-        let mut packet_file_reader = self.transport.get(self.batch.packet_file_key())?;
+        let mut packet_file_reader = self
+            .transport
+            .get(self.batch.packet_file_key(), self.trace_id)?;
         // SidecarWriter takes a Vec of std::io::write so we wrap the Vec we
         // want to read the file into in a Vec.
         let entire_packet_file = vec![Vec::new()];
@@ -235,7 +257,7 @@ impl<'a, H: Header, P: Packet> BatchReader<'a, H, P> {
                     .inc();
             }
             if self.permit_malformed_batch {
-                warn!("{}", message);
+                warn!(self.logger, "{}", message);
             } else {
                 return Err(anyhow!("{}", message));
             }
@@ -261,16 +283,18 @@ pub struct BatchWriter<'a, H, P> {
     batch: Batch,
     transport: &'a mut dyn Transport,
     packet_schema: Schema,
+    trace_id: &'a str,
     phantom_header: PhantomData<*const H>,
     phantom_packet: PhantomData<*const P>,
 }
 
 impl<'a, H: Header, P: Packet> BatchWriter<'a, H, P> {
-    pub fn new(batch: Batch, transport: &'a mut dyn Transport) -> Self {
+    pub fn new(batch: Batch, transport: &'a mut dyn Transport, trace_id: &'a str) -> Self {
         BatchWriter {
             batch,
             transport,
             packet_schema: P::schema(),
+            trace_id,
             phantom_header: PhantomData,
             phantom_packet: PhantomData,
         }
@@ -285,7 +309,7 @@ impl<'a, H: Header, P: Packet> BatchWriter<'a, H, P> {
     /// on success.
     pub fn put_header(&mut self, header: &H, key: &EcdsaKeyPair) -> Result<Signature> {
         let mut sidecar_writer = SidecarWriter::new(
-            vec![self.transport.put(self.batch.header_key())?],
+            vec![self.transport.put(self.batch.header_key(), self.trace_id)?],
             Vec::new(),
         );
         header.write(&mut sidecar_writer)?;
@@ -310,12 +334,14 @@ impl<'a, H: Header, P: Packet> BatchWriter<'a, H, P> {
     where
         F: FnOnce(&mut Writer<SidecarWriter<Box<dyn TransportWriter>, DigestWriter>>) -> Result<()>,
     {
-        let mut transport_writers = vec![self.transport.put(self.batch.packet_file_key())?];
+        let mut transport_writers = vec![self
+            .transport
+            .put(self.batch.packet_file_key(), self.trace_id)?];
         for batch_writer in &mut more_batch_writers {
             transport_writers.push(
                 batch_writer
                     .transport
-                    .put(batch_writer.batch.packet_file_key())?,
+                    .put(batch_writer.batch.packet_file_key(), self.trace_id)?,
             );
         }
         let mut writer = Writer::new(
@@ -365,7 +391,9 @@ impl<'a, H: Header, P: Packet> BatchWriter<'a, H, P> {
             batch_header_signature: signature.as_ref().to_vec(),
             key_identifier: key_identifier.to_string(),
         };
-        let mut writer = self.transport.put(self.batch.signature_key())?;
+        let mut writer = self
+            .transport
+            .put(self.batch.signature_key(), self.trace_id)?;
         batch_signature
             .write(&mut writer)
             .context("failed to write signature")?;
@@ -380,6 +408,7 @@ mod tests {
     use super::*;
     use crate::{
         idl::{IngestionDataSharePacket, IngestionHeader},
+        logging::setup_test_logging,
         test_utils::{
             default_facilitator_signing_public_key, default_ingestor_private_key,
             default_ingestor_public_key,
@@ -466,7 +495,7 @@ mod tests {
         // Verify file layout is as expected
         for extension in filenames {
             transport
-                .get(&format!("{}.{}", base_path, extension))
+                .get(&format!("{}.{}", base_path, extension), "trace-id")
                 .unwrap_or_else(|_| panic!("could not get batch file {}", extension));
         }
 
@@ -517,6 +546,7 @@ mod tests {
     }
 
     fn roundtrip_ingestion_batch(keys_match: bool) {
+        let logger = setup_test_logging();
         let tempdir = tempfile::TempDir::new().unwrap();
         let mut write_transport = LocalFileTransport::new(tempdir.path().to_path_buf());
         let mut read_transport = LocalFileTransport::new(tempdir.path().to_path_buf());
@@ -530,12 +560,15 @@ mod tests {
             BatchWriter::new(
                 Batch::new_ingestion(&aggregation_name, &batch_id, &date),
                 &mut write_transport,
+                "trace-id",
             );
         let mut batch_reader: BatchReader<'_, IngestionHeader, IngestionDataSharePacket> =
             BatchReader::new(
                 Batch::new_ingestion(&aggregation_name, &batch_id, &date),
                 &mut read_transport,
                 false,
+                "trace-id",
+                &logger,
             );
         let base_path = format!(
             "{}/{}/{}",
@@ -587,6 +620,7 @@ mod tests {
     }
 
     fn roundtrip_validation_batch(is_first: bool, keys_match: bool) {
+        let logger = setup_test_logging();
         let tempdir = tempfile::TempDir::new().unwrap();
         let mut write_transport = LocalFileTransport::new(tempdir.path().to_path_buf());
         let mut read_transport = LocalFileTransport::new(tempdir.path().to_path_buf());
@@ -600,12 +634,15 @@ mod tests {
             BatchWriter::new(
                 Batch::new_validation(&aggregation_name, &batch_id, &date, is_first),
                 &mut write_transport,
+                "trace-id",
             );
         let mut batch_reader: BatchReader<'_, IngestionHeader, IngestionDataSharePacket> =
             BatchReader::new(
                 Batch::new_validation(&aggregation_name, &batch_id, &date, is_first),
                 &mut read_transport,
                 false,
+                "trace-id",
+                &logger,
             );
         let base_path = format!(
             "{}/{}/{}",
@@ -667,6 +704,7 @@ mod tests {
     }
 
     fn roundtrip_sum_batch(is_first: bool, keys_match: bool) {
+        let logger = setup_test_logging();
         let tempdir = tempfile::TempDir::new().unwrap();
         let mut write_transport = LocalFileTransport::new(tempdir.path().to_path_buf());
         let mut read_transport = LocalFileTransport::new(tempdir.path().to_path_buf());
@@ -682,12 +720,15 @@ mod tests {
             BatchWriter::new(
                 Batch::new_sum(&instance_name, &aggregation_name, &start, &end, is_first),
                 &mut write_transport,
+                "trace-id",
             );
         let mut batch_reader: BatchReader<'_, IngestionHeader, IngestionDataSharePacket> =
             BatchReader::new(
                 Batch::new_sum(instance_name, &aggregation_name, &start, &end, is_first),
                 &mut read_transport,
                 false,
+                "trace-id",
+                &logger,
             );
         let batch_path = format!(
             "{}/{}/{}-{}",
@@ -731,6 +772,7 @@ mod tests {
 
     #[test]
     fn permit_malformed_batch() {
+        let logger = setup_test_logging();
         let tempdir = tempfile::TempDir::new().unwrap();
         let mut write_transport = LocalFileTransport::new(tempdir.path().to_path_buf());
         let mut read_transport = LocalFileTransport::new(tempdir.path().to_path_buf());
@@ -745,12 +787,15 @@ mod tests {
             BatchWriter::new(
                 Batch::new_sum(&instance_name, &aggregation_name, &start, &end, true),
                 &mut write_transport,
+                "trace-id",
             );
         let mut batch_reader: BatchReader<'_, IngestionHeader, IngestionDataSharePacket> =
             BatchReader::new(
                 Batch::new_sum(instance_name, &aggregation_name, &start, &end, true),
                 &mut read_transport,
                 true, // permit_malformed_batch
+                "trace-id",
+                &logger,
             );
 
         let metrics_collector = BatchReaderMetricsCollector::new("test").unwrap();
