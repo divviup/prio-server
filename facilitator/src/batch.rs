@@ -387,6 +387,7 @@ mod tests {
         transport::LocalFileTransport,
         Error,
     };
+    use assert_matches::assert_matches;
 
     #[allow(clippy::too_many_arguments)] // Grandfathered in
     fn roundtrip_batch<'a>(
@@ -499,10 +500,10 @@ mod tests {
         }
 
         // One more read should get EOF
-        match IngestionDataSharePacket::read(&mut packet_file_reader) {
-            Err(Error::EofError) => (),
-            v => assert!(false, "wrong error {:?}", v),
-        }
+        assert_matches!(
+            IngestionDataSharePacket::read(&mut packet_file_reader),
+            Err(Error::EofError)
+        );
     }
 
     #[test]
@@ -796,7 +797,7 @@ mod tests {
         let mut key_map = HashMap::new();
         key_map.insert(
             "key-identifier".to_owned(),
-            default_facilitator_signing_public_key().clone(),
+            default_facilitator_signing_public_key(),
         );
 
         assert_eq!(

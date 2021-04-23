@@ -2,7 +2,6 @@ use anyhow::{anyhow, Result};
 use atty::{self, Stream};
 use serde::Serialize;
 use slog::{o, Drain, FnValue, Level, LevelFilter, Logger, PushFnValue};
-use slog_async;
 use slog_json::Json;
 use slog_scope::{self, GlobalLoggerGuard};
 use slog_term::{FullFormat, PlainSyncDecorator, TermDecorator, TestStdoutWriter};

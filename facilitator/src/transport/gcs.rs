@@ -1,5 +1,5 @@
 use crate::{
-    config::{GCSPath, Identity},
+    config::{GcsPath, Identity},
     gcp_oauth::GcpOauthTokenProvider,
     http::{
         prepare_request, prepare_request_without_agent, Method, OauthTokenProvider,
@@ -45,24 +45,24 @@ fn gcp_upload_object_url(storage_api_url: &str, bucket: &str) -> Result<Url> {
 /// or can impersonate another GCP service account if one is provided to
 /// GCSTransport::new.
 #[derive(Debug)]
-pub struct GCSTransport {
-    path: GCSPath,
+pub struct GcsTransport {
+    path: GcsPath,
     oauth_token_provider: GcpOauthTokenProvider,
     agent: Agent,
 }
 
-impl GCSTransport {
+impl GcsTransport {
     /// Instantiate a new GCSTransport to read or write objects from or to the
     /// provided path. If identity is None, GCSTransport authenticates to GCS
     /// as the default service account. If identity contains a service
     /// account email, GCSTransport will use the GCP IAM API to obtain an Oauth
     /// token to impersonate that service account.
     pub fn new(
-        path: GCSPath,
+        path: GcsPath,
         identity: Identity,
         key_file_reader: Option<Box<dyn Read>>,
-    ) -> Result<GCSTransport> {
-        Ok(GCSTransport {
+    ) -> Result<GcsTransport> {
+        Ok(GcsTransport {
             path: path.ensure_directory_prefix(),
             oauth_token_provider: GcpOauthTokenProvider::new(
                 // This token is used to access GCS storage
@@ -78,7 +78,7 @@ impl GCSTransport {
     }
 }
 
-impl Transport for GCSTransport {
+impl Transport for GcsTransport {
     fn path(&self) -> String {
         self.path.to_string()
     }

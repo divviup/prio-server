@@ -280,7 +280,7 @@ fn aggregation_including_invalid_batch() {
         transport: Box::new(LocalFileTransport::new(
             facilitator_tempdir.path().join("own-validation"),
         )),
-        batch_signing_public_keys: facilitator_pub_keys.clone(),
+        batch_signing_public_keys: facilitator_pub_keys,
     };
 
     // Facilitator uses this transport to read PHA's validations
@@ -288,7 +288,7 @@ fn aggregation_including_invalid_batch() {
         transport: Box::new(LocalFileTransport::new(
             facilitator_tempdir.path().join("peer-validation"),
         )),
-        batch_signing_public_keys: pha_pub_keys.clone(),
+        batch_signing_public_keys: pha_pub_keys,
     };
 
     // PHA uses this transport to send sum parts
@@ -714,7 +714,7 @@ fn check_invalid_packets(
             match InvalidPacket::read(&mut invalid_packet_reader) {
                 Ok(packet) => assert!(dropped_packets.contains(&packet.uuid)),
                 Err(Error::EofError) => break,
-                Err(err) => assert!(false, "error reading invalid packet {}", err),
+                Err(err) => panic!("error reading invalid packet {}", err),
             }
         }
     } else {

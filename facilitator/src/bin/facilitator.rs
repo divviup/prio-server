@@ -28,7 +28,7 @@ use facilitator::{
     sample::{SampleGenerator, SampleOutput},
     task::{AggregationTask, AwsSqsTaskQueue, GcpPubSubTaskQueue, IntakeBatchTask, TaskQueue},
     transport::{
-        GCSTransport, LocalFileTransport, S3Transport, SignableTransport, Transport,
+        GcsTransport, LocalFileTransport, S3Transport, SignableTransport, Transport,
         VerifiableAndDecryptableTransport, VerifiableTransport,
     },
     BatchSigningKey, DATE_FORMAT,
@@ -1169,6 +1169,7 @@ fn generate_sample(
     Ok(())
 }
 
+#[allow(clippy::too_many_arguments)]
 fn intake_batch<F>(
     trace_id: &str,
     aggregation_id: &str,
@@ -1297,7 +1298,7 @@ fn intake_batch_worker(
                 .task
                 .trace_id
                 .map(|id| id.to_string())
-                .unwrap_or(String::from("None"));
+                .unwrap_or_else(|| String::from("None"));
 
             let result = intake_batch(
                 &trace_id,
@@ -1337,6 +1338,7 @@ fn intake_batch_worker(
     // unreachable
 }
 
+#[allow(clippy::too_many_arguments)]
 fn aggregate<F>(
     trace_id: &str,
     aggregation_id: &str,
@@ -1558,7 +1560,7 @@ fn aggregate_worker(sub_matches: &ArgMatches, parent_logger: &Logger) -> Result<
                 .task
                 .trace_id
                 .map(|id| id.to_string())
-                .unwrap_or(String::from("None"));
+                .unwrap_or_else(|| String::from("None"));
 
             let result = aggregate(
                 &trace_id,
@@ -1833,7 +1835,7 @@ fn transport_for_path(
             )?;
             Ok(Box::new(S3Transport::new(path, credentials_provider)))
         }
-        StoragePath::GCSPath(path) => Ok(Box::new(GCSTransport::new(
+        StoragePath::GcsPath(path) => Ok(Box::new(GcsTransport::new(
             path,
             identity,
             key_file_reader,
