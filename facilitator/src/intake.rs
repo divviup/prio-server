@@ -331,10 +331,11 @@ mod tests {
             100,
             &mut pha_output,
             &mut facilitator_output,
+            &logger,
         );
 
         sample_generator
-            .generate_ingestion_sample(&batch_uuid, &date, 10)
+            .generate_ingestion_sample("trace-id", &batch_uuid, &date, 10)
             .unwrap();
 
         let mut ingestor_pub_keys = HashMap::new();
@@ -476,10 +477,11 @@ mod tests {
             100,
             &mut pha_output,
             &mut facilitator_output,
+            &logger,
         );
 
         sample_generator
-            .generate_ingestion_sample(&batch_uuid, &date, 10)
+            .generate_ingestion_sample("trace-id", &batch_uuid, &date, 10)
             .unwrap();
 
         let mut ingestor_pub_keys = HashMap::new();
@@ -576,11 +578,12 @@ mod tests {
             100,
             &mut pha_output,
             &mut facilitator_output,
+            &logger,
         );
         sample_generator.set_generate_short_packet(5);
 
         sample_generator
-            .generate_ingestion_sample(&batch_uuid, &date, 10)
+            .generate_ingestion_sample("trace-id", &batch_uuid, &date, 10)
             .unwrap();
 
         let mut ingestor_pub_keys = HashMap::new();
