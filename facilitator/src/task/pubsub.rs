@@ -2,11 +2,12 @@ use crate::{
     config::Identity,
     gcp_oauth::GcpOauthTokenProvider,
     http::{Method, RequestParameters, RetryingAgent},
+    logging::event,
     task::{Task, TaskHandle, TaskQueue},
 };
 use anyhow::{anyhow, Context, Result};
 use serde::Deserialize;
-use slog_scope::info;
+use slog::{info, o, Logger};
 use std::{io::Cursor, marker::PhantomData, time::Duration};
 use ureq::AgentBuilder;
 use url::Url;
@@ -40,7 +41,7 @@ fn gcp_pubsub_ack_url(
         pubsub_api_endpoint, gcp_project_id, subscription_id
     );
     Url::parse(&request_url).context(format!(
-        "faield to parse gcp_pubsub_ack_url: {}",
+        "failed to parse gcp_pubsub_ack_url: {}",
         request_url
     ))
 }
@@ -101,6 +102,7 @@ pub struct GcpPubSubTaskQueue<T: Task> {
     oauth_token_provider: GcpOauthTokenProvider,
     phantom_task: PhantomData<*const T>,
     agent: RetryingAgent,
+    logger: Logger,
 }
 
 impl<T: Task> GcpPubSubTaskQueue<T> {
@@ -109,6 +111,7 @@ impl<T: Task> GcpPubSubTaskQueue<T> {
         gcp_project_id: &str,
         subscription_id: &str,
         identity: Identity,
+        parent_logger: &Logger,
     ) -> Result<GcpPubSubTaskQueue<T>> {
         let ureq_agent = AgentBuilder::new()
             // Empirically, if there are no messages available in the
@@ -124,6 +127,11 @@ impl<T: Task> GcpPubSubTaskQueue<T> {
             // https://cloud.google.com/pubsub/docs/reference/error-codes
             vec![429],
         );
+        let logger = parent_logger.new(o!(
+            "gcp_project_id" => gcp_project_id.to_owned(),
+            event::TASK_QUEUE_ID => subscription_id.to_owned(),
+            event::IDENTITY => identity.unwrap_or("default identity").to_owned(),
+        ));
 
         Ok(GcpPubSubTaskQueue {
             pubsub_api_endpoint: pubsub_api_endpoint
@@ -140,16 +148,14 @@ impl<T: Task> GcpPubSubTaskQueue<T> {
             )?,
             phantom_task: PhantomData,
             agent: retrying_agent,
+            logger,
         })
     }
 }
 
 impl<T: Task> TaskQueue<T> for GcpPubSubTaskQueue<T> {
     fn dequeue(&mut self) -> Result<Option<TaskHandle<T>>> {
-        info!(
-            "pull task from {}/{} as {:?}",
-            self.gcp_project_id, self.subscription_id, self.oauth_token_provider
-        );
+        info!(self.logger, "pull task");
 
         let request = self.agent.prepare_request(RequestParameters {
             url: gcp_pubsub_pull_url(
@@ -209,11 +215,8 @@ impl<T: Task> TaskQueue<T> for GcpPubSubTaskQueue<T> {
 
     fn acknowledge_task(&mut self, handle: TaskHandle<T>) -> Result<()> {
         info!(
-            "acknowledging task {} in topic {}/{} as {:?}",
-            handle.acknowledgment_id,
-            self.gcp_project_id,
-            self.subscription_id,
-            self.oauth_token_provider
+            self.logger, "acknowledging task";
+            event::TASK_ACKNOWLEDGEMENT_ID => &handle.acknowledgment_id,
         );
 
         let request = self.agent.prepare_request(RequestParameters {
@@ -240,11 +243,8 @@ impl<T: Task> TaskQueue<T> for GcpPubSubTaskQueue<T> {
 
     fn nacknowledge_task(&mut self, handle: TaskHandle<T>) -> Result<()> {
         info!(
-            "nacknowledging task {} in topic {}/{} as {:?}",
-            handle.acknowledgment_id,
-            self.gcp_project_id,
-            self.subscription_id,
-            self.oauth_token_provider,
+            self.logger, "nacknowledging task";
+            event::TASK_ACKNOWLEDGEMENT_ID => &handle.acknowledgment_id,
         );
 
         self.modify_ack_deadline(&handle, &Duration::from_secs(0))
@@ -253,11 +253,8 @@ impl<T: Task> TaskQueue<T> for GcpPubSubTaskQueue<T> {
 
     fn extend_task_deadline(&mut self, handle: &TaskHandle<T>, increment: &Duration) -> Result<()> {
         info!(
-            "extending deadline on task {} in topic {}/{} as {:?}",
-            handle.acknowledgment_id,
-            self.gcp_project_id,
-            self.subscription_id,
-            self.oauth_token_provider,
+            self.logger, "extending deadline on task";
+            event::TASK_ACKNOWLEDGEMENT_ID => &handle.acknowledgment_id,
         );
 
         self.modify_ack_deadline(handle, increment)
