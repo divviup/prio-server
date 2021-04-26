@@ -42,6 +42,10 @@ pub(crate) const EVENT_KEY_STORAGE_KEY: EventKey = "key";
 /// An identity used while accessing some cloud resource (e.g., an AWS role ARN
 /// or a GCP service account email)
 pub(crate) const EVENT_KEY_IDENTITY: EventKey = "identity";
+/// Acknowledgement identifier for a task in a queue
+pub(crate) const EVENT_KEY_TASK_ACKNOWLEDGEMENT_ID: EventKey = "task_ack_id";
+/// Unique identifier for a task queue
+pub(crate) const EVENT_KEY_TASK_QUEUE_ID: EventKey = "task_queue-id";
 
 /// Severity maps `log::Level` to Google Cloud Platform's notion of Severity.
 /// https://cloud.google.com/logging/docs/reference/v2/rest/v2/LogEntry#LogSeverity

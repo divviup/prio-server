@@ -1289,7 +1289,7 @@ fn intake_batch_worker(
     let metrics_collector = IntakeMetricsCollector::new()?;
     let scrape_port = value_t!(sub_matches.value_of("metrics-scrape-port"), u16)?;
     let _runtime = start_metrics_scrape_endpoint(scrape_port)?;
-    let mut queue = intake_task_queue_from_args(sub_matches)?;
+    let mut queue = intake_task_queue_from_args(sub_matches, parent_logger)?;
 
     loop {
         if let Some(task_handle) = queue.dequeue()? {
@@ -1549,7 +1549,7 @@ fn aggregate_subcommand(
 }
 
 fn aggregate_worker(sub_matches: &ArgMatches, parent_logger: &Logger) -> Result<(), anyhow::Error> {
-    let mut queue = aggregation_task_queue_from_args(sub_matches)?;
+    let mut queue = aggregation_task_queue_from_args(sub_matches, parent_logger)?;
     let metrics_collector = AggregateMetricsCollector::new()?;
     let scrape_port = value_t!(sub_matches.value_of("metrics-scrape-port"), u16)?;
     let _runtime = start_metrics_scrape_endpoint(scrape_port)?;
@@ -1890,6 +1890,7 @@ fn decode_base64_key(s: &str) -> Result<Vec<u8>> {
 // [1] https://doc.rust-lang.org/book/ch17-02-trait-objects.html#object-safety-is-required-for-trait-objects
 fn intake_task_queue_from_args(
     matches: &ArgMatches,
+    logger: &Logger,
 ) -> Result<Box<dyn TaskQueue<IntakeBatchTask>>> {
     let task_queue_kind = TaskQueueKind::from_str(
         matches
@@ -1912,6 +1913,7 @@ fn intake_task_queue_from_args(
                 gcp_project_id,
                 queue_name,
                 identity,
+                logger,
             )?))
         }
         TaskQueueKind::AwsSqs => {
@@ -1930,6 +1932,7 @@ fn intake_task_queue_from_args(
                 sqs_region,
                 queue_name,
                 credentials_provider,
+                logger,
             )?))
         }
     }
@@ -1937,6 +1940,7 @@ fn intake_task_queue_from_args(
 
 fn aggregation_task_queue_from_args(
     matches: &ArgMatches,
+    logger: &Logger,
 ) -> Result<Box<dyn TaskQueue<AggregationTask>>> {
     let task_queue_kind = TaskQueueKind::from_str(
         matches
@@ -1959,6 +1963,7 @@ fn aggregation_task_queue_from_args(
                 gcp_project_id,
                 queue_name,
                 identity,
+                logger,
             )?))
         }
         TaskQueueKind::AwsSqs => {
@@ -1977,6 +1982,7 @@ fn aggregation_task_queue_from_args(
                 sqs_region,
                 queue_name,
                 credentials_provider,
+                logger,
             )?))
         }
     }
