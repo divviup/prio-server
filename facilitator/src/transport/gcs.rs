@@ -2,8 +2,7 @@ use crate::{
     config::{GcsPath, Identity},
     gcp_oauth::GcpOauthTokenProvider,
     http::{
-        prepare_request, prepare_request_without_agent, Method, OauthTokenProvider,
-        RequestParameters, StaticOauthTokenProvider,
+        Method, OauthTokenProvider, RequestParameters, RetryingAgent, StaticOauthTokenProvider,
     },
     transport::{Transport, TransportWriter},
     Error,
@@ -15,7 +14,7 @@ use std::{
     io::{Read, Write},
     time::Duration,
 };
-use ureq::{Agent, AgentBuilder};
+use ureq::AgentBuilder;
 use url::Url;
 
 fn storage_api_base_url() -> Url {
@@ -48,7 +47,7 @@ fn gcp_upload_object_url(storage_api_url: &str, bucket: &str) -> Result<Url> {
 pub struct GcsTransport {
     path: GcsPath,
     oauth_token_provider: GcpOauthTokenProvider,
-    agent: Agent,
+    agent: RetryingAgent,
 }
 
 impl GcsTransport {
@@ -62,6 +61,19 @@ impl GcsTransport {
         identity: Identity,
         key_file_reader: Option<Box<dyn Read>>,
     ) -> Result<GcsTransport> {
+        let ureq_agent = AgentBuilder::new()
+            // We set an unusually long timeout for uploads to GCS, per Google's
+            // recommendation:
+            // https://cloud.google.com/storage/docs/best-practices#uploading
+            .timeout(Duration::from_secs(120))
+            .build();
+        let retrying_agent = RetryingAgent::new(
+            ureq_agent,
+            // Per Google documentation, HTTP 408 Request Timeout and HTTP 429
+            // Too Many Requests shouldbe retried
+            // https://cloud.google.com/storage/docs/retry-strategy
+            vec![408, 429],
+        );
         Ok(GcsTransport {
             path: path.ensure_directory_prefix(),
             oauth_token_provider: GcpOauthTokenProvider::new(
@@ -71,9 +83,7 @@ impl GcsTransport {
                 identity.map(|x| x.to_string()),
                 key_file_reader,
             )?,
-            agent: AgentBuilder::new()
-                .timeout(Duration::from_secs(120))
-                .build(),
+            agent: retrying_agent,
         })
     }
 }
@@ -98,17 +108,15 @@ impl Transport for GcsTransport {
         // https://cloud.google.com/storage/docs/json_api/v1/objects/get#parameters
         url.query_pairs_mut().append_pair("alt", "media").finish();
 
-        let request = prepare_request(
-            &self.agent,
-            RequestParameters {
-                url: url.clone(),
-                method: Method::Get,
-                token_provider: Some(&mut self.oauth_token_provider),
-            },
-        )?;
+        let request = self.agent.prepare_request(RequestParameters {
+            url: url.clone(),
+            method: Method::Get,
+            token_provider: Some(&mut self.oauth_token_provider),
+        })?;
 
-        let response = request
-            .call()
+        let response = self
+            .agent
+            .call(&request)
             .context(format!("failed to fetch object {} from GCS", url))?;
 
         Ok(Box::new(response.into_reader()))
@@ -129,6 +137,7 @@ impl Transport for GcsTransport {
             self.path.bucket.to_owned(),
             [&self.path.key, key].concat(),
             oauth_token,
+            self.agent.clone(),
         )?;
         Ok(Box::new(writer))
     }
@@ -163,7 +172,7 @@ struct StreamingTransferWriter {
     minimum_upload_chunk_size: usize,
     object_upload_position: usize,
     buffer: Vec<u8>,
-    agent: Agent,
+    agent: RetryingAgent,
 }
 
 impl StreamingTransferWriter {
@@ -171,7 +180,12 @@ impl StreamingTransferWriter {
     /// the name of the GCS bucket. Object is the full name of the object being
     /// uploaded, which may contain path separators or file extensions.
     /// oauth_token is used to initiate the initial resumable upload request.
-    fn new(bucket: String, object: String, oauth_token: String) -> Result<StreamingTransferWriter> {
+    fn new(
+        bucket: String,
+        object: String,
+        oauth_token: String,
+        agent: RetryingAgent,
+    ) -> Result<StreamingTransferWriter> {
         StreamingTransferWriter::new_with_api_url(
             bucket,
             object,
@@ -180,6 +194,7 @@ impl StreamingTransferWriter {
             // https://cloud.google.com/storage/docs/performing-resumable-uploads#chunked-upload
             8_388_608,
             storage_api_base_url(),
+            agent,
         )
     }
 
@@ -189,6 +204,7 @@ impl StreamingTransferWriter {
         oauth_token: String,
         minimum_upload_chunk_size: usize,
         storage_api_base_url: Url,
+        agent: RetryingAgent,
     ) -> Result<StreamingTransferWriter> {
         // Initiate the resumable, streaming upload.
         // https://cloud.google.com/storage/docs/performing-resumable-uploads#initiate-session
@@ -199,14 +215,14 @@ impl StreamingTransferWriter {
             .append_pair("name", &object)
             .finish();
 
-        let request = prepare_request_without_agent(RequestParameters {
+        let request = agent.prepare_request(RequestParameters {
             url: upload_url,
             method: Method::Post,
             token_provider: Some(&mut StaticOauthTokenProvider::from(oauth_token)),
         })?;
 
-        let http_response = request
-            .send_bytes(&[])
+        let http_response = agent
+            .send_bytes(&request, &[])
             .context(format!("uploading to gs://{} failed", bucket))?;
 
         // The upload session URI authenticates subsequent upload requests for
@@ -226,12 +242,7 @@ impl StreamingTransferWriter {
                 "failed to parse upload_session_uri url: {}",
                 &upload_session_uri
             ))?,
-            // We set an unusually long timeout for uploads to GCS, per Google's
-            // recommendation:
-            // https://cloud.google.com/storage/docs/best-practices#uploading
-            agent: AgentBuilder::new()
-                .timeout(Duration::from_secs(120))
-                .build(),
+            agent,
         })
     }
 
@@ -270,17 +281,14 @@ impl StreamingTransferWriter {
             content_range_header_total_length_field
         );
 
-        let mut request = prepare_request(
-            &self.agent,
-            RequestParameters {
-                url: self.upload_session_uri.clone(),
-                method: Method::Put,
-                ..Default::default()
-            },
-        )?;
+        let mut request = self.agent.prepare_request(RequestParameters {
+            url: self.upload_session_uri.clone(),
+            method: Method::Put,
+            ..Default::default()
+        })?;
         request = request.set("Content-Range", &content_range);
 
-        let http_response = request.send_bytes(body).context(format!(
+        let http_response = self.agent.send_bytes(&request, body).context(format!(
             "failed in sending bytes to gcs upload session: {}",
             &self.upload_session_uri
         ))?;
@@ -375,18 +383,13 @@ impl TransportWriter for StreamingTransferWriter {
 
     fn cancel_upload(&mut self) -> Result<()> {
         // https://cloud.google.com/storage/docs/performing-resumable-uploads#cancel-upload
-        let mut request = prepare_request(
-            &self.agent,
-            RequestParameters {
-                url: self.upload_session_uri.clone(),
-                method: Method::Delete,
-                ..Default::default()
-            },
-        )?;
+        let request = self.agent.prepare_request(RequestParameters {
+            url: self.upload_session_uri.clone(),
+            method: Method::Delete,
+            ..Default::default()
+        })?;
 
-        request = request.set("Content-Length", "0");
-
-        let http_response = request.call()?;
+        let http_response = self.agent.call(&request.set("Content-Length", "0"))?;
         match http_response.status() {
             499 => Ok(()),
             _ => Err(anyhow!(
@@ -427,6 +430,7 @@ mod tests {
             "fake-token".to_string(),
             10,
             Url::parse(&mockito::server_url()).expect("unable to parse mockito server url"),
+            RetryingAgent::default(),
         )
         .unwrap();
 
@@ -471,6 +475,7 @@ mod tests {
             "fake-token".to_string(),
             4,
             Url::parse(&mockito::server_url()).expect("unable to parse mockito server url"),
+            RetryingAgent::default(),
         )
         .unwrap();
 

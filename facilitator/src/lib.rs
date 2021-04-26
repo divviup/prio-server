@@ -14,6 +14,7 @@ pub mod kubernetes;
 pub mod logging;
 pub mod manifest;
 pub mod metrics;
+mod retries;
 pub mod sample;
 pub mod task;
 pub mod test_utils;
