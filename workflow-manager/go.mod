@@ -3,7 +3,7 @@ module github.com/letsencrypt/prio-server/workflow-manager
 go 1.15
 
 require (
-	cloud.google.com/go/pubsub v1.10.2
+	cloud.google.com/go/pubsub v1.10.3
 	cloud.google.com/go/storage v1.15.0
 	github.com/aws/aws-sdk-go v1.38.26
 	github.com/google/uuid v1.2.0
