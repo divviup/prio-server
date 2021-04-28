@@ -44,6 +44,10 @@ pub mod event {
     /// An identity used while accessing some cloud resource (e.g., an AWS role ARN
     /// or a GCP service account email)
     pub(crate) const IDENTITY: EventKey = "identity";
+    /// Acknowledgement identifier for a task in a queue
+    pub(crate) const TASK_ACKNOWLEDGEMENT_ID: EventKey = "task_ack_id";
+    /// Unique identifier for a task queue
+    pub(crate) const TASK_QUEUE_ID: EventKey = "task_queue-id";
 }
 
 /// Severity maps `log::Level` to Google Cloud Platform's notion of Severity.
