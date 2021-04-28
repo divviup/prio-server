@@ -2,6 +2,7 @@ mod pubsub;
 mod sqs;
 
 use anyhow::Result;
+use dyn_clone::{clone_trait_object, DynClone};
 use serde::Deserialize;
 use slog::{Key, Record, Serializer, Value};
 use std::{
@@ -15,7 +16,7 @@ pub use pubsub::GcpPubSubTaskQueue;
 pub use sqs::AwsSqsTaskQueue;
 
 /// A queue of tasks to be executed
-pub trait TaskQueue<T: Task>: Debug {
+pub trait TaskQueue<T: Task>: Debug + DynClone + Send + Sync {
     /// Get a task to execute. If a task to run is found, returns Ok(Some(T)).
     /// If a task is successfully checked for but there is no work available,
     /// returns Ok(None). Returns Err(e) if something goes wrong.
@@ -61,8 +62,13 @@ pub trait TaskQueue<T: Task>: Debug {
     }
 }
 
+clone_trait_object!(<T: Task> TaskQueue<T>);
+
 /// Represents a task that can be assigned to a worker
-pub trait Task: Debug + Display + Sized + serde::de::DeserializeOwned + Clone {}
+pub trait Task:
+    Debug + Display + Sized + Send + Sync + serde::de::DeserializeOwned + Clone
+{
+}
 
 /// Represents an intake batch task to be executed
 #[derive(Clone, Debug, Deserialize, PartialEq)]
