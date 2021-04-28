@@ -3,7 +3,6 @@ use atty::{self, Stream};
 use serde::Serialize;
 use slog::{o, Drain, FnValue, Level, LevelFilter, Logger, PushFnValue};
 use slog_json::Json;
-use slog_scope::{self, GlobalLoggerGuard};
 use slog_term::{FullFormat, PlainSyncDecorator, TermDecorator, TestStdoutWriter};
 use std::{
     convert::From,
@@ -114,22 +113,13 @@ trait IoErrorDrain: Drain<Ok = (), Err = std::io::Error> + Send {}
 impl IoErrorDrain for Json<Stderr> {}
 impl IoErrorDrain for FullFormat<TermDecorator> {}
 
-/// Initialize logging resources. On success, returns a tuple consisting of:
-///
-///   - a root [`slog::Logger`][1]
-///   - a `GlobalLoggerGuard` wrapping a [`slog_scope` global logger][2].
-///
-/// Child loggers should be created from the root `Logger` so that modules can
-/// add more key-value pairs to the events they log. The `GlobalLoggerGuard`
-/// must be kept live by the caller to enable the `slog_scope` global logger to
-/// function in modules that haven't yet opted into managing their own
-/// `slog::Logger`.
-///
-/// Returns an error if `LoggingConfiguration` is invalid.
+/// Initialize logging resources. On success, returns a root [`slog::Logger`][1]
+/// from which modules should create child loggers to add more key-value pairs
+/// to the events they log. Returns an error if `LoggingConfiguration` is
+/// invalid.
 ///
 /// [1]: https://docs.rs/slog/2.7.0/slog/struct.Logger.html
-/// [2]: https://docs.rs/slog-scope/4.4.0/slog_scope/
-pub fn setup_logging(config: &LoggingConfiguration) -> Result<(Logger, GlobalLoggerGuard)> {
+pub fn setup_logging(config: &LoggingConfiguration) -> Result<Logger> {
     // We have to box the Drain so that both branches return the same type
     let drain: Box<dyn IoErrorDrain> = if atty::isnt(Stream::Stderr) || config.force_json_output {
         // If stderr is not a tty, output logs as JSON structures on the
@@ -186,12 +176,7 @@ pub fn setup_logging(config: &LoggingConfiguration) -> Result<(Logger, GlobalLog
         ),
     );
 
-    // Over time, all modules in `facilitator` should begin using custom
-    // `slog::Loggers` decorated with appropriate k-v pairs, and we can stop
-    // creating a global `slog_scope` logger.
-    let slog_scope_guard = slog_scope::set_global_logger(root_logger.new(o!()));
-
-    Ok((root_logger, slog_scope_guard))
+    Ok(root_logger)
 }
 
 /// Initialize logging for unit or integration tests. Must be public for

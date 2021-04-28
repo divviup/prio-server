@@ -98,12 +98,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "28b2cd92db5cbd74e8e5028f7e27dd7aa3090e89e4f2a197cc7c8dfb69c7063b"
 
 [[package]]
-name = "arc-swap"
-version = "1.2.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d4d7d63395147b81a9e570bcc6243aaf71c017bd666d4909cfef0085bdda8d73"
-
-[[package]]
 name = "array_tool"
 version = "1.0.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -676,7 +670,6 @@ dependencies = [
  "slog",
  "slog-async",
  "slog-json",
- "slog-scope",
  "slog-term",
  "tempfile",
  "thiserror",
@@ -2347,17 +2340,6 @@ dependencies = [
  "chrono",
  "serde",
  "serde_json",
- "slog",
-]
-
-[[package]]
-name = "slog-scope"
-version = "4.4.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2f95a4b4c3274cd2869549da82b57ccc930859bdbf5bcea0424bc5f140b3c786"
-dependencies = [
- "arc-swap",
- "lazy_static",
  "slog",
 ]
 

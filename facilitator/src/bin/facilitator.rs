@@ -868,10 +868,7 @@ fn main() -> Result<(), anyhow::Error> {
 
     let force_json_log_output = value_t!(matches.value_of("force-json-log-output"), bool)?;
 
-    // We must keep _scope_logger_guard live or the global logger will be
-    // dropped and messages from modules that don't use their own slog::Logger
-    // will be discarded.
-    let (root_logger, _scope_logger_guard) = setup_logging(&LoggingConfiguration {
+    let root_logger = setup_logging(&LoggingConfiguration {
         force_json_output: force_json_log_output,
         version_string: option_env!("BUILD_INFO").unwrap_or("(BUILD_INFO unavailable)"),
         log_level: option_env!("RUST_LOG").unwrap_or("INFO"),
