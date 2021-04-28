@@ -1854,6 +1854,7 @@ fn transport_for_path(
                     bool
                 )?,
                 "s3",
+                logger,
             )?;
             Ok(Box::new(S3Transport::new(
                 path,
@@ -1927,6 +1928,7 @@ fn intake_task_queue_from_args(
                     bool
                 )?,
                 "sqs",
+                logger,
             )?;
             Ok(Box::new(AwsSqsTaskQueue::new(
                 sqs_region,
@@ -1977,6 +1979,7 @@ fn aggregation_task_queue_from_args(
                     bool
                 )?,
                 "sqs",
+                logger,
             )?;
             Ok(Box::new(AwsSqsTaskQueue::new(
                 sqs_region,

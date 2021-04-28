@@ -89,6 +89,7 @@ impl GcsTransport {
                 "https://www.googleapis.com/auth/devstorage.read_write",
                 identity.map(|x| x.to_string()),
                 key_file_reader,
+                &logger,
             )?,
             agent: retrying_agent,
             logger,

@@ -18,7 +18,7 @@ use rusoto_core::{
 };
 use rusoto_mock::MockCredentialsProvider;
 use rusoto_sts::WebIdentityProvider;
-use slog_scope::debug;
+use slog::{debug, o, Logger};
 use std::{
     boxed::Box,
     convert::From,
@@ -75,10 +75,17 @@ pub enum Provider {
 impl Provider {
     /// Instantiates an appropriate Provider based on the provided configuration
     /// values
-    pub fn new(identity: Identity, use_default_provider: bool, purpose: &str) -> Result<Self> {
+    pub fn new(
+        identity: Identity,
+        use_default_provider: bool,
+        purpose: &str,
+        logger: &Logger,
+    ) -> Result<Self> {
         match (use_default_provider, identity) {
             (true, _) => Self::new_default(),
-            (_, Some(identity)) => Self::new_web_identity_with_oidc(identity, purpose.to_owned()),
+            (_, Some(identity)) => {
+                Self::new_web_identity_with_oidc(identity, purpose.to_owned(), logger)
+            }
             (_, None) => Self::new_web_identity_from_kubernetes_environment(),
         }
     }
@@ -113,18 +120,25 @@ impl Provider {
             .expect("could not parse token metadata api url")
     }
 
-    fn new_web_identity_with_oidc(iam_role: &str, purpose: String) -> Result<Self> {
+    fn new_web_identity_with_oidc(
+        iam_role: &str,
+        purpose: String,
+        logger: &Logger,
+    ) -> Result<Self> {
         // When running in GKE, the token used to authenticate to AWS S3 is
         // available from the instance metadata service.
         // See terraform/modules/kubernetes/kubernetes.tf for discussion.
         // This dynamic variable lets us provide a callback for fetching tokens,
         // allowing Rusoto to automatically get new credentials if they expire
         // (which they do every hour).
-        let iam_role_clone = iam_role.to_owned();
+        let token_logger = logger.new(o!(
+            "iam_role" => iam_role.to_owned(),
+            "purpose" => purpose.clone(),
+        ));
         let oidc_token_variable = Variable::dynamic(move || {
             debug!(
-                "obtaining OIDC token from GKE metadata service for IAM role {} and purpose {}",
-                iam_role_clone, purpose
+                token_logger,
+                "obtaining OIDC token from GKE metadata service"
             );
             let aws_account_id = env::var("AWS_ACCOUNT_ID").map_err(|e| {
                 CredentialsError::new(format!(
