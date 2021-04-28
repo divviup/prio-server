@@ -3,7 +3,7 @@ use http::Response;
 use prometheus::{
     register_int_counter, register_int_counter_vec, Encoder, IntCounter, IntCounterVec, TextEncoder,
 };
-use slog_scope::{error, info};
+use slog::{error, info, o, Logger};
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use tokio::runtime::Runtime;
 use warp::Filter;
@@ -12,13 +12,19 @@ use warp::Filter;
 /// from this instance. On success, returns a Runtime value that the caller must
 /// keep live, or the task that handles Prometheus scrapes will not run. Returns
 /// an error if something goes wrong setting up the endpoint.
-pub fn start_metrics_scrape_endpoint(port: u16) -> Result<Runtime> {
+pub fn start_metrics_scrape_endpoint(port: u16, parent_logger: &Logger) -> Result<Runtime> {
     // The default, multi-threaded runtime should suffice for our needs
     let runtime = Runtime::new().context("failed to create runtime for metrics endpoint")?;
 
+    // scrape_logger will be moved into the closure passed to `runtime.spawn()`
+    let scrape_logger = parent_logger.new(o!());
+
     // This task will run forever, so we intentionally drop the returned handle
     runtime.spawn(async move {
-        let endpoint = warp::get().and(warp::path("metrics")).map(|| {
+        // Clone scrape_logger so it can safely be moved into the closure that
+        // handles metrics scrapes.
+        let scrape_logger_clone = scrape_logger.clone();
+        let endpoint = warp::get().and(warp::path("metrics")).map(move || {
             match handle_scrape() {
                 Ok(body) => {
                     Response::builder()
@@ -27,13 +33,16 @@ pub fn start_metrics_scrape_endpoint(port: u16) -> Result<Runtime> {
                         .body(body)
                 }
                 Err(err) => {
-                    error!("unable to scrape Prometheus metrics: {}", err);
+                    error!(
+                        scrape_logger_clone,
+                        "unable to scrape Prometheus metrics: {}", err
+                    );
                     Response::builder().status(500).body(vec![])
                 }
             }
         });
 
-        info!("serving metrics scrapes on 0.0.0.0:{}", port);
+        info!(scrape_logger, "serving metrics scrapes on 0.0.0.0:{}", port);
         warp::serve(endpoint)
             .run(SocketAddr::new(IpAddr::V4(Ipv4Addr::new(0, 0, 0, 0)), port))
             .await;

@@ -1305,7 +1305,7 @@ fn intake_batch_worker(
 ) -> Result<(), anyhow::Error> {
     let metrics_collector = IntakeMetricsCollector::new()?;
     let scrape_port = value_t!(sub_matches.value_of("metrics-scrape-port"), u16)?;
-    let _runtime = start_metrics_scrape_endpoint(scrape_port)?;
+    let _runtime = start_metrics_scrape_endpoint(scrape_port, parent_logger)?;
     let mut queue = intake_task_queue_from_args(sub_matches, parent_logger)?;
 
     loop {
@@ -1570,7 +1570,7 @@ fn aggregate_worker(sub_matches: &ArgMatches, parent_logger: &Logger) -> Result<
     let mut queue = aggregation_task_queue_from_args(sub_matches, parent_logger)?;
     let metrics_collector = AggregateMetricsCollector::new()?;
     let scrape_port = value_t!(sub_matches.value_of("metrics-scrape-port"), u16)?;
-    let _runtime = start_metrics_scrape_endpoint(scrape_port)?;
+    let _runtime = start_metrics_scrape_endpoint(scrape_port, parent_logger)?;
 
     loop {
         if let Some(task_handle) = queue.dequeue()? {

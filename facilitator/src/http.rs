@@ -1,10 +1,10 @@
 use anyhow::{Context, Result};
-use slog::Logger;
+use slog::{o, Logger};
 use std::{convert::From, default::Default, fmt::Debug, time::Duration};
 use ureq::{Agent, AgentBuilder, Request, Response, SerdeValue};
 use url::Url;
 
-use crate::retries::retry_request;
+use crate::{logging::event, retries::retry_request};
 
 /// Method contains the HTTP methods supported by this crate.
 #[derive(Debug)]
@@ -103,8 +103,9 @@ impl RetryingAgent {
         request: &Request,
         body: &SerdeValue,
     ) -> Result<Response> {
+        let request_logger = self.logger.new(o!(event::ACTION => "send json request"));
         retry_request(
-            "send json request",
+            &request_logger,
             || request.clone().send_json(body.clone()),
             |ureq_error| self.is_error_retryable(ureq_error),
         )
@@ -113,8 +114,9 @@ impl RetryingAgent {
 
     /// Send the provided request with the provided bytes as the body.
     pub(crate) fn send_bytes(&self, request: &Request, data: &[u8]) -> Result<Response> {
+        let request_logger = self.logger.new(o!(event::ACTION => "send bytes"));
         retry_request(
-            "send bytes",
+            &request_logger,
             || request.clone().send_bytes(data),
             |ureq_error| self.is_error_retryable(ureq_error),
         )
@@ -123,8 +125,9 @@ impl RetryingAgent {
 
     /// Send the provided request with the provided string as the body.
     pub(crate) fn send_string(&self, request: &Request, data: &str) -> Result<Response> {
+        let request_logger = self.logger.new(o!(event::ACTION => "send string"));
         retry_request(
-            "send string",
+            &request_logger,
             || request.clone().send_string(data),
             |ureq_error| self.is_error_retryable(ureq_error),
         )
@@ -133,8 +136,11 @@ impl RetryingAgent {
 
     /// Send the provided request with no body.
     pub(crate) fn call(&self, request: &Request) -> Result<Response> {
+        let request_logger = self
+            .logger
+            .new(o!(event::ACTION => "send request without body"));
         retry_request(
-            "send request without body",
+            &request_logger,
             || request.clone().call(),
             |ureq_error| self.is_error_retryable(ureq_error),
         )

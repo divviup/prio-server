@@ -48,6 +48,8 @@ pub mod event {
     pub(crate) const TASK_ACKNOWLEDGEMENT_ID: EventKey = "task_ack_id";
     /// Unique identifier for a task queue
     pub(crate) const TASK_QUEUE_ID: EventKey = "task_queue-id";
+    /// Description of an action being retried
+    pub(crate) const ACTION: EventKey = "action";
 }
 
 /// Severity maps `log::Level` to Google Cloud Platform's notion of Severity.
