@@ -175,6 +175,7 @@ impl<'a> SampleGenerator<'a> {
             BatchWriter::new(
                 Batch::new_ingestion(self.aggregation_name, batch_uuid, date),
                 &mut *self.pha_output.transport.transport,
+                trace_id,
             );
         let mut facilitator_ingestion_batch: BatchWriter<
             '_,
@@ -183,6 +184,7 @@ impl<'a> SampleGenerator<'a> {
         > = BatchWriter::new(
             Batch::new_ingestion(self.aggregation_name, batch_uuid, date),
             &mut *self.facilitator_output.transport.transport,
+            trace_id,
         );
 
         // Generate random data packets and write into data share packets
@@ -440,7 +442,7 @@ mod tests {
             LocalFileTransport::new(tempdir.path().to_path_buf().join("facilitator")),
         ];
         for transport in transports {
-            let reader = transport.get(&expected_path).unwrap();
+            let reader = transport.get(&expected_path, "trace-id").unwrap();
 
             let parsed_header = IngestionHeader::read(reader).unwrap();
             assert_eq!(parsed_header.batch_uuid, batch_uuid);

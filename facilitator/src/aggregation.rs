@@ -86,6 +86,7 @@ impl<'a> BatchAggregator<'a> {
                     is_first,
                 ),
                 &mut *aggregation_transport.transport,
+                trace_id,
             ),
             share_processor_signing_key: &aggregation_transport.batch_signing_key,
             total_individual_clients: 0,
@@ -201,6 +202,8 @@ impl<'a> BatchAggregator<'a> {
                 Batch::new_ingestion(self.aggregation_name, batch_id, batch_date),
                 &mut *self.ingestion_transport.transport.transport,
                 self.permit_malformed_batch,
+                self.trace_id,
+                &self.logger,
             );
         let ingestion_header = ingestion_batch
             .header(&self.ingestion_transport.transport.batch_signing_public_keys)?;
@@ -222,18 +225,24 @@ impl<'a> BatchAggregator<'a> {
                 Batch::new_ingestion(self.aggregation_name, batch_id, batch_date),
                 &mut *self.ingestion_transport.transport.transport,
                 self.permit_malformed_batch,
+                self.trace_id,
+                &self.logger,
             );
         let mut own_validation_batch: BatchReader<'_, ValidationHeader, ValidationPacket> =
             BatchReader::new(
                 Batch::new_validation(self.aggregation_name, batch_id, batch_date, self.is_first),
                 &mut *self.own_validation_transport.transport,
                 self.permit_malformed_batch,
+                self.trace_id,
+                &self.logger,
             );
         let mut peer_validation_batch: BatchReader<'_, ValidationHeader, ValidationPacket> =
             BatchReader::new(
                 Batch::new_validation(self.aggregation_name, batch_id, batch_date, !self.is_first),
                 &mut *self.peer_validation_transport.transport,
                 self.permit_malformed_batch,
+                self.trace_id,
+                &self.logger,
             );
 
         if let Some(collector) = self.metrics_collector {
