@@ -589,6 +589,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "88d7ed2934d741c6b37e33e3832298e8850b53fd2d2bea03873375596c7cea4e"
 
 [[package]]
+name = "dyn-clone"
+version = "1.0.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ee2626afccd7561a06cf1367e2950c4718ea04565e20fb5029b6c7d8ad09abcf"
+
+[[package]]
 name = "ecdsa"
 version = "0.11.0-pre.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -649,6 +655,7 @@ dependencies = [
  "chrono",
  "clap",
  "derivative",
+ "dyn-clone",
  "elliptic-curve",
  "http",
  "hyper",
