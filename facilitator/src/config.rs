@@ -1,11 +1,13 @@
 use anyhow::{anyhow, Context, Result};
-use rusoto_core::{credential::ProvideAwsCredentials, region::ParseRegionError, Region};
+use rusoto_core::{region::ParseRegionError, Region};
 use serde::{de, Deserialize, Deserializer};
 use std::{
     fmt::{self, Display, Formatter},
     path::PathBuf,
     str::FromStr,
 };
+
+use crate::aws_credentials;
 
 /// Identity represents a cloud identity: Either an AWS IAM ARN (i.e. "arn:...")
 /// or a GCP ServiceAccount (i.e. "foo@bar.com").
@@ -21,7 +23,7 @@ pub struct WorkloadIdentityPoolParameters {
     /// A credential provider that can get AWS credentials for an AWS IAM role
     /// or user that is permitted to impersonate a GCP service account via the
     /// workload_identity_pool_provider
-    pub aws_credentials_provider: Box<dyn ProvideAwsCredentials>,
+    pub aws_credentials_provider: aws_credentials::Provider,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
