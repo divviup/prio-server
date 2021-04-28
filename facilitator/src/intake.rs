@@ -1,11 +1,7 @@
 use crate::{
     batch::{Batch, BatchReader, BatchWriter},
     idl::{IngestionDataSharePacket, IngestionHeader, Packet, ValidationHeader, ValidationPacket},
-    logging::{
-        EVENT_KEY_AGGREGATION_NAME, EVENT_KEY_BATCH_DATE, EVENT_KEY_BATCH_ID,
-        EVENT_KEY_INGESTION_PATH, EVENT_KEY_OWN_VALIDATION_PATH, EVENT_KEY_PACKET_UUID,
-        EVENT_KEY_PEER_VALIDATION_PATH, EVENT_KEY_TRACE_ID,
-    },
+    logging::event,
     metrics::IntakeMetricsCollector,
     transport::{SignableTransport, VerifiableAndDecryptableTransport},
     BatchSigningKey, Error, DATE_FORMAT,
@@ -55,13 +51,13 @@ impl<'a> BatchIntaker<'a> {
         parent_logger: &Logger,
     ) -> Result<BatchIntaker<'a>> {
         let logger = parent_logger.new(o!(
-            EVENT_KEY_TRACE_ID => trace_id.to_owned(),
-            EVENT_KEY_AGGREGATION_NAME => aggregation_name.to_owned(),
-            EVENT_KEY_BATCH_ID => batch_id.to_string(),
-            EVENT_KEY_BATCH_DATE => date.format(DATE_FORMAT).to_string(),
-            EVENT_KEY_INGESTION_PATH => ingestion_transport.transport.transport.path(),
-            EVENT_KEY_OWN_VALIDATION_PATH => own_validation_transport.transport.path(),
-            EVENT_KEY_PEER_VALIDATION_PATH => peer_validation_transport.transport.path(),
+            event::TRACE_ID => trace_id.to_owned(),
+            event::AGGREGATION_NAME => aggregation_name.to_owned(),
+            event::BATCH_ID => batch_id.to_string(),
+            event::BATCH_DATE => date.format(DATE_FORMAT).to_string(),
+            event::INGESTION_PATH => ingestion_transport.transport.transport.path(),
+            event::OWN_VALIDATION_PATH => own_validation_transport.transport.path(),
+            event::PEER_VALIDATION_PATH => peer_validation_transport.transport.path(),
         ));
         Ok(BatchIntaker {
             intake_batch: BatchReader::new(
@@ -194,7 +190,7 @@ impl<'a> BatchIntaker<'a> {
                                 more packet decryption keys if available.";
                                 o!(
                                     "decryption_error" => format!("{:?}", e),
-                                    EVENT_KEY_PACKET_UUID => packet.uuid.to_string(),
+                                    event::PACKET_UUID => packet.uuid.to_string(),
                                 )
                             );
                             continue;

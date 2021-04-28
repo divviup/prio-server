@@ -4,9 +4,7 @@ use crate::{
     http::{
         Method, OauthTokenProvider, RequestParameters, RetryingAgent, StaticOauthTokenProvider,
     },
-    logging::{
-        EVENT_KEY_IDENTITY, EVENT_KEY_STORAGE_KEY, EVENT_KEY_STORAGE_PATH, EVENT_KEY_TRACE_ID,
-    },
+    logging::event,
     transport::{Transport, TransportWriter},
     Error,
 };
@@ -80,8 +78,8 @@ impl GcsTransport {
             vec![408, 429],
         );
         let logger = parent_logger.new(o!(
-            EVENT_KEY_STORAGE_PATH => path.to_string(),
-            EVENT_KEY_IDENTITY => identity.unwrap_or("default identity").to_owned(),
+            event::STORAGE_PATH => path.to_string(),
+            event::IDENTITY => identity.unwrap_or("default identity").to_owned(),
         ));
         Ok(GcsTransport {
             path: path.ensure_directory_prefix(),
@@ -106,8 +104,8 @@ impl Transport for GcsTransport {
     fn get(&mut self, key: &str, trace_id: &str) -> Result<Box<dyn Read>> {
         info!(
             self.logger, "get";
-            EVENT_KEY_TRACE_ID => trace_id,
-            EVENT_KEY_STORAGE_KEY => key,
+            event::TRACE_ID => trace_id,
+            event::STORAGE_KEY => key,
         );
         // Per API reference, the object key must be URL encoded.
         // API reference: https://cloud.google.com/storage/docs/json_api/v1/objects/get
@@ -136,8 +134,8 @@ impl Transport for GcsTransport {
     fn put(&mut self, key: &str, trace_id: &str) -> Result<Box<dyn TransportWriter>> {
         info!(
             self.logger, "put";
-            EVENT_KEY_TRACE_ID => trace_id,
-            EVENT_KEY_STORAGE_KEY => key,
+            event::TRACE_ID => trace_id,
+            event::STORAGE_KEY => key,
         );
         // The Oauth token will only be used once, during the call to
         // StreamingTransferWriter::new, so we don't have to worry about it
@@ -224,7 +222,7 @@ impl StreamingTransferWriter {
         parent_logger: &Logger,
     ) -> Result<StreamingTransferWriter> {
         let logger = parent_logger.new(o!(
-            EVENT_KEY_STORAGE_KEY => object.clone(),
+            event::STORAGE_KEY => object.clone(),
         ));
 
         // Initiate the resumable, streaming upload.

@@ -13,35 +13,38 @@ use std::{
     thread,
 };
 
-/// An event key is a key that could be encountered in the fields of a
-/// structured log message.
-type EventKey = &'static str;
+/// `event` defines constants for structured events
+pub mod event {
+    /// An event key is a key that could be encountered in the fields of a
+    /// structured log message.
+    type EventKey = &'static str;
 
-/// The trace ID of the event
-pub const EVENT_KEY_TRACE_ID: EventKey = "trace_id";
-/// The task handle structure
-pub const EVENT_KEY_TASK_HANDLE: EventKey = "task_handle";
-/// The name of the aggregation
-pub(crate) const EVENT_KEY_AGGREGATION_NAME: EventKey = "aggregation_name";
-/// The storage path from which ingestion batches are read/written
-pub(crate) const EVENT_KEY_INGESTION_PATH: EventKey = "ingestion_path";
-/// The storage path from which own validation batches are read/written
-pub(crate) const EVENT_KEY_OWN_VALIDATION_PATH: EventKey = "own_validation_path";
-/// The storage path from which peer validation batches are read/written
-pub(crate) const EVENT_KEY_PEER_VALIDATION_PATH: EventKey = "peer_validation_path";
-/// The UUID of a packet that something happened to
-pub(crate) const EVENT_KEY_PACKET_UUID: EventKey = "packet_uuid";
-/// The ID (usually a UUID) of a batch that something happened to
-pub(crate) const EVENT_KEY_BATCH_ID: EventKey = "batch_id";
-/// The date of a batch that something happened to
-pub(crate) const EVENT_KEY_BATCH_DATE: EventKey = "batch_date";
-/// The path to some object store (e.g., an S3 bucket or a local directory)
-pub(crate) const EVENT_KEY_STORAGE_PATH: EventKey = "path";
-/// The key for an object in some object store
-pub(crate) const EVENT_KEY_STORAGE_KEY: EventKey = "key";
-/// An identity used while accessing some cloud resource (e.g., an AWS role ARN
-/// or a GCP service account email)
-pub(crate) const EVENT_KEY_IDENTITY: EventKey = "identity";
+    /// The trace ID of the event
+    pub const TRACE_ID: EventKey = "trace_id";
+    /// The task handle structure
+    pub const TASK_HANDLE: EventKey = "task_handle";
+    /// The name of the aggregation
+    pub(crate) const AGGREGATION_NAME: EventKey = "aggregation_name";
+    /// The storage path from which ingestion batches are read/written
+    pub(crate) const INGESTION_PATH: EventKey = "ingestion_path";
+    /// The storage path from which own validation batches are read/written
+    pub(crate) const OWN_VALIDATION_PATH: EventKey = "own_validation_path";
+    /// The storage path from which peer validation batches are read/written
+    pub(crate) const PEER_VALIDATION_PATH: EventKey = "peer_validation_path";
+    /// The UUID of a packet that something happened to
+    pub(crate) const PACKET_UUID: EventKey = "packet_uuid";
+    /// The ID (usually a UUID) of a batch that something happened to
+    pub(crate) const BATCH_ID: EventKey = "batch_id";
+    /// The date of a batch that something happened to
+    pub(crate) const BATCH_DATE: EventKey = "batch_date";
+    /// The path to some object store (e.g., an S3 bucket or a local directory)
+    pub(crate) const STORAGE_PATH: EventKey = "path";
+    /// The key for an object in some object store
+    pub(crate) const STORAGE_KEY: EventKey = "key";
+    /// An identity used while accessing some cloud resource (e.g., an AWS role ARN
+    /// or a GCP service account email)
+    pub(crate) const IDENTITY: EventKey = "identity";
+}
 
 /// Severity maps `log::Level` to Google Cloud Platform's notion of Severity.
 /// https://cloud.google.com/logging/docs/reference/v2/rest/v2/LogEntry#LogSeverity

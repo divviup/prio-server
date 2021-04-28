@@ -1,9 +1,7 @@
 use crate::{
     batch::{Batch, BatchWriter},
     idl::{IngestionDataSharePacket, IngestionHeader, Packet},
-    logging::{
-        EVENT_KEY_AGGREGATION_NAME, EVENT_KEY_BATCH_DATE, EVENT_KEY_BATCH_ID, EVENT_KEY_TRACE_ID,
-    },
+    logging::event,
     transport::SignableTransport,
     DATE_FORMAT,
 };
@@ -109,7 +107,7 @@ impl<'a> SampleGenerator<'a> {
         parent_logger: &Logger,
     ) -> Self {
         let logger = parent_logger.new(o!(
-            EVENT_KEY_AGGREGATION_NAME => aggregation_name.to_owned(),
+            event::AGGREGATION_NAME => aggregation_name.to_owned(),
         ));
         Self {
             aggregation_name,
@@ -159,9 +157,9 @@ impl<'a> SampleGenerator<'a> {
         packet_count: usize,
     ) -> Result<ReferenceSum> {
         let local_logger = self.logger.new(o!(
-            EVENT_KEY_TRACE_ID => trace_id.to_owned(),
-            EVENT_KEY_BATCH_ID => batch_uuid.to_string(),
-            EVENT_KEY_BATCH_DATE => date.format(DATE_FORMAT).to_string(),
+            event::TRACE_ID => trace_id.to_owned(),
+            event::BATCH_ID => batch_uuid.to_string(),
+            event::BATCH_DATE => date.format(DATE_FORMAT).to_string(),
             "pha_output_path" => self.pha_output.transport.transport.path(),
             "facilitator_output_path" => self.facilitator_output.transport.transport.path(),
         ));
