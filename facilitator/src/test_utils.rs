@@ -154,3 +154,14 @@ pub fn default_pha_packet_encryption_public_key() -> PublicKey {
 pub fn default_facilitator_packet_encryption_public_key() -> PublicKey {
     PublicKey::from(&PrivateKey::from_base64(DEFAULT_FACILITATOR_ECIES_PRIVATE_KEY).unwrap())
 }
+
+#[cfg(test)]
+use tokio::runtime::{Builder, Runtime};
+
+/// Create a [`tokio::runtime::Runtime`] suitable for use in tests. The
+/// `Runtime` must be kept live by the caller or tasks spawned onto handles
+/// will never run.
+#[cfg(test)]
+pub(crate) fn test_runtime() -> Runtime {
+    Builder::new_multi_thread().enable_all().build().unwrap()
+}

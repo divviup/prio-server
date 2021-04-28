@@ -1,42 +1,37 @@
+use crate::{
+    aws_credentials::{self, retry_request},
+    logging::event,
+    task::{Task, TaskHandle, TaskQueue},
+};
 use anyhow::{anyhow, Context, Result};
-use derivative::Derivative;
 use rusoto_core::Region;
 use rusoto_sqs::{
     ChangeMessageVisibilityRequest, DeleteMessageRequest, ReceiveMessageRequest, Sqs, SqsClient,
 };
 use slog::{debug, info, o, Logger};
 use std::{convert::TryFrom, marker::PhantomData, str::FromStr, time::Duration};
-use tokio::runtime::Runtime;
-
-use crate::aws_credentials;
-use crate::{
-    aws_credentials::{basic_runtime, retry_request},
-    logging::event,
-    task::{Task, TaskHandle, TaskQueue},
-};
+use tokio::runtime::Handle;
 
 /// A task queue backed by AWS SQS
-#[derive(Derivative)]
-#[derivative(Debug)]
+#[derive(Clone, Debug)]
 pub struct AwsSqsTaskQueue<T: Task> {
     region: Region,
     queue_url: String,
-    runtime: Runtime,
-    #[derivative(Debug = "ignore")]
+    runtime_handle: Handle,
     credentials_provider: aws_credentials::Provider,
     logger: Logger,
-    phantom_task: PhantomData<*const T>,
+    phantom_task: PhantomData<T>,
 }
 
 impl<T: Task> AwsSqsTaskQueue<T> {
     pub fn new(
         region: &str,
         queue_url: &str,
+        runtime_handle: &Handle,
         credentials_provider: aws_credentials::Provider,
         parent_logger: &Logger,
     ) -> Result<Self> {
         let region = Region::from_str(region).context("invalid AWS region")?;
-        let runtime = basic_runtime()?;
         let logger = parent_logger.new(o!(
             event::TASK_QUEUE_ID => queue_url.to_owned(),
             event::IDENTITY => credentials_provider.to_string(),
@@ -45,7 +40,7 @@ impl<T: Task> AwsSqsTaskQueue<T> {
         Ok(AwsSqsTaskQueue {
             region,
             queue_url: queue_url.to_owned(),
-            runtime,
+            runtime_handle: runtime_handle.clone(),
             credentials_provider,
             logger,
             phantom_task: PhantomData,
@@ -77,7 +72,8 @@ impl<T: Task> TaskQueue<T> for AwsSqsTaskQueue<T> {
                     ..Default::default()
                 };
 
-                self.runtime.block_on(client.receive_message(request))
+                self.runtime_handle
+                    .block_on(client.receive_message(request))
             },
         )
         .context("failed to dequeue message from SQS")?;
@@ -133,7 +129,7 @@ impl<T: Task> TaskQueue<T> for AwsSqsTaskQueue<T> {
                     queue_url: self.queue_url.clone(),
                     receipt_handle: task.acknowledgment_id.clone(),
                 };
-                self.runtime.block_on(client.delete_message(request))
+                self.runtime_handle.block_on(client.delete_message(request))
             },
         )
         .context("failed to delete/acknowledge message in SQS")
@@ -205,7 +201,7 @@ impl<T: Task> AwsSqsTaskQueue<T> {
                     receipt_handle: task.acknowledgment_id.clone(),
                     visibility_timeout: timeout,
                 };
-                self.runtime
+                self.runtime_handle
                     .block_on(client.change_message_visibility(request))
             },
         )

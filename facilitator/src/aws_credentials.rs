@@ -36,7 +36,7 @@ use std::{
     default::Default,
     fmt::{self, Debug, Display},
 };
-use tokio::runtime::{Builder, Runtime};
+use tokio::runtime::Handle;
 use url::Url;
 use xml::EventReader;
 
@@ -46,11 +46,6 @@ const HOST_HEADER: &str = "host";
 const AMAZON_DATE_HEADER: &str = "x-amz-date";
 const AMAZON_SECURITY_TOKEN_HEADER: &str = "x-amz-security-token";
 const GOOGLE_TARGET_RESOURCE_HEADER: &str = "x-goog-cloud-target-resource";
-
-/// Constructs a basic runtime suitable for use in our single threaded context
-pub(crate) fn basic_runtime() -> Result<Runtime> {
-    Ok(Builder::new_current_thread().enable_all().build()?)
-}
 
 /// The Provider enum allows us to generically handle different scenarios for
 /// authenticating to AWS APIs, while still having a concrete value that
@@ -112,6 +107,7 @@ impl Provider {
         impersonate_gcp_service_account: Identity,
         use_default_provider: bool,
         purpose: &str,
+        runtime_handle: &Handle,
         logger: &Logger,
     ) -> Result<Self> {
         match (use_default_provider, aws_identity.as_str()) {
@@ -120,6 +116,7 @@ impl Provider {
                 identity,
                 purpose.to_owned(),
                 impersonate_gcp_service_account,
+                runtime_handle,
                 logger,
             ),
             (_, None) => Self::new_web_identity_from_kubernetes_environment(),
@@ -150,6 +147,7 @@ impl Provider {
         iam_role: &str,
         purpose: String,
         impersonated_gcp_service_account: Identity,
+        runtime_handle: &Handle,
         logger: &Logger,
     ) -> Result<Self> {
         // When running in GKE, we obtain an identity token which we can then
@@ -172,6 +170,7 @@ impl Provider {
                             Identity::none(),
                             None,
                             None,
+                            runtime_handle,
                             &token_logger,
                         )?,
                         token_logger.clone(),

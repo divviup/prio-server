@@ -2,6 +2,7 @@ use anyhow::{anyhow, Context, Result};
 use rusoto_core::{region::ParseRegionError, Region};
 use serde::{de, Deserialize, Deserializer};
 use slog::Logger;
+use tokio::runtime::Handle;
 
 use std::{
     convert::Infallible,
@@ -92,6 +93,7 @@ impl WorkloadIdentityPoolParameters {
     pub fn new(
         workload_identity_pool_provider_id: Option<&str>,
         use_default_aws_credentials_provider: bool,
+        runtime_handle: &Handle,
         logger: &Logger,
     ) -> Result<Option<Self>> {
         let parameters = match workload_identity_pool_provider_id {
@@ -110,6 +112,7 @@ impl WorkloadIdentityPoolParameters {
                     Identity::none(),
                     use_default_aws_credentials_provider,
                     "IAM federation",
+                    runtime_handle,
                     logger,
                 )?,
             }),
