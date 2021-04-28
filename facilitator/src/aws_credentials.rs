@@ -235,6 +235,14 @@ impl Display for Provider {
     }
 }
 
+impl Debug for Provider {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Provider")
+            .field("credential_source", &self.to_string())
+            .finish()
+    }
+}
+
 #[async_trait]
 impl ProvideAwsCredentials for Provider {
     async fn credentials(&self) -> Result<AwsCredentials, CredentialsError> {

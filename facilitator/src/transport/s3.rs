@@ -11,7 +11,7 @@ use bytes::Bytes;
 use derivative::Derivative;
 use http::{HeaderMap, StatusCode};
 use hyper_rustls::HttpsConnector;
-use rusoto_core::{request::BufferedHttpResponse, ByteStream, Region, RusotoError};
+use rusoto_core::{request::BufferedHttpResponse, ByteStream, RusotoError};
 use rusoto_s3::{
     AbortMultipartUploadRequest, CompleteMultipartUploadRequest, CompletedMultipartUpload,
     CompletedPart, CreateMultipartUploadRequest, GetObjectRequest, S3Client, UploadPartRequest, S3,
@@ -29,19 +29,13 @@ use tokio::{
 };
 use uuid::Uuid;
 
-/// ClientProvider allows mocking out a client for testing.
-type ClientProvider = Box<dyn Fn(&Region, aws_credentials::Provider) -> Result<S3Client>>;
-
 /// Implementation of Transport that reads and writes objects from Amazon S3.
-#[derive(Derivative)]
+#[derive(Clone, Derivative)]
 #[derivative(Debug)]
 pub struct S3Transport {
     path: S3Path,
     #[derivative(Debug = "ignore")]
     credentials_provider: aws_credentials::Provider,
-    // client_provider allows injection of mock S3Client for testing purposes
-    #[derivative(Debug = "ignore")]
-    client_provider: ClientProvider,
     logger: Logger,
 }
 
@@ -51,56 +45,42 @@ impl S3Transport {
         credentials_provider: aws_credentials::Provider,
         parent_logger: &Logger,
     ) -> Self {
-        S3Transport::new_with_client(
-            path,
-            credentials_provider,
-            Box::new(
-                |region: &Region, credentials_provider: aws_credentials::Provider| {
-                    // Rusoto uses Hyper which uses connection pools. The default
-                    // timeout for those connections is 90 seconds[1]. Amazon S3's
-                    // API closes idle client connections after 20 seconds[2]. If we
-                    // use a default client via S3Client::new, this mismatch causes
-                    // uploads to fail when Hyper tries to re-use a connection that
-                    // has been idle too long. Until this is fixed in Rusoto[3], we
-                    // construct our own HTTP request dispatcher whose underlying
-                    // hyper::Client is configured to timeout idle connections after
-                    // 10 seconds.
-                    //
-                    // [1]: https://docs.rs/hyper/0.13.8/hyper/client/struct.Builder.html#method.pool_idle_timeout
-                    // [2]: https://aws.amazon.com/premiumsupport/knowledge-center/s3-socket-connection-timeout-error/
-                    // [3]: https://github.com/rusoto/rusoto/issues/1686
-                    let mut builder = hyper::Client::builder();
-                    builder.pool_idle_timeout(Duration::from_secs(10));
-                    let connector = HttpsConnector::with_native_roots();
-                    let http_client = rusoto_core::HttpClient::from_builder(builder, connector);
-
-                    Ok(S3Client::new_with(
-                        http_client,
-                        credentials_provider,
-                        region.clone(),
-                    ))
-                },
-            ),
-            parent_logger,
-        )
-    }
-
-    fn new_with_client(
-        path: S3Path,
-        credentials_provider: aws_credentials::Provider,
-        client_provider: ClientProvider,
-        parent_logger: &Logger,
-    ) -> Self {
         let logger = parent_logger.new(o!(
             event::STORAGE_PATH => path.to_string(),
             event::IDENTITY => credentials_provider.to_string(),
         ));
-        S3Transport {
+        Self {
             path: path.ensure_directory_prefix(),
             credentials_provider,
-            client_provider,
             logger,
         }
+    }
+
+    /// Construct an S3Client for this transport
+    fn client(&self) -> Result<S3Client> {
+        // Rusoto uses Hyper which uses connection pools. The default
+        // timeout for those connections is 90 seconds[1]. Amazon S3's
+        // API closes idle client connections after 20 seconds[2]. If we
+        // use a default client via S3Client::new, this mismatch causes
+        // uploads to fail when Hyper tries to re-use a connection that
+        // has been idle too long. Until this is fixed in Rusoto[3], we
+        // construct our own HTTP request dispatcher whose underlying
+        // hyper::Client is configured to timeout idle connections after
+        // 10 seconds.
+        //
+        // [1]: https://docs.rs/hyper/0.13.8/hyper/client/struct.Builder.html#method.pool_idle_timeout
+        // [2]: https://aws.amazon.com/premiumsupport/knowledge-center/s3-socket-connection-timeout-error/
+        // [3]: https://github.com/rusoto/rusoto/issues/1686
+        let mut builder = hyper::Client::builder();
+        builder.pool_idle_timeout(Duration::from_secs(10));
+        let connector = HttpsConnector::with_native_roots();
+        let http_client = rusoto_core::HttpClient::from_builder(builder, connector);
+
+        Ok(S3Client::new_with(
+            http_client,
+            self.credentials_provider.clone(),
+            self.path.region.clone(),
+        ))
     }
 }
 
@@ -117,7 +97,7 @@ impl Transport for S3Transport {
         ));
         info!(logger, "get");
         let runtime = basic_runtime()?;
-        let client = (self.client_provider)(&self.path.region, self.credentials_provider.clone())?;
+        let client = self.client()?;
 
         let get_output = retry_request(&logger, || {
             runtime.block_on(client.get_object(GetObjectRequest {
@@ -145,7 +125,7 @@ impl Transport for S3Transport {
             // Set buffer size to 5 MB, which is the minimum required by Amazon
             // https://docs.aws.amazon.com/AmazonS3/latest/dev/qfacts.html
             5_242_880,
-            (self.client_provider)(&self.path.region, self.credentials_provider.clone())?,
+            self.client()?,
             &logger,
         )?;
         Ok(Box::new(writer))
@@ -403,7 +383,7 @@ mod tests {
     use crate::{logging::setup_test_logging, test_utils::DEFAULT_TRACE_ID};
     use mockito::{mock, Matcher, Mock};
     use regex;
-    use rusoto_core::request::HttpClient;
+    use rusoto_core::{request::HttpClient, Region};
     use rusoto_s3::CreateMultipartUploadError;
     use std::io::Read;
 
@@ -742,7 +722,10 @@ mod tests {
     fn roundtrip_s3_transport_failed_get_object() {
         let logger = setup_test_logging();
         let s3_path = S3Path {
-            region: Region::UsWest2,
+            region: Region::Custom {
+                name: TEST_REGION.into(),
+                endpoint: mockito::server_url(),
+            },
             bucket: TEST_BUCKET.into(),
             key: "".into(),
         };
@@ -751,23 +734,8 @@ mod tests {
             .with_status(404)
             .create();
 
-        let mut transport = S3Transport::new_with_client(
-            s3_path,
-            aws_credentials::Provider::new_mock(),
-            Box::new(
-                |_: &Region, credentials_provider: aws_credentials::Provider| {
-                    Ok(S3Client::new_with(
-                        HttpClient::new().unwrap(),
-                        credentials_provider,
-                        Region::Custom {
-                            name: TEST_REGION.into(),
-                            endpoint: mockito::server_url(),
-                        },
-                    ))
-                },
-            ),
-            &logger,
-        );
+        let mut transport =
+            S3Transport::new(s3_path, aws_credentials::Provider::new_mock(), &logger);
 
         let ret = transport.get(TEST_KEY, &DEFAULT_TRACE_ID);
         assert!(ret.is_err(), "unexpected return value {:?}", ret.err());
@@ -779,7 +747,10 @@ mod tests {
     fn roundtrip_s3_transport_successful_get_object() {
         let logger = setup_test_logging();
         let s3_path = S3Path {
-            region: Region::UsWest2,
+            region: Region::Custom {
+                name: TEST_REGION.into(),
+                endpoint: mockito::server_url(),
+            },
             bucket: TEST_BUCKET.into(),
             key: "".into(),
         };
@@ -788,23 +759,8 @@ mod tests {
             .with_body("fake-content")
             .create();
 
-        let mut transport = S3Transport::new_with_client(
-            s3_path,
-            aws_credentials::Provider::new_mock(),
-            Box::new(
-                |_: &Region, credentials_provider: aws_credentials::Provider| {
-                    Ok(S3Client::new_with(
-                        HttpClient::new().unwrap(),
-                        credentials_provider,
-                        Region::Custom {
-                            name: TEST_REGION.into(),
-                            endpoint: mockito::server_url(),
-                        },
-                    ))
-                },
-            ),
-            &logger,
-        );
+        let mut transport =
+            S3Transport::new(s3_path, aws_credentials::Provider::new_mock(), &logger);
 
         let mut reader = transport
             .get(TEST_KEY, &DEFAULT_TRACE_ID)
@@ -820,7 +776,10 @@ mod tests {
     fn roundtrip_s3_transport_create_multipart_upload() {
         let logger = setup_test_logging();
         let s3_path = S3Path {
-            region: Region::UsWest2,
+            region: Region::Custom {
+                name: TEST_REGION.into(),
+                endpoint: mockito::server_url(),
+            },
             bucket: TEST_BUCKET.into(),
             key: "".into(),
         };
@@ -841,23 +800,8 @@ mod tests {
         .map(Mock::create)
         .collect();
 
-        let mut transport = S3Transport::new_with_client(
-            s3_path,
-            aws_credentials::Provider::new_mock(),
-            Box::new(
-                |_: &Region, credentials_provider: aws_credentials::Provider| {
-                    Ok(S3Client::new_with(
-                        HttpClient::new().unwrap(),
-                        credentials_provider,
-                        Region::Custom {
-                            name: TEST_REGION.into(),
-                            endpoint: mockito::server_url(),
-                        },
-                    ))
-                },
-            ),
-            &logger,
-        );
+        let mut transport =
+            S3Transport::new(s3_path, aws_credentials::Provider::new_mock(), &logger);
 
         let mut writer = transport.put(TEST_KEY, &DEFAULT_TRACE_ID).unwrap();
         writer.write_all(b"fake-content").unwrap();
