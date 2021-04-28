@@ -1,4 +1,5 @@
 use anyhow::{Context, Result};
+use slog::Logger;
 use std::{convert::From, default::Default, fmt::Debug, time::Duration};
 use ureq::{Agent, AgentBuilder, Request, Response, SerdeValue};
 use url::Url;
@@ -32,27 +33,35 @@ impl Method {
 pub(crate) struct RetryingAgent {
     /// Agent to use for constructing HTTP requests.
     agent: Agent,
+    logger: Logger,
     /// Requests which fail due to transport problems or which return any HTTP
     /// status code in this list or in the 5xx range will be retried with
     /// exponential backoff.
     additional_retryable_http_status_codes: Vec<u16>,
 }
 
-impl Default for RetryingAgent {
-    fn default() -> Self {
-        Self::new(
-            AgentBuilder::new().timeout(Duration::from_secs(10)).build(),
-            vec![],
-        )
-    }
-}
-
 impl RetryingAgent {
-    pub fn new(agent: Agent, additional_retryable_http_status_codes: Vec<u16>) -> Self {
+    pub fn new(
+        agent: Agent,
+        parent_logger: &Logger,
+        additional_retryable_http_status_codes: Vec<u16>,
+    ) -> Self {
         Self {
             agent,
+            logger: parent_logger.clone(),
             additional_retryable_http_status_codes,
         }
+    }
+
+    /// Create an agent with the provided `slog::Logger` and default parameters.
+    /// This is not an `std::default::Default` implementation because there is
+    /// no sensible default value for `slog::Logger`.
+    pub fn default(logger: &Logger) -> Self {
+        Self::new(
+            AgentBuilder::new().timeout(Duration::from_secs(10)).build(),
+            logger,
+            vec![],
+        )
     }
 
     /// Prepares a request for the provided `RequestParameters`. Returns a
@@ -186,8 +195,8 @@ impl Default for RequestParameters<'_> {
 
 /// simple_get_request does a HTTP request to a URL and returns the body as a
 // string.
-pub(crate) fn simple_get_request(url: Url) -> Result<String> {
-    let agent = RetryingAgent::default();
+pub(crate) fn simple_get_request(url: Url, logger: &Logger) -> Result<String> {
+    let agent = RetryingAgent::default(logger);
     let request = agent
         .prepare_request(RequestParameters {
             url,
@@ -205,10 +214,13 @@ pub(crate) fn simple_get_request(url: Url) -> Result<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::logging::setup_test_logging;
     use mockito::{mock, Matcher};
 
     #[test]
     fn retryable_error() {
+        let logger = setup_test_logging();
+
         let http_400 = ureq::Error::Status(400, Response::new(400, "", "").unwrap());
         let http_429 = ureq::Error::Status(429, Response::new(429, "", "").unwrap());
         let http_500 = ureq::Error::Status(500, Response::new(500, "", "").unwrap());
@@ -217,7 +229,7 @@ mod tests {
         // settle for testing different HTTP status codes.
         // https://github.com/algesten/ureq/issues/373
 
-        let mut agent = RetryingAgent::default();
+        let mut agent = RetryingAgent::default(&logger);
         assert!(!agent.is_error_retryable(&http_400));
         assert!(!agent.is_error_retryable(&http_429));
         assert!(agent.is_error_retryable(&http_500));
@@ -233,6 +245,8 @@ mod tests {
 
     #[test]
     fn authenticated_request() {
+        let logger = setup_test_logging();
+
         let mocked_get = mock("GET", "/resource")
             .match_header("Authorization", "Bearer fake-token")
             .with_status(200)
@@ -250,7 +264,7 @@ mod tests {
             token_provider: Some(&mut oauth_token_provider),
         };
 
-        let agent = RetryingAgent::default();
+        let agent = RetryingAgent::default(&logger);
         let request = agent.prepare_request(request_parameters).unwrap();
 
         let response = agent.call(&request).unwrap();
@@ -263,6 +277,8 @@ mod tests {
 
     #[test]
     fn unauthenticated_request() {
+        let logger = setup_test_logging();
+
         let mocked_get = mock("GET", "/resource")
             .match_header("Authorization", Matcher::Missing)
             .with_status(200)
@@ -276,7 +292,7 @@ mod tests {
             token_provider: None,
         };
 
-        let agent = RetryingAgent::default();
+        let agent = RetryingAgent::default(&logger);
         let request = agent.prepare_request(request_parameters).unwrap();
 
         let response = agent.call(&request).unwrap();

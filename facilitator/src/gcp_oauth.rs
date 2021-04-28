@@ -179,7 +179,7 @@ impl GcpOauthTokenProvider {
             account_to_impersonate,
             default_account_token: None,
             impersonated_account_token: None,
-            agent: RetryingAgent::default(),
+            agent: RetryingAgent::default(&logger),
             logger,
         })
     }

@@ -113,6 +113,11 @@ impl<T: Task> GcpPubSubTaskQueue<T> {
         identity: Identity,
         parent_logger: &Logger,
     ) -> Result<GcpPubSubTaskQueue<T>> {
+        let logger = parent_logger.new(o!(
+            "gcp_project_id" => gcp_project_id.to_owned(),
+            event::TASK_QUEUE_ID => subscription_id.to_owned(),
+            event::IDENTITY => identity.unwrap_or("default identity").to_owned(),
+        ));
         let ureq_agent = AgentBuilder::new()
             // Empirically, if there are no messages available in the
             // subscription, the PubSub API will wait about 90 seconds to send
@@ -122,16 +127,12 @@ impl<T: Task> GcpPubSubTaskQueue<T> {
             .build();
         let retrying_agent = RetryingAgent::new(
             ureq_agent,
+            &logger,
             // Per Google documentation, 429 Too Many Requests should be retried
             // with exponential backoff
             // https://cloud.google.com/pubsub/docs/reference/error-codes
             vec![429],
         );
-        let logger = parent_logger.new(o!(
-            "gcp_project_id" => gcp_project_id.to_owned(),
-            event::TASK_QUEUE_ID => subscription_id.to_owned(),
-            event::IDENTITY => identity.unwrap_or("default identity").to_owned(),
-        ));
 
         Ok(GcpPubSubTaskQueue {
             pubsub_api_endpoint: pubsub_api_endpoint

@@ -64,6 +64,10 @@ impl GcsTransport {
         key_file_reader: Option<Box<dyn Read>>,
         parent_logger: &Logger,
     ) -> Result<GcsTransport> {
+        let logger = parent_logger.new(o!(
+            event::STORAGE_PATH => path.to_string(),
+            event::IDENTITY => identity.unwrap_or("default identity").to_owned(),
+        ));
         let ureq_agent = AgentBuilder::new()
             // We set an unusually long timeout for uploads to GCS, per Google's
             // recommendation:
@@ -72,15 +76,12 @@ impl GcsTransport {
             .build();
         let retrying_agent = RetryingAgent::new(
             ureq_agent,
+            &logger,
             // Per Google documentation, HTTP 408 Request Timeout and HTTP 429
             // Too Many Requests shouldbe retried
             // https://cloud.google.com/storage/docs/retry-strategy
             vec![408, 429],
         );
-        let logger = parent_logger.new(o!(
-            event::STORAGE_PATH => path.to_string(),
-            event::IDENTITY => identity.unwrap_or("default identity").to_owned(),
-        ));
         Ok(GcsTransport {
             path: path.ensure_directory_prefix(),
             oauth_token_provider: GcpOauthTokenProvider::new(
@@ -464,7 +465,7 @@ mod tests {
             "fake-token".to_string(),
             10,
             Url::parse(&mockito::server_url()).expect("unable to parse mockito server url"),
-            RetryingAgent::default(),
+            RetryingAgent::default(&logger),
             &logger,
         )
         .unwrap();
@@ -511,7 +512,7 @@ mod tests {
             "fake-token".to_string(),
             4,
             Url::parse(&mockito::server_url()).expect("unable to parse mockito server url"),
-            RetryingAgent::default(),
+            RetryingAgent::default(&logger),
             &logger,
         )
         .unwrap();

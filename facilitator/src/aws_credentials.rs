@@ -157,7 +157,7 @@ impl Provider {
                 .append_pair("audience", &format!("sts.amazonaws.com/{}", aws_account_id))
                 .finish();
 
-            let agent = RetryingAgent::default();
+            let agent = RetryingAgent::default(&token_logger);
             let mut request = agent
                 .prepare_request(RequestParameters {
                     url,
