@@ -2,9 +2,7 @@ use crate::aws_credentials;
 use crate::{
     aws_credentials::{basic_runtime, retry_request},
     config::S3Path,
-    logging::{
-        EVENT_KEY_IDENTITY, EVENT_KEY_STORAGE_KEY, EVENT_KEY_STORAGE_PATH, EVENT_KEY_TRACE_ID,
-    },
+    logging::event,
     transport::{Transport, TransportWriter},
     Error,
 };
@@ -91,8 +89,8 @@ impl S3Transport {
         parent_logger: &Logger,
     ) -> Self {
         let logger = parent_logger.new(o!(
-            EVENT_KEY_STORAGE_PATH => path.to_string(),
-            EVENT_KEY_IDENTITY => credentials_provider.to_string(),
+            event::STORAGE_PATH => path.to_string(),
+            event::IDENTITY => credentials_provider.to_string(),
         ));
         S3Transport {
             path: path.ensure_directory_prefix(),
@@ -111,8 +109,8 @@ impl Transport for S3Transport {
     fn get(&mut self, key: &str, trace_id: &str) -> Result<Box<dyn Read>> {
         info!(
             self.logger, "get";
-            EVENT_KEY_STORAGE_KEY => key,
-            EVENT_KEY_TRACE_ID => trace_id,
+            event::STORAGE_KEY => key,
+            event::TRACE_ID => trace_id,
         );
         let runtime = basic_runtime()?;
         let client = (self.client_provider)(&self.path.region, self.credentials_provider.clone())?;
@@ -134,8 +132,8 @@ impl Transport for S3Transport {
     fn put(&mut self, key: &str, trace_id: &str) -> Result<Box<dyn TransportWriter>> {
         info!(
             self.logger, "put";
-            EVENT_KEY_STORAGE_KEY => key,
-            EVENT_KEY_TRACE_ID => trace_id,
+            event::STORAGE_KEY => key,
+            event::TRACE_ID => trace_id,
         );
         let writer = MultipartUploadWriter::new(
             self.path.bucket.to_owned(),

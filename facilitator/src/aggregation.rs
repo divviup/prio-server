@@ -4,10 +4,7 @@ use crate::{
         IngestionDataSharePacket, IngestionHeader, InvalidPacket, Packet, SumPart,
         ValidationHeader, ValidationPacket,
     },
-    logging::{
-        EVENT_KEY_AGGREGATION_NAME, EVENT_KEY_INGESTION_PATH, EVENT_KEY_OWN_VALIDATION_PATH,
-        EVENT_KEY_PACKET_UUID, EVENT_KEY_PEER_VALIDATION_PATH, EVENT_KEY_TRACE_ID,
-    },
+    logging::event,
     metrics::AggregateMetricsCollector,
     transport::{SignableTransport, VerifiableAndDecryptableTransport, VerifiableTransport},
     BatchSigningKey, Error,
@@ -61,11 +58,11 @@ impl<'a> BatchAggregator<'a> {
         parent_logger: &Logger,
     ) -> Result<BatchAggregator<'a>> {
         let logger = parent_logger.new(o!(
-            EVENT_KEY_TRACE_ID => trace_id.to_owned(),
-            EVENT_KEY_AGGREGATION_NAME => aggregation_name.to_owned(),
-            EVENT_KEY_INGESTION_PATH => ingestion_transport.transport.transport.path(),
-            EVENT_KEY_OWN_VALIDATION_PATH => own_validation_transport.transport.path(),
-            EVENT_KEY_PEER_VALIDATION_PATH => peer_validation_transport.transport.path(),
+            event::TRACE_ID => trace_id.to_owned(),
+            event::AGGREGATION_NAME => aggregation_name.to_owned(),
+            event::INGESTION_PATH => ingestion_transport.transport.transport.path(),
+            event::OWN_VALIDATION_PATH => own_validation_transport.transport.path(),
+            event::PEER_VALIDATION_PATH => peer_validation_transport.transport.path(),
         ));
         Ok(BatchAggregator {
             trace_id,
@@ -319,7 +316,7 @@ impl<'a> BatchAggregator<'a> {
             if processed_ingestion_packets.contains(&ingestion_packet.uuid) {
                 info!(
                     logger, "ignoring duplicate packet";
-                    EVENT_KEY_PACKET_UUID => ingestion_packet.uuid.to_string()
+                    event::PACKET_UUID => ingestion_packet.uuid.to_string()
                 );
                 continue;
             }
@@ -364,7 +361,7 @@ impl<'a> BatchAggregator<'a> {
                         if !valid {
                             info!(
                                 logger, "rejecting packet due to invalid proof";
-                                EVENT_KEY_PACKET_UUID => peer_validation_packet.uuid.to_string(),
+                                event::PACKET_UUID => peer_validation_packet.uuid.to_string(),
                             );
                             invalid_uuids.push(peer_validation_packet.uuid);
                         }
@@ -421,7 +418,7 @@ fn get_validation_packet<'a>(
         None => {
             info!(
                 logger, "no {} validation packet", kind;
-                EVENT_KEY_PACKET_UUID => uuid.to_string()
+                event::PACKET_UUID => uuid.to_string()
             );
             invalid_uuids.push(*uuid);
             None

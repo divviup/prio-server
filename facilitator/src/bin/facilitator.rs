@@ -19,7 +19,7 @@ use facilitator::{
     config::{leak_string, Entity, Identity, InOut, ManifestKind, StoragePath, TaskQueueKind},
     intake::BatchIntaker,
     kubernetes::KubernetesClient,
-    logging::{setup_logging, LoggingConfiguration, EVENT_KEY_TASK_HANDLE, EVENT_KEY_TRACE_ID},
+    logging::{event, setup_logging, LoggingConfiguration},
     manifest::{
         DataShareProcessorGlobalManifest, IngestionServerManifest, PortalServerGlobalManifest,
         SpecificManifest,
@@ -920,7 +920,7 @@ fn generate_sample_worker(
         if let Err(e) = result {
             error!(
                 root_logger, "Error: {:?}", e;
-                EVENT_KEY_TRACE_ID => trace_id.to_string(),
+                event::TRACE_ID => trace_id.to_string(),
             );
         }
         std::thread::sleep(Duration::from_secs(interval))
@@ -1294,7 +1294,7 @@ fn intake_batch_worker(
     loop {
         if let Some(task_handle) = queue.dequeue()? {
             info!(parent_logger, "dequeued intake task";
-                EVENT_KEY_TASK_HANDLE => task_handle.clone(),
+                event::TASK_HANDLE => task_handle.clone(),
             );
             let task_start = Instant::now();
 
@@ -1318,8 +1318,8 @@ fn intake_batch_worker(
                     {
                         error!(
                             logger, "{}", e;
-                            EVENT_KEY_TRACE_ID => trace_id.clone(),
-                            EVENT_KEY_TASK_HANDLE => task_handle.clone(),
+                            event::TRACE_ID => trace_id.clone(),
+                            event::TASK_HANDLE => task_handle.clone(),
                         );
                     }
                 },
@@ -1330,8 +1330,8 @@ fn intake_batch_worker(
                 Err(err) => {
                     error!(
                         parent_logger, "error while processing intake task: {:?}", err;
-                        EVENT_KEY_TASK_HANDLE => task_handle.clone(),
-                        EVENT_KEY_TRACE_ID => trace_id,
+                        event::TASK_HANDLE => task_handle.clone(),
+                        event::TRACE_ID => trace_id,
                     );
                     queue.nacknowledge_task(task_handle)?;
                 }
@@ -1558,7 +1558,7 @@ fn aggregate_worker(sub_matches: &ArgMatches, parent_logger: &Logger) -> Result<
         if let Some(task_handle) = queue.dequeue()? {
             info!(
                 parent_logger, "dequeued aggregate task";
-                EVENT_KEY_TASK_HANDLE => task_handle.clone(),
+                event::TASK_HANDLE => task_handle.clone(),
             );
             let task_start = Instant::now();
 
@@ -1590,8 +1590,8 @@ fn aggregate_worker(sub_matches: &ArgMatches, parent_logger: &Logger) -> Result<
                     {
                         error!(
                             logger, "{}", e;
-                            EVENT_KEY_TRACE_ID => trace_id.clone(),
-                            EVENT_KEY_TASK_HANDLE => task_handle.clone(),
+                            event::TRACE_ID => trace_id.clone(),
+                            event::TASK_HANDLE => task_handle.clone(),
                         );
                     }
                 },
@@ -1602,8 +1602,8 @@ fn aggregate_worker(sub_matches: &ArgMatches, parent_logger: &Logger) -> Result<
                 Err(err) => {
                     error!(
                         parent_logger, "error while processing task: {:?}", err;
-                        EVENT_KEY_TRACE_ID => trace_id,
-                        EVENT_KEY_TASK_HANDLE => task_handle.clone(),
+                        event::TRACE_ID => trace_id,
+                        event::TASK_HANDLE => task_handle.clone(),
                     );
                     queue.nacknowledge_task(task_handle)?;
                 }
