@@ -242,12 +242,12 @@ impl ProvideAwsCredentials for Provider {
 /// Calls the provided closure, retrying with exponential backoff on failure if
 /// the error is retryable (see retryable() in this module and its comments for
 /// details).
-pub(crate) fn retry_request<F, T, E>(action: &str, f: F) -> RusotoResult<T, E>
+pub(crate) fn retry_request<F, T, E>(logger: &Logger, f: F) -> RusotoResult<T, E>
 where
     F: FnMut() -> RusotoResult<T, E>,
     E: Debug,
 {
-    retries::retry_request(action, f, |rusoto_error| retryable(rusoto_error))
+    retries::retry_request(logger, f, |rusoto_error| retryable(rusoto_error))
 }
 
 /// Returns true if the error is transient and should be retried, false

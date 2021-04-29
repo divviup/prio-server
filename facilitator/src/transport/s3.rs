@@ -114,8 +114,9 @@ impl Transport for S3Transport {
         );
         let runtime = basic_runtime()?;
         let client = (self.client_provider)(&self.path.region, self.credentials_provider.clone())?;
+        let logger = self.logger.new(o!(event::ACTION => "get s3 object"));
 
-        let get_output = retry_request("get s3 object", || {
+        let get_output = retry_request(&logger, || {
             runtime.block_on(client.get_object(GetObjectRequest {
                 bucket: self.path.bucket.to_owned(),
                 key: [&self.path.key, key].concat(),
@@ -213,16 +214,19 @@ impl MultipartUploadWriter {
         // We use the "bucket-owner-full-control" canned ACL to ensure that
         // objects we send to peers will be owned by them.
         // https://docs.aws.amazon.com/AmazonS3/latest/dev/about-object-ownership.html
-        let create_output = retry_request("create multipart upload", || {
-            runtime.block_on(
-                client.create_multipart_upload(CreateMultipartUploadRequest {
-                    bucket: bucket.to_string(),
-                    key: key.to_string(),
-                    acl: Some("bucket-owner-full-control".to_owned()),
-                    ..Default::default()
-                }),
-            )
-        })
+        let create_output = retry_request(
+            &logger.new(o!(event::ACTION => "create multipart upload")),
+            || {
+                runtime.block_on(
+                    client.create_multipart_upload(CreateMultipartUploadRequest {
+                        bucket: bucket.to_string(),
+                        key: key.to_string(),
+                        acl: Some("bucket-owner-full-control".to_owned()),
+                        ..Default::default()
+                    }),
+                )
+            },
+        )
         .context(format!(
             "error creating multipart upload to s3://{}",
             bucket
@@ -262,25 +266,26 @@ impl MultipartUploadWriter {
             Vec::with_capacity(self.minimum_upload_part_size * 2),
         );
 
-        let upload_output = retry_request("upload part", || {
-            self.runtime
-                .block_on(self.client.upload_part(UploadPartRequest {
-                    bucket: self.bucket.to_string(),
-                    key: self.key.to_string(),
-                    upload_id: self.upload_id.clone(),
-                    part_number: part_number as i64,
-                    body: Some(body.clone().into()),
-                    ..Default::default()
-                }))
-        })
-        .context("failed to upload part")
-        .map_err(|e| {
-            // Clean up botched uploads
-            if let Err(cancel) = self.cancel_upload() {
-                return cancel.context(e);
-            }
-            e
-        })?;
+        let upload_output =
+            retry_request(&self.logger.new(o!(event::ACTION => "upload part")), || {
+                self.runtime
+                    .block_on(self.client.upload_part(UploadPartRequest {
+                        bucket: self.bucket.to_string(),
+                        key: self.key.to_string(),
+                        upload_id: self.upload_id.clone(),
+                        part_number: part_number as i64,
+                        body: Some(body.clone().into()),
+                        ..Default::default()
+                    }))
+            })
+            .context("failed to upload part")
+            .map_err(|e| {
+                // Clean up botched uploads
+                if let Err(cancel) = self.cancel_upload() {
+                    return cancel.context(e);
+                }
+                e
+            })?;
 
         let e_tag = upload_output
             .e_tag
@@ -329,19 +334,22 @@ impl TransportWriter for MultipartUploadWriter {
         // Ignore output for now, but we might want the e_tag to check the
         // digest
         let completed_parts = mem::take(&mut self.completed_parts);
-        retry_request("complete upload", || {
-            self.runtime.block_on(self.client.complete_multipart_upload(
-                CompleteMultipartUploadRequest {
-                    bucket: self.bucket.to_string(),
-                    key: self.key.to_string(),
-                    upload_id: self.upload_id.clone(),
-                    multipart_upload: Some(CompletedMultipartUpload {
-                        parts: Some(completed_parts.clone()),
-                    }),
-                    ..Default::default()
-                },
-            ))
-        })
+        retry_request(
+            &self.logger.new(o!(event::ACTION => "complete upload")),
+            || {
+                self.runtime.block_on(self.client.complete_multipart_upload(
+                    CompleteMultipartUploadRequest {
+                        bucket: self.bucket.to_string(),
+                        key: self.key.to_string(),
+                        upload_id: self.upload_id.clone(),
+                        multipart_upload: Some(CompletedMultipartUpload {
+                            parts: Some(completed_parts.clone()),
+                        }),
+                        ..Default::default()
+                    },
+                ))
+            },
+        )
         .context("error completing upload")?;
 
         Ok(())
