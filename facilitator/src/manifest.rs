@@ -9,7 +9,7 @@ use pkix::pkcs10::DerCertificationRequest;
 use pkix::FromDer;
 use ring::signature::{UnparsedPublicKey, ECDSA_P256_SHA256_ASN1};
 use serde::Deserialize;
-use slog_scope::debug;
+use slog::Logger;
 use std::{collections::HashMap, str::FromStr};
 
 // See discussion in SpecificManifest::batch_signing_public_key
@@ -52,7 +52,6 @@ impl PacketEncryptionCertificateSigningRequest {
 
     /// Gets the base64ed public key from the CSR that libprio-rs is expecting
     pub fn base64_public_key(&self) -> Result<String> {
-        debug!("Packet Encryption Certificate Signing Request: {:?}", self);
         let der = pem_to_der(
             &self.certificate_signing_request,
             Some(PEM_CERTIFICATE_REQUEST),
@@ -105,9 +104,11 @@ pub struct DataShareProcessorServerIdentity {
 impl DataShareProcessorGlobalManifest {
     /// Loads the global manifest relative to the provided base path and returns
     /// it. Returns an error if the manifest could not be loaded or parsed.
-    pub fn from_https(base_path: &str) -> Result<Self> {
+    pub fn from_https(base_path: &str, logger: &Logger) -> Result<Self> {
         let manifest_url = format!("{}/global-manifest.json", base_path);
-        DataShareProcessorGlobalManifest::from_slice(fetch_manifest(&manifest_url)?.as_bytes())
+        DataShareProcessorGlobalManifest::from_slice(
+            fetch_manifest(&manifest_url, logger)?.as_bytes(),
+        )
     }
 
     /// Loads the manifest from the provided String. Returns an error if
@@ -155,9 +156,9 @@ impl SpecificManifest {
     /// Load the specific manifest for the specified peer relative to the
     /// provided base path. Returns an error if the manifest could not be
     /// downloaded or parsed.
-    pub fn from_https(base_path: &str, peer_name: &str) -> Result<Self> {
+    pub fn from_https(base_path: &str, peer_name: &str, logger: &Logger) -> Result<Self> {
         let manifest_url = format!("{}/{}-manifest.json", base_path, peer_name);
-        SpecificManifest::from_slice(fetch_manifest(&manifest_url)?.as_bytes())
+        SpecificManifest::from_slice(fetch_manifest(&manifest_url, logger)?.as_bytes())
     }
 
     /// Loads the manifest from the provided String. Returns an error if
@@ -257,20 +258,22 @@ impl IngestionServerManifest {
     /// it. First tries to load a global manifest, then falls back to a specific
     /// manifest for the specified locality. Returns an error if no manifest
     /// could be found at either location, or if either was unparseable.
-    pub fn from_https(base_path: &str, locality: Option<&str>) -> Result<Self> {
-        IngestionServerManifest::from_http(base_path, locality, fetch_manifest)
+    pub fn from_https(base_path: &str, locality: Option<&str>, logger: &Logger) -> Result<Self> {
+        IngestionServerManifest::from_http(base_path, locality, logger, fetch_manifest)
     }
 
     fn from_http(
         base_path: &str,
         locality: Option<&str>,
+        logger: &Logger,
         fetcher: ManifestFetcher,
     ) -> Result<Self> {
-        match fetcher(&format!("{}/global-manifest.json", base_path)) {
+        match fetcher(&format!("{}/global-manifest.json", base_path), logger) {
             Ok(body) => IngestionServerManifest::from_slice(body.as_bytes()),
             Err(err) => match locality {
                 Some(locality) => IngestionServerManifest::from_slice(
-                    fetcher(&format!("{}/{}-manifest.json", base_path, locality))?.as_bytes(),
+                    fetcher(&format!("{}/{}-manifest.json", base_path, locality), logger)?
+                        .as_bytes(),
                 ),
                 None => Err(err),
             },
@@ -328,9 +331,9 @@ pub struct PortalServerGlobalManifest {
 }
 
 impl PortalServerGlobalManifest {
-    pub fn from_https(base_path: &str) -> Result<Self> {
+    pub fn from_https(base_path: &str, logger: &Logger) -> Result<Self> {
         let manifest_url = format!("{}/global-manifest.json", base_path);
-        PortalServerGlobalManifest::from_slice(fetch_manifest(&manifest_url)?.as_bytes())
+        PortalServerGlobalManifest::from_slice(fetch_manifest(&manifest_url, logger)?.as_bytes())
     }
 
     /// Loads the manifest from the provided String. Returns an error if
@@ -368,17 +371,18 @@ impl PortalServerGlobalManifest {
 
 /// A function that fetches a manifest from the provided URL, returning the
 /// manifest body as a String on success.
-type ManifestFetcher = fn(&str) -> Result<String>;
+type ManifestFetcher = fn(&str, &Logger) -> Result<String>;
 
 /// Obtains a manifest file from the provided URL, returning an error if the URL
 /// is not https or if a problem occurs during the transfer.
-fn fetch_manifest(manifest_url: &str) -> Result<String> {
+fn fetch_manifest(manifest_url: &str, logger: &Logger) -> Result<String> {
     if !manifest_url.starts_with("https://") {
         return Err(anyhow!("Manifest must be fetched over HTTPS"));
     }
     http::simple_get_request(
         url::Url::parse(manifest_url)
             .context(format!("failed to parse manifest url: {}", manifest_url))?,
+        logger,
     )
 }
 
@@ -431,6 +435,7 @@ mod tests {
     use super::*;
     use crate::{
         config::{GcsPath, S3Path},
+        logging::setup_test_logging,
         test_utils::{
             default_ingestor_private_key, default_packet_encryption_certificate_signing_request,
             DEFAULT_INGESTOR_SUBJECT_PUBLIC_KEY_INFO,
@@ -443,8 +448,8 @@ mod tests {
     use rusoto_core::Region;
     use url::Url;
 
-    fn url_fetcher(url: &str) -> Result<String> {
-        http::simple_get_request(Url::parse(url)?)
+    fn url_fetcher(url: &str, logger: &Logger) -> Result<String> {
+        http::simple_get_request(Url::parse(url)?, logger)
     }
 
     #[test]
@@ -1131,6 +1136,7 @@ mod tests {
 
     #[test]
     fn ingestor_global_manifest() {
+        let logger = setup_test_logging();
         let mocked_get = mock("GET", "/global-manifest.json")
             .with_status(200)
             .with_body(r#"
@@ -1152,26 +1158,30 @@ mod tests {
             .expect(1)
             .create();
 
-        IngestionServerManifest::from_http(&mockito::server_url(), None, url_fetcher).unwrap();
+        IngestionServerManifest::from_http(&mockito::server_url(), None, &logger, url_fetcher)
+            .unwrap();
 
         mocked_get.assert();
     }
 
     #[test]
     fn unparseable_ingestor_global_manifest() {
+        let logger = setup_test_logging();
         let mocked_get = mock("GET", "/global-manifest.json")
             .with_status(200)
             .with_body("invalid manifest")
             .expect(1)
             .create();
 
-        IngestionServerManifest::from_http(&mockito::server_url(), None, url_fetcher).unwrap_err();
+        IngestionServerManifest::from_http(&mockito::server_url(), None, &logger, url_fetcher)
+            .unwrap_err();
 
         mocked_get.assert();
     }
 
     #[test]
     fn ingestor_specific_manifest_fallback() {
+        let logger = setup_test_logging();
         let mocked_global_get = mock("GET", "/global-manifest.json")
             .with_status(404)
             .expect(1)
@@ -1201,6 +1211,7 @@ mod tests {
         IngestionServerManifest::from_http(
             &mockito::server_url(),
             Some("instance-name"),
+            &logger,
             url_fetcher,
         )
         .unwrap();
@@ -1211,6 +1222,7 @@ mod tests {
 
     #[test]
     fn unparseable_ingestor_specific_manifest() {
+        let logger = setup_test_logging();
         let mocked_global_get = mock("GET", "/global-manifest.json")
             .with_status(404)
             .expect(1)
@@ -1225,6 +1237,7 @@ mod tests {
         IngestionServerManifest::from_http(
             &mockito::server_url(),
             Some("instance-name"),
+            &logger,
             url_fetcher,
         )
         .unwrap_err();
@@ -1235,6 +1248,7 @@ mod tests {
 
     #[test]
     fn missing_ingestor_specific_manifest() {
+        let logger = setup_test_logging();
         let mocked_global_get = mock("GET", "/global-manifest.json")
             .with_status(404)
             .expect(1)
@@ -1248,6 +1262,7 @@ mod tests {
         IngestionServerManifest::from_http(
             &mockito::server_url(),
             Some("instance-name"),
+            &logger,
             url_fetcher,
         )
         .unwrap_err();

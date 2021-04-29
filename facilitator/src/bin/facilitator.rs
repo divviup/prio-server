@@ -900,7 +900,7 @@ fn main() -> Result<(), anyhow::Error> {
         }
         ("aggregate", Some(sub_matches)) => aggregate_subcommand(sub_matches, &root_logger),
         ("aggregate-worker", Some(sub_matches)) => aggregate_worker(sub_matches, &root_logger),
-        ("lint-manifest", Some(sub_matches)) => lint_manifest(sub_matches),
+        ("lint-manifest", Some(sub_matches)) => lint_manifest(sub_matches, &root_logger),
         (_, _) => Ok(()),
     };
 
@@ -954,9 +954,10 @@ fn get_ecies_public_key(
                     anyhow!("locality-name must be provided with ingestor-manifest-base-url")
                 })?;
                 let peer_name = &format!("{}-{}", locality_name, ingestor_name);
-                let manifest = SpecificManifest::from_https(manifest_url, peer_name).context(
-                    format!("unable to read SpecificManifest from {}", manifest_url),
-                )?;
+                let manifest =
+                    SpecificManifest::from_https(manifest_url, peer_name, logger).context(
+                        format!("unable to read SpecificManifest from {}", manifest_url),
+                    )?;
                 let packet_decryption_keys = manifest
                     .packet_decryption_keys()
                     .context("unable to get packet decryption keys from the SpecificManifest")?;
@@ -992,6 +993,7 @@ fn get_ingestion_identity_and_bucket(
     manifest_url: Option<&str>,
     ingestor_name: Option<&str>,
     locality_name: Option<&str>,
+    logger: &Logger,
 ) -> Result<(Option<String>, String)> {
     match bucket {
         Some(bucket) => Ok((identity.map(String::from), String::from(bucket))),
@@ -1005,7 +1007,7 @@ fn get_ingestion_identity_and_bucket(
                 anyhow!("If bucket is not provided, manifest_url must be provided")
             })?;
 
-            let manifest = SpecificManifest::from_https(manifest_url, peer_name).context(
+            let manifest = SpecificManifest::from_https(manifest_url, peer_name, logger).context(
                 format!("unable to read SpecificManifest from {}", manifest_url),
             )?;
 
@@ -1018,6 +1020,7 @@ fn get_valid_batch_signing_key(
     namespace: Option<&str>,
     ingestor_manifest_url: Option<&str>,
     matches: &ArgMatches,
+    logger: &Logger,
 ) -> Result<BatchSigningKey> {
     match ingestor_manifest_url {
         Some(own_manifest_url) => {
@@ -1025,8 +1028,8 @@ fn get_valid_batch_signing_key(
                 anyhow!("If manifest URLs are used, kubernetes namespace must be provided")
             })?;
 
-            let manifest =
-                IngestionServerManifest::from_https(own_manifest_url, None).context(format!(
+            let manifest = IngestionServerManifest::from_https(own_manifest_url, None, logger)
+                .context(format!(
                     "unable to get ingestion server manifest from url: {}",
                     own_manifest_url
                 ))?;
@@ -1075,8 +1078,12 @@ fn generate_sample(
     let ingestor_name = sub_matches.value_of("ingestor-name");
     let locality_name = sub_matches.value_of("locality-name");
 
-    let own_batch_signing_key =
-        get_valid_batch_signing_key(kube_namespace, ingestor_manifest_base_url, sub_matches)?;
+    let own_batch_signing_key = get_valid_batch_signing_key(
+        kube_namespace,
+        ingestor_manifest_base_url,
+        sub_matches,
+        logger,
+    )?;
 
     let (peer_identity, peer_output_path) = get_ingestion_identity_and_bucket(
         sub_matches.value_of("peer-identity"),
@@ -1084,6 +1091,7 @@ fn generate_sample(
         sub_matches.value_of("pha-manifest-base-url"),
         ingestor_name,
         locality_name,
+        logger,
     )?;
 
     let peer_output_path = StoragePath::from_str(&peer_output_path)?;
@@ -1117,6 +1125,7 @@ fn generate_sample(
         sub_matches.value_of("facilitator-manifest-base-url"),
         ingestor_name,
         locality_name,
+        logger,
     )?;
 
     let faciliator_output = StoragePath::from_str(&faciliator_output)?;
@@ -1130,8 +1139,12 @@ fn generate_sample(
     )
     .unwrap();
 
-    let own_batch_signing_key =
-        get_valid_batch_signing_key(kube_namespace, ingestor_manifest_base_url, sub_matches)?;
+    let own_batch_signing_key = get_valid_batch_signing_key(
+        kube_namespace,
+        ingestor_manifest_base_url,
+        sub_matches,
+        logger,
+    )?;
 
     let mut facilitator_transport = SampleOutput {
         transport: SignableTransport {
@@ -1192,8 +1205,12 @@ where
     // peer manifest or provided directly via command line argument.
     let peer_validation_bucket =
         if let Some(base_url) = sub_matches.value_of("peer-manifest-base-url") {
-            SpecificManifest::from_https(base_url, sub_matches.value_of("instance-name").unwrap())?
-                .validation_bucket()
+            SpecificManifest::from_https(
+                base_url,
+                sub_matches.value_of("instance-name").unwrap(),
+                parent_logger,
+            )?
+            .validation_bucket()
         } else if let Some(path) = sub_matches.value_of(Entity::Peer.suffix(InOut::Output.str())) {
             StoragePath::from_str(path)
         } else {
@@ -1380,7 +1397,7 @@ where
         sub_matches.value_of("batch-signing-private-key-identifier"),
     ) {
         (Some(manifest_base_url), _, _) => {
-            SpecificManifest::from_https(manifest_base_url, instance_name)?
+            SpecificManifest::from_https(manifest_base_url, instance_name, logger)?
                 .batch_signing_public_keys()?
         }
         (_, Some(private_key), Some(private_key_identifier)) => {
@@ -1413,7 +1430,7 @@ where
         sub_matches.value_of("peer-manifest-base-url"),
     ) {
         (_, _, Some(manifest_base_url)) => {
-            SpecificManifest::from_https(manifest_base_url, instance_name)?
+            SpecificManifest::from_https(manifest_base_url, instance_name, logger)?
                 .batch_signing_public_keys()?
         }
         (Some(public_key), Some(public_key_identifier), _) => {
@@ -1435,7 +1452,8 @@ where
         sub_matches.value_of("portal-output"),
     ) {
         (Some(manifest_base_url), _) => {
-            PortalServerGlobalManifest::from_https(manifest_base_url)?.sum_part_bucket(is_first)
+            PortalServerGlobalManifest::from_https(manifest_base_url, logger)?
+                .sum_part_bucket(is_first)
         }
         (_, Some(path)) => StoragePath::from_str(path),
         _ => Err(anyhow!(
@@ -1614,7 +1632,7 @@ fn aggregate_worker(sub_matches: &ArgMatches, parent_logger: &Logger) -> Result<
     // unreachable
 }
 
-fn lint_manifest(sub_matches: &ArgMatches) -> Result<(), anyhow::Error> {
+fn lint_manifest(sub_matches: &ArgMatches, logger: &Logger) -> Result<(), anyhow::Error> {
     let manifest_base_url = sub_matches.value_of("manifest-base-url");
     let manifest_body: Option<String> = match sub_matches.value_of("manifest-path") {
         Some(f) => Some(fs::read_to_string(f)?),
@@ -1637,7 +1655,11 @@ fn lint_manifest(sub_matches: &ArgMatches) -> Result<(), anyhow::Error> {
                 ));
             }
             let manifest = if let Some(base_url) = manifest_base_url {
-                IngestionServerManifest::from_https(base_url, sub_matches.value_of("instance"))?
+                IngestionServerManifest::from_https(
+                    base_url,
+                    sub_matches.value_of("instance"),
+                    logger,
+                )?
             } else if let Some(body) = manifest_body {
                 IngestionServerManifest::from_slice(body.as_bytes())?
             } else {
@@ -1649,7 +1671,7 @@ fn lint_manifest(sub_matches: &ArgMatches) -> Result<(), anyhow::Error> {
         }
         ManifestKind::DataShareProcessorGlobal => {
             let manifest = if let Some(base_url) = manifest_base_url {
-                DataShareProcessorGlobalManifest::from_https(base_url)?
+                DataShareProcessorGlobalManifest::from_https(base_url, logger)?
             } else if let Some(body) = manifest_body {
                 DataShareProcessorGlobalManifest::from_slice(body.as_bytes())?
             } else {
@@ -1664,7 +1686,7 @@ fn lint_manifest(sub_matches: &ArgMatches) -> Result<(), anyhow::Error> {
                 .value_of("instance")
                 .context("instance is required when manifest-kind=data-share-processor-specific")?;
             let manifest = if let Some(base_url) = manifest_base_url {
-                SpecificManifest::from_https(base_url, instance)?
+                SpecificManifest::from_https(base_url, instance, logger)?
             } else if let Some(body) = manifest_body {
                 SpecificManifest::from_slice(body.as_bytes())?
             } else {
@@ -1676,7 +1698,7 @@ fn lint_manifest(sub_matches: &ArgMatches) -> Result<(), anyhow::Error> {
         }
         ManifestKind::PortalServerGlobal => {
             let manifest = if let Some(base_url) = manifest_base_url {
-                PortalServerGlobalManifest::from_https(base_url)?
+                PortalServerGlobalManifest::from_https(base_url, logger)?
             } else if let Some(body) = manifest_body {
                 PortalServerGlobalManifest::from_slice(body.as_bytes())?
             } else {
@@ -1755,6 +1777,7 @@ fn intake_transport_from_args(
         (_, _, Some(manifest_base_url)) => IngestionServerManifest::from_https(
             manifest_base_url,
             Some(matches.value_of("instance-name").unwrap()),
+            logger,
         )?
         .batch_signing_public_keys()?,
         _ => {
