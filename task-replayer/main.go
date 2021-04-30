@@ -59,7 +59,7 @@ func main() {
 	var err error
 
 	if *topic == "" {
-		log.Fatalf("--topic is required")
+		log.Fatal("--topic is required")
 	}
 
 	switch *taskQueueKind {
@@ -69,15 +69,15 @@ func main() {
 		}
 		taskEnqueuer, err = task.NewGCPPubSubEnqueuer(*gcpProjectID, *topic, *dryRun, 10)
 		if err != nil {
-			log.Fatal("%s", err)
+			log.Fatalf("%s", err)
 		}
 	case "aws-sns":
 		if *awsSNSRegion == "" {
-			log.Fatal("--aws-sns-region is required for task-queue-kind=aws-sns")
+			log.Fatalf("--aws-sns-region is required for task-queue-kind=aws-sns")
 		}
 		taskEnqueuer, err = task.NewAWSSNSEnqueuer(*awsSNSRegion, *awsSNSIdentity, *topic, *dryRun)
 		if err != nil {
-			log.Fatal("%s", err)
+			log.Fatalf("%s", err)
 		}
 	default:
 		log.Fatalf("unknown task queue kind %s", *taskQueueKind)

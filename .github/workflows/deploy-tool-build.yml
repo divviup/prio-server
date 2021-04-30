@@ -15,20 +15,20 @@ jobs:
     runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@v2
-    
+
     - name: Setup go
       uses: actions/setup-go@v1
       with:
-        go-version: 1.15
-    
+        go-version: 1.16
+
     - name: Vet
       run: go vet ./...
       working-directory: deploy-tool
-    
+
     - name: Test
       run: go test -race --coverprofile=coverage.coverprofile --covermode=atomic ./...
       working-directory: deploy-tool
-    
+
     - name: Upload test coverage
       if: success()
       uses: codecov/codecov-action@v1
@@ -37,7 +37,7 @@ jobs:
         file: deploy-tool/coverage.coverprofile
         flags: deploy_tool_tests
         name: deploy tool tests
-  
+
   deploy-tool-lint:
     runs-on: ubuntu-latest
     steps:
@@ -47,4 +47,42 @@ jobs:
       with:
         version: v1.31
         working-directory: deploy-tool
+        args: --timeout 5m
+
+  task-replayer:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v2
+
+    - name: Setup go
+      uses: actions/setup-go@v1
+      with:
+        go-version: 1.16
+
+    - name: Vet
+      run: go vet ./...
+      working-directory: task-replayer
+
+    - name: Test
+      run: go test -race --coverprofile=coverage.coverprofile --covermode=atomic ./...
+      working-directory: task-replayer
+
+    - name: Upload test coverage
+      if: success()
+      uses: codecov/codecov-action@v1
+      with:
+        fail_ci_if_error: false
+        file: task-replayer/coverage.coverprofile
+        flags: task_replayer_tests
+        name: task replayer tests
+
+  task-replayer-lint:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v2
+    - name: golangci-lint
+      uses: golangci/golangci-lint-action@v2
+      with:
+        version: v1.31
+        working-directory: task-replayer
         args: --timeout 5m
