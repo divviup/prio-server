@@ -1,5 +1,5 @@
 use backoff::{retry, ExponentialBackoff};
-use slog::{debug, info, Logger};
+use slog::{debug, warn, Logger};
 use std::{fmt::Debug, time::Duration};
 
 /// Executes the provided action `f`, retrying with exponential backoff if the
@@ -59,7 +59,7 @@ where
         // Invoke the function and wrap its E into backoff::Error
         f().map_err(|error| {
             if is_retryable(&error) {
-                info!(
+                warn!(
                     logger, "encountered retryable error";
                     "error" => format!("{:?}", error),
                 );

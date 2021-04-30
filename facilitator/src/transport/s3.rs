@@ -107,14 +107,14 @@ impl Transport for S3Transport {
     }
 
     fn get(&mut self, key: &str, trace_id: &str) -> Result<Box<dyn Read>> {
-        info!(
-            self.logger, "get";
-            event::STORAGE_KEY => key,
-            event::TRACE_ID => trace_id,
-        );
+        let logger = self.logger.new(o!(
+            event::STORAGE_KEY => key.to_owned(),
+            event::TRACE_ID => trace_id.to_owned(),
+            event::ACTION => "get s3 object",
+        ));
+        info!(logger, "get");
         let runtime = basic_runtime()?;
         let client = (self.client_provider)(&self.path.region, self.credentials_provider.clone())?;
-        let logger = self.logger.new(o!(event::ACTION => "get s3 object"));
 
         let get_output = retry_request(&logger, || {
             runtime.block_on(client.get_object(GetObjectRequest {
@@ -131,11 +131,11 @@ impl Transport for S3Transport {
     }
 
     fn put(&mut self, key: &str, trace_id: &str) -> Result<Box<dyn TransportWriter>> {
-        info!(
-            self.logger, "put";
-            event::STORAGE_KEY => key,
-            event::TRACE_ID => trace_id,
-        );
+        let logger = self.logger.new(o!(
+            event::STORAGE_KEY => key.to_owned(),
+            event::TRACE_ID => trace_id.to_owned(),
+        ));
+        info!(logger, "put");
         let writer = MultipartUploadWriter::new(
             self.path.bucket.to_owned(),
             format!("{}{}", &self.path.key, key),
@@ -143,7 +143,7 @@ impl Transport for S3Transport {
             // https://docs.aws.amazon.com/AmazonS3/latest/dev/qfacts.html
             5_242_880,
             (self.client_provider)(&self.path.region, self.credentials_provider.clone())?,
-            &self.logger,
+            &logger,
         )?;
         Ok(Box::new(writer))
     }

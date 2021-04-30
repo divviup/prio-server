@@ -127,7 +127,6 @@ impl<T: Task> GcpPubSubTaskQueue<T> {
             .build();
         let retrying_agent = RetryingAgent::new(
             ureq_agent,
-            &logger,
             // Per Google documentation, 429 Too Many Requests should be retried
             // with exponential backoff
             // https://cloud.google.com/pubsub/docs/reference/error-codes
@@ -172,6 +171,7 @@ impl<T: Task> TaskQueue<T> for GcpPubSubTaskQueue<T> {
         let http_response = self
             .agent
             .send_json_request(
+                &self.logger,
                 &request,
                 &ureq::json!({
                     // Dequeue one task at a time
@@ -216,10 +216,10 @@ impl<T: Task> TaskQueue<T> for GcpPubSubTaskQueue<T> {
     }
 
     fn acknowledge_task(&mut self, handle: TaskHandle<T>) -> Result<()> {
-        info!(
-            self.logger, "acknowledging task";
-            event::TASK_ACKNOWLEDGEMENT_ID => &handle.acknowledgment_id,
-        );
+        let logger = self.logger.new(o!(
+            event::TASK_ACKNOWLEDGEMENT_ID => handle.acknowledgment_id.to_owned(),
+        ));
+        info!(logger, "acknowledging task");
 
         let request = self.agent.prepare_request(RequestParameters {
             url: gcp_pubsub_ack_url(
@@ -233,6 +233,7 @@ impl<T: Task> TaskQueue<T> for GcpPubSubTaskQueue<T> {
 
         self.agent
             .send_json_request(
+                &logger,
                 &request,
                 &ureq::json!({
                     "ackIds": [handle.acknowledgment_id]
@@ -272,6 +273,9 @@ impl<T: Task> GcpPubSubTaskQueue<T> {
         handle: &TaskHandle<T>,
         ack_deadline: &Duration,
     ) -> Result<()> {
+        let logger = self.logger.new(o!(
+            event::TASK_ACKNOWLEDGEMENT_ID => handle.acknowledgment_id.to_owned(),
+        ));
         // API reference: https://cloud.google.com/pubsub/docs/reference/rest/v1/projects.subscriptions/modifyAckDeadline
         // Per API doc, deadline must be between 0 and 600 seconds.
         // Duration::as_secs returns u64, which cannot be negative, so we only
@@ -292,6 +296,7 @@ impl<T: Task> GcpPubSubTaskQueue<T> {
 
         self.agent
             .send_json_request(
+                &logger,
                 &request,
                 &ureq::json!({
                     "ackIds": [handle.acknowledgment_id],
