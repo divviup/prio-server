@@ -59,7 +59,10 @@ where
         // Invoke the function and wrap its E into backoff::Error
         f().map_err(|error| {
             if is_retryable(&error) {
-                info!(logger, "encountered retryable error");
+                info!(
+                    logger, "encountered retryable error";
+                    "error" => format!("{:?}", error),
+                );
                 backoff::Error::Transient(error)
             } else {
                 debug!(logger, "encountered non-retryable error");
