@@ -652,7 +652,7 @@ dependencies = [
  "hyper-rustls",
  "jsonwebtoken",
  "k8s-openapi",
- "kube 0.52.0",
+ "kube",
  "kube-runtime",
  "mockito",
  "p256",
@@ -1196,41 +1196,6 @@ dependencies = [
 
 [[package]]
 name = "kube"
-version = "0.52.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "65b2fbe85ad92f8435a0f52072f55bd7f0843e082c8e461e56d1ce29440554c8"
-dependencies = [
- "base64 0.13.0",
- "bytes",
- "chrono",
- "dirs-next",
- "either",
- "futures",
- "http",
- "hyper",
- "hyper-timeout",
- "hyper-tls",
- "jsonpath_lib",
- "k8s-openapi",
- "log",
- "openssl",
- "pem",
- "pin-project 1.0.5",
- "serde",
- "serde_json",
- "serde_yaml",
- "static_assertions",
- "thiserror",
- "tokio",
- "tokio-native-tls",
- "tokio-util",
- "tower",
- "tracing",
- "url",
-]
-
-[[package]]
-name = "kube"
 version = "0.55.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "43a7370e62dacd8f672231c59001ddf00b090648c81b3cde2600bfbfab7518fe"
@@ -1289,7 +1254,7 @@ dependencies = [
  "derivative",
  "futures",
  "k8s-openapi",
- "kube 0.55.0",
+ "kube",
  "pin-project 1.0.5",
  "serde",
  "smallvec",
