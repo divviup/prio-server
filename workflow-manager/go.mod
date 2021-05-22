@@ -1,6 +1,6 @@
 module github.com/letsencrypt/prio-server/workflow-manager
 
-go 1.15
+go 1.16
 
 require (
 	cloud.google.com/go/pubsub v1.10.3

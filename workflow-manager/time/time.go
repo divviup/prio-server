@@ -120,6 +120,21 @@ func (t Timestamp) MarshalJSON() ([]byte, error) {
 	return json.Marshal(t.String())
 }
 
+func (t *Timestamp) UnmarshalJSON(data []byte) error {
+	var timeString string
+	if err := json.Unmarshal(data, &timeString); err != nil {
+		return err
+	}
+
+	parsedTime, err := time.Parse("2006/01/02/15/04", timeString)
+	if err != nil {
+		return err
+	}
+
+	*t = Timestamp(parsedTime)
+	return nil
+}
+
 func (t *Timestamp) stringWithFormat(format string) string {
 	asTime := (*time.Time)(t)
 	return asTime.Format(format)
