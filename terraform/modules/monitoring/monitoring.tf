@@ -33,7 +33,6 @@ provider "helm" {
     host                   = var.cluster_endpoint
     cluster_ca_certificate = var.cluster_ca_certificate
     token                  = data.google_client_config.current.access_token
-    load_config_file       = false
   }
 }
 
