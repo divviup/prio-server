@@ -199,7 +199,7 @@ terraform {
     google-beta = {
       source = "hashicorp/google-beta"
       # Ensure that this matches the non-beta google provider version above.
-      version = "~> 3.49.0"
+      version = "~> 3.68.0"
     }
     helm = {
       source  = "hashicorp/helm"
