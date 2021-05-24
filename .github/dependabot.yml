@@ -25,3 +25,7 @@ updates:
     directory: "/workflow-manager"
     schedule:
       interval: "daily"
+  - package-ecosystem: "gomod"
+    directory: "/task-replayer"
+    schedule:
+      interval: "daily"
