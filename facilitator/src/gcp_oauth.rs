@@ -179,7 +179,7 @@ impl GcpOauthTokenProvider {
             account_to_impersonate,
             default_account_token: None,
             impersonated_account_token: None,
-            agent: RetryingAgent::default(&logger),
+            agent: RetryingAgent::default(),
             logger,
         })
     }
@@ -235,7 +235,7 @@ impl GcpOauthTokenProvider {
         request = request.set("Metadata-Flavor", "Google");
 
         self.agent
-            .call(&request)
+            .call(&self.logger, &request)
             .context("failed to query GKE metadata service")
     }
 
@@ -284,7 +284,7 @@ impl GcpOauthTokenProvider {
 
         let request = request.set("Content-Type", "application/x-www-form-urlencoded");
         self.agent
-            .send_string(&request, &request_body)
+            .send_string(&self.logger, &request, &request_body)
             .context("failed to get account token with key file")
     }
 
@@ -323,6 +323,7 @@ impl GcpOauthTokenProvider {
         let http_response = self
             .agent
             .send_json_request(
+                &self.logger,
                 &request,
                 &ureq::json!({
                     "scope": [self.scope]

@@ -1,10 +1,10 @@
 use anyhow::{Context, Result};
-use slog::{o, Logger};
+use slog::Logger;
 use std::{convert::From, default::Default, fmt::Debug, time::Duration};
 use ureq::{Agent, AgentBuilder, Request, Response, SerdeValue};
 use url::Url;
 
-use crate::{logging::event, retries::retry_request};
+use crate::retries::retry_request;
 
 /// Method contains the HTTP methods supported by this crate.
 #[derive(Debug)]
@@ -33,35 +33,27 @@ impl Method {
 pub(crate) struct RetryingAgent {
     /// Agent to use for constructing HTTP requests.
     agent: Agent,
-    logger: Logger,
     /// Requests which fail due to transport problems or which return any HTTP
     /// status code in this list or in the 5xx range will be retried with
     /// exponential backoff.
     additional_retryable_http_status_codes: Vec<u16>,
 }
 
-impl RetryingAgent {
-    pub fn new(
-        agent: Agent,
-        parent_logger: &Logger,
-        additional_retryable_http_status_codes: Vec<u16>,
-    ) -> Self {
-        Self {
-            agent,
-            logger: parent_logger.clone(),
-            additional_retryable_http_status_codes,
-        }
-    }
-
-    /// Create an agent with the provided `slog::Logger` and default parameters.
-    /// This is not an `std::default::Default` implementation because there is
-    /// no sensible default value for `slog::Logger`.
-    pub fn default(logger: &Logger) -> Self {
+impl Default for RetryingAgent {
+    fn default() -> Self {
         Self::new(
             AgentBuilder::new().timeout(Duration::from_secs(10)).build(),
-            logger,
             vec![],
         )
+    }
+}
+
+impl RetryingAgent {
+    pub fn new(agent: Agent, additional_retryable_http_status_codes: Vec<u16>) -> Self {
+        Self {
+            agent,
+            additional_retryable_http_status_codes,
+        }
     }
 
     /// Prepares a request for the provided `RequestParameters`. Returns a
@@ -100,12 +92,12 @@ impl RetryingAgent {
     /// Send the provided request with the provided JSON body.
     pub(crate) fn send_json_request(
         &self,
+        logger: &Logger,
         request: &Request,
         body: &SerdeValue,
     ) -> Result<Response> {
-        let request_logger = self.logger.new(o!(event::ACTION => "send json request"));
         retry_request(
-            &request_logger,
+            logger,
             || request.clone().send_json(body.clone()),
             |ureq_error| self.is_error_retryable(ureq_error),
         )
@@ -113,10 +105,14 @@ impl RetryingAgent {
     }
 
     /// Send the provided request with the provided bytes as the body.
-    pub(crate) fn send_bytes(&self, request: &Request, data: &[u8]) -> Result<Response> {
-        let request_logger = self.logger.new(o!(event::ACTION => "send bytes"));
+    pub(crate) fn send_bytes(
+        &self,
+        logger: &Logger,
+        request: &Request,
+        data: &[u8],
+    ) -> Result<Response> {
         retry_request(
-            &request_logger,
+            logger,
             || request.clone().send_bytes(data),
             |ureq_error| self.is_error_retryable(ureq_error),
         )
@@ -124,10 +120,14 @@ impl RetryingAgent {
     }
 
     /// Send the provided request with the provided string as the body.
-    pub(crate) fn send_string(&self, request: &Request, data: &str) -> Result<Response> {
-        let request_logger = self.logger.new(o!(event::ACTION => "send string"));
+    pub(crate) fn send_string(
+        &self,
+        logger: &Logger,
+        request: &Request,
+        data: &str,
+    ) -> Result<Response> {
         retry_request(
-            &request_logger,
+            logger,
             || request.clone().send_string(data),
             |ureq_error| self.is_error_retryable(ureq_error),
         )
@@ -135,12 +135,9 @@ impl RetryingAgent {
     }
 
     /// Send the provided request with no body.
-    pub(crate) fn call(&self, request: &Request) -> Result<Response> {
-        let request_logger = self
-            .logger
-            .new(o!(event::ACTION => "send request without body"));
+    pub(crate) fn call(&self, logger: &Logger, request: &Request) -> Result<Response> {
         retry_request(
-            &request_logger,
+            logger,
             || request.clone().call(),
             |ureq_error| self.is_error_retryable(ureq_error),
         )
@@ -202,7 +199,7 @@ impl Default for RequestParameters<'_> {
 /// simple_get_request does a HTTP request to a URL and returns the body as a
 // string.
 pub(crate) fn simple_get_request(url: Url, logger: &Logger) -> Result<String> {
-    let agent = RetryingAgent::default(logger);
+    let agent = RetryingAgent::default();
     let request = agent
         .prepare_request(RequestParameters {
             url,
@@ -212,7 +209,7 @@ pub(crate) fn simple_get_request(url: Url, logger: &Logger) -> Result<String> {
         .context("creating simple_get_request failed")?;
 
     agent
-        .call(&request)?
+        .call(logger, &request)?
         .into_string()
         .context("failed to convert GET response body into string")
 }
@@ -225,8 +222,6 @@ mod tests {
 
     #[test]
     fn retryable_error() {
-        let logger = setup_test_logging();
-
         let http_400 = ureq::Error::Status(400, Response::new(400, "", "").unwrap());
         let http_429 = ureq::Error::Status(429, Response::new(429, "", "").unwrap());
         let http_500 = ureq::Error::Status(500, Response::new(500, "", "").unwrap());
@@ -235,7 +230,7 @@ mod tests {
         // settle for testing different HTTP status codes.
         // https://github.com/algesten/ureq/issues/373
 
-        let mut agent = RetryingAgent::default(&logger);
+        let mut agent = RetryingAgent::default();
         assert!(!agent.is_error_retryable(&http_400));
         assert!(!agent.is_error_retryable(&http_429));
         assert!(agent.is_error_retryable(&http_500));
@@ -270,10 +265,10 @@ mod tests {
             token_provider: Some(&mut oauth_token_provider),
         };
 
-        let agent = RetryingAgent::default(&logger);
+        let agent = RetryingAgent::default();
         let request = agent.prepare_request(request_parameters).unwrap();
 
-        let response = agent.call(&request).unwrap();
+        let response = agent.call(&logger, &request).unwrap();
 
         mocked_get.assert();
 
@@ -298,10 +293,10 @@ mod tests {
             token_provider: None,
         };
 
-        let agent = RetryingAgent::default(&logger);
+        let agent = RetryingAgent::default();
         let request = agent.prepare_request(request_parameters).unwrap();
 
-        let response = agent.call(&request).unwrap();
+        let response = agent.call(&logger, &request).unwrap();
 
         mocked_get.assert();
 

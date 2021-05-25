@@ -76,7 +76,6 @@ impl GcsTransport {
             .build();
         let retrying_agent = RetryingAgent::new(
             ureq_agent,
-            &logger,
             // Per Google documentation, HTTP 408 Request Timeout and HTTP 429
             // Too Many Requests shouldbe retried
             // https://cloud.google.com/storage/docs/retry-strategy
@@ -104,11 +103,13 @@ impl Transport for GcsTransport {
     }
 
     fn get(&mut self, key: &str, trace_id: &str) -> Result<Box<dyn Read>> {
-        info!(
-            self.logger, "get";
-            event::TRACE_ID => trace_id,
-            event::STORAGE_KEY => key,
-        );
+        let logger = self.logger.new(o!(
+            event::TRACE_ID => trace_id.to_owned(),
+            event::STORAGE_KEY => key.to_owned(),
+            event::ACTION => "get GCS object"
+        ));
+        info!(logger, "get");
+
         // Per API reference, the object key must be URL encoded.
         // API reference: https://cloud.google.com/storage/docs/json_api/v1/objects/get
         let encoded_key = urlencoding::encode(&[&self.path.key, key].concat());
@@ -127,18 +128,20 @@ impl Transport for GcsTransport {
 
         let response = self
             .agent
-            .call(&request)
+            .call(&logger, &request)
             .context(format!("failed to fetch object {} from GCS", url))?;
 
         Ok(Box::new(response.into_reader()))
     }
 
     fn put(&mut self, key: &str, trace_id: &str) -> Result<Box<dyn TransportWriter>> {
-        info!(
-            self.logger, "put";
-            event::TRACE_ID => trace_id,
-            event::STORAGE_KEY => key,
-        );
+        let logger = self.logger.new(o!(
+            event::TRACE_ID => trace_id.to_owned(),
+            event::STORAGE_KEY => key.to_owned(),
+            event::ACTION => "put GCS object",
+        ));
+        info!(logger, "put");
+
         // The Oauth token will only be used once, during the call to
         // StreamingTransferWriter::new, so we don't have to worry about it
         // expiring during the lifetime of that object, and so obtain a token
@@ -150,7 +153,7 @@ impl Transport for GcsTransport {
             [&self.path.key, key].concat(),
             oauth_token,
             self.agent.clone(),
-            &self.logger,
+            &logger,
         )?;
         Ok(Box::new(writer))
     }
@@ -223,10 +226,6 @@ impl StreamingTransferWriter {
         agent: RetryingAgent,
         parent_logger: &Logger,
     ) -> Result<StreamingTransferWriter> {
-        let logger = parent_logger.new(o!(
-            event::STORAGE_KEY => object.clone(),
-        ));
-
         // Initiate the resumable, streaming upload.
         // https://cloud.google.com/storage/docs/performing-resumable-uploads#initiate-session
         let mut upload_url = gcp_upload_object_url(&storage_api_base_url.to_string(), &bucket)?;
@@ -236,7 +235,7 @@ impl StreamingTransferWriter {
             .append_pair("name", &object)
             .finish();
 
-        debug!(logger, "initiating multi-part upload");
+        debug!(parent_logger, "initiating multi-part upload");
         let request = agent.prepare_request(RequestParameters {
             url: upload_url,
             method: Method::Post,
@@ -244,7 +243,7 @@ impl StreamingTransferWriter {
         })?;
 
         let http_response = agent
-            .send_bytes(&request, &[])
+            .send_bytes(parent_logger, &request, &[])
             .context(format!("uploading to gs://{} failed", bucket))?;
 
         // The upload session URI authenticates subsequent upload requests for
@@ -265,7 +264,7 @@ impl StreamingTransferWriter {
                 &upload_session_uri
             ))?,
             agent,
-            logger,
+            logger: parent_logger.clone(),
         })
     }
 
@@ -316,10 +315,13 @@ impl StreamingTransferWriter {
         })?;
         request = request.set("Content-Range", &content_range);
 
-        let http_response = self.agent.send_bytes(&request, body).context(format!(
-            "failed in sending bytes to gcs upload session: {}",
-            &self.upload_session_uri
-        ))?;
+        let http_response = self
+            .agent
+            .send_bytes(&self.logger, &request, body)
+            .context(format!(
+                "failed in sending bytes to gcs upload session: {}",
+                &self.upload_session_uri
+            ))?;
 
         // On success we expect HTTP 308 Resume Incomplete and a Range: header,
         // unless this is the last part and the server accepts the entire
@@ -422,7 +424,9 @@ impl TransportWriter for StreamingTransferWriter {
             ..Default::default()
         })?;
 
-        let http_response = self.agent.call(&request.set("Content-Length", "0"))?;
+        let http_response = self
+            .agent
+            .call(&self.logger, &request.set("Content-Length", "0"))?;
         match http_response.status() {
             499 => Ok(()),
             _ => Err(anyhow!(
@@ -465,7 +469,7 @@ mod tests {
             "fake-token".to_string(),
             10,
             Url::parse(&mockito::server_url()).expect("unable to parse mockito server url"),
-            RetryingAgent::default(&logger),
+            RetryingAgent::default(),
             &logger,
         )
         .unwrap();
@@ -512,7 +516,7 @@ mod tests {
             "fake-token".to_string(),
             4,
             Url::parse(&mockito::server_url()).expect("unable to parse mockito server url"),
-            RetryingAgent::default(&logger),
+            RetryingAgent::default(),
             &logger,
         )
         .unwrap();

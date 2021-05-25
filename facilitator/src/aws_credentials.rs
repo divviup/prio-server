@@ -157,7 +157,7 @@ impl Provider {
                 .append_pair("audience", &format!("sts.amazonaws.com/{}", aws_account_id))
                 .finish();
 
-            let agent = RetryingAgent::default(&token_logger);
+            let agent = RetryingAgent::default();
             let mut request = agent
                 .prepare_request(RequestParameters {
                     url,
@@ -168,7 +168,7 @@ impl Provider {
 
             request = request.set("Metadata-Flavor", "Google");
 
-            let response = agent.call(&request).map_err(|e| {
+            let response = agent.call(&token_logger, &request).map_err(|e| {
                 CredentialsError::new(format!(
                     "failed to fetch {} auth token from metadata service: {:?}",
                     purpose, e
