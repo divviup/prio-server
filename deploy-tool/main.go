@@ -51,7 +51,7 @@ type SpecificManifestWrapper struct {
 // variables this program is interested in.
 type TerraformOutput struct {
 	ManifestBucket struct {
-		Value string
+		Value manifest.Bucket
 	} `json:"manifest_bucket"`
 	// OwnManifestBaseURL is a URL without a scheme (https), that manifests can
 	// be found in
@@ -67,6 +67,9 @@ type TerraformOutput struct {
 	SingletonIngestor struct {
 		Value *SingletonIngestor
 	} `json:"singleton_ingestor"`
+	AWSProfile struct {
+		Value string
+	} `json:"aws_profile"`
 }
 
 // GlobalIngestor defines the structure for the global fake ingestor (apple-like
@@ -148,7 +151,7 @@ func manifestExists(fqdn, dsp string) bool {
 func setupTestEnvironment(
 	k8sClient *kubernetes.Clientset,
 	ingestor *SingletonIngestor,
-	manifestBucket string,
+	bucket *manifest.Bucket,
 ) error {
 	batchSigningPublicKey, err := createBatchSigningPublicKey(
 		k8sClient.CoreV1().Secrets(ingestor.TesterKubernetesNamespace),
@@ -171,7 +174,11 @@ func setupTestEnvironment(
 		},
 	}
 
-	writer := manifest.NewWriter(manifestBucket)
+	writer, err := manifest.NewWriter(bucket)
+	if err != nil {
+		return err
+	}
+
 	return writer.WriteIngestorGlobalManifest(globalManifest, "singleton-ingestor/global-manifest.json")
 }
 
@@ -285,10 +292,12 @@ func createManifest(
 
 	// Put the specific manifests into the manifest bucket.
 	destination := fmt.Sprintf("%s-manifest.json", dataShareProcessorName)
-	writer := manifest.NewWriter(terraformOutput.ManifestBucket.Value)
-
-	err := writer.WriteDataShareSpecificManifest(manifestWrapper.SpecificManifest, destination)
+	writer, err := manifest.NewWriter(&terraformOutput.ManifestBucket.Value)
 	if err != nil {
+		return err
+	}
+
+	if err := writer.WriteDataShareSpecificManifest(manifestWrapper.SpecificManifest, destination); err != nil {
 		return fmt.Errorf("could not write data share specific manifest: %s", err)
 	}
 
@@ -384,7 +393,7 @@ func main() {
 		} else if err := setupTestEnvironment(
 			k8sClient,
 			terraformOutput.SingletonIngestor.Value,
-			terraformOutput.ManifestBucket.Value,
+			&terraformOutput.ManifestBucket.Value,
 		); err != nil {
 			log.Fatalf("%s", err)
 		}

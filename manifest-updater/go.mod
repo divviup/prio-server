@@ -4,6 +4,7 @@ go 1.15
 
 require (
 	cloud.google.com/go/storage v1.0.0
+	github.com/aws/aws-sdk-go v1.38.45
 	github.com/google/gofuzz v1.2.0 // indirect
 	github.com/rs/zerolog v1.20.0
 	github.com/sirupsen/logrus v1.7.0
