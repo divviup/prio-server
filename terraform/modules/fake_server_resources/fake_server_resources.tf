@@ -73,7 +73,7 @@ resource "aws_iam_role" "tester_role" {
       "Action": "sts:AssumeRoleWithWebIdentity",
       "Condition": {
         "StringEquals": {
-          "accounts.google.com:sub": "${module.account_mapping.google_service_account_unique_id}",
+          "accounts.google.com:sub": "${module.account_mapping.gcp_service_account_unique_id}",
           "accounts.google.com:oaud": "sts.amazonaws.com/${data.aws_caller_identity.current.account_id}"
         }
       }
@@ -111,9 +111,9 @@ module "account_mapping" {
   source      = "../account_mapping"
   environment = var.environment
 
-  google_account_name     = "${var.environment}-fake-ingestion-identity"
-  kubernetes_account_name = "ingestion-identity"
-  kubernetes_namespace    = kubernetes_namespace.tester.metadata[0].name
+  gcp_service_account_name        = "${var.environment}-fake-ingestion-identity"
+  kubernetes_service_account_name = "ingestion-identity"
+  kubernetes_namespace            = kubernetes_namespace.tester.metadata[0].name
 }
 
 resource "kubernetes_role" "integration_tester_role" {
@@ -147,7 +147,7 @@ resource "kubernetes_role_binding" "integration_tester_role_binding" {
 
   subject {
     kind      = "ServiceAccount"
-    name      = module.account_mapping.kubernetes_account_name
+    name      = module.account_mapping.kubernetes_service_account_name
     namespace = kubernetes_namespace.tester.metadata[0].name
   }
 }
@@ -201,7 +201,7 @@ resource "kubernetes_deployment" "integration-tester" {
         }
       }
       spec {
-        service_account_name            = module.account_mapping.kubernetes_account_name
+        service_account_name            = module.account_mapping.kubernetes_service_account_name
         automount_service_account_token = true
         container {
           name  = "integration-tester"
@@ -246,11 +246,11 @@ output "aws_iam_entity" {
 }
 
 output "gcp_service_account_id" {
-  value = module.account_mapping.google_service_account_unique_id
+  value = module.account_mapping.gcp_service_account_unique_id
 }
 
 output "gcp_service_account_email" {
-  value = module.account_mapping.google_service_account_email
+  value = module.account_mapping.gcp_service_account_email
 }
 
 output "test_kubernetes_namespace" {

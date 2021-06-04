@@ -10,11 +10,13 @@ variable "managed_dns_zone" {
   type = map(string)
 }
 
-variable "sum_part_bucket_service_account_email" {
+variable "global_manifest_content" {
   type = string
 }
 
-data "aws_caller_identity" "current" {}
+resource "google_project_service" "compute" {
+  service = "compute.googleapis.com"
+}
 
 # Make a bucket where we will store global and specific manifests and from which
 # peers can fetch them.
@@ -53,13 +55,7 @@ resource "google_storage_bucket_object" "global_manifest" {
   bucket        = google_storage_bucket.manifests.name
   content_type  = "application/json"
   cache_control = "no-cache"
-  content = jsonencode({
-    format = 0
-    server-identity = {
-      aws-account-id            = tonumber(data.aws_caller_identity.current.account_id)
-      gcp-service-account-email = var.sum_part_bucket_service_account_email
-    }
-  })
+  content       = var.global_manifest_content
 }
 
 locals {
@@ -76,6 +72,8 @@ resource "google_compute_managed_ssl_certificate" "manifests" {
   managed {
     domains = [local.domain_name]
   }
+
+  depends_on = [google_project_service.compute]
 }
 
 # We expect a managed DNS zone in which we can create subdomains for a given
@@ -101,12 +99,16 @@ resource "google_dns_record_set" "manifests" {
 # https://cloud.google.com/cdn/docs/setting-up-cdn-with-bucket#ip-address
 resource "google_compute_global_address" "manifests" {
   name = "prio-${var.environment}-manifests"
+
+  depends_on = [google_project_service.compute]
 }
 
 resource "google_compute_backend_bucket" "manifests" {
   name        = "prio-${var.environment}-manifest-backend"
   bucket_name = google_storage_bucket.manifests.name
   enable_cdn  = true
+
+  depends_on = [google_project_service.compute]
 }
 
 resource "google_compute_url_map" "manifests" {

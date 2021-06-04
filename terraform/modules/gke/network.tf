@@ -1,23 +1,30 @@
-
-variable "network" {
-  description = "self_link of VPC which nodes will be connected to"
-}
-
-variable "base_subnet" {
-  type        = string
-  description = "CIDR block this region will use for its network subnets (assumed to be a /11)"
-}
-
 locals {
   # Expected size of base_subnet, used to calculate the size of subnets below
   subnet_prefix = 11
+  # Address block used by the GKE cluster and other regional resources.
+  # Addresses in 10.0.0.0/8 outside of this block are reserved for future
+  # expansion.
+  cluster_subnet_block = "10.64.0.0/${local.subnet_prefix}"
+}
+
+# A VPC is a global resource in GCP, however, subnets inside it are regional
+# and so are created for each region by the gke module. See gke/network.tf
+resource "google_compute_network" "network" {
+  # Add prefix to support existing multi-env GCP projects
+  name = "${var.environment}-network"
+  # We will always have to create a subnet for the cluster anyways, so the auto
+  # networks would never be used. This frees up the upper half of the 10.0.0.0/8
+  # block, where these auto subnets would otherwise be allocated.
+  auto_create_subnetworks = false
+
+  depends_on = [google_project_service.compute]
 }
 
 module "subnets" {
   source  = "hashicorp/subnets/cidr"
   version = "1.0.0"
 
-  base_cidr_block = var.base_subnet
+  base_cidr_block = local.cluster_subnet_block
   networks = [
     {
       # Used to assign individual pods unique addresses. One /24 from this range
@@ -53,7 +60,7 @@ module "subnets" {
 resource "google_compute_subnetwork" "subnet" {
   name    = "${var.resource_prefix}-${var.gcp_region}-instances"
   region  = var.gcp_region
-  network = var.network
+  network = google_compute_network.network.self_link
 
   ip_cidr_range = module.subnets.network_cidr_blocks["vm_instances"]
   # We'll let other resources automatically add the secondary address ranges
@@ -68,7 +75,7 @@ resource "google_compute_subnetwork" "subnet" {
 # required in order to configure a NAT gateway below.
 resource "google_compute_router" "router" {
   name    = "${var.resource_prefix}-${var.gcp_region}-router"
-  network = var.network
+  network = google_compute_network.network.self_link
   region  = var.gcp_region
 }
 

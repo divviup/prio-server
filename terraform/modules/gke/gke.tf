@@ -19,8 +19,22 @@ variable "cluster_settings" {
     initial_node_count = number
     min_node_count     = number
     max_node_count     = number
-    machine_type       = string
+    gcp_machine_type   = string
+    aws_machine_types  = list(string)
   })
+}
+
+# Activate some services which the deployment will require.
+resource "google_project_service" "compute" {
+  service = "compute.googleapis.com"
+}
+
+resource "google_project_service" "container" {
+  service = "container.googleapis.com"
+}
+
+resource "google_project_service" "kms" {
+  service = "cloudkms.googleapis.com"
 }
 
 resource "google_container_cluster" "cluster" {
@@ -46,7 +60,7 @@ resource "google_container_cluster" "cluster" {
   # We opt into a VPC native cluster because they have several benefits (see
   # https://cloud.google.com/kubernetes-engine/docs/how-to/alias-ips).
   networking_mode = "VPC_NATIVE"
-  network         = var.network
+  network         = google_compute_network.network.self_link
   subnetwork      = google_compute_subnetwork.subnet.self_link
   ip_allocation_policy {
     cluster_ipv4_cidr_block  = module.subnets.network_cidr_blocks["kubernetes_cluster"]
@@ -83,6 +97,8 @@ resource "google_container_cluster" "cluster" {
   # Enables boot integrity checking and monitoring for nodes in the cluster.
   # More configuration values are defined in node pools below.
   enable_shielded_nodes = true
+
+  depends_on = [google_project_service.container]
 }
 
 resource "google_container_node_pool" "worker_nodes" {
@@ -97,7 +113,7 @@ resource "google_container_node_pool" "worker_nodes" {
   node_config {
     disk_size_gb = "25"
     image_type   = "COS_CONTAINERD"
-    machine_type = var.cluster_settings.machine_type
+    machine_type = var.cluster_settings.gcp_machine_type
     oauth_scopes = [
       "storage-ro",
       "logging-write",
@@ -114,6 +130,8 @@ resource "google_container_node_pool" "worker_nodes" {
       enable_integrity_monitoring = true
     }
   }
+
+  depends_on = [google_project_service.compute]
 }
 
 # KMS keyring to store etcd encryption key
@@ -122,6 +140,8 @@ resource "google_kms_key_ring" "keyring" {
   # Keyrings can also be zonal, but ours must be regional to match the GKE
   # cluster.
   location = var.gcp_region
+
+  depends_on = [google_project_service.kms]
 }
 
 # KMS key used by GKE cluster to encrypt contents of cluster etcd, crucially to
@@ -150,6 +170,8 @@ resource "google_kms_crypto_key_iam_binding" "etcd-encryption-key-iam-binding" {
   ]
 }
 
+data "google_client_config" "current" {}
+
 output "cluster_name" {
   value = google_container_cluster.cluster.name
 }
@@ -164,4 +186,8 @@ output "certificate_authority_data" {
 
 output "kms_keyring" {
   value = google_kms_key_ring.keyring.id
+}
+
+output "token" {
+  value = data.google_client_config.current.access_token
 }

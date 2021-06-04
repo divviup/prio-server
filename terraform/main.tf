@@ -177,7 +177,8 @@ variable "cluster_settings" {
     initial_node_count = number
     min_node_count     = number
     max_node_count     = number
-    machine_type       = string
+    gcp_machine_type   = string
+    aws_machine_types  = list(string)
   })
 }
 
@@ -221,6 +222,10 @@ terraform {
       source  = "hashicorp/random"
       version = "~> 3.1.0"
     }
+    tls = {
+      source  = "hashicorp/tls"
+      version = "~> 3.1.0"
+    }
   }
 }
 
@@ -234,7 +239,7 @@ data "terraform_remote_state" "state" {
   }
 }
 
-data "google_client_config" "current" {}
+data "aws_caller_identity" "current" {}
 
 provider "google" {
   # This will use "Application Default Credentials". Run `gcloud auth
@@ -250,60 +255,63 @@ provider "google-beta" {
   project = var.gcp_project
 }
 
-# Activate some services which the deployment will require.
-resource "google_project_service" "compute" {
-  service = "compute.googleapis.com"
-}
-
-resource "google_project_service" "container" {
-  service = "container.googleapis.com"
-}
-
-resource "google_project_service" "kms" {
-  service = "cloudkms.googleapis.com"
-}
-
 provider "aws" {
   # aws_s3_bucket resources will be created in the region specified in this
   # provider.
   # https://github.com/hashicorp/terraform/issues/12512
   region  = var.aws_region
   profile = var.aws_profile
+
+  default_tags {
+    tags = {
+      "prio-env" = var.environment
+    }
+  }
 }
 
 provider "kubernetes" {
-  host                   = module.gke.cluster_endpoint
-  cluster_ca_certificate = base64decode(module.gke.certificate_authority_data)
-  token                  = data.google_client_config.current.access_token
+  host                   = local.kubernetes_cluster.endpoint
+  cluster_ca_certificate = base64decode(local.kubernetes_cluster.certificate_authority_data)
+  token                  = local.kubernetes_cluster.token
   load_config_file       = false
 }
 
+module "manifest_gcp" {
+  source = "./modules/manifest_gcp"
+  count  = var.use_aws ? 0 : 1
 
-module "manifest" {
-  source                                = "./modules/manifest"
-  environment                           = var.environment
-  gcp_region                            = var.gcp_region
-  managed_dns_zone                      = var.managed_dns_zone
-  sum_part_bucket_service_account_email = google_service_account.sum_part_bucket_writer.email
+  environment             = var.environment
+  gcp_region              = var.gcp_region
+  managed_dns_zone        = var.managed_dns_zone
+  global_manifest_content = local.global_manifest
+}
 
-  depends_on = [google_project_service.compute]
+module "manifest_aws" {
+  source = "./modules/manifest_aws"
+  count  = var.use_aws ? 1 : 0
+
+  environment             = var.environment
+  global_manifest_content = local.global_manifest
 }
 
 module "gke" {
-  source           = "./modules/gke"
+  source = "./modules/gke"
+  count  = var.use_aws ? 0 : 1
+
   environment      = var.environment
   resource_prefix  = "prio-${var.environment}"
   gcp_region       = var.gcp_region
   gcp_project      = var.gcp_project
   cluster_settings = var.cluster_settings
-  network          = google_compute_network.network.self_link
-  base_subnet      = local.cluster_subnet_block
+}
 
-  depends_on = [
-    google_project_service.compute,
-    google_project_service.container,
-    google_project_service.kms,
-  ]
+module "eks" {
+  source = "./modules/eks"
+  count  = var.use_aws ? 1 : 0
+
+  environment      = var.environment
+  resource_prefix  = "prio-${var.environment}"
+  cluster_settings = var.cluster_settings
 }
 
 # While we create a distinct data share processor for each (ingestor, locality)
@@ -364,24 +372,54 @@ locals {
       portal_server_manifest_base_url         = var.ingestors[pair[1]].localities[pair[0]].portal_server_manifest_base_url
     }
   }
-}
-
-locals {
-  // Does this series of deployment have a fake ingestor (integration-tester)
+  # Does this series of deployment have a fake ingestor (integration-tester)
   deployment_has_ingestor = lookup(var.test_peer_environment, "env_with_ingestor", "") == "" ? false : true
-  // Does this specific environment home the ingestor
+  # Does this specific environment home the ingestor
   is_env_with_ingestor = local.deployment_has_ingestor && lookup(var.test_peer_environment, "env_with_ingestor", "") == var.environment ? true : false
+  kubernetes_cluster = var.use_aws ? {
+    name                       = module.eks[0].cluster_name
+    endpoint                   = module.eks[0].cluster_endpoint
+    certificate_authority_data = module.eks[0].certificate_authority_data
+    token                      = module.eks[0].token
+    kubectl_command            = "aws --profile ${var.aws_profile} eks update-kubeconfig --region ${var.aws_region} --name ${module.eks[0].cluster_name}"
+    } : {
+    name                       = module.gke[0].cluster_name
+    endpoint                   = module.gke[0].cluster_endpoint
+    certificate_authority_data = module.gke[0].certificate_authority_data
+    token                      = module.gke[0].token
+    kubectl_command            = "gcloud container clusters get-credentials ${module.gke[0].cluster_name} --region ${var.gcp_region} --project ${var.gcp_project}"
+  }
+  global_manifest = jsonencode({
+    format = 0
+    server-identity = {
+      aws-account-id            = tonumber(data.aws_caller_identity.current.account_id)
+      gcp-service-account-email = google_service_account.sum_part_bucket_writer.email
+    }
+  })
+  manifest = var.use_aws ? {
+    bucket      = module.manifest_aws[0].bucket
+    base_url    = module.manifest_aws[0].base_url
+    aws_region  = var.aws_region
+    aws_profile = var.aws_profile
+    } : {
+    bucket      = module.manifest_gcp[0].bucket
+    base_url    = module.manifest_gcp[0].base_url
+    aws_region  = ""
+    aws_profile = ""
+  }
 }
 
-# Call the locality_kubernetes module per
-# each locality/namespace
+# Call the locality_kubernetes module per each locality/namespace
 module "locality_kubernetes" {
-  for_each             = kubernetes_namespace.namespaces
-  source               = "./modules/locality_kubernetes"
+  for_each = kubernetes_namespace.namespaces
+  source   = "./modules/locality_kubernetes"
+
+  use_aws              = var.use_aws
   environment          = var.environment
-  manifest_bucket      = module.manifest.bucket
+  manifest_bucket      = local.manifest.bucket
   kubernetes_namespace = each.value.metadata[0].name
   ingestors            = keys(var.ingestors)
+  oidc_provider        = var.use_aws ? module.eks[0].oidc_provider : { url = "", arn = "" }
 
   batch_signing_key_expiration     = var.batch_signing_key_expiration
   batch_signing_key_rotation       = var.batch_signing_key_rotation
@@ -406,12 +444,12 @@ module "data_share_processors" {
   peer_share_processor_manifest_base_url         = each.value.peer_share_processor_manifest_base_url
   remote_bucket_writer_gcp_service_account_email = google_service_account.sum_part_bucket_writer.email
   portal_server_manifest_base_url                = each.value.portal_server_manifest_base_url
-  own_manifest_base_url                          = module.manifest.base_url
+  own_manifest_base_url                          = local.manifest.base_url
   is_first                                       = var.is_first
   intake_max_age                                 = var.intake_max_age
   aggregation_period                             = var.aggregation_period
   aggregation_grace_period                       = var.aggregation_grace_period
-  kms_keyring                                    = module.gke.kms_keyring
+  kms_keyring                                    = var.use_aws ? "" : module.gke[0].kms_keyring
   pushgateway                                    = var.pushgateway
   workflow_manager_image                         = var.workflow_manager_image
   workflow_manager_version                       = var.workflow_manager_version
@@ -420,12 +458,14 @@ module "data_share_processors" {
   container_registry                             = var.container_registry
   intake_worker_count                            = each.value.intake_worker_count
   aggregate_worker_count                         = each.value.aggregate_worker_count
+  oidc_provider                                  = var.use_aws ? module.eks[0].oidc_provider : { url = "", arn = "" }
 }
 
 # The portal owns two sum part buckets (one for each data share processor) and
 # the one for this data share processor gets configured by the portal operator
 # to permit writes from this GCP service account, whose email the portal
-# operator discovers in our global manifest.
+# operator discovers in our global manifest. We use a GCP SA to write sum parts
+# even if our data share processor runs on AWS.
 resource "google_service_account" "sum_part_bucket_writer" {
   account_id   = "prio-${var.environment}-sum-writer"
   display_name = "prio-${var.environment}-sum-part-bucket-writer"
@@ -434,19 +474,21 @@ resource "google_service_account" "sum_part_bucket_writer" {
 # Permit the service accounts for all the data share processors to request Oauth
 # tokens allowing them to impersonate the sum part bucket writer.
 resource "google_service_account_iam_binding" "data_share_processors_to_sum_part_bucket_writer_token_creator" {
+  count = var.use_aws ? 0 : 1
+
   service_account_id = google_service_account.sum_part_bucket_writer.name
   role               = "roles/iam.serviceAccountTokenCreator"
-  members            = [for v in module.data_share_processors : "serviceAccount:${v.service_account_email}"]
+  members            = [for v in module.data_share_processors : "serviceAccount:${v.gcp_service_account_email}"]
 }
 
 module "fake_server_resources" {
   count                 = local.is_env_with_ingestor ? 1 : 0
   source                = "./modules/fake_server_resources"
-  manifest_bucket       = module.manifest.bucket
+  manifest_bucket       = local.manifest.bucket
   gcp_region            = var.gcp_region
   environment           = var.environment
   ingestor_pairs        = local.locality_ingestor_pairs
-  own_manifest_base_url = module.manifest.base_url
+  own_manifest_base_url = local.manifest.base_url
   pushgateway           = var.pushgateway
   container_registry    = var.container_registry
   facilitator_image     = var.facilitator_image
@@ -458,7 +500,8 @@ module "fake_server_resources" {
 module "portal_server_resources" {
   count                        = local.deployment_has_ingestor ? 1 : 0
   source                       = "./modules/portal_server_resources"
-  manifest_bucket              = module.manifest.bucket
+  use_aws                      = var.use_aws
+  manifest_bucket              = local.manifest.bucket
   gcp_region                   = var.gcp_region
   environment                  = var.environment
   sum_part_bucket_writer_email = google_service_account.sum_part_bucket_writer.email
@@ -470,8 +513,8 @@ module "monitoring" {
   source                 = "./modules/monitoring"
   environment            = var.environment
   gcp_region             = var.gcp_region
-  cluster_endpoint       = module.gke.cluster_endpoint
-  cluster_ca_certificate = base64decode(module.gke.certificate_authority_data)
+  cluster_endpoint       = local.kubernetes_cluster.endpoint
+  cluster_ca_certificate = base64decode(local.kubernetes_cluster.certificate_authority_data)
   victorops_routing_key  = var.victorops_routing_key
   aggregation_period     = var.aggregation_period
 
@@ -479,11 +522,15 @@ module "monitoring" {
 }
 
 output "manifest_bucket" {
-  value = module.manifest.bucket
+  value = {
+    bucket      = local.manifest.bucket
+    aws_region  = local.manifest.aws_region
+    aws_profile = local.manifest.aws_profile
+  }
 }
 
-output "gke_kubeconfig" {
-  value = "Run this command to update your kubectl config: gcloud container clusters get-credentials ${module.gke.cluster_name} --region ${var.gcp_region} --project ${var.gcp_project}"
+output "kubeconfig" {
+  value = "Run this command to update your kubectl config: ${local.kubernetes_cluster.kubectl_command}"
 }
 
 output "specific_manifests" {
@@ -505,8 +552,9 @@ output "singleton_ingestor" {
     batch_signing_key_name      = module.fake_server_resources[0].batch_signing_key_name
   } : {}
 }
+
 output "own_manifest_base_url" {
-  value = module.manifest.base_url
+  value = local.manifest.base_url
 }
 
 output "use_test_pha_decryption_key" {
