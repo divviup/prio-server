@@ -145,6 +145,7 @@ impl<T: Task> GcpPubSubTaskQueue<T> {
                 "https://www.googleapis.com/auth/pubsub",
                 identity.map(|x| x.to_string()),
                 None, // GCP key file; never used
+                None, // AWS credentials provider; never used
                 &logger,
             )?,
             phantom_task: PhantomData,

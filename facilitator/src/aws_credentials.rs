@@ -200,6 +200,13 @@ impl Provider {
 
         Ok(Self::WebIdentityWithOidc(provider))
     }
+
+    /// Synchronous wrapper around Provider::credentials
+    pub(crate) fn credentials_sync(&self) -> Result<AwsCredentials> {
+        basic_runtime()?
+            .block_on(self.credentials())
+            .context(format!("failed to get credentials for {}", self))
+    }
 }
 
 impl Display for Provider {
