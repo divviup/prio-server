@@ -119,19 +119,19 @@ impl RetryingAgent {
         .context("failed to send request with bytes body")
     }
 
-    /// Send the provided request with the provided string as the body.
-    pub(crate) fn send_string(
+    /// Send the provided data as a form encoded body.
+    pub(crate) fn send_form(
         &self,
         logger: &Logger,
         request: &Request,
-        data: &str,
+        data: &[(&str, &str)],
     ) -> Result<Response> {
         retry_request(
             logger,
-            || request.clone().send_string(data),
+            || request.clone().send_form(data),
             |ureq_error| self.is_error_retryable(ureq_error),
         )
-        .context("failed to send request with string body")
+        .context("failed to send form")
     }
 
     /// Send the provided request with no body.

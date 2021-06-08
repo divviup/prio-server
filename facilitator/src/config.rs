@@ -1,5 +1,5 @@
 use anyhow::{anyhow, Context, Result};
-use rusoto_core::{region::ParseRegionError, Region};
+use rusoto_core::{credential::ProvideAwsCredentials, region::ParseRegionError, Region};
 use serde::{de, Deserialize, Deserializer};
 use std::{
     fmt::{self, Display, Formatter},
@@ -10,6 +10,19 @@ use std::{
 /// Identity represents a cloud identity: Either an AWS IAM ARN (i.e. "arn:...")
 /// or a GCP ServiceAccount (i.e. "foo@bar.com").
 pub type Identity<'a> = Option<&'a str>;
+
+/// Parameters necessary to configure federation from AWS IAM to GCP IAM using
+/// GCP workload identity pool
+/// https://cloud.google.com/iam/docs/access-resources-aws
+pub struct WorkloadIdentityPoolParameters {
+    /// Full identifier of the workload identity pool provider, like
+    /// "//iam.googleapis.com/projects/12345678/locations/global/workloadIdentityPools/my-pool/providers/my-aws-provider"
+    pub workload_identity_pool_provider: String,
+    /// A credential provider that can get AWS credentials for an AWS IAM role
+    /// or user that is permitted to impersonate a GCP service account via the
+    /// workload_identity_pool_provider
+    pub aws_credentials_provider: Box<dyn ProvideAwsCredentials>,
+}
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct S3Path {
