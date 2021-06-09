@@ -1,4 +1,5 @@
 use crate::{
+    aws_credentials,
     config::{GcsPath, Identity},
     gcp_oauth::GcpOauthTokenProvider,
     http::{
@@ -47,7 +48,7 @@ fn gcp_upload_object_url(storage_api_url: &str, bucket: &str) -> Result<Url> {
 #[derive(Debug)]
 pub struct GcsTransport {
     path: GcsPath,
-    oauth_token_provider: GcpOauthTokenProvider,
+    oauth_token_provider: GcpOauthTokenProvider<aws_credentials::Provider>,
     agent: RetryingAgent,
     logger: Logger,
 }

@@ -1,4 +1,5 @@
 use crate::{
+    aws_credentials,
     config::Identity,
     gcp_oauth::GcpOauthTokenProvider,
     http::{Method, RequestParameters, RetryingAgent},
@@ -99,7 +100,7 @@ pub struct GcpPubSubTaskQueue<T: Task> {
     pubsub_api_endpoint: String,
     gcp_project_id: String,
     subscription_id: String,
-    oauth_token_provider: GcpOauthTokenProvider,
+    oauth_token_provider: GcpOauthTokenProvider<aws_credentials::Provider>,
     phantom_task: PhantomData<*const T>,
     agent: RetryingAgent,
     logger: Logger,

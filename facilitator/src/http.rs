@@ -96,12 +96,31 @@ impl RetryingAgent {
         request: &Request,
         body: &SerdeValue,
     ) -> Result<Response> {
-        retry_request(
+        let resp = retry_request(
             logger,
-            || request.clone().send_json(body.clone()),
+            || {
+                let resp = request.clone().send_json(body.clone());
+                slog::debug!(logger, "response: {:?}", resp);
+                resp
+            },
             |ureq_error| self.is_error_retryable(ureq_error),
-        )
-        .context("failed to send JSON request")
+        );
+
+        if let Err(ureq::Error::Status(status, response)) = resp {
+            slog::debug!(
+                logger,
+                "response code {} response body:\n{}",
+                status,
+                response.into_string().unwrap()
+            );
+            Err(ureq::Error::Status(
+                status,
+                ureq::Response::new(status, "you fucked up", "idiot").unwrap(),
+            ))
+            .context("failed to send JSON request")
+        } else {
+            resp.context("failed to send JSON request")
+        }
     }
 
     /// Send the provided request with the provided bytes as the body.

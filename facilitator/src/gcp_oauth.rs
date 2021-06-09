@@ -1,15 +1,15 @@
 use anyhow::{anyhow, Context, Result};
 use chrono::{prelude::Utc, DateTime, Duration};
 use jsonwebtoken::{encode, Algorithm, EncodingKey, Header};
-use rusoto_core::{signature::SignedRequest, Region};
+use rusoto_core::{credential::ProvideAwsCredentials, signature::SignedRequest, Region};
 use serde::{Deserialize, Serialize};
 use slog::{debug, o, Logger};
-use std::{env, fmt, io::Read};
+use std::{env, fmt, io::Read, str};
 use ureq::Response;
 use url::Url;
 
 use crate::{
-    aws_credentials,
+    aws_credentials::basic_runtime,
     http::{
         Method, OauthTokenProvider, RequestParameters, RetryingAgent, StaticOauthTokenProvider,
     },
@@ -94,7 +94,7 @@ struct ServiceAccountKeyFile {
 /// one for a GCP service account mapped to a Kubernetes service account, or the
 /// one found in a JSON key file) and an Oauth token used to impersonate another
 /// service account.
-pub(crate) struct GcpOauthTokenProvider {
+pub(crate) struct GcpOauthTokenProvider<P: ProvideAwsCredentials> {
     /// The Oauth scope for which tokens should be requested.
     scope: String,
     /// The parsed key file for the default GCP service account. If present,
@@ -105,7 +105,7 @@ pub(crate) struct GcpOauthTokenProvider {
     /// credentials via a Workload Identity Pool (not to be confused with GKE
     /// workload identity) as described in
     /// https://cloud.google.com/iam/docs/access-resources-aws#exchange-token
-    aws_credentials: Option<aws_credentials::Provider>,
+    aws_credentials: Option<P>,
     /// Holds the service account email to impersonate, if one was provided to
     /// GcpOauthTokenProvider::new.
     account_to_impersonate: Option<String>,
@@ -125,7 +125,7 @@ pub(crate) struct GcpOauthTokenProvider {
     logger: Logger,
 }
 
-impl fmt::Debug for GcpOauthTokenProvider {
+impl<P: ProvideAwsCredentials> fmt::Debug for GcpOauthTokenProvider<P> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("OauthTokenProvider")
             .field("account_to_impersonate", &self.account_to_impersonate)
@@ -136,13 +136,13 @@ impl fmt::Debug for GcpOauthTokenProvider {
                     .as_ref()
                     .map(|key_file| key_file.client_email.clone()),
             )
-            .field(
+            /* .field(
                 "aws_credentials",
                 &self
                     .aws_credentials
                     .as_ref()
                     .map(|aws_credentials| aws_credentials.to_string()),
-            )
+            )*/
             .field(
                 "default_account_token",
                 &self.default_account_token.as_ref().map(|_| "redacted"),
@@ -155,7 +155,7 @@ impl fmt::Debug for GcpOauthTokenProvider {
     }
 }
 
-impl OauthTokenProvider for GcpOauthTokenProvider {
+impl<P: ProvideAwsCredentials> OauthTokenProvider for GcpOauthTokenProvider<P> {
     /// Returns the Oauth token to use with GCP API in an Authorization header,
     /// fetching it or renewing it if necessary. If a service account to
     /// impersonate was provided, the default service account is used to
@@ -170,17 +170,17 @@ impl OauthTokenProvider for GcpOauthTokenProvider {
     }
 }
 
-impl GcpOauthTokenProvider {
+impl<P: ProvideAwsCredentials> GcpOauthTokenProvider<P> {
     /// Creates a token provider which can impersonate the specified service
     /// account.
     pub(crate) fn new(
         scope: &str,
         account_to_impersonate: Option<String>,
         key_file_reader: Option<Box<dyn Read>>,
-        aws_credentials: Option<&aws_credentials::Provider>,
+        aws_credentials: Option<P>,
         parent_logger: &Logger,
     ) -> Result<Self> {
-        if let (Some(_), Some(_)) = (&key_file_reader, aws_credentials) {
+        if let (Some(_), Some(_)) = (&key_file_reader, &aws_credentials) {
             return Err(anyhow!(
                 "either but not both of key_file_reader or aws_credentials may be provided"
             ));
@@ -201,7 +201,7 @@ impl GcpOauthTokenProvider {
         Ok(GcpOauthTokenProvider {
             scope: scope.to_owned(),
             default_service_account_key_file: key_file,
-            aws_credentials: aws_credentials.cloned(),
+            aws_credentials,
             account_to_impersonate,
             default_account_token: None,
             impersonated_account_token: None,
@@ -325,14 +325,14 @@ impl GcpOauthTokenProvider {
     /// obtain an Oauth token that allows impersonation of some GCP service
     /// account.
     /// https://cloud.google.com/iam/docs/access-resources-aws#exchange-token
-    fn account_token_with_workload_identity_pool(
-        &self,
-        aws_credentials: &aws_credentials::Provider,
-    ) -> Result<Response> {
+    fn account_token_with_workload_identity_pool(&self, aws_credentials: &P) -> Result<Response> {
+        debug!(self.logger, "getting workload identity pool token");
         // rusoto_core::Region::default consults AWS_DEFAULT_REGION and
         // AWS_REGION environment variables to figure out what region we are
         // running in, which we need to pick an STS endpoint
         let aws_region = Region::default();
+
+        debug!(self.logger, "aws region: {:?}", aws_region);
 
         // The full resource name of the workload identity pool provider, which
         // looks like "//iam.googleapis.com/projects/PROJECT_NUMBER/locations/global/workloadIdentityPools/POOL_ID/providers/PROVIDER_ID",
@@ -342,7 +342,14 @@ impl GcpOauthTokenProvider {
 
         // First, we must obtain credentials for the AWS IAM role mapped to this
         // facilitator's Kubernetes service account
-        let temporary_credentials = aws_credentials.credentials_sync()?;
+        let temporary_credentials = basic_runtime()?
+            .block_on(aws_credentials.credentials())
+            .context("failed to get AWS credentials")?;
+
+        debug!(
+            self.logger,
+            "obtained temp AWS credentials {:?}", temporary_credentials
+        );
 
         // Next, we construct an sts:GetCallerIdentity request and sign it using
         // the credentials. A rusoto_sts::GetCallerIdentityRequest doesn't
@@ -352,38 +359,60 @@ impl GcpOauthTokenProvider {
         // https://github.com/rusoto/rusoto/blob/31cf1506f9f4bd7af7a1f86ced3cec436913d518/rusoto/services/sts/src/generated.rs#L1814
         // See also AWS STS docs for the GetCallerIdentity method:
         // https://docs.aws.amazon.com/STS/latest/APIReference/API_GetCallerIdentity.html
-        let mut signed_aws_request = SignedRequest::new("POST", "sts", &&aws_region, "/");
+        let mut signed_aws_request = SignedRequest::new("POST", "sts", &aws_region, "/");
         signed_aws_request.set_payload(Some("Action=GetCallerIdentity&Version=2011-06-15"));
         signed_aws_request.set_content_type("application/x-www-form-urlencoded".to_owned());
-        signed_aws_request.sign(&temporary_credentials);
+        signed_aws_request.add_header(
+            "x-goog-cloud-target-resource",
+            &workload_identity_pool_provider,
+        );
+        signed_aws_request.generate_presigned_url(
+            &temporary_credentials,
+            &std::time::Duration::from_secs(10),
+            false,
+        );
+        //signed_aws_request.sign(&temporary_credentials);
+
+        let host = get_header(&signed_aws_request, "host")?;
+        let auth = get_header(&signed_aws_request, "authorization")?;
+        //let content_type = get_header(&signed_aws_request, "content-type")?;
+        debug!(self.logger, "auth header: {}\ncontent-type {}", auth, "");
 
         // Next, we use elements of the signed sts:GetCallerIdentity request to
         // construct what GCP calls a "GetCallerIdentity" token; essentially a
         // JSON serialization of the signed sts:GetCallerIdentity request.
         // SignedRequest::sign will have set all the headers we consult.
         let get_caller_identity_token = ureq::json!({
-            "url": signed_aws_request.canonical_uri(),
+            "url": format!("https://{}?Action=GetCallerIdentity&Version=2011-06-15", host),
             "method": "POST",
             "headers": [
                 {
                     "key": "Authorization",
-                    "value": signed_aws_request.headers.get("authorization").ok_or_else(|| anyhow!("no authorization header in signed request"))?,
+                    "value": auth,
                 },
                 {
                     "key": "host",
-                    "value": signed_aws_request.headers.get("host").ok_or_else(|| anyhow!("no host header in signed request"))?,
+                    "value": host,
                 },
+                // {
+                //     "key": "content-type",
+                //     "value": get_header(&signed_aws_request, "content-type")?,
+                // },
                 {
                     "key": "x-amz-date",
-                    "value": signed_aws_request.headers.get("x-amz-date").ok_or_else(|| anyhow!("no x-amz-date header in signed request"))?,
-                },
-                {
-                    "key": "x-goog-cloud-target-resource",
-                    "value": &workload_identity_pool_provider,
+                    "value": get_header(&signed_aws_request, "x-amz-date")?,
                 },
                 {
                     "key": "x-amz-security-token",
-                    "value": signed_aws_request.headers.get("X-Amz-Security-Token").ok_or_else(|| anyhow!("no X-Amz-Security_token header in signed request"))?,
+                    "value": get_header(&signed_aws_request, "x-amz-security-token")?,
+                },
+                // {
+                //     "key": "x-amz-content-sha256",
+                //     "value": get_header(&signed_aws_request, "x-amz-content-sha256")?,
+                // },
+                {
+                    "key": "x-goog-cloud-target-resource",
+                    "value": &workload_identity_pool_provider,
                 },
             ],
         });
@@ -396,7 +425,7 @@ impl GcpOauthTokenProvider {
             "grantType": "urn:ietf:params:oauth:grant-type:token-exchange",
             "requestedTokenType": "urn:ietf:params:oauth:token-type:access_token",
             "scope": "https://www.googleapis.com/auth/cloud-platform",
-            "subjectToken": get_caller_identity_token,
+            "subjectToken": urlencoding::encode(&get_caller_identity_token.to_string()),
             "subjectTokenType": "urn:ietf:params:aws:token-type:aws4_request",
         });
 
@@ -411,6 +440,11 @@ impl GcpOauthTokenProvider {
                 token_provider: None,
             })?
             .set("Content-Type", "application/json; charset=utf-8");
+
+        debug!(
+            self.logger,
+            "obtaining federated access token. request {:?}\nbody {}", request, request_body
+        );
         self.agent
             .send_json_request(&self.logger, &request, &request_body)
             .context("failed to obtain federated access token from sts.googleapis.com")
@@ -471,5 +505,73 @@ impl GcpOauthTokenProvider {
         });
 
         Ok(response.access_token)
+    }
+}
+
+/// Extracts the value of the provided HTTP header from the signed request.
+/// Returns an error if the provided header is not present or if its value
+/// cannot be parsed as UTF-8.
+fn get_header(signed_request: &SignedRequest, key: &str) -> Result<String> {
+    // SignedRequest only exposes HTTP headers as a BTreeMap<String,
+    // Vec<Vec<u8>>>, presumably because an HTTP header may occur multiple times
+    // in a single request. To translate these into plain strings, we borrow
+    // logic from SignedRequest::canonical_headers().
+    let header_utf8 = signed_request
+        .headers
+        .get(key)
+        .ok_or_else(|| anyhow!("no {} header in signed request", key))?;
+
+    let mut header = String::new();
+
+    for value in header_utf8 {
+        let s = str::from_utf8(&value).context("failed to convert UTF8 bytes to string")?;
+        if !header.is_empty() {
+            header.push(',');
+        }
+        header.push_str(s);
+    }
+    Ok(header)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::logging::setup_test_logging;
+    use rusoto_core::credential::AutoRefreshingProvider;
+    use rusoto_sts::{StsAssumeRoleSessionCredentialsProvider, StsClient};
+    #[test]
+    fn web_identity_pool() {
+        let logger = &setup_test_logging();
+
+        let aws_credentials_provider =
+            AutoRefreshingProvider::new(StsAssumeRoleSessionCredentialsProvider::new(
+                StsClient::new(Region::default()),
+                "arn:aws:iam::338276578713:role/timg-test-workload-identity-pool".to_owned(),
+                "default".to_owned(),
+                None,
+                None,
+                None,
+                None,
+            ))
+            .unwrap();
+
+        let mut gcp_oauth_token_provider = GcpOauthTokenProvider::new(
+            "https://www.googleapis.com/auth/devstorage.read_write",
+            Some("prio-ybultwbpbhpeuvex@timg-prio-aws-dev.iam.gserviceaccount.com".to_owned()),
+            None,
+            Some(aws_credentials_provider),
+            &logger,
+        )
+        .unwrap();
+
+        env::set_var("WORKLOAD_IDENTITY_POOL_PROVIDER", "//iam.googleapis.com/projects/533213449904/locations/global/workloadIdentityPools/aws-identity-pool/providers/aws-identity-pool-provider");
+
+        let gcp_sa_oauth_token = gcp_oauth_token_provider
+            .ensure_impersonated_service_account_oauth_token()
+            .unwrap();
+
+        println!("oauth token for GCP SA: {}", gcp_sa_oauth_token);
+
+        assert!(false);
     }
 }
