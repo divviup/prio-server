@@ -1,8 +1,11 @@
 use anyhow::{anyhow, Context, Result};
 use chrono::{prelude::Utc, DateTime, Duration};
+use hmac::{Hmac, Mac, NewMac};
 use jsonwebtoken::{encode, Algorithm, EncodingKey, Header};
 use rusoto_core::{credential::ProvideAwsCredentials, signature::SignedRequest, Region};
+use s3::signing;
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use slog::{debug, o, Logger};
 use std::{env, fmt, io::Read, str};
 use ureq::Response;
@@ -326,7 +329,10 @@ impl<P: ProvideAwsCredentials> GcpOauthTokenProvider<P> {
     /// account.
     /// https://cloud.google.com/iam/docs/access-resources-aws#exchange-token
     fn account_token_with_workload_identity_pool(&self, aws_credentials: &P) -> Result<Response> {
-        debug!(self.logger, "getting workload identity pool token");
+        debug!(
+            self.logger,
+            "getting GCP workload identity pool federated token"
+        );
         // rusoto_core::Region::default consults AWS_DEFAULT_REGION and
         // AWS_REGION environment variables to figure out what region we are
         // running in, which we need to pick an STS endpoint
@@ -359,40 +365,131 @@ impl<P: ProvideAwsCredentials> GcpOauthTokenProvider<P> {
         // https://github.com/rusoto/rusoto/blob/31cf1506f9f4bd7af7a1f86ced3cec436913d518/rusoto/services/sts/src/generated.rs#L1814
         // See also AWS STS docs for the GetCallerIdentity method:
         // https://docs.aws.amazon.com/STS/latest/APIReference/API_GetCallerIdentity.html
-        let mut signed_aws_request = SignedRequest::new("POST", "sts", &aws_region, "/");
-        signed_aws_request.set_payload(Some("Action=GetCallerIdentity&Version=2011-06-15"));
-        signed_aws_request.set_content_type("application/x-www-form-urlencoded".to_owned());
-        signed_aws_request.add_header(
-            "x-goog-cloud-target-resource",
-            &workload_identity_pool_provider,
+        let sts_request_url = Url::parse(&format!(
+            "https://sts.{}.amazonaws.com?Action=GetCallerIdentity&Version=2011-06-15",
+            aws_region.name()
+        ))
+        .unwrap();
+        let request_time = Utc::now();
+        let mut headers = http::HeaderMap::new();
+        headers.insert(
+            http::header::HeaderName::from_static("host"),
+            sts_request_url.host_str().unwrap().parse().unwrap(),
+            //"sts.amazonaws.com".parse().unwrap(),
         );
-        signed_aws_request.generate_presigned_url(
-            &temporary_credentials,
-            &std::time::Duration::from_secs(10),
-            false,
+        headers.insert(
+            http::header::HeaderName::from_static("x-amz-date"),
+            request_time
+                .format("%Y%m%dT%H%M%SZ")
+                .to_string()
+                .parse()
+                .unwrap(),
         );
-        //signed_aws_request.sign(&temporary_credentials);
+        let aws_security_token = &temporary_credentials
+            .token()
+            .as_ref()
+            .ok_or_else(|| anyhow!("no security token in temporary AWS credentials"))?;
+        headers.insert(
+            http::header::HeaderName::from_static("x-amz-security-token"),
+            aws_security_token.parse().unwrap(),
+        );
+        headers.insert(
+            http::header::HeaderName::from_static("x-goog-cloud-target-resource"),
+            workload_identity_pool_provider.parse().unwrap(),
+        );
+        debug!(self.logger, "signing over request headers {:?}", headers);
+        let canonical_request = signing::canonical_request(
+            "POST",
+            &sts_request_url,
+            &headers,
+            "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        );
 
-        let host = get_header(&signed_aws_request, "host")?;
-        let auth = get_header(&signed_aws_request, "authorization")?;
-        //let content_type = get_header(&signed_aws_request, "content-type")?;
-        debug!(self.logger, "auth header: {}\ncontent-type {}", auth, "");
+        let mut hasher = Sha256::default();
+        hasher.update(canonical_request.as_bytes());
+        let string_to_sign = format!(
+            "AWS4-HMAC-SHA256\n{timestamp}\n{scope}\n{hash}",
+            timestamp = request_time.format("%Y%m%dT%H%M%SZ"),
+            scope = format!(
+                "{date}/{region}/sts/aws4_request",
+                date = request_time.format("%Y%m%d"),
+                region = aws_region.name(),
+            ),
+            hash = hex::encode(hasher.finalize().as_slice()),
+        );
+
+        // let string_to_sign = signing::string_to_sign(
+        //     &request_time,
+        //     &aws_region.name().parse().unwrap(),
+        //     &canonical_request,
+        // );
+        debug!(self.logger, "string to sign {}", &string_to_sign);
+
+        let signing_key = signing::signing_key(
+            &request_time,
+            temporary_credentials.aws_secret_access_key(),
+            &aws_region.name().parse().unwrap(),
+            "sts",
+        )
+        .context("failed to parse signing key")?;
+
+        let mut hmac: Hmac<Sha256> =
+            Hmac::new_from_slice(&signing_key).map_err(|_| anyhow!("failed to construct HMAC"))?;
+        hmac.update(string_to_sign.as_bytes());
+        let signature = hex::encode(hmac.finalize().into_bytes());
+        let signed_header_string = signing::signed_header_string(&headers);
+        let authorization_header = format!(
+            "AWS4-HMAC-SHA256 Credential={access_key}/{scope},\
+                SignedHeaders={signed_headers},Signature={signature}",
+            access_key = temporary_credentials.aws_access_key_id(),
+            scope = format!(
+                "{date}/{region}/sts/aws4_request",
+                date = request_time.format("%Y%m%d"),
+                region = aws_region.name(),
+            ),
+            signed_headers = &signed_header_string,
+            signature = signature
+        );
+
+        signing::authorization_header(
+            temporary_credentials.aws_access_key_id(),
+            &request_time,
+            &aws_region.name().parse().unwrap(),
+            &signed_header_string,
+            &signature,
+        );
+
+        debug!(self.logger, "auth header: {}", &authorization_header);
+
+        // let mut signed_aws_request = SignedRequest::new("POST", "sts", &aws_region, "/");
+        // signed_aws_request.set_payload(Some("Action=GetCallerIdentity&Version=2011-06-15"));
+        // signed_aws_request.set_content_type("application/x-www-form-urlencoded".to_owned());
+        // signed_aws_request.add_header(
+        //     "x-goog-cloud-target-resource",
+        //     &workload_identity_pool_provider,
+        // );
+        // signed_aws_request.sign(&temporary_credentials);
+
+        // let host = get_header(&signed_aws_request, "host")?;
+        // let auth = get_header(&signed_aws_request, "authorization")?;
+        // //let content_type = get_header(&signed_aws_request, "content-type")?;
+        // debug!(self.logger, "auth header: {}\ncontent-type {}", auth, "sts");
 
         // Next, we use elements of the signed sts:GetCallerIdentity request to
         // construct what GCP calls a "GetCallerIdentity" token; essentially a
         // JSON serialization of the signed sts:GetCallerIdentity request.
         // SignedRequest::sign will have set all the headers we consult.
         let get_caller_identity_token = ureq::json!({
-            "url": format!("https://{}?Action=GetCallerIdentity&Version=2011-06-15", host),
+            "url": sts_request_url.to_string(),
             "method": "POST",
             "headers": [
                 {
                     "key": "Authorization",
-                    "value": auth,
+                    "value": authorization_header,
                 },
                 {
                     "key": "host",
-                    "value": host,
+                    "value": sts_request_url.host_str().unwrap(),
                 },
                 // {
                 //     "key": "content-type",
@@ -400,11 +497,13 @@ impl<P: ProvideAwsCredentials> GcpOauthTokenProvider<P> {
                 // },
                 {
                     "key": "x-amz-date",
-                    "value": get_header(&signed_aws_request, "x-amz-date")?,
+                    "value": request_time
+                .format("%Y%m%dT%H%M%SZ")
+                .to_string(),
                 },
                 {
                     "key": "x-amz-security-token",
-                    "value": get_header(&signed_aws_request, "x-amz-security-token")?,
+                    "value": aws_security_token,
                 },
                 // {
                 //     "key": "x-amz-content-sha256",
@@ -443,7 +542,10 @@ impl<P: ProvideAwsCredentials> GcpOauthTokenProvider<P> {
 
         debug!(
             self.logger,
-            "obtaining federated access token. request {:?}\nbody {}", request, request_body
+            "obtaining federated access token. request {:?}\ngci_token {}\nbody {}",
+            request,
+            get_caller_identity_token,
+            request_body
         );
         self.agent
             .send_json_request(&self.logger, &request, &request_body)
@@ -470,6 +572,7 @@ impl<P: ProvideAwsCredentials> GcpOauthTokenProvider<P> {
         let service_account_to_impersonate = self.account_to_impersonate.clone().unwrap();
 
         let default_token = self.ensure_default_account_token()?;
+        debug!(self.logger, "default token: {}", default_token);
 
         let request = self.agent.prepare_request(RequestParameters {
             url: access_token_url_for_service_account(&service_account_to_impersonate)?,
@@ -506,31 +609,6 @@ impl<P: ProvideAwsCredentials> GcpOauthTokenProvider<P> {
 
         Ok(response.access_token)
     }
-}
-
-/// Extracts the value of the provided HTTP header from the signed request.
-/// Returns an error if the provided header is not present or if its value
-/// cannot be parsed as UTF-8.
-fn get_header(signed_request: &SignedRequest, key: &str) -> Result<String> {
-    // SignedRequest only exposes HTTP headers as a BTreeMap<String,
-    // Vec<Vec<u8>>>, presumably because an HTTP header may occur multiple times
-    // in a single request. To translate these into plain strings, we borrow
-    // logic from SignedRequest::canonical_headers().
-    let header_utf8 = signed_request
-        .headers
-        .get(key)
-        .ok_or_else(|| anyhow!("no {} header in signed request", key))?;
-
-    let mut header = String::new();
-
-    for value in header_utf8 {
-        let s = str::from_utf8(&value).context("failed to convert UTF8 bytes to string")?;
-        if !header.is_empty() {
-            header.push(',');
-        }
-        header.push_str(s);
-    }
-    Ok(header)
 }
 
 #[cfg(test)]
