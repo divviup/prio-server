@@ -262,8 +262,6 @@ checksum = "fe174d1b67f7b2bafed829c09db039301eb5841f66e43be2cf60b326e7f8e2cc"
 dependencies = [
  "http",
  "log",
- "native-tls",
- "openssl",
  "rustls 0.17.0",
  "serde",
  "serde_json",
@@ -1519,19 +1517,6 @@ dependencies = [
 
 [[package]]
 name = "hyper-tls"
-version = "0.4.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d979acc56dcb5b8dddba3917601745e877576475aa046df3226eabdecef78eed"
-dependencies = [
- "bytes 0.5.6",
- "hyper 0.13.10",
- "native-tls",
- "tokio 0.2.25",
- "tokio-tls",
-]
-
-[[package]]
-name = "hyper-tls"
 version = "0.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d6183ddfa99b85da61a140bea0efc93fdf56ceaa041b37d553518030827f9905"
@@ -1678,7 +1663,7 @@ dependencies = [
  "http",
  "hyper 0.14.7",
  "hyper-timeout",
- "hyper-tls 0.5.0",
+ "hyper-tls",
  "jsonpath_lib",
  "k8s-openapi",
  "kube-core",
@@ -2473,14 +2458,12 @@ dependencies = [
  "http-body 0.3.1",
  "hyper 0.13.10",
  "hyper-rustls 0.21.0",
- "hyper-tls 0.4.3",
  "ipnet",
  "js-sys",
  "lazy_static",
  "log",
  "mime",
  "mime_guess",
- "native-tls",
  "percent-encoding",
  "pin-project-lite 0.2.4",
  "rustls 0.18.1",
@@ -2489,7 +2472,6 @@ dependencies = [
  "serde_urlencoded 0.7.0",
  "tokio 0.2.25",
  "tokio-rustls 0.14.1",
- "tokio-tls",
  "url",
  "wasm-bindgen",
  "wasm-bindgen-futures",
@@ -3528,16 +3510,6 @@ dependencies = [
  "futures-core",
  "pin-project-lite 0.2.4",
  "tokio 1.6.0",
-]
-
-[[package]]
-name = "tokio-tls"
-version = "0.3.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9a70f4fcd7b3b24fb194f837560168208f669ca8cb70d0c4b862944452396343"
-dependencies = [
- "native-tls",
- "tokio 0.2.25",
 ]
 
 [[package]]

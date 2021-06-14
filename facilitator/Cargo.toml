@@ -37,7 +37,7 @@ rusoto_mock = { version = "^0.46", default_features = false, features = ["rustls
 rusoto_s3 = { version = "^0.46", default_features = false, features = ["rustls"] }
 rusoto_sqs = { version = "^0.46", default_features = false, features = ["rustls"] }
 rusoto_sts = { version = "^0.46", default_features = false, features = ["rustls"] }
-rust-s3 = { version = "0.26", features = ["rustls-tls"] }
+rust-s3 = { version = "0.26", default_features = false, features = ["rustls-tls"] }
 sha2 = "0.9"
 slog = { version = "2.7.0", features = ["max_level_trace"] }
 slog-async = "2.6.0"

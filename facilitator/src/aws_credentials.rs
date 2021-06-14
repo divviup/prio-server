@@ -3,8 +3,11 @@ use crate::{
     http::{Method, RequestParameters, RetryingAgent},
     retries,
 };
-use anyhow::{Context, Result};
+use anyhow::{anyhow, Context, Result};
 use async_trait::async_trait;
+use chrono::prelude::Utc;
+use hmac::{Hmac, Mac, NewMac};
+use http::header::{HeaderMap, HeaderName};
 use rusoto_core::{
     credential::{
         AutoRefreshingProvider, AwsCredentials, CredentialsError, DefaultCredentialsProvider,
@@ -14,11 +17,14 @@ use rusoto_core::{
         error::XmlErrorDeserializer,
         util::{find_start_element, XmlResponse},
     },
-    RusotoError, RusotoResult,
+    Region, RusotoError, RusotoResult,
 };
 use rusoto_mock::MockCredentialsProvider;
 use rusoto_sts::WebIdentityProvider;
+use s3::signing::{canonical_request, signed_header_string, signing_key};
+use sha2::{Digest, Sha256};
 use slog::{debug, o, Logger};
+use std::str;
 use std::{
     boxed::Box,
     convert::From,
@@ -30,6 +36,13 @@ use std::{
 use tokio::runtime::{Builder, Runtime};
 use url::Url;
 use xml::EventReader;
+
+const LONG_DATETIME: &str = "%Y%m%dT%H%M%SZ";
+const SHORT_DATE: &str = "%Y%m%d";
+const HOST_HEADER: &str = "host";
+const AMAZON_DATE_HEADER: &str = "x-amz-date";
+const AMAZON_SECURITY_TOKEN_HEADER: &str = "x-amz-security-token";
+const GOOGLE_TARGET_RESOURCE_HEADER: &str = "x-goog-cloud-target-resource";
 
 /// Constructs a basic runtime suitable for use in our single threaded context
 pub(crate) fn basic_runtime() -> Result<Runtime> {
@@ -303,6 +316,174 @@ fn retryable<T>(error: &RusotoError<T>) -> bool {
         }
         _ => false,
     }
+}
+
+/// Construct a GetCallerIdentity token, as specified in GCP's workload identity
+/// pool guide. This entails constructing a signed sts:GetCallerIdentity AWS API
+/// request, using the form that has no body (sts.googleapis.com will reject the
+/// other form), then signing that request using AWS v4 request signing, then
+/// constructing a JSON serialization of the GetCallerIdentity request, which
+/// will later be reconstructed by sts.googleapis.com into an HTTP POST and sent
+/// to sts.amazonaws.com. This means that the request we construct gets
+/// scrutinized by not one but two different STS implementations, so we must be
+/// unusually careful.
+///
+/// # Arguments
+///
+/// * `sts_request_url` - The full URL to which the serialized request should be
+///   sent. Regional API endpoints are supported.
+/// * `workload_identity_pool_provider` - The full resource name of the GCP
+///   workload identity provider, like
+///   "//iam.googleapis.com/projects/PROJECT_NUMBER/locations/global/workloadIdentityPools/POOL_ID/providers/PROVIDER_ID".
+/// * `aws_region` - The AWS region
+/// * `credentials` - AWS credentials to use to sign the request.
+///
+/// References:
+/// GCP workload identity pool / sts.googleapis.com:
+/// https://cloud.google.com/iam/docs/access-resources-aws#exchange-token
+/// https://cloud.google.com/iam/docs/reference/sts/rest/v1/TopLevel/token
+/// AWS sts:GetCallerIdentity:
+/// https://docs.aws.amazon.com/STS/latest/APIReference/API_GetCallerIdentity.html
+/// AWS v4 request signing
+/// https://docs.aws.amazon.com/general/latest/gr/sigv4_signing.html
+pub(crate) fn get_caller_identity_token(
+    sts_request_url: &Url,
+    workload_identity_pool_provider: &str,
+    aws_region: &Region,
+    credentials: &AwsCredentials,
+) -> Result<serde_json::Value> {
+    // Rusoto provides a SignedRequest struct that can construct and sign
+    // correct sts:GetCallerIdentity requests, but unfortunately it insists on
+    // using the form with a body, which sts.googleapis.com rejects. The rust-s3
+    // crate provides a more flexible implementation of request signing, except
+    // that it is hardcoded to refer to "s3" in various places, but we can use
+    // a lot of its code.
+    let request_time = Utc::now();
+    let aws_security_token = credentials
+        .token()
+        .as_ref()
+        .ok_or_else(|| anyhow!("no security token in AWS credentials"))?;
+    let host = sts_request_url
+        .host_str()
+        .ok_or_else(|| anyhow!("no host in provided URL {}", sts_request_url))?;
+    let request_time_long = request_time.format(LONG_DATETIME).to_string();
+
+    // Construct the headers that we will sign over. Adding headers here may
+    // cause sts.googleapis.com to reject the GetCallerIdentity token.
+    let mut headers = HeaderMap::new();
+    headers.insert(
+        HeaderName::from_static(HOST_HEADER),
+        host.parse()
+            .context("failed to parse host as header value")?,
+    );
+    headers.insert(
+        HeaderName::from_static(AMAZON_DATE_HEADER),
+        request_time
+            .format(LONG_DATETIME)
+            .to_string()
+            .parse()
+            .context("failed to parse formatted date as header value")?,
+    );
+    headers.insert(
+        HeaderName::from_static(AMAZON_SECURITY_TOKEN_HEADER),
+        aws_security_token
+            .parse()
+            .context("failed to parse Amazon security token as header value")?,
+    );
+    headers.insert(
+        HeaderName::from_static(GOOGLE_TARGET_RESOURCE_HEADER),
+        workload_identity_pool_provider
+            .parse()
+            .context("failed to parse workload identity pool provider as header value")?,
+    );
+
+    // The last parameter here is the SHA256 digest of the request body. In our
+    // case the body is empty, so we provide the hash of the empty string, per
+    // step 6 in
+    // https://docs.aws.amazon.com/general/latest/gr/sigv4-create-canonical-request.html
+    let canonical_reqeust = canonical_request(
+        "POST",
+        sts_request_url,
+        &headers,
+        "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    );
+
+    // At this stage we should call rust_s3::signing::string_to_sign, but it
+    // uses rust_s3::signing::scope_string which hard codes the service name
+    // "s3"
+    let mut hasher = Sha256::default();
+    hasher.update(canonical_reqeust.as_bytes());
+    let string_to_sign = format!(
+        "AWS4-HMAC-SHA256\n{timestamp}\n{scope}\n{hash}",
+        timestamp = request_time_long,
+        scope = format!(
+            "{date}/{region}/sts/aws4_request",
+            date = request_time.format(SHORT_DATE),
+            region = aws_region.name(),
+        ),
+        hash = hex::encode(hasher.finalize().as_slice()),
+    );
+
+    let signing_key = signing_key(
+        &request_time,
+        credentials.aws_secret_access_key(),
+        &aws_region
+            .name()
+            .parse()
+            .context("failed to parse AWS region")?,
+        "sts",
+    )
+    .context("failed to construct AWS request signing key")?;
+
+    // At this stage we should call rust_s3::signing::authorization_header, but
+    // it also uses scope_string.
+    let mut hmac: Hmac<Sha256> = Hmac::new_from_slice(&signing_key)
+        .map_err(|e| anyhow!("failed to construct HMAC from signing key: {}", e))?;
+    hmac.update(string_to_sign.as_bytes());
+    let signature = hex::encode(hmac.finalize().into_bytes());
+
+    let authorization_header = format!(
+        "AWS4-HMAC-SHA256 Credential={access_key}/{scope},\
+                SignedHeaders={signed_headers},Signature={signature}",
+        access_key = credentials.aws_access_key_id(),
+        scope = format!(
+            "{date}/{region}/sts/aws4_request",
+            date = request_time.format("%Y%m%d"),
+            region = aws_region.name(),
+        ),
+        signed_headers = &signed_header_string(&headers),
+        signature = signature
+    );
+
+    // Construct the GetCallerIdentity token expected by sts.googleapis.com.
+    // Except for the Authorization header, these must match the headers signed
+    // over earlier.
+    Ok(ureq::json!({
+        "url": sts_request_url.as_str(),
+        "method": "POST",
+        "headers": [
+            {
+                "key": "Authorization",
+                "value": authorization_header,
+            },
+            {
+                "key": HOST_HEADER,
+                "value": host,
+            },
+            {
+                "key": AMAZON_DATE_HEADER,
+                "value": request_time_long,
+            },
+            {
+                "key": AMAZON_SECURITY_TOKEN_HEADER,
+                "value": aws_security_token,
+            },
+            {
+                "key": GOOGLE_TARGET_RESOURCE_HEADER,
+                "value": workload_identity_pool_provider,
+            },
+        ]
+    }))
 }
 
 #[cfg(test)]
