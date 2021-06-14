@@ -113,7 +113,7 @@ impl<T: Task> GcpPubSubTaskQueue<T> {
         subscription_id: &str,
         identity: Identity,
         parent_logger: &Logger,
-    ) -> Result<GcpPubSubTaskQueue<T>> {
+    ) -> Result<Self> {
         let logger = parent_logger.new(o!(
             "gcp_project_id" => gcp_project_id.to_owned(),
             event::TASK_QUEUE_ID => subscription_id.to_owned(),
@@ -145,8 +145,12 @@ impl<T: Task> GcpPubSubTaskQueue<T> {
                 // https://developers.google.com/identity/protocols/oauth2/scopes
                 "https://www.googleapis.com/auth/pubsub",
                 identity.map(|x| x.to_string()),
-                None, // GCP key file; never used
-                None, // AWS credentials provider; never used
+                // GCP key file; None because PubSub is only used if the
+                // workload is on GKE
+                None,
+                // AWS credentials provider; None because PubSub is only used if
+                // the workload is on GKE
+                None,
                 &logger,
             )?,
             phantom_task: PhantomData,

@@ -16,7 +16,10 @@ use uuid::Uuid;
 use facilitator::{
     aggregation::BatchAggregator,
     aws_credentials,
-    config::{leak_string, Entity, Identity, InOut, ManifestKind, StoragePath, TaskQueueKind},
+    config::{
+        leak_string, Entity, Identity, InOut, ManifestKind, StoragePath, TaskQueueKind,
+        WorkloadIdentityPoolParameters,
+    },
     intake::BatchIntaker,
     kubernetes::KubernetesClient,
     logging::{event, setup_logging, LoggingConfiguration},
@@ -74,6 +77,8 @@ trait AppArgumentAdder {
     fn add_packet_decryption_key_argument(self) -> Self;
 
     fn add_gcp_service_account_key_file_argument(self) -> Self;
+
+    fn add_gcp_workload_identity_pool_provider_argument(self) -> Self;
 
     fn add_task_queue_arguments(self) -> Self;
 
@@ -317,10 +322,27 @@ impl<'a, 'b> AppArgumentAdder for App<'a, 'b> {
                 .help("Path to key file for GCP service account")
                 .long_help(
                     "Path to the JSON key file for the GCP service account \
-                    that should be used by for accessing GCS or impersonating \
+                    that should be used by for accessing GCP or impersonating \
                     other GCP service accounts. If omitted, the default \
                     account found in the GKE metadata service will be used for \
                     authentication or impersonation.",
+                ),
+        )
+    }
+
+    fn add_gcp_workload_identity_pool_provider_argument(self) -> Self {
+        self.arg(
+            Arg::with_name("gcp-workload-identity-pool-provider")
+                .long("gcp-workload-identity-pool-provider")
+                .env("GCP_WORKLOAD_IDENTITY_POOL_PROVIDER")
+                .help("Full resource name of a GCP workload identity pool provider")
+                .long_help(
+                    "Full resource name of a GCP workload identity pool \
+                    provider that should be used for accessing GCP or \
+                    impersonating other GCP service accounts when running in \
+                    Amazon EKS. The pool provider should be configured to \
+                    permit service account impersonation by the AWS IAM role or \
+                    user that this facilitator authenticates as.",
                 ),
         )
     }
@@ -1841,6 +1863,15 @@ fn transport_from_args(
     transport_for_path(path, identity, entity, matches, logger)
 }
 
+fn aws_credentials_provider(
+    identity: Identity,
+    service: &str,
+    use_default_provider: bool,
+    logger: &Logger,
+) -> Result<aws_credentials::Provider> {
+    aws_credentials::Provider::new(identity, use_default_provider, service, logger)
+}
+
 fn transport_for_path(
     path: StoragePath,
     identity: Identity,
@@ -1858,22 +1889,17 @@ fn transport_for_path(
         identity
     };
 
-    let key_file_reader = match matches.value_of("gcp-service-account-key-file") {
-        Some(path) => {
-            Some(Box::new(File::open(path).context("failed to open key file")?) as Box<dyn Read>)
-        }
-        None => None,
-    };
+    let use_default_aws_credentials_provider = value_t!(
+        matches.value_of(entity.suffix("-use-default-aws-credentials-provider")),
+        bool
+    )?;
 
     match path {
         StoragePath::S3Path(path) => {
-            let credentials_provider = aws_credentials::Provider::new(
+            let credentials_provider = aws_credentials_provider(
                 identity,
-                value_t!(
-                    matches.value_of(entity.suffix("-use-default-aws-credentials-provider")),
-                    bool
-                )?,
                 "s3",
+                use_default_aws_credentials_provider,
                 logger,
             )?;
             Ok(Box::new(S3Transport::new(
@@ -1882,12 +1908,42 @@ fn transport_for_path(
                 logger,
             )))
         }
-        StoragePath::GcsPath(path) => Ok(Box::new(GcsTransport::new(
-            path,
-            identity,
-            key_file_reader,
-            logger,
-        )?)),
+        StoragePath::GcsPath(path) => {
+            let key_file_reader = match matches.value_of("gcp-service-account-key-file") {
+                Some(path) => Some(
+                    Box::new(File::open(path).context("failed to open key file")?) as Box<dyn Read>,
+                ),
+                None => None,
+            };
+
+            let workload_identity_pool_params =
+                match matches.value_of("gcp-workload-identity-pool-provider") {
+                    Some(workload_identity_pool_provider) => Some(WorkloadIdentityPoolParameters {
+                        workload_identity_pool_provider: workload_identity_pool_provider.to_owned(),
+                        aws_credentials_provider: aws_credentials_provider(
+                            // The identity parameter is the GCP SA that must be
+                            // impersonated to access the GCS bucket. We create
+                            // this aws_credentials::Provider with no identity,
+                            // effectively requiring that the authentication to
+                            // AWS either use aws_credentials::Provider::Default
+                            // or aws_credentials::Provider::WebIdentityFromKubernetesEnvironment.
+                            None,
+                            "IAM federation",
+                            use_default_aws_credentials_provider,
+                            logger,
+                        )?,
+                    }),
+                    None => None,
+                };
+
+            Ok(Box::new(GcsTransport::new(
+                path,
+                identity,
+                key_file_reader,
+                workload_identity_pool_params,
+                logger,
+            )?))
+        }
         StoragePath::LocalPath(path) => Ok(Box::new(LocalFileTransport::new(path))),
     }
 }
@@ -1941,13 +1997,13 @@ fn intake_task_queue_from_args(
             let sqs_region = matches
                 .value_of("aws-sqs-region")
                 .ok_or_else(|| anyhow!("aws-sqs-region is required"))?;
-            let credentials_provider = aws_credentials::Provider::new(
-                None,
+            let credentials_provider = aws_credentials_provider(
+                identity,
+                "sqs",
                 value_t!(
                     matches.value_of("task-queue-use-default-aws-credentials-provider"),
                     bool
                 )?,
-                "sqs",
                 logger,
             )?;
             Ok(Box::new(AwsSqsTaskQueue::new(
@@ -1992,13 +2048,13 @@ fn aggregation_task_queue_from_args(
             let sqs_region = matches
                 .value_of("aws-sqs-region")
                 .ok_or_else(|| anyhow!("aws-sqs-region is required"))?;
-            let credentials_provider = aws_credentials::Provider::new(
-                None,
+            let credentials_provider = aws_credentials_provider(
+                identity,
+                "sqs",
                 value_t!(
                     matches.value_of("task-queue-use-default-aws-credentials-provider"),
                     bool
                 )?,
-                "sqs",
                 logger,
             )?;
             Ok(Box::new(AwsSqsTaskQueue::new(

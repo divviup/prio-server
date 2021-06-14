@@ -1,6 +1,5 @@
 use crate::{
-    aws_credentials,
-    config::{GcsPath, Identity},
+    config::{GcsPath, Identity, WorkloadIdentityPoolParameters},
     gcp_oauth::GcpOauthTokenProvider,
     http::{
         Method, OauthTokenProvider, RequestParameters, RetryingAgent, StaticOauthTokenProvider,
@@ -10,10 +9,11 @@ use crate::{
     Error,
 };
 use anyhow::{anyhow, Context, Result};
+use rusoto_core::credential::ProvideAwsCredentials;
 use slog::{debug, info, o, Logger};
 use std::{
-    io,
-    io::{Read, Write},
+    fmt,
+    io::{self, Read, Write},
     time::Duration,
 };
 use ureq::AgentBuilder;
@@ -45,15 +45,27 @@ fn gcp_upload_object_url(storage_api_url: &str, bucket: &str) -> Result<Url> {
 /// struct can either use the default service account from the metadata service,
 /// or can impersonate another GCP service account if one is provided to
 /// GCSTransport::new.
-#[derive(Debug)]
-pub struct GcsTransport {
+pub struct GcsTransport<P: ProvideAwsCredentials> {
     path: GcsPath,
-    oauth_token_provider: GcpOauthTokenProvider<aws_credentials::Provider>,
+    oauth_token_provider: GcpOauthTokenProvider<P>,
     agent: RetryingAgent,
     logger: Logger,
 }
 
-impl GcsTransport {
+impl<P: ProvideAwsCredentials> fmt::Debug for GcsTransport<P> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        // GcpOauthTokenProvider<'a, P> implements std::fmt::Debug regardless
+        // of whether P implements std::fmt::Debug, but evidently not in a way
+        // that satisfies #[derive(Debug)], so we provide this implementation
+        f.debug_struct("GcsTransport")
+            .field("path", &self.path)
+            .field("oauth_token_provider", &self.oauth_token_provider)
+            .field("agent", &self.agent)
+            .finish()
+    }
+}
+
+impl<P: ProvideAwsCredentials> GcsTransport<P> {
     /// Instantiate a new GCSTransport to read or write objects from or to the
     /// provided path. If identity is None, GCSTransport authenticates to GCS
     /// as the default service account. If identity contains a service
@@ -63,8 +75,9 @@ impl GcsTransport {
         path: GcsPath,
         identity: Identity,
         key_file_reader: Option<Box<dyn Read>>,
+        workload_identity_pool_params: Option<WorkloadIdentityPoolParameters<P>>,
         parent_logger: &Logger,
-    ) -> Result<GcsTransport> {
+    ) -> Result<Self> {
         let logger = parent_logger.new(o!(
             event::STORAGE_PATH => path.to_string(),
             event::IDENTITY => identity.unwrap_or("default identity").to_owned(),
@@ -90,7 +103,7 @@ impl GcsTransport {
                 "https://www.googleapis.com/auth/devstorage.read_write",
                 identity.map(|x| x.to_string()),
                 key_file_reader,
-                None, // aws credentials
+                workload_identity_pool_params,
                 &logger,
             )?,
             agent: retrying_agent,
@@ -99,7 +112,7 @@ impl GcsTransport {
     }
 }
 
-impl Transport for GcsTransport {
+impl<P: ProvideAwsCredentials> Transport for GcsTransport<P> {
     fn path(&self) -> String {
         self.path.to_string()
     }

@@ -4,12 +4,13 @@ use jsonwebtoken::{encode, Algorithm, EncodingKey, Header};
 use rusoto_core::{credential::ProvideAwsCredentials, Region};
 use serde::{Deserialize, Serialize};
 use slog::{debug, o, Logger};
-use std::{env, fmt, io::Read, str};
+use std::{fmt, io::Read, str};
 use ureq::Response;
 use url::Url;
 
 use crate::{
     aws_credentials::{basic_runtime, get_caller_identity_token},
+    config::WorkloadIdentityPoolParameters,
     http::{
         Method, OauthTokenProvider, RequestParameters, RetryingAgent, StaticOauthTokenProvider,
     },
@@ -90,6 +91,221 @@ struct ServiceAccountKeyFile {
     token_uri: String,
 }
 
+/// This enum captures the different ways that a GcpOauthTokenProvider can
+/// obtain the default Oauth token, used either to authenticate to GCP services
+/// or to obtain a further service account Oauth token from GCP IAM.
+enum DefaultTokenProvider<P: ProvideAwsCredentials> {
+    /// Fetch a token from the GKE metadata service for the GCP SA mapped to
+    /// the current Kubernetes SA via GKE workload identity (not to be confused)
+    /// with workload identity *pool*). Used by workloads in Google Kubernetes
+    /// Engine.
+    GkeMetadataService,
+    /// Use a GCP service account key file to authenticate to GCP IAM as some
+    /// service account.
+    ServiceAccountKeyFile(ServiceAccountKeyFile),
+    /// Use a GCP Workload Identity Pool to federate GCP IAM with AWS IAM,
+    /// allowing workloads in AWS Elastic Kubernetes Service to impersonate a
+    /// GCP SA.
+    AwsIamFederationViaWorkloadIdentityPool(WorkloadIdentityPoolParameters<P>),
+}
+
+impl<P: ProvideAwsCredentials> fmt::Debug for DefaultTokenProvider<P> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let mut debug_struct = f.debug_struct("DefaultTokenProvider");
+        match self {
+            Self::GkeMetadataService => debug_struct.field(
+                "token_source",
+                &"default service account from GKE metadata service".to_owned(),
+            ),
+            Self::ServiceAccountKeyFile(key_file) => debug_struct
+                .field("token_source", &"service account key file".to_owned())
+                .field("service_account", &key_file.client_email),
+            Self::AwsIamFederationViaWorkloadIdentityPool(_) => debug_struct.field(
+                "token_source",
+                &"AWS IAM federation via workload identity pool".to_owned(),
+            ),
+        };
+        debug_struct.finish()
+    }
+}
+
+impl<P: ProvideAwsCredentials> DefaultTokenProvider<P> {
+    fn default_token(
+        &self,
+        scope: &str,
+        agent: &RetryingAgent,
+        logger: &Logger,
+    ) -> Result<Response> {
+        match self {
+            Self::GkeMetadataService => self.account_token_from_gke_metadata_service(agent, logger),
+            Self::ServiceAccountKeyFile(key_file) => {
+                self.account_token_with_key_file(&key_file, scope, agent, logger)
+            }
+            Self::AwsIamFederationViaWorkloadIdentityPool(parameters) => self
+                .account_token_with_workload_identity_pool(
+                    &parameters.aws_credentials_provider,
+                    &parameters.workload_identity_pool_provider,
+                    agent,
+                    logger,
+                ),
+        }
+    }
+
+    /// Fetches default account token from GKE metadata service. Returns the
+    /// ureq::Response, whose body will be an OauthTokenResponse if the HTTP
+    /// call was successful.
+    fn account_token_from_gke_metadata_service(
+        &self,
+        agent: &RetryingAgent,
+        logger: &Logger,
+    ) -> Result<Response> {
+        debug!(
+            logger,
+            "obtaining default account token from GKE metadata service"
+        );
+
+        let mut request = agent.prepare_request(RequestParameters {
+            url: default_oauth_token_url(),
+            method: Method::Get,
+            ..Default::default()
+        })?;
+
+        request = request.set("Metadata-Flavor", "Google");
+
+        agent
+            .call(logger, &request)
+            .context("failed to query GKE metadata service")
+    }
+
+    /// Fetches the default account token from Google OAuth API using a JWT
+    /// constructed from the parameters in the provided key file. If the JWT is
+    /// successfully constructed, returns the ureq::Response whose body will be
+    /// an OauthTokenResponse if the HTTP call was successful, but may be an
+    /// error.
+    fn account_token_with_key_file(
+        &self,
+        key_file: &ServiceAccountKeyFile,
+        scope: &str,
+        agent: &RetryingAgent,
+        logger: &Logger,
+    ) -> Result<Response> {
+        debug!(logger, "obtaining account token from key file");
+        // We construct the JWT per Google documentation:
+        // https://developers.google.com/identity/protocols/oauth2/service-account#authorizingrequests
+        let mut header = Header::new(Algorithm::RS256);
+        header.kid = Some(key_file.private_key_id.to_owned());
+
+        // The iat and exp fields in a JWT are in seconds since UNIX epoch.
+        let now = Utc::now().timestamp();
+        let claims = Claims {
+            iss: key_file.client_email.to_owned(),
+            scope: scope.to_owned(),
+            aud: key_file.token_uri.to_owned(),
+            iat: now,
+            exp: now + 3600, // token expires in one hour
+        };
+
+        let encoding_key = EncodingKey::from_rsa_pem(key_file.private_key.as_bytes())
+            .context("failed to parse PEM RSA key")?;
+
+        let token =
+            encode(&header, &claims, &encoding_key).context("failed to construct and sign JWT")?;
+
+        let request_body = format!(
+            "grant_type={}&assertion={}",
+            urlencoding::encode("urn:ietf:params:oauth:grant-type:jwt-bearer"),
+            token
+        );
+
+        let request = agent.prepare_request(RequestParameters {
+            url: Url::parse(&key_file.token_uri).context(format!(
+                "failed to parse key_file.token_uri: {}",
+                &key_file.token_uri
+            ))?,
+            method: Method::Post,
+            ..Default::default()
+        })?;
+
+        let request = request.set("Content-Type", "application/x-www-form-urlencoded");
+        agent
+            .send_string(logger, &request, &request_body)
+            .context("failed to get account token with key file")
+    }
+
+    /// Uses a GCP workload identity pool provider to fetch a federated access
+    /// token which can later be presented to iamcredentials.googleapis.com to
+    /// obtain an Oauth token that allows impersonation of some GCP service
+    /// account.
+    /// https://cloud.google.com/iam/docs/access-resources-aws#exchange-token
+    fn account_token_with_workload_identity_pool(
+        &self,
+        aws_credentials: &P,
+        workload_identity_pool_provider: &str,
+        agent: &RetryingAgent,
+        logger: &Logger,
+    ) -> Result<Response> {
+        debug!(logger, "getting GCP workload identity pool federated token");
+        // rusoto_core::Region::default consults AWS_DEFAULT_REGION and
+        // AWS_REGION environment variables to figure out what region we are
+        // running in, which we need to pick an STS endpoint
+        let aws_region = Region::default();
+
+        // First, we must obtain credentials for the AWS IAM role mapped to this
+        // facilitator's Kubernetes service account
+        let credentials = basic_runtime()?
+            .block_on(aws_credentials.credentials())
+            .context("failed to get AWS credentials")?;
+
+        // Next, we construct a GetCallerIdentity token
+        let sts_request_url = Url::parse(&format!(
+            "https://sts.{}.amazonaws.com?Action=GetCallerIdentity&Version=2011-06-15",
+            aws_region.name()
+        ))
+        .context("failed to parse STS request URL")?;
+
+        let get_caller_identity_token = get_caller_identity_token(
+            &sts_request_url,
+            &workload_identity_pool_provider,
+            &aws_region,
+            &credentials,
+        )?;
+
+        // The GetCallerIdentity token goes into the body of the request sent to
+        // sts.googleapis.com (one assumes that GCP relays that request to
+        // sts.amazonaws.com to prove that we control the AWS IAM role).
+        let request_body = ureq::json!({
+            "audience": &workload_identity_pool_provider,
+            "grantType": "urn:ietf:params:oauth:grant-type:token-exchange",
+            "requestedTokenType": "urn:ietf:params:oauth:token-type:access_token",
+            "scope": "https://www.googleapis.com/auth/cloud-platform",
+            "subjectToken": urlencoding::encode(&get_caller_identity_token.to_string()),
+            "subjectTokenType": "urn:ietf:params:aws:token-type:aws4_request",
+        });
+
+        let request = agent
+            .prepare_request(RequestParameters {
+                url: Url::parse("https://sts.googleapis.com/v1/token")
+                    .context("failed to construct sts.googleapis.com URL")?,
+                method: Method::Post,
+                // This request is unauthenticated, except for the signature and
+                // token on the inner subjectToken
+                token_provider: None,
+            })?
+            .set("Content-Type", "application/json; charset=utf-8");
+
+        debug!(
+            logger,
+            "obtaining federated access token. request {:?}\ngci_token {}\nbody {}",
+            request,
+            get_caller_identity_token,
+            request_body
+        );
+        agent
+            .send_json_request(logger, &request, &request_body)
+            .context("failed to obtain federated access token from sts.googleapis.com")
+    }
+}
+
 /// GcpOauthTokenProvider manages a default service account Oauth token (i.e. the
 /// one for a GCP service account mapped to a Kubernetes service account, or the
 /// one found in a JSON key file) and an Oauth token used to impersonate another
@@ -97,15 +313,9 @@ struct ServiceAccountKeyFile {
 pub(crate) struct GcpOauthTokenProvider<P: ProvideAwsCredentials> {
     /// The Oauth scope for which tokens should be requested.
     scope: String,
-    /// The parsed key file for the default GCP service account. If present,
-    /// this will be used to obtain the default account OAuth token. If absent,
-    /// the GKE metadata service is consulted.
-    default_service_account_key_file: Option<ServiceAccountKeyFile>,
-    /// An AWS credentials provider. If present, will be used to obtain GCP
-    /// credentials via a Workload Identity Pool (not to be confused with GKE
-    /// workload identity) as described in
-    /// https://cloud.google.com/iam/docs/access-resources-aws#exchange-token
-    aws_credentials: Option<P>,
+    /// Provides the default Oauth token, which may be used to directly access
+    /// GCP services or may be used to impersonate some GCP service account.
+    default_token_provider: DefaultTokenProvider<P>,
     /// Holds the service account email to impersonate, if one was provided to
     /// GcpOauthTokenProvider::new.
     account_to_impersonate: Option<String>,
@@ -129,20 +339,7 @@ impl<P: ProvideAwsCredentials> fmt::Debug for GcpOauthTokenProvider<P> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("OauthTokenProvider")
             .field("account_to_impersonate", &self.account_to_impersonate)
-            .field(
-                "default_service_account_key_file",
-                &self
-                    .default_service_account_key_file
-                    .as_ref()
-                    .map(|key_file| key_file.client_email.clone()),
-            )
-            /* .field(
-                "aws_credentials",
-                &self
-                    .aws_credentials
-                    .as_ref()
-                    .map(|aws_credentials| aws_credentials.to_string()),
-            )*/
+            .field("default_token_provider", &self.default_token_provider)
             .field(
                 "default_account_token",
                 &self.default_account_token.as_ref().map(|_| "redacted"),
@@ -177,20 +374,22 @@ impl<P: ProvideAwsCredentials> GcpOauthTokenProvider<P> {
         scope: &str,
         account_to_impersonate: Option<String>,
         key_file_reader: Option<Box<dyn Read>>,
-        aws_credentials: Option<P>,
+        workload_identity_pool_params: Option<WorkloadIdentityPoolParameters<P>>,
         parent_logger: &Logger,
     ) -> Result<Self> {
-        if let (Some(_), Some(_)) = (&key_file_reader, &aws_credentials) {
-            return Err(anyhow!(
-                "either but not both of key_file_reader or aws_credentials may be provided"
-            ));
-        }
-
-        let key_file: Option<ServiceAccountKeyFile> = match key_file_reader {
-            Some(reader) => {
-                serde_json::from_reader(reader).context("failed to deserialize JSON key file")?
+        let default_token_provider = match (key_file_reader, workload_identity_pool_params) {
+            (Some(_), Some(_)) => {
+                return Err(anyhow!(
+                    "either but not both of key_file_reader or aws_credentials may be provided"
+                ))
             }
-            None => None,
+            (Some(reader), None) => DefaultTokenProvider::ServiceAccountKeyFile(
+                serde_json::from_reader(reader).context("failed to deserialize JSON key file")?,
+            ),
+            (None, Some(parameters)) => {
+                DefaultTokenProvider::AwsIamFederationViaWorkloadIdentityPool(parameters)
+            }
+            (None, None) => DefaultTokenProvider::GkeMetadataService,
         };
 
         let logger = parent_logger.new(o!(
@@ -200,8 +399,7 @@ impl<P: ProvideAwsCredentials> GcpOauthTokenProvider<P> {
 
         Ok(GcpOauthTokenProvider {
             scope: scope.to_owned(),
-            default_service_account_key_file: key_file,
-            aws_credentials,
+            default_token_provider,
             account_to_impersonate,
             default_account_token: None,
             impersonated_account_token: None,
@@ -222,16 +420,9 @@ impl<P: ProvideAwsCredentials> GcpOauthTokenProvider<P> {
             }
         }
 
-        let http_response = match (
-            &self.default_service_account_key_file,
-            &self.aws_credentials,
-        ) {
-            (Some(key_file), _) => self.account_token_with_key_file(key_file)?,
-            (_, Some(aws_credentials)) => {
-                self.account_token_with_workload_identity_pool(aws_credentials)?
-            }
-            (None, None) => self.account_token_from_gke_metadata_service()?,
-        };
+        let http_response =
+            self.default_token_provider
+                .default_token(&self.scope, &self.agent, &self.logger)?;
 
         let response = http_response
             .into_json::<OauthTokenResponse>()
@@ -247,154 +438,6 @@ impl<P: ProvideAwsCredentials> GcpOauthTokenProvider<P> {
         });
 
         Ok(response.access_token)
-    }
-
-    /// Fetches default account token from GKE metadata service. Returns the
-    /// ureq::Response, whose body will be an OauthTokenResponse if the HTTP
-    /// call was successful.
-    fn account_token_from_gke_metadata_service(&self) -> Result<Response> {
-        debug!(
-            self.logger,
-            "obtaining default account token from GKE metadata service"
-        );
-
-        let mut request = self.agent.prepare_request(RequestParameters {
-            url: default_oauth_token_url(),
-            method: Method::Get,
-            ..Default::default()
-        })?;
-
-        request = request.set("Metadata-Flavor", "Google");
-
-        self.agent
-            .call(&self.logger, &request)
-            .context("failed to query GKE metadata service")
-    }
-
-    /// Fetches the default account token from Google OAuth API using a JWT
-    /// constructed from the parameters in the provided key file. If the JWT is
-    /// successfully constructed, returns the ureq::Response whose body will be
-    /// an OauthTokenResponse if the HTTP call was successful, but may be an
-    /// error.
-    fn account_token_with_key_file(&self, key_file: &ServiceAccountKeyFile) -> Result<Response> {
-        debug!(self.logger, "obtaining account token from key file");
-        // We construct the JWT per Google documentation:
-        // https://developers.google.com/identity/protocols/oauth2/service-account#authorizingrequests
-        let mut header = Header::new(Algorithm::RS256);
-        header.kid = Some(key_file.private_key_id.to_owned());
-
-        // The iat and exp fields in a JWT are in seconds since UNIX epoch.
-        let now = Utc::now().timestamp();
-        let claims = Claims {
-            iss: key_file.client_email.to_owned(),
-            scope: self.scope.to_owned(),
-            aud: key_file.token_uri.to_owned(),
-            iat: now,
-            exp: now + 3600, // token expires in one hour
-        };
-
-        let encoding_key = EncodingKey::from_rsa_pem(key_file.private_key.as_bytes())
-            .context("failed to parse PEM RSA key")?;
-
-        let token =
-            encode(&header, &claims, &encoding_key).context("failed to construct and sign JWT")?;
-
-        let request_body = format!(
-            "grant_type={}&assertion={}",
-            urlencoding::encode("urn:ietf:params:oauth:grant-type:jwt-bearer"),
-            token
-        );
-
-        let request = self.agent.prepare_request(RequestParameters {
-            url: Url::parse(&key_file.token_uri).context(format!(
-                "failed to parse key_file.token_uri: {}",
-                &key_file.token_uri
-            ))?,
-            method: Method::Post,
-            ..Default::default()
-        })?;
-
-        let request = request.set("Content-Type", "application/x-www-form-urlencoded");
-        self.agent
-            .send_string(&self.logger, &request, &request_body)
-            .context("failed to get account token with key file")
-    }
-
-    /// Uses a GCP workload identity pool provider to fetch a federated access
-    /// token which can later be presented to iamcredentials.googleapis.com to
-    /// obtain an Oauth token that allows impersonation of some GCP service
-    /// account.
-    /// https://cloud.google.com/iam/docs/access-resources-aws#exchange-token
-    fn account_token_with_workload_identity_pool(&self, aws_credentials: &P) -> Result<Response> {
-        debug!(
-            self.logger,
-            "getting GCP workload identity pool federated token"
-        );
-        // rusoto_core::Region::default consults AWS_DEFAULT_REGION and
-        // AWS_REGION environment variables to figure out what region we are
-        // running in, which we need to pick an STS endpoint
-        let aws_region = Region::default();
-
-        // The full resource name of the workload identity pool provider, which
-        // looks like "//iam.googleapis.com/projects/PROJECT_NUMBER/locations/global/workloadIdentityPools/POOL_ID/providers/PROVIDER_ID",
-        // is obtained from the environment.
-        let workload_identity_pool_provider = env::var("WORKLOAD_IDENTITY_POOL_PROVIDER")
-            .context("could not get GCP workload identity pool provider from environment")?;
-
-        // First, we must obtain credentials for the AWS IAM role mapped to this
-        // facilitator's Kubernetes service account
-        let credentials = basic_runtime()?
-            .block_on(aws_credentials.credentials())
-            .context("failed to get AWS credentials")?;
-
-        // Next, we construct a GetCallerIdentity token
-        let sts_request_url = Url::parse(&format!(
-            "https://sts.{}.amazonaws.com?Action=GetCallerIdentity&Version=2011-06-15",
-            aws_region.name()
-        ))
-        .context("failed to parse STS request URL")?;
-
-        let get_caller_identity_token = get_caller_identity_token(
-            &sts_request_url,
-            &workload_identity_pool_provider,
-            &aws_region,
-            &credentials,
-        )?;
-
-        // The GetCallerIdentity token goes into the body of the request sent to
-        // sts.googleapis.com (one assumes that GCP relays that request to
-        // sts.amazonaws.com to prove that we control the AWS IAM role).
-        let request_body = ureq::json!({
-            "audience": &workload_identity_pool_provider,
-            "grantType": "urn:ietf:params:oauth:grant-type:token-exchange",
-            "requestedTokenType": "urn:ietf:params:oauth:token-type:access_token",
-            "scope": "https://www.googleapis.com/auth/cloud-platform",
-            "subjectToken": urlencoding::encode(&get_caller_identity_token.to_string()),
-            "subjectTokenType": "urn:ietf:params:aws:token-type:aws4_request",
-        });
-
-        let request = self
-            .agent
-            .prepare_request(RequestParameters {
-                url: Url::parse("https://sts.googleapis.com/v1/token")
-                    .context("failed to construct sts.googleapis.com URL")?,
-                method: Method::Post,
-                // This request is unauthenticated, except for the signature and
-                // token on the inner subjectToken
-                token_provider: None,
-            })?
-            .set("Content-Type", "application/json; charset=utf-8");
-
-        debug!(
-            self.logger,
-            "obtaining federated access token. request {:?}\ngci_token {}\nbody {}",
-            request,
-            get_caller_identity_token,
-            request_body
-        );
-        self.agent
-            .send_json_request(&self.logger, &request, &request_body)
-            .context("failed to obtain federated access token from sts.googleapis.com")
     }
 
     /// Returns the current OAuth token for the impersonated service account, if
@@ -482,12 +525,13 @@ mod tests {
             "https://www.googleapis.com/auth/devstorage.read_write",
             Some("prio-ybultwbpbhpeuvex@timg-prio-aws-dev.iam.gserviceaccount.com".to_owned()),
             None,
-            Some(aws_credentials_provider),
+            Some(WorkloadIdentityPoolParameters{
+                workload_identity_pool_provider: "//iam.googleapis.com/projects/533213449904/locations/global/workloadIdentityPools/aws-identity-pool/providers/aws-identity-pool-provider".to_owned(),
+                aws_credentials_provider
+            }),
             &logger,
         )
         .unwrap();
-
-        env::set_var("WORKLOAD_IDENTITY_POOL_PROVIDER", "//iam.googleapis.com/projects/533213449904/locations/global/workloadIdentityPools/aws-identity-pool/providers/aws-identity-pool-provider");
 
         let _gcp_sa_oauth_token = gcp_oauth_token_provider
             .ensure_impersonated_service_account_oauth_token()
