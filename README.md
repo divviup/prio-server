@@ -1,7 +1,7 @@
 # prio-server
 [![Build Status]][actions]
 
-[Build Status]: https://github.com/abetterinternet/abetterinternet/workflows/ci-build/badge.svg
+[Build Status]: https://github.com/abetterinternet/prio-server/workflows/ci-build/badge.svg
 [actions]: https://github.com/abetterinternet/prio-server/actions?query=branch%3Amain
 
 This is ISRG's implementation server components for [Prio](https://crypto.stanford.edu/prio/), the privacy preserving statistics aggregation system.
