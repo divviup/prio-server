@@ -5,7 +5,7 @@ use crate::{
 };
 use anyhow::{anyhow, Context, Result};
 use async_trait::async_trait;
-use chrono::prelude::Utc;
+use chrono::{prelude::Utc, DateTime};
 use hmac::{Hmac, Mac, NewMac};
 use http::header::{HeaderMap, HeaderName};
 use rusoto_core::{
@@ -352,13 +352,28 @@ pub(crate) fn get_caller_identity_token(
     aws_region: &Region,
     credentials: &AwsCredentials,
 ) -> Result<serde_json::Value> {
+    get_caller_identity_token_at_time(
+        Utc::now(),
+        sts_request_url,
+        workload_identity_pool_provider,
+        aws_region,
+        credentials,
+    )
+}
+
+fn get_caller_identity_token_at_time(
+    request_time: DateTime<Utc>,
+    sts_request_url: &Url,
+    workload_identity_pool_provider: &str,
+    aws_region: &Region,
+    credentials: &AwsCredentials,
+) -> Result<serde_json::Value> {
     // Rusoto provides a SignedRequest struct that can construct and sign
     // correct sts:GetCallerIdentity requests, but unfortunately it insists on
     // using the form with a body, which sts.googleapis.com rejects. The rust-s3
     // crate provides a more flexible implementation of request signing, except
     // that it is hardcoded to refer to "s3" in various places, but we can use
     // a lot of its code.
-    let request_time = Utc::now();
     let aws_security_token = credentials
         .token()
         .as_ref()
@@ -490,6 +505,7 @@ pub(crate) fn get_caller_identity_token(
 mod tests {
     use super::*;
     use bytes::Bytes;
+    use chrono::TimeZone;
     use http::{status::StatusCode, HeaderMap};
     use rusoto_core::request::{BufferedHttpResponse, HttpDispatchError};
 
@@ -585,5 +601,87 @@ mod tests {
         for test_case in test_cases {
             assert_eq!(retryable(&test_case.error), test_case.is_retryable);
         }
+    }
+
+    #[test]
+    fn get_caller_identity_token_correctness() {
+        // Valid request URL
+        let sts_request_url = Url::parse(
+            "https://sts.us-east-1.amazonaws.com/?Action=GetCallerIdentity&Version=2011-06-15",
+        )
+        .unwrap();
+
+        // Host-less but valid URL from Url docs
+        let bad_request_url = Url::parse("data:text/plain,Stuff").unwrap();
+
+        // AWS credentials invalid due to missing token
+        let aws_creds_no_token = AwsCredentials::new("fake-key", "fake-secret", None, None);
+
+        // Valid AWS credentials
+        let aws_creds = AwsCredentials::new(
+            "fake-key",
+            "fake-secret",
+            Some("fake-token".to_string()),
+            None,
+        );
+
+        // AWS creds without a token should cause non-specific error
+        get_caller_identity_token(
+            &sts_request_url,
+            "fake-workload-identity-pool-provider",
+            &Region::ApEast1,
+            &aws_creds_no_token,
+        )
+        .unwrap_err();
+
+        // Request URL without host should cause non-specific error
+        get_caller_identity_token(
+            &bad_request_url,
+            "fake-workload-identity-pool-provider",
+            &Region::ApEast1,
+            &aws_creds,
+        )
+        .unwrap_err();
+
+        // To avoid providing an ad-hoc implementation of sts.googleapis.com, we check the output
+        // against a recorded, strongly-believed-to-be-good token so we can at least prevent trivial
+        // regressions.
+        let token = get_caller_identity_token_at_time(
+            Utc.ymd(2021, 1, 1).and_hms(1, 1, 1),
+            &sts_request_url,
+            "fake-workload-identity-pool-provider",
+            &Region::ApEast1,
+            &aws_creds,
+        )
+        .unwrap();
+
+        let expected_token = serde_json::json!({
+            "url": "https://sts.us-east-1.amazonaws.com/?Action=GetCallerIdentity&Version=2011-06-15",
+            "method": "POST",
+            "headers": [
+                {
+                    "key": "Authorization",
+                    "value": "AWS4-HMAC-SHA256 Credential=fake-key/20210101/ap-east-1/sts/aws4_request,SignedHeaders=host;x-amz-date;x-amz-security-token;x-goog-cloud-target-resource,Signature=e5e352ea8b93552bd3a11e01ff83f6fa6cdc4dfa19cc57be9d54c9d746918dc0"
+                },
+                {
+                    "key": "host",
+                    "value": "sts.us-east-1.amazonaws.com"
+                },
+                {
+                    "key": "x-amz-date",
+                    "value": "20210101T010101Z"
+                },
+                {
+                    "key": "x-amz-security-token",
+                    "value": "fake-token"
+                },
+                {
+                    "key": "x-goog-cloud-target-resource",
+                    "value": "fake-workload-identity-pool-provider"
+                }
+            ]
+        });
+
+        assert_eq!(token, expected_token);
     }
 }
