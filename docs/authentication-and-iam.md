@@ -1,6 +1,6 @@
 # Authentication and IAM
 
-`prio-server` supports running in either Google Kubernetes Engine or Amazon AWS Elastic Kubernetes service. In either configuration, it is a multi-cloud application. We expect that the two `prio-server` deployments will run on different clouds to eliminate the possibility of a single cloud vendor being able to decrypt and reassemble Prio data shares and learning anything about individual data submissions. So an instance running in GKE will need to read and write to and from Amazon S3 buckets, and an instance running in EKS will need to do the same to Google Cloud Storage buckets. Fortunately, GCP and AWS IAM provide rich support for federating identity across clouds, enabling us to securely share cloud resources with no or minimal credential sharing. However, the authentication flows can get quite complicated. Rust lacks mature cloud platform SDKs which means that `facilitator` has to prove its own implementation of several authentication flows, and while `workflow-manager` benefits from robust, first-party SDKs, it remains our responsibility to configure GCP and AWS cloud resources in Terraform so that they can be accessed. This document attempts to enumerate the various authentication flows used in different deployments of `prio-server` and to clarify some concepts used in the client implementations.
+`prio-server` supports running in either Google Kubernetes Engine or Amazon AWS Elastic Kubernetes service. In either configuration, it is a multi-cloud application, because we expect that the two `prio-server` deployments will run on different clouds to eliminate the possibility of a single cloud vendor being able to decrypt and reassemble Prio data shares and learning anything about individual data submissions. So an instance running in GKE will need to read and write to and from Amazon S3 buckets, and an instance running in EKS will need to do the same to Google Cloud Storage buckets. Fortunately, GCP and AWS IAM can be federated in both directions, enabling us to securely share cloud resources with no or minimal credential sharing. However, the authentication flows can get quite complicated. Since Rust lacks mature cloud platform SDKs, `facilitator` has to provide its own implementation of several authentication flows, and while `workflow-manager` benefits from robust, first-party SDKs, it remains our responsibility to configure GCP and AWS cloud resources in Terraform so that they can be accessed. This document attempts to enumerate the various authentication flows used in different deployments of `prio-server` and to clarify some concepts used in the client implementations.
 
 ## Kubernetes service accounts
 
@@ -24,7 +24,11 @@ On AWS, we use [IAM roles for service accounts](https://docs.aws.amazon.com/eks/
 
 Google Kubernetes Engine offers [workload identity](https://cloud.google.com/kubernetes-engine/docs/how-to/workload-identity) as its means of mapping Kubernetes service accounts to GCP service accounts. We enable workload identity on the GKE clusters we create, and then annotate the Kubernetes service accounts and GCP service accounts so that GCP IAM can determine which goes with which. Oauth tokens for GCP service accounts are made available to pods via an unauthenticated request to the GKE metadata service, which is exposed in each pod's network namespace. Those tokens may then be used as bearer tokens in `Authentication` headers on subsequent requests to GCP API endpoints.
 
+This is implemented in `facilitator::gcp_oauth::DefaultTokenProvider::account_token_from_gke_metadata_service()` in `facilitator/src/gcp_oauth.rs`.
+
 It is possible for a GCP service account to impersonate another service account, if the latter is configured to allow it. For example, every per-locality data share processor in a `prio-server` environment impersonates a single GCP service account to send sum parts to the portal server. This impersonation is achieved by sending a request to `iamcredentials.googleapis.com`, authenticated with the workload identity token obtained from the GKE metadata service.
+
+This is implemneted in `facilitator::gcp_oauth::GcpOauthTokenProvider::ensure_impersonated_service_account_oauth_token()` in `facilitator/src/gcp_oauth.rs`.
 
 ## Cross-cloud authentication
 
@@ -38,9 +42,13 @@ The simplest means of impersonating a GCP service account is a [service acount k
 
 In this authentication flow, neither the Kubernetes service account nor an AWS IAM role come into play. The Kubernetes pod uses the private key in the key file to sign a request to sign a JWT, sends it to `iamcredentials.googleapis.com` and obtains an Oauth token which can be presented as a bearer token in subsequent API requests to other GCP services.
 
+This is implemented in `facilitator::gcp_oauth::DefaultTokenProvider::account_token_with_key_file()` in `facilitator/src/gcp_oauth.rs`.
+
 #### [Workload identity pool](https://cloud.google.com/iam/docs/access-resources-aws)
 
 Workload identity pools (not to be confused with GKE workload identity) allows federating GCP and AWS IAM together. A _workload identity pool_ and a _workload identity pool provider_ are created in the GCP project, configured to allow one or more AWS IAM entities (users or roles) to impersonate a GCP service account. The pod in EKS must obtain credentials for the AWS IAM role (via IAM roles for service accounts), then can use those credentials to construct a signed `sts:GetCallerIdentity`request. Instead of sending that request to `sts.amazonaws.com`, the pod serializes it into a JSON request to `sts.googleapis.com`. That GCP service reconstructs the serialized `sts:GetCallerIdentity` request and sends it to `sts.amazonaws.com`, proving that the EKS Kubernetes pod does have valid credentials for the particular AWS IAM role. `sts.googleapis.com` then provides a _federated access token_ to the pod, which can then be presented to `iamcredentials.googleapis.com` and exchanged for an Oauth token for a GCP service account.
+
+The downside of this authentication flow is that it is more complicated both in terms of setup and configuration and on the hot or data path of making API requests. However, it is more secure since no secret keys need to be shared from GCP to AWS, and is more hands off once deployed because rotating a GCP service account key is transparent to the AWS side.
 
 So, end to end, this flow goes:
 
@@ -50,15 +58,19 @@ So, end to end, this flow goes:
     - Exchange GCP federated access token for GCP service account token with `iamcredentials.googleapis.com`
     - Use GCP service account token to authenticate API request to e.g. `pubsub.googleapis.com`
 
-### GCP -> AWS
+Construction of the `GetCallerIdentity` token is implemented in `facilitator::aws_authentication::get_caller_identity_token()` in `facilitator/src/aws_credentials.rs`. The request to `sts.googleapis.com` is implemented in `facilitator::gcp_oauth::DefaultProvider::account_token_with_workload_identity_pool()` in `facilitator/src/gcp_oauth.rs`.
+
+### Assuming AWS IAM roles from GCP
 
 AWS supports identity federation with GCP using [OpenID Connect web identity](https://docs.aws.amazon.com/IAM/latest/UserGuide/id_roles_providers_oidc.html). When creating an IAM role, [we define a role assumption policy that federates trust to `accounts.google.com` for a particular GCP service account](https://docs.aws.amazon.com/IAM/latest/UserGuide/id_roles_create_for-idp_oidc.html). This enables us to obtain AWS IAM credentials for the role by presenting a request authenticated by a GCP service account to `sts:AssumeRoleWithWebIdentity`.
 
 The end-to-end authentication flow:
 
-    - Obtain GCP service account token from GKE metadata service
+    - Obtain GCP service account OIDC token from GKE metadata service
     - Exchange GCP service account token for AWS IAM credentials with `sts.amazonaws.com`
     - Use AWS IAM credentials to authenticate API request to e.g. `s3.amazonaws.com`
+
+Obtaining the OIDC authentication token from the GKE metadata service is implemented in `facilitator::aws_credentials::Provider::new_web_identity_with_oidc()` in `facilitator/src/aws_authentication.rs`.
 
 ### Simulating authentication flows at the command line
 
