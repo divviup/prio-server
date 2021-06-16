@@ -112,6 +112,12 @@ Had you generated and intaken multiple batches with `generate-ingestion-sample` 
 
 To build a Docker image, run `./build.sh`. To run that image locally, `docker run letsencrypt/prio-facilitator -- --help`.
 
+### Be careful to avoid depending on OpenSSL!
+
+We take great care to use [`rustls`](https://github.com/ctz/rustls) instead of any native TLS implementation, to avoid depending on OpenSSL. Besides `rustls`'s sterling reputation for quality, using a pure Rust TLS implementation means we don't [have to use special tricks to statically link OpenSSL](https://users.rust-lang.org/t/sigsegv-with-program-linked-against-openssl-in-an-alpine-container/52172).
+
+When adding a dependency to `Cargo.toml`, check if it depends on [`native-tls`](https://crates.io/crates/native-tls) or otherwise winds up pulling in the [`openssl`](https://crates.io/crates/openssl) crate. See if it can be configured to use `rustls`. For example, [Rusoto's crates all have a `rustls` feature](https://crates.io/crates/rusoto_core).
+
 ## Linting manifest files
 
 The `facilitator lint-manifest` subcommand can validate the various manifest files used in the system. See that subcommand's help text for more information on usage.
