@@ -179,7 +179,7 @@ checksum = "9fe17f59a06fe8b87a6fc8bf53bb70b3aba76d7685f432487a68cd5552853625"
 dependencies = [
  "getrandom 0.2.2",
  "instant",
- "rand 0.8.3",
+ "rand 0.8.4",
 ]
 
 [[package]]
@@ -638,7 +638,7 @@ dependencies = [
  "pkix",
  "prio",
  "prometheus",
- "rand 0.8.3",
+ "rand 0.8.4",
  "ring",
  "rusoto_core",
  "rusoto_mock",
@@ -1346,7 +1346,7 @@ dependencies = [
  "httparse",
  "lazy_static",
  "log",
- "rand 0.8.3",
+ "rand 0.8.4",
  "regex",
  "serde_json",
  "serde_urlencoded 0.7.0",
@@ -1738,9 +1738,9 @@ dependencies = [
 
 [[package]]
 name = "rand"
-version = "0.8.3"
+version = "0.8.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0ef9e7e66b4468674bfcb0c81af8b7fa0bb154fa9f28eb840da5c447baeb8d7e"
+checksum = "2e7573632e6454cf6b99d7aac4ccca54be06da05aca2ef7423d22d27d4d4bcd8"
 dependencies = [
  "libc",
  "rand_chacha 0.3.0",
@@ -2550,7 +2550,7 @@ checksum = "dac1c663cfc93810f88aed9b8941d48cabf856a1b111c29a40439018d870eb22"
 dependencies = [
  "cfg-if",
  "libc",
- "rand 0.8.3",
+ "rand 0.8.4",
  "redox_syscall 0.2.4",
  "remove_dir_all",
  "winapi",
@@ -2867,7 +2867,7 @@ dependencies = [
  "httparse",
  "input_buffer",
  "log",
- "rand 0.8.3",
+ "rand 0.8.4",
  "sha-1 0.9.3",
  "url",
  "utf-8",
