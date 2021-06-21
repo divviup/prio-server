@@ -10,7 +10,7 @@ require (
 	google.golang.org/grpc v1.38.0
 	k8s.io/api v0.21.2
 	k8s.io/apimachinery v0.21.2
-	k8s.io/client-go v0.21.1
+	k8s.io/client-go v0.21.2
 )
 
 replace github.com/abetterinternet/prio-server/manifest-updater => ../manifest-updater
