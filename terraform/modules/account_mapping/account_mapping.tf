@@ -47,6 +47,7 @@ resource "google_service_account" "account" {
 # This is the Kubernetes-level service account which we associate with the GCP
 # service account above.
 resource "kubernetes_service_account" "account" {
+  automount_service_account_token = false
   metadata {
     name      = var.kubernetes_account_name
     namespace = var.kubernetes_namespace

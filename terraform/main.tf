@@ -275,7 +275,6 @@ provider "kubernetes" {
   host                   = module.gke.cluster_endpoint
   cluster_ca_certificate = base64decode(module.gke.certificate_authority_data)
   token                  = data.google_client_config.current.access_token
-  load_config_file       = false
 }
 
 
