@@ -270,11 +270,11 @@ resource "kubernetes_cron_job" "workflow_manager" {
               name  = "workflow-manager"
               image = "${var.container_registry}/${var.workflow_manager_image}:${var.workflow_manager_version}"
               resources {
-                requests {
+                requests = {
                   memory = "500Mi"
                   cpu    = "0.5"
                 }
-                limits {
+                limits = {
                   memory = "8Gi"
                   cpu    = "1.5"
                 }
@@ -324,6 +324,7 @@ resource "kubernetes_cron_job" "workflow_manager" {
 }
 
 resource "kubernetes_service" "intake_batch" {
+  wait_for_load_balancer = false
   metadata {
     name      = "intake-batch-${var.ingestor}"
     namespace = var.kubernetes_namespace
@@ -374,7 +375,8 @@ resource "kubernetes_deployment" "intake_batch" {
         }
       }
       spec {
-        service_account_name = module.account_mapping.kubernetes_account_name
+        service_account_name            = module.account_mapping.kubernetes_account_name
+        automount_service_account_token = false
         container {
           name  = "facile-container"
           image = "${var.container_registry}/${var.facilitator_image}:${var.facilitator_version}"
@@ -391,11 +393,11 @@ resource "kubernetes_deployment" "intake_batch" {
             # use an entire core if necessary. However we set the requests much
             # lower since most batches are much smaller than 3-400 MB and we get
             # more efficient bin packing this way.
-            requests {
+            requests = {
               memory = "50Mi"
               cpu    = "0.1"
             }
-            limits {
+            limits = {
               memory = "550Mi"
               cpu    = "1.5"
             }
@@ -433,6 +435,7 @@ resource "kubernetes_deployment" "intake_batch" {
 }
 
 resource "kubernetes_service" "aggregate" {
+  wait_for_load_balancer = false
   metadata {
     name      = "aggregate-${var.ingestor}"
     namespace = var.kubernetes_namespace
@@ -484,7 +487,8 @@ resource "kubernetes_deployment" "aggregate" {
         }
       }
       spec {
-        service_account_name = module.account_mapping.kubernetes_account_name
+        service_account_name            = module.account_mapping.kubernetes_account_name
+        automount_service_account_token = false
         container {
           name  = "facile-container"
           image = "${var.container_registry}/${var.facilitator_image}:${var.facilitator_version}"
@@ -497,11 +501,11 @@ resource "kubernetes_deployment" "aggregate" {
           resources {
             # As in the intake-batch case, aggregate jobs are single threaded
             # and need to fit whole ingestion batches into memory.
-            requests {
+            requests = {
               memory = "50Mi"
               cpu    = "0.1"
             }
-            limits {
+            limits = {
               memory = "550Mi"
               cpu    = "1.5"
             }
