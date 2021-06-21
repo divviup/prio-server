@@ -32,9 +32,7 @@ COPY ./facilitator ./facilitator
 ARG BUILD_INFO=unspecified
 
 # This cargo build command must match the one above, or the build cache will not be reused.
-RUN cargo build --manifest-path ./facilitator/Cargo.toml
-# We build in debug mode so the build runs quickly, then strip the binary for size.
-RUN strip facilitator/target/debug/facilitator
+RUN cargo build --manifest-path ./facilitator/Cargo.toml --release
 
 # Build a minimal container from Alpine containing only the stripped binary and
 # no intermediate build artifacts
