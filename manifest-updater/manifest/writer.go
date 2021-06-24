@@ -9,6 +9,17 @@ import (
 	"github.com/rs/zerolog/log"
 )
 
+// DataShareProcessorSpecificManifestWriter writes data share processor
+// specific manifests to some storage
+type DataShareProcessorSpecificManifestWriter interface {
+	// WriteDataShareProcessorSpecificManifest writes the provided manifest to
+	// the provided path in the writer's backing storage, or returns an error
+	// on failure.
+	WriteDataShareProcessorSpecificManifest(manifest DataShareProcessorSpecificManifest, path string) error
+}
+
+// Writer writes ingestor global and data share processor specific manifests to
+// Google Cloud Storage buckets
 type Writer struct {
 	manifestBucketLocation string
 }
@@ -23,7 +34,7 @@ func (w *Writer) WriteIngestorGlobalManifest(manifest IngestorGlobalManifest, pa
 	return w.writeManifest(manifest, path)
 }
 
-func (w *Writer) WriteDataShareSpecificManifest(manifest DataShareProcessorSpecificManifest, path string) error {
+func (w *Writer) WriteDataShareProcessorSpecificManifest(manifest DataShareProcessorSpecificManifest, path string) error {
 	return w.writeManifest(manifest, path)
 }
 

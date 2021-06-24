@@ -155,18 +155,35 @@ func globalManifestExists(manifestBaseURL string) (bool, error) {
 	return true, nil
 }
 
+// ManifestFetcher fetches manifests from some storage
+type ManifestFetcher interface {
+	// Fetch fetches the manifest for the specified data share processor and
+	// returns it, if it exists and is well-formed. Returns (nil, nil) if the
+	// manifest does not exist. Returns (nil, error) if something went wrong
+	// while trying to fetch or parse the manifest.
+	Fetch(dataShareProcessorName string) (*manifest.DataShareProcessorSpecificManifest, error)
+}
+
+// HTTPSManifestFetcher fetches manifests over HTTPS
+type HTTPSManifestFetcher struct {
+	manifestBaseURL string
+}
+
+func NewHTTPSManifestFetcher(manifestBaseURL string) HTTPSManifestFetcher {
+	return HTTPSManifestFetcher{manifestBaseURL}
+}
+
 // fetchSpecificManifest fetches the manifest for the specified data share
 // processor relative to the provided manifest base URL and returns it, if it
 // exists and is well-formed. Returns (nil, nil) if the manifest does not exist.
 // Returns nil and some error if something went wrong while trying to fetch or
 // parse the manifest.
-func fetchSpecificManifest(manifestBaseURL, dataShareProcessorName string) (*manifest.DataShareProcessorSpecificManifest, error) {
-	path := fmt.Sprintf("https://%s/%s-manifest.json", manifestBaseURL, dataShareProcessorName)
+func (f *HTTPSManifestFetcher) Fetch(dataShareProcessorName string) (*manifest.DataShareProcessorSpecificManifest, error) {
+	path := fmt.Sprintf("https://%s/%s-manifest.json", f.manifestBaseURL, dataShareProcessorName)
 
 	resp, err := http.Get(path)
 	if err != nil {
 		return nil, fmt.Errorf("error when getting manifest %s: %s", path, err)
-
 	}
 	defer resp.Body.Close()
 
@@ -188,12 +205,12 @@ func fetchSpecificManifest(manifestBaseURL, dataShareProcessorName string) (*man
 }
 
 func setupTestEnvironment(
-	k8sClient *kubernetes.Clientset,
+	k8sSecretsClientGetter k8scorev1.SecretsGetter,
 	ingestor *SingletonIngestor,
 	manifestBucket string,
 ) error {
 	batchSigningPublicKey, err := createBatchSigningPublicKey(
-		k8sClient.CoreV1().Secrets(ingestor.TesterKubernetesNamespace),
+		k8sSecretsClientGetter.Secrets(ingestor.TesterKubernetesNamespace),
 		ingestor.TesterKubernetesNamespace,
 		ingestor.BatchSigningKeyName,
 	)
@@ -249,13 +266,13 @@ func createBatchSigningPublicKey(
 }
 
 func createManifest(
-	k8sClient *kubernetes.Clientset,
+	k8sSecretsClientGetter k8scorev1.SecretsGetter,
 	dataShareProcessorName string,
 	manifestWrapper *SpecificManifestWrapper,
-	manifestBucket string,
+	manifestWriter manifest.DataShareProcessorSpecificManifestWriter,
 	packetEncryptionKeyCSRs manifest.PacketEncryptionKeyCSRs,
 ) error {
-	k8sSecretsClient := k8sClient.CoreV1().Secrets(manifestWrapper.KubernetesNamespace)
+	k8sSecretsClient := k8sSecretsClientGetter.Secrets(manifestWrapper.KubernetesNamespace)
 
 	for name, batchSigningPublicKey := range manifestWrapper.SpecificManifest.BatchSigningPublicKeys {
 		if batchSigningPublicKey.PublicKey != "" {
@@ -315,9 +332,7 @@ func createManifest(
 
 	// Put the specific manifests into the manifest bucket.
 	destination := fmt.Sprintf("%s-manifest.json", dataShareProcessorName)
-	writer := manifest.NewWriter(manifestBucket)
-
-	if err := writer.WriteDataShareSpecificManifest(manifestWrapper.SpecificManifest, destination); err != nil {
+	if err := manifestWriter.WriteDataShareProcessorSpecificManifest(manifestWrapper.SpecificManifest, destination); err != nil {
 		return fmt.Errorf("could not write data share specific manifest: %s", err)
 	}
 
@@ -325,7 +340,7 @@ func createManifest(
 }
 
 func backupKeys(
-	k8sClient *kubernetes.Clientset,
+	k8sSecretsClientGetter k8scorev1.SecretsGetter,
 	gcpProjectName string,
 	manifestWrapper *SpecificManifestWrapper,
 ) error {
@@ -347,7 +362,7 @@ func backupKeys(
 		keyNames = append(keyNames, keyName)
 	}
 
-	k8sSecretsClient := k8sClient.CoreV1().Secrets(manifestWrapper.KubernetesNamespace)
+	k8sSecretsClient := k8sSecretsClientGetter.Secrets(manifestWrapper.KubernetesNamespace)
 	secretsBackup, err := key.NewGCPSecretManagerBackup(gcpProjectName)
 	if err != nil {
 		return fmt.Errorf("failed to create secret backup client: %w", err)
@@ -356,11 +371,71 @@ func backupKeys(
 	for _, keyName := range keyNames {
 		secret, err := k8sSecretsClient.Get(context, keyName, k8smetav1.GetOptions{})
 		if err != nil {
-			return fmt.Errorf("could not locate kubernetes secret %s/%s: %w", manifestWrapper.KubernetesNamespace, keyName, err)
+			return fmt.Errorf(
+				"could not locate kubernetes secret %s/%s: %w",
+				manifestWrapper.KubernetesNamespace,
+				keyName,
+				err,
+			)
 		}
 
 		if err := secretsBackup.BackupSecret(context, secret); err != nil {
 			return fmt.Errorf("failed to backup secret %s: %w", secret.ObjectMeta.Name, err)
+		}
+	}
+
+	return nil
+}
+
+func createManifests(
+	k8sSecretsClientGetter k8scorev1.SecretsGetter,
+	specificManifests map[string]SpecificManifestWrapper,
+	manifestFetcher ManifestFetcher,
+	manifestWriter manifest.DataShareProcessorSpecificManifestWriter,
+) error {
+	// Iterate over all specific manifests described by TF output so we can
+	// record any packet encryption key CSRs that have already been created. We
+	// assume that the presence of a packet encryption key CSR in any specific
+	// manifest means that a corresponding private key already exists in
+	// Kubernetes secrets.
+	existingManifests := map[string]struct{}{}
+	packetEncryptionKeyCSRs := manifest.PacketEncryptionKeyCSRs{}
+	for dataShareProcessorName := range specificManifests {
+		manifest, err := manifestFetcher.Fetch(dataShareProcessorName)
+		if err != nil {
+			return err
+		}
+
+		if manifest == nil {
+			continue
+		}
+
+		existingManifests[dataShareProcessorName] = struct{}{}
+
+		for keyName, certificateSigningRequest := range manifest.PacketEncryptionKeyCSRs {
+			packetEncryptionKeyCSRs[keyName] = certificateSigningRequest
+		}
+	}
+
+	// Iterate over all specific manifests again, this time creating any that
+	// don't exist, using the previously recorded packet encryption key CSRs to
+	// ensure we don't update (destroy) existing keys. e.g. if the us-la-g-enpa
+	// manifest already exists, but the us-la-apple manifest doesn't, then we
+	// need to create the latter, but want to reuse the existing us-la packet
+	// encryption key.
+	for dataShareProcessorName, manifestWrapper := range specificManifests {
+		if _, ok := existingManifests[dataShareProcessorName]; !ok {
+			if err := createManifest(
+				k8sSecretsClientGetter,
+				dataShareProcessorName,
+				&manifestWrapper,
+				manifestWriter,
+				packetEncryptionKeyCSRs,
+			); err != nil {
+				return err
+			}
+		} else {
+			log.Printf("manifest for %s already exists - skipping", dataShareProcessorName)
 		}
 	}
 
@@ -408,13 +483,15 @@ func main() {
 	}
 
 	if terraformOutput.HasTestEnvironment.Value && terraformOutput.SingletonIngestor.Value != nil {
-		manifestExists, err := globalManifestExists(fmt.Sprintf("%s/singleton-ingestor", terraformOutput.OwnManifestBaseURL.Value))
+		manifestExists, err := globalManifestExists(
+			fmt.Sprintf("%s/singleton-ingestor", terraformOutput.OwnManifestBaseURL.Value),
+		)
 		if err != nil {
 			log.Fatalf("%s", err)
 		} else if manifestExists {
 			log.Println("global ingestor manifest exists - skipping creation")
 		} else if err := setupTestEnvironment(
-			k8sClient,
+			k8sClient.CoreV1(),
 			terraformOutput.SingletonIngestor.Value,
 			terraformOutput.ManifestBucket.Value,
 		); err != nil {
@@ -422,46 +499,20 @@ func main() {
 		}
 	}
 
-	// Iterate over all specific manifests described by TF output so we can
-	// record any packet encryption key CSRs that have already been created. We
-	// assume that the presence of a packet encryption key CSR in any specific
-	// manifest means that a corresponding private key already exists in
-	// Kubernetes secrets.
-	existingManifests := map[string]struct{}{}
-	packetEncryptionKeyCSRs := manifest.PacketEncryptionKeyCSRs{}
-	for dataShareProcessorName, _ := range terraformOutput.SpecificManifests.Value {
-		manifest, err := fetchSpecificManifest(terraformOutput.OwnManifestBaseURL.Value, dataShareProcessorName)
-		if err != nil {
-			log.Fatalf("%s", err)
-		}
+	manifestFetcher := NewHTTPSManifestFetcher(terraformOutput.OwnManifestBaseURL.Value)
+	manifestWriter := manifest.NewWriter(terraformOutput.ManifestBucket.Value)
 
-		if manifest == nil {
-			continue
-		}
-
-		existingManifests[dataShareProcessorName] = struct{}{}
-
-		for keyName, certificateSigningRequest := range manifest.PacketEncryptionKeyCSRs {
-			packetEncryptionKeyCSRs[keyName] = certificateSigningRequest
-		}
+	if err := createManifests(
+		k8sClient.CoreV1(),
+		terraformOutput.SpecificManifests.Value,
+		&manifestFetcher,
+		&manifestWriter,
+	); err != nil {
+		log.Fatalf("%s", err)
 	}
 
-	// Iterate over all specific manifests again, this time creating any that
-	// don't exist, using the previously recorded packet encryption key CSRs to
-	// ensure we don't update (destroy) existing keys. e.g. if the us-la-g-enpa
-	// manifest already exists, but the us-la-apple manifest doesn't, then we
-	// need to create the latter, but want to reuse the existing us-la packet
-	// encryption key.
-	for dataShareProcessorName, manifestWrapper := range terraformOutput.SpecificManifests.Value {
-		if _, ok := existingManifests[dataShareProcessorName]; !ok {
-			if err := createManifest(k8sClient, dataShareProcessorName, &manifestWrapper, terraformOutput.ManifestBucket.Value, packetEncryptionKeyCSRs); err != nil {
-				log.Fatalf("%s", err)
-			}
-		} else {
-			log.Printf("manifest for %s already exists - skipping", dataShareProcessorName)
-		}
-
-		if err := backupKeys(k8sClient, *keyBackupGCPProject, &manifestWrapper); err != nil {
+	for _, manifestWrapper := range terraformOutput.SpecificManifests.Value {
+		if err := backupKeys(k8sClient.CoreV1(), *keyBackupGCPProject, &manifestWrapper); err != nil {
 			log.Fatalf("%s", err)
 		}
 	}
