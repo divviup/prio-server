@@ -363,6 +363,14 @@ locals {
       portal_server_manifest_base_url         = var.ingestors[pair[1]].localities[pair[0]].portal_server_manifest_base_url
     }
   }
+  # For now, we only support advertising manifests in GCS but in #655 we will
+  # add support for S3
+  manifest = {
+    bucket      = module.manifest.bucket
+    base_url    = module.manifest.base_url
+    aws_region  = ""
+    aws_profile = ""
+  }
 }
 
 locals {
@@ -478,7 +486,11 @@ module "monitoring" {
 }
 
 output "manifest_bucket" {
-  value = module.manifest.bucket
+  value = {
+    bucket      = local.manifest.bucket
+    aws_region  = local.manifest.aws_region
+    aws_profile = local.manifest.aws_profile
+  }
 }
 
 output "gke_kubeconfig" {
@@ -505,7 +517,7 @@ output "singleton_ingestor" {
   } : {}
 }
 output "own_manifest_base_url" {
-  value = module.manifest.base_url
+  value = local.manifest.base_url
 }
 
 output "use_test_pha_decryption_key" {

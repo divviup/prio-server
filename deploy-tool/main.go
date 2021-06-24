@@ -51,7 +51,7 @@ type SpecificManifestWrapper struct {
 // variables this program is interested in.
 type TerraformOutput struct {
 	ManifestBucket struct {
-		Value string
+		Value manifest.Bucket
 	} `json:"manifest_bucket"`
 	// OwnManifestBaseURL is a URL without a scheme (https), that manifests can
 	// be found in
@@ -207,7 +207,7 @@ func (f *HTTPSManifestFetcher) Fetch(dataShareProcessorName string) (*manifest.D
 func setupTestEnvironment(
 	k8sSecretsClientGetter k8scorev1.SecretsGetter,
 	ingestor *SingletonIngestor,
-	manifestBucket string,
+	bucket *manifest.Bucket,
 ) error {
 	batchSigningPublicKey, err := createBatchSigningPublicKey(
 		k8sSecretsClientGetter.Secrets(ingestor.TesterKubernetesNamespace),
@@ -230,7 +230,11 @@ func setupTestEnvironment(
 		},
 	}
 
-	writer := manifest.NewWriter(manifestBucket)
+	writer, err := manifest.NewWriter(bucket)
+	if err != nil {
+		return err
+	}
+
 	return writer.WriteIngestorGlobalManifest(globalManifest, "singleton-ingestor/global-manifest.json")
 }
 
@@ -269,7 +273,7 @@ func createManifest(
 	k8sSecretsClientGetter k8scorev1.SecretsGetter,
 	dataShareProcessorName string,
 	manifestWrapper *SpecificManifestWrapper,
-	manifestWriter manifest.DataShareProcessorSpecificManifestWriter,
+	manifestWriter manifest.Writer,
 	packetEncryptionKeyCSRs manifest.PacketEncryptionKeyCSRs,
 ) error {
 	k8sSecretsClient := k8sSecretsClientGetter.Secrets(manifestWrapper.KubernetesNamespace)
@@ -391,7 +395,7 @@ func createManifests(
 	k8sSecretsClientGetter k8scorev1.SecretsGetter,
 	specificManifests map[string]SpecificManifestWrapper,
 	manifestFetcher ManifestFetcher,
-	manifestWriter manifest.DataShareProcessorSpecificManifestWriter,
+	manifestWriter manifest.Writer,
 ) error {
 	// Iterate over all specific manifests described by TF output so we can
 	// record any packet encryption key CSRs that have already been created. We
@@ -493,20 +497,23 @@ func main() {
 		} else if err := setupTestEnvironment(
 			k8sClient.CoreV1(),
 			terraformOutput.SingletonIngestor.Value,
-			terraformOutput.ManifestBucket.Value,
+			&terraformOutput.ManifestBucket.Value,
 		); err != nil {
 			log.Fatalf("%s", err)
 		}
 	}
 
 	manifestFetcher := NewHTTPSManifestFetcher(terraformOutput.OwnManifestBaseURL.Value)
-	manifestWriter := manifest.NewWriter(terraformOutput.ManifestBucket.Value)
+	manifestWriter, err := manifest.NewWriter(&terraformOutput.ManifestBucket.Value)
+	if err != nil {
+		log.Fatalf("%s", err)
+	}
 
 	if err := createManifests(
 		k8sClient.CoreV1(),
 		terraformOutput.SpecificManifests.Value,
 		&manifestFetcher,
-		&manifestWriter,
+		manifestWriter,
 	); err != nil {
 		log.Fatalf("%s", err)
 	}
