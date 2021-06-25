@@ -12,9 +12,9 @@ use std::{
     io::{Read, Write},
 };
 
+pub use self::s3::S3Transport;
 pub use gcs::GcsTransport;
 pub use local::LocalFileTransport;
-pub use s3::S3Transport;
 
 /// A transport along with the public keys that can be used to verify signatures
 /// on the batches read from the transport.

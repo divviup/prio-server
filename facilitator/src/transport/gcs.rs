@@ -1,5 +1,5 @@
 use crate::{
-    config::{GcsPath, Identity},
+    config::{GcsPath, Identity, WorkloadIdentityPoolParameters},
     gcp_oauth::GcpOauthTokenProvider,
     http::{
         Method, OauthTokenProvider, RequestParameters, RetryingAgent, StaticOauthTokenProvider,
@@ -11,8 +11,7 @@ use crate::{
 use anyhow::{anyhow, Context, Result};
 use slog::{debug, info, o, Logger};
 use std::{
-    io,
-    io::{Read, Write},
+    io::{self, Read, Write},
     time::Duration,
 };
 use ureq::AgentBuilder;
@@ -62,8 +61,9 @@ impl GcsTransport {
         path: GcsPath,
         identity: Identity,
         key_file_reader: Option<Box<dyn Read>>,
+        workload_identity_pool_params: Option<WorkloadIdentityPoolParameters>,
         parent_logger: &Logger,
-    ) -> Result<GcsTransport> {
+    ) -> Result<Self> {
         let logger = parent_logger.new(o!(
             event::STORAGE_PATH => path.to_string(),
             event::IDENTITY => identity.unwrap_or("default identity").to_owned(),
@@ -89,6 +89,7 @@ impl GcsTransport {
                 "https://www.googleapis.com/auth/devstorage.read_write",
                 identity.map(|x| x.to_string()),
                 key_file_reader,
+                workload_identity_pool_params,
                 &logger,
             )?,
             agent: retrying_agent,
