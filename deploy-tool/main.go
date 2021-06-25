@@ -12,7 +12,6 @@ import (
 	"flag"
 	"fmt"
 	"log"
-	"net/http"
 	"os"
 	"os/user"
 	"path"
@@ -53,11 +52,6 @@ type TerraformOutput struct {
 	ManifestBucket struct {
 		Value manifest.Bucket
 	} `json:"manifest_bucket"`
-	// OwnManifestBaseURL is a URL without a scheme (https), that manifests can
-	// be found in
-	OwnManifestBaseURL struct {
-		Value string
-	} `json:"own_manifest_base_url"`
 	SpecificManifests struct {
 		Value map[string]SpecificManifestWrapper
 	} `json:"specific_manifests"`
@@ -132,82 +126,10 @@ func generateAndDeployKeyPair(
 	return p256Key, nil
 }
 
-// globalManifestExists checks if a global data share processor manifest exists
-// relative to the manifest base URL provided, returning (true, nil) if so,
-// (false, nil) if not, and (false, error) if it could be determined
-func globalManifestExists(manifestBaseURL string) (bool, error) {
-	url := fmt.Sprintf("https://%s/global-manifest.json", manifestBaseURL)
-
-	resp, err := http.Get(url)
-	if err != nil {
-		return false, fmt.Errorf("error fetching manifest %s: %w", url, err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode == 403 || resp.StatusCode == 404 {
-		return false, nil
-	}
-
-	if resp.StatusCode != 200 {
-		return false, fmt.Errorf("unexpected HTTP status %d", resp.StatusCode)
-	}
-
-	return true, nil
-}
-
-// ManifestFetcher fetches manifests from some storage
-type ManifestFetcher interface {
-	// Fetch fetches the manifest for the specified data share processor and
-	// returns it, if it exists and is well-formed. Returns (nil, nil) if the
-	// manifest does not exist. Returns (nil, error) if something went wrong
-	// while trying to fetch or parse the manifest.
-	Fetch(dataShareProcessorName string) (*manifest.DataShareProcessorSpecificManifest, error)
-}
-
-// HTTPSManifestFetcher fetches manifests over HTTPS
-type HTTPSManifestFetcher struct {
-	manifestBaseURL string
-}
-
-func NewHTTPSManifestFetcher(manifestBaseURL string) HTTPSManifestFetcher {
-	return HTTPSManifestFetcher{manifestBaseURL}
-}
-
-// fetchSpecificManifest fetches the manifest for the specified data share
-// processor relative to the provided manifest base URL and returns it, if it
-// exists and is well-formed. Returns (nil, nil) if the manifest does not exist.
-// Returns nil and some error if something went wrong while trying to fetch or
-// parse the manifest.
-func (f *HTTPSManifestFetcher) Fetch(dataShareProcessorName string) (*manifest.DataShareProcessorSpecificManifest, error) {
-	path := fmt.Sprintf("https://%s/%s-manifest.json", f.manifestBaseURL, dataShareProcessorName)
-
-	resp, err := http.Get(path)
-	if err != nil {
-		return nil, fmt.Errorf("error when getting manifest %s: %s", path, err)
-	}
-	defer resp.Body.Close()
-
-	// GETs on non-existent objects in storage.googleapis.com return HTTP 403
-	if resp.StatusCode == 403 || resp.StatusCode == 404 {
-		return nil, nil
-	}
-
-	if resp.StatusCode != 200 {
-		return nil, fmt.Errorf("unexpected HTTP status fetching manifest: %d", resp.StatusCode)
-	}
-
-	var manifest manifest.DataShareProcessorSpecificManifest
-	if err := json.NewDecoder(resp.Body).Decode(&manifest); err != nil {
-		return nil, fmt.Errorf("error parsing manifest: %w", err)
-	}
-
-	return &manifest, nil
-}
-
 func setupTestEnvironment(
 	k8sSecretsClientGetter k8scorev1.SecretsGetter,
 	ingestor *SingletonIngestor,
-	bucket *manifest.Bucket,
+	manifestWriter manifest.Writer,
 ) error {
 	batchSigningPublicKey, err := createBatchSigningPublicKey(
 		k8sSecretsClientGetter.Secrets(ingestor.TesterKubernetesNamespace),
@@ -230,12 +152,7 @@ func setupTestEnvironment(
 		},
 	}
 
-	writer, err := manifest.NewWriter(bucket)
-	if err != nil {
-		return err
-	}
-
-	return writer.WriteIngestorGlobalManifest(globalManifest, "singleton-ingestor/global-manifest.json")
+	return manifestWriter.WriteIngestorGlobalManifest(globalManifest)
 }
 
 func createBatchSigningPublicKey(
@@ -335,8 +252,7 @@ func createManifest(
 	}
 
 	// Put the specific manifests into the manifest bucket.
-	destination := fmt.Sprintf("%s-manifest.json", dataShareProcessorName)
-	if err := manifestWriter.WriteDataShareProcessorSpecificManifest(manifestWrapper.SpecificManifest, destination); err != nil {
+	if err := manifestWriter.WriteDataShareProcessorSpecificManifest(manifestWrapper.SpecificManifest, dataShareProcessorName); err != nil {
 		return fmt.Errorf("could not write data share specific manifest: %s", err)
 	}
 
@@ -394,8 +310,7 @@ func backupKeys(
 func createManifests(
 	k8sSecretsClientGetter k8scorev1.SecretsGetter,
 	specificManifests map[string]SpecificManifestWrapper,
-	manifestFetcher ManifestFetcher,
-	manifestWriter manifest.Writer,
+	manifestStorage manifest.Storage,
 ) error {
 	// Iterate over all specific manifests described by TF output so we can
 	// record any packet encryption key CSRs that have already been created. We
@@ -405,7 +320,7 @@ func createManifests(
 	existingManifests := map[string]struct{}{}
 	packetEncryptionKeyCSRs := manifest.PacketEncryptionKeyCSRs{}
 	for dataShareProcessorName := range specificManifests {
-		manifest, err := manifestFetcher.Fetch(dataShareProcessorName)
+		manifest, err := manifestStorage.FetchDataShareProcessorSpecificManifest(dataShareProcessorName)
 		if err != nil {
 			return err
 		}
@@ -438,7 +353,7 @@ func createManifests(
 				k8sSecretsClientGetter,
 				dataShareProcessorName,
 				&manifestWrapper,
-				manifestWriter,
+				manifestStorage,
 				packetEncryptionKeyCSRs,
 			); err != nil {
 				return err
@@ -491,10 +406,21 @@ func main() {
 		log.Fatalf("%s", err)
 	}
 
+	manifestStorage, err := manifest.NewStorage(&terraformOutput.ManifestBucket.Value)
+	if err != nil {
+		log.Fatalf("%s", err)
+	}
+
 	if terraformOutput.HasTestEnvironment.Value && terraformOutput.SingletonIngestor.Value != nil {
-		manifestExists, err := globalManifestExists(
-			fmt.Sprintf("%s/singleton-ingestor", terraformOutput.OwnManifestBaseURL.Value),
-		)
+		globalManifestStorage, err := manifest.NewStorage(&manifest.Bucket{
+			URL:        fmt.Sprintf("%s/singleton-ingestor", terraformOutput.ManifestBucket.Value.URL),
+			AWSRegion:  terraformOutput.ManifestBucket.Value.AWSRegion,
+			AWSProfile: terraformOutput.ManifestBucket.Value.AWSProfile,
+		})
+		if err != nil {
+			log.Fatalf("%s", err)
+		}
+		manifestExists, err := globalManifestStorage.IngestorGlobalManifestExists()
 		if err != nil {
 			log.Fatalf("%s", err)
 		} else if manifestExists {
@@ -502,23 +428,16 @@ func main() {
 		} else if err := setupTestEnvironment(
 			k8sClient.CoreV1(),
 			terraformOutput.SingletonIngestor.Value,
-			&terraformOutput.ManifestBucket.Value,
+			globalManifestStorage,
 		); err != nil {
 			log.Fatalf("%s", err)
 		}
 	}
 
-	manifestFetcher := NewHTTPSManifestFetcher(terraformOutput.OwnManifestBaseURL.Value)
-	manifestWriter, err := manifest.NewWriter(&terraformOutput.ManifestBucket.Value)
-	if err != nil {
-		log.Fatalf("%s", err)
-	}
-
 	if err := createManifests(
 		k8sClient.CoreV1(),
 		terraformOutput.SpecificManifests.Value,
-		&manifestFetcher,
-		manifestWriter,
+		manifestStorage,
 	); err != nil {
 		log.Fatalf("%s", err)
 	}

@@ -109,32 +109,32 @@ func (c *FakeKubernetesSecretsClient) Apply(
 	return nil, nil
 }
 
-type FakeManifestFetcher struct {
-	manifests map[string]manifest.DataShareProcessorSpecificManifest
+type FakeManifestStorage struct {
+	existingManifests map[string]manifest.DataShareProcessorSpecificManifest
+	writtenManifests  map[string]manifest.DataShareProcessorSpecificManifest
 }
 
-func (f *FakeManifestFetcher) Fetch(dataShareProcessorName string) (*manifest.DataShareProcessorSpecificManifest, error) {
-	if manifest, ok := f.manifests[dataShareProcessorName]; ok {
+func (s *FakeManifestStorage) FetchDataShareProcessorSpecificManifest(dataShareProcessorName string) (*manifest.DataShareProcessorSpecificManifest, error) {
+	if manifest, ok := s.existingManifests[dataShareProcessorName]; ok {
 		return &manifest, nil
 	}
 	return nil, nil
 }
 
-type FakeManifestWriter struct {
-	manifests map[string]manifest.DataShareProcessorSpecificManifest
+func (s *FakeManifestStorage) IngestorGlobalManifestExists() (bool, error) {
+	return false, nil
 }
 
-func (w *FakeManifestWriter) WriteDataShareProcessorSpecificManifest(
+func (s *FakeManifestStorage) WriteDataShareProcessorSpecificManifest(
 	manifest manifest.DataShareProcessorSpecificManifest,
-	path string,
+	dataShareProcessorName string,
 ) error {
-	w.manifests[path] = manifest
+	s.writtenManifests[dataShareProcessorName] = manifest
 	return nil
 }
 
-func (w *FakeManifestWriter) WriteIngestorGlobalManifest(
+func (s *FakeManifestStorage) WriteIngestorGlobalManifest(
 	manifest manifest.IngestorGlobalManifest,
-	path string,
 ) error {
 	return nil
 }
@@ -215,9 +215,8 @@ func TestCreateManifests(t *testing.T) {
 		},
 	}
 
-	// Fetcher that gets manifests posted publicly
-	manifestFetcher := FakeManifestFetcher{
-		manifests: map[string]manifest.DataShareProcessorSpecificManifest{
+	manifestStorage := FakeManifestStorage{
+		existingManifests: map[string]manifest.DataShareProcessorSpecificManifest{
 			"manifest-already-posted": {
 				Format:               1,
 				IngestionBucket:      "gs://irrelevant",
@@ -235,21 +234,18 @@ func TestCreateManifests(t *testing.T) {
 				},
 			},
 		},
-	}
-
-	manifestWriter := FakeManifestWriter{
-		manifests: map[string]manifest.DataShareProcessorSpecificManifest{},
+		writtenManifests: map[string]manifest.DataShareProcessorSpecificManifest{},
 	}
 
 	secretsClientGetter := FakeKubernetesSecretsClientGetter{
 		secrets: map[string]k8scorev1.Secret{},
 	}
 
-	if err := createManifests(&secretsClientGetter, specificManifests, &manifestFetcher, &manifestWriter); err != nil {
+	if err := createManifests(&secretsClientGetter, specificManifests, &manifestStorage); err != nil {
 		t.Errorf("unexpected error %s", err)
 	}
 
-	if _, ok := manifestWriter.manifests["manifest-already-posted"]; ok {
+	if _, ok := manifestStorage.writtenManifests["manifest-already-posted"]; ok {
 		t.Error("no manifest should be uploaded if manifest already existed")
 	}
 	if _, ok := secretsClientGetter.secrets["packet-encryption-key-exists-ingestor-1-batch-signing-key"]; ok {
@@ -259,22 +255,22 @@ func TestCreateManifests(t *testing.T) {
 		t.Error("packet encryption key should not be created if it already existed")
 	}
 
-	manifest, ok := manifestWriter.manifests["manifest-not-posted-encryption-key-exists-manifest.json"]
+	manifest, ok := manifestStorage.writtenManifests["manifest-not-posted-encryption-key-exists"]
 	if !ok {
 		t.Error("manifest should be uploaded if it does not already exist")
 	}
-	if !reflect.DeepEqual(manifest.PacketEncryptionKeyCSRs, manifestFetcher.manifests["manifest-already-posted"].PacketEncryptionKeyCSRs) {
+	if !reflect.DeepEqual(manifest.PacketEncryptionKeyCSRs, manifestStorage.existingManifests["manifest-already-posted"].PacketEncryptionKeyCSRs) {
 		t.Error("CSRs in manifest should match existing packet encryption key")
 	}
 	if _, ok := secretsClientGetter.secrets["packet-encryption-key-exists-ingestor-2-batch-signing-key"]; !ok {
 		t.Error("batch signing key should be created if manifest did not exist")
 	}
 
-	manifest, ok = manifestWriter.manifests["manifest-not-posted-encryption-key-does-not-exist-manifest.json"]
+	manifest, ok = manifestStorage.writtenManifests["manifest-not-posted-encryption-key-does-not-exist"]
 	if !ok {
 		t.Error("manifest should be uploaded if it does not already exist")
 	}
-	if reflect.DeepEqual(manifest.PacketEncryptionKeyCSRs, manifestFetcher.manifests["manifest-already-posted"].PacketEncryptionKeyCSRs) {
+	if reflect.DeepEqual(manifest.PacketEncryptionKeyCSRs, manifestStorage.existingManifests["manifest-already-posted"].PacketEncryptionKeyCSRs) {
 		t.Error("new CSR should be generated for new packet encryption key")
 	}
 	if _, ok := secretsClientGetter.secrets["packet-encryption-key-does-not-exist-ingestor-1-batch-signing-key"]; !ok {
@@ -338,9 +334,8 @@ func TestCreateManifestsExistingDuplicatePacketEncryptionKeyCsrs(t *testing.T) {
 		},
 	}
 
-	// Fetcher that gets manifests posted publicly
-	manifestFetcher := FakeManifestFetcher{
-		manifests: map[string]manifest.DataShareProcessorSpecificManifest{
+	manifestStorage := FakeManifestStorage{
+		existingManifests: map[string]manifest.DataShareProcessorSpecificManifest{
 			"manifest-already-posted-1": {
 				Format:               1,
 				IngestionBucket:      "gs://irrelevant",
@@ -375,17 +370,14 @@ func TestCreateManifestsExistingDuplicatePacketEncryptionKeyCsrs(t *testing.T) {
 				},
 			},
 		},
-	}
-
-	manifestWriter := FakeManifestWriter{
-		manifests: map[string]manifest.DataShareProcessorSpecificManifest{},
+		writtenManifests: map[string]manifest.DataShareProcessorSpecificManifest{},
 	}
 
 	secretsClientGetter := FakeKubernetesSecretsClientGetter{
 		secrets: map[string]k8scorev1.Secret{},
 	}
 
-	if err := createManifests(&secretsClientGetter, specificManifests, &manifestFetcher, &manifestWriter); err == nil {
+	if err := createManifests(&secretsClientGetter, specificManifests, &manifestStorage); err == nil {
 		t.Error("manifest creation should fail when existing posted manifests contain two different CSRs for the same packet encryption key name")
 	}
 }
