@@ -1,16 +1,21 @@
-use crate::config::StoragePath;
-use crate::http;
 use anyhow::{anyhow, Context, Result};
 use elliptic_curve::sec1::{EncodedPoint, ToEncodedPoint};
-use p256::pkcs8::FromPublicKey;
-use p256::NistP256;
-use pkix::pem::{pem_to_der, PEM_CERTIFICATE_REQUEST};
-use pkix::pkcs10::DerCertificationRequest;
-use pkix::FromDer;
-use ring::signature::{UnparsedPublicKey, ECDSA_P256_SHA256_ASN1};
+use p256::{pkcs8::FromPublicKey, NistP256};
+use pkix::{
+    pem::{pem_to_der, PEM_CERTIFICATE_REQUEST},
+    pkcs10::DerCertificationRequest,
+    FromDer,
+};
+use prio::encrypt::{decrypt_share, encrypt_share, PrivateKey, PublicKey};
+use ring::{
+    rand::SystemRandom,
+    signature::{UnparsedPublicKey, ECDSA_P256_SHA256_ASN1},
+};
 use serde::Deserialize;
 use slog::Logger;
 use std::{collections::HashMap, str::FromStr};
+
+use crate::{config::StoragePath, http, BatchSigningKey};
 
 // See discussion in SpecificManifest::batch_signing_public_key
 const ECDSA_P256_SPKI_PREFIX: &[u8] = &[
@@ -215,6 +220,89 @@ impl SpecificManifest {
 
     pub fn ingestion_bucket(&self) -> String {
         self.ingestion_bucket.clone()
+    }
+
+    /// Checks if the batch signing public key in the manifest matches the
+    /// provided batch signing private key by signing a random message and
+    /// verifying the signature. Returns an error if the keys do not match.
+    pub fn verify_batch_signing_key(
+        &self,
+        batch_signing_private_key: &BatchSigningKey,
+    ) -> Result<()> {
+        let test_message: Vec<u8> = (0..100).map(|_| rand::random::<u8>()).collect();
+        let signature = batch_signing_private_key
+            .key
+            .sign(&SystemRandom::new(), &&test_message)
+            .context(format!(
+                "failed to sign test message with private key {}",
+                batch_signing_private_key.identifier
+            ))?;
+
+        self.batch_signing_public_keys()?
+            .get(&batch_signing_private_key.identifier)
+            .context(format!(
+                "key identifier {} not present in manifest batch signing public keys",
+                batch_signing_private_key.identifier
+            ))?
+            .verify(&test_message, signature.as_ref())
+            .context(format!(
+                "failed to verify signature over test message with key {}",
+                batch_signing_private_key.identifier
+            ))
+    }
+
+    /// Checks if all of the packet encryption public keys in the manifest
+    /// match one of the provided packet encryption private keys by encrypting a
+    /// random message and decrypting it. Returns an error if any public key
+    /// does not have a corresponding private key.
+    pub fn verify_packet_encryption_keys(
+        &self,
+        packet_encryption_private_keys: &[PrivateKey],
+    ) -> Result<()> {
+        let test_message: Vec<u8> = (0..100).map(|_| rand::random::<u8>()).collect();
+        'outer: for (identifier, csr) in &self.packet_encryption_keys {
+            let public_key = PublicKey::from_base64(&csr.base64_public_key()?).context(format!(
+                "failed to decode packet encryption public key {} from specific manifest",
+                identifier,
+            ))?;
+
+            let encrypted = encrypt_share(&test_message, &public_key).context(format!(
+                "failed to encrypt test message to packet encryption public key {}",
+                identifier,
+            ))?;
+
+            for private_key in packet_encryption_private_keys {
+                match decrypt_share(&encrypted, &private_key) {
+                    Ok(decrypted) => {
+                        // AEAD decryption succeeding but yielding incorrect
+                        // plaintext is incredibly unlikely
+                        if !decrypted.eq(&test_message) {
+                            return Err(anyhow!(
+                                "decrypted text does not match test message for key {}",
+                                identifier
+                            ));
+                        }
+
+                        // AEAD decryption succeeded and the plaintext is good,
+                        // so move on to the next packet encryption public key
+                        continue 'outer;
+                    }
+                    // AEAD decryption failing is expected if we are using the
+                    // wrong private key, so move on to the next one
+                    Err(_) => continue,
+                }
+            }
+
+            // If we made it here, then no private key was able to decrypt the
+            // test message and we have a key mismatch
+            return Err(anyhow!(
+                "unable to decrypt test message encrypted with {} with any of {} available packet decryption keys",
+                identifier,
+                packet_encryption_private_keys.len(),
+            ));
+        }
+
+        Ok(())
     }
 }
 
@@ -444,8 +532,9 @@ mod tests {
         },
     };
     use assert_matches::assert_matches;
-    use ring::rand::SystemRandom;
+    use ring::signature::{EcdsaKeyPair, ECDSA_P256_SHA256_ASN1_SIGNING};
     use rusoto_core::Region;
+    use std::array::IntoIter;
     use url::Url;
 
     fn url_fetcher(url: &str, logger: &Logger) -> Result<String> {
@@ -1274,11 +1363,195 @@ mod tests {
     #[test]
     fn known_csr_and_private_key() {
         let csr = default_packet_encryption_certificate_signing_request();
-        let private_key = DEFAULT_PACKET_ENCRYPTION_CERTIFICATE_SIGNING_REQUEST_PRIVATE_KEY;
+        let private_key = PrivateKey::from_base64(
+            DEFAULT_PACKET_ENCRYPTION_CERTIFICATE_SIGNING_REQUEST_PRIVATE_KEY,
+        )
+        .unwrap();
 
         let actual = PublicKey::from_base64(&csr.base64_public_key().unwrap()).unwrap();
-        let expected = PublicKey::from(&PrivateKey::from_base64(private_key).unwrap());
+        let expected = PublicKey::from(&private_key);
 
-        println!("expected:{:?}\nactual:{:?}", expected, actual)
+        // There's no convenient method of checking that two `PublicKey`s are
+        // equal so we instead check that they both can encrypt a message to the
+        // private key
+        let test_message: Vec<u8> = (0..100).map(|_| rand::random::<u8>()).collect();
+
+        let actual_encrypted = encrypt_share(&test_message, &actual).unwrap();
+        let decrypted = decrypt_share(&actual_encrypted, &private_key).unwrap();
+        assert_eq!(test_message, decrypted);
+
+        let expected_encrypted = encrypt_share(&test_message, &expected).unwrap();
+        let decrypted = decrypt_share(&&expected_encrypted, &private_key).unwrap();
+        assert_eq!(test_message, decrypted);
+    }
+
+    #[test]
+    fn test_key_consistency_checks() {
+        // Real public and private keys ethically sourced from test environments
+        let batch_signing_key_1_public =
+            "-----BEGIN PUBLIC KEY-----\nMFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEf3\
+            xFccRXkByhftlbQNjaOHG9qs+A\nOjF42iWxbMO8OH2vhT1c+ItsZ+gCzxg47aLpClG\
+            dpgmI9fSh4R2WFhkuSA==\n-----END PUBLIC KEY-----\n";
+        let batch_signing_key_1_private_pem =
+            "MIGHAgEAMBMGByqGSM49AgEGCCqGSM49AwEHBG0wawIBAQQgQZztDnVQh43ty7pbDd\
+            KpQd1bA+ZrV8gnoZs2nucwaaChRANCAAR/fEVxxFeQHKF+2VtA2No4cb2qz4A6MXjaJ\
+            bFsw7w4fa+FPVz4i2xn6ALPGDjtoukKUZ2mCYj19KHhHZYWGS5I";
+        let batch_signing_key_1_private = BatchSigningKey {
+            key: EcdsaKeyPair::from_pkcs8(
+                &ECDSA_P256_SHA256_ASN1_SIGNING,
+                &base64::decode(batch_signing_key_1_private_pem).unwrap(),
+            )
+            .unwrap(),
+            identifier: "batch-signing-key-1".to_owned(),
+        };
+
+        let batch_signing_key_2_public =
+            "-----BEGIN PUBLIC KEY-----\nMFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEkJ\
+            jJIY7lxyO23EkcIROXkrASGVDy\nwkityouKiFbiahlIa/szIftNF3FoVAT+NnZWHBY\
+            Cw3kSM4r2NEeGLAPNHA==\n-----END PUBLIC KEY-----\n";
+        let batch_signing_key_2_private_pem =
+            "MIGHAgEAMBMGByqGSM49AgEGCCqGSM49AwEHBG0wawIBAQQgP0q/CXcp9Dw6jwSRF0\
+            u0a46WLs95dTFyv4hJnwsvrUmhRANCAASQmMkhjuXHI7bcSRwhE5eSsBIZUPLCSK3Ki\
+            4qIVuJqGUhr+zMh+00XcWhUBP42dlYcFgLDeRIzivY0R4YsA80c";
+        let batch_signing_key_2_private = BatchSigningKey {
+            key: EcdsaKeyPair::from_pkcs8(
+                &ECDSA_P256_SHA256_ASN1_SIGNING,
+                &base64::decode(batch_signing_key_2_private_pem).unwrap(),
+            )
+            .unwrap(),
+            identifier: "batch-signing-key-2".to_owned(),
+        };
+
+        // Batch signing private key unrelated to any public key
+        let batch_signing_key_unrelated_private_pem =
+            "MIGHAgEAMBMGByqGSM49AgEGCCqGSM49AwEHBG0wawIBAQQgvFVl1jrTLnIUAVe5ER\
+            VpPyZE6gBHSdu2fMExf78QsY2hRANCAAQoNHgIo7baQ8whCeor4k0abH2bGIMC9p6tE\
+            Y4Wo/E/JIrWqbAFmYZOGK6Lq5pfrtwQG7Xaw2h3S6OtEk0fUmMW";
+        let batch_signing_key_unrelated_private = BatchSigningKey {
+            key: EcdsaKeyPair::from_pkcs8(
+                &ECDSA_P256_SHA256_ASN1_SIGNING,
+                &base64::decode(batch_signing_key_unrelated_private_pem).unwrap(),
+            )
+            .unwrap(),
+            identifier: "batch-signing-key-unrelated".to_owned(),
+        };
+
+        let packet_encryption_key_1_csr = "-----BEGIN CERTIFICATE REQUEST-----\n\
+        MIHzMIGbAgEAMDkxNzA1BgNVBAMTLm5hcm5pYS50aW1nLWRldi1waGEuY2VydGlm\n\
+        aWNhdGVzLmlzcmctcHJpby5vcmcwWTATBgcqhkjOPQIBBggqhkjOPQMBBwNCAAQZ\n\
+        PaZ+nwLgkKyENDgKN8ygde4L5+YCXD2jF4YlYteiWG16jJyekqdswO2l3NB4mkYV\n\
+        gGaMeyvlf2uYhX5CfPpFoAAwCgYIKoZIzj0EAwIDRwAwRAIgXZCNgsPQhHuKzyqZ\n\
+        Gd/WhAaaAAXcBChLfXzlgqglxZ0CIDzHxmURqDLNDivx5x4M342aRG3izy11d0HS\n\
+        USO9+luc\n\
+        -----END CERTIFICATE REQUEST-----\n";
+        let packet_encryption_key_1_private_b64 =
+            "BBk9pn6fAuCQrIQ0OAo3zKB17gvn5gJcPaMXhiVi16JYbXqMnJ6Sp2zA7aXc0HiaRh\
+            WAZox7K+V/a5iFfkJ8+kUqOtcCXXhjIRTS2XxFanmcfd+zTHNtjoNl1+a/N6q4/Q==";
+        let packet_encryption_key_1_private =
+            PrivateKey::from_base64(packet_encryption_key_1_private_b64).unwrap();
+
+        let packet_encryption_key_2_csr = "-----BEGIN CERTIFICATE REQUEST-----\n\
+        MIH0MIGbAgEAMDkxNzA1BgNVBAMTLmdvbmRvci50aW1nLWRldi1waGEuY2VydGlm\n\
+        aWNhdGVzLmlzcmctcHJpby5vcmcwWTATBgcqhkjOPQIBBggqhkjOPQMBBwNCAAQk\n\
+        L1UbdRTE3RqzM08NIsGxho4EcxXJ+GmpBkRgG0ogeIn4bALJnyh4FkrsIn162zqu\n\
+        ajnEl5uxGopAturyO3ijoAAwCgYIKoZIzj0EAwIDSAAwRQIhAJfvxfn35cQWD5lU\n\
+        6/EfiNwuY6LJg8UJC5WCb/MOq219AiBDHdKOyI/eo1+OZABR132+zZZAhwG9lA2V\n\
+        eUcnSpurBw==\n\
+        -----END CERTIFICATE REQUEST-----\n";
+        let packet_encryption_key_2_private_b64 =
+            "BCQvVRt1FMTdGrMzTw0iwbGGjgRzFcn4aakGRGAbSiB4ifhsAsmfKHgWSuwifXrbOq\
+            5qOcSXm7EaikC26vI7eKMV3owPJiAmeCdfNVeO82olh8p4nASdSs3SssjZJVz2pw==";
+        let packet_encryption_key_2_private =
+            PrivateKey::from_base64(packet_encryption_key_2_private_b64).unwrap();
+
+        let packet_encryption_key_unrelated_private_b64 =
+            "BFyuN8wm2j+Dj7uM28vp/rmeA3badNALXDgBCLCO4x197sumOYr8doModklTjHbQSv\
+            3vtOs7mixH6SlcbF7mZ2TeI4teI/nxinZPLXQSilVFA45fSJg3XTllJ4ic8ibYug==";
+        let packet_encryption_key_unrelated_private =
+            PrivateKey::from_base64(packet_encryption_key_unrelated_private_b64).unwrap();
+
+        let specific_manifest = SpecificManifest {
+            format: 1,
+            ingestion_bucket: "gs://irrelevant".to_owned(),
+            ingestion_identity: None,
+            peer_validation_bucket: "gs://irrelevant".to_owned(),
+            batch_signing_public_keys: IntoIter::new([
+                (
+                    "batch-signing-key-1".to_owned(),
+                    BatchSigningPublicKey {
+                        public_key: batch_signing_key_1_public.to_owned(),
+                        expiration: "irrelevant".to_owned(),
+                    },
+                ),
+                (
+                    "batch-signing-key-2".to_owned(),
+                    BatchSigningPublicKey {
+                        public_key: batch_signing_key_2_public.to_owned(),
+                        expiration: "irrelevant".to_owned(),
+                    },
+                ),
+            ])
+            .collect(),
+            packet_encryption_keys: IntoIter::new([
+                (
+                    "packet-encryption-key-1".to_owned(),
+                    PacketEncryptionCertificateSigningRequest {
+                        certificate_signing_request: packet_encryption_key_1_csr.to_owned(),
+                    },
+                ),
+                (
+                    "packet-encryption-key-2".to_owned(),
+                    PacketEncryptionCertificateSigningRequest {
+                        certificate_signing_request: packet_encryption_key_2_csr.to_owned(),
+                    },
+                ),
+            ])
+            .collect(),
+        };
+
+        // Passes because manifest has corresponding public key
+        specific_manifest
+            .verify_batch_signing_key(&batch_signing_key_1_private)
+            .unwrap();
+        // Passes because manifest has corresponding public key
+        specific_manifest
+            .verify_batch_signing_key(&batch_signing_key_2_private)
+            .unwrap();
+        // Fails because manifest does not contain corresponding public key
+        specific_manifest
+            .verify_batch_signing_key(&batch_signing_key_unrelated_private)
+            .unwrap_err();
+
+        // Passes because manifest contains both corresponding public keys
+        specific_manifest
+            .verify_packet_encryption_keys(&[
+                packet_encryption_key_1_private.clone(),
+                packet_encryption_key_2_private.clone(),
+            ])
+            .unwrap();
+        // Passes because manifest contains both corresponding public keys;
+        // extra private key is benign
+        specific_manifest
+            .verify_packet_encryption_keys(&[
+                packet_encryption_key_1_private.clone(),
+                packet_encryption_key_2_private.clone(),
+                packet_encryption_key_unrelated_private.clone(),
+            ])
+            .unwrap();
+        // Fails because one of the private keys corresponding to the manifest's
+        // public keys is missing
+        specific_manifest
+            .verify_packet_encryption_keys(&[packet_encryption_key_1_private])
+            .unwrap_err();
+        // Fails because one of the private keys corresponding to the manifest's
+        // public keys is missing
+        specific_manifest
+            .verify_packet_encryption_keys(&[packet_encryption_key_2_private])
+            .unwrap_err();
+        // Fails because none of the private keys corresponding to the manifest
+        // public keys
+        specific_manifest
+            .verify_packet_encryption_keys(&[packet_encryption_key_unrelated_private])
+            .unwrap_err();
     }
 }
