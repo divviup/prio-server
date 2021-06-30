@@ -33,10 +33,10 @@ prometheus = "0.12"
 rand = "0.8"
 ring = { version = "0.16.20", features = ["std"] }
 rusoto_core = { version = "^0.47", default_features = false, features = ["rustls"] }
-rusoto_mock = { version = "^0.46", default_features = false, features = ["rustls"] }
-rusoto_s3 = { version = "^0.46", default_features = false, features = ["rustls"] }
-rusoto_sqs = { version = "^0.46", default_features = false, features = ["rustls"] }
-rusoto_sts = { version = "^0.46", default_features = false, features = ["rustls"] }
+rusoto_mock = { version = "^0.47", default_features = false, features = ["rustls"] }
+rusoto_s3 = { version = "^0.47", default_features = false, features = ["rustls"] }
+rusoto_sqs = { version = "^0.47", default_features = false, features = ["rustls"] }
+rusoto_sts = { version = "^0.47", default_features = false, features = ["rustls"] }
 sha2 = "0.9"
 slog = { version = "2.7.0", features = ["max_level_trace"] }
 slog-async = "2.6.0"

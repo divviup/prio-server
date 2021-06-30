@@ -155,7 +155,7 @@ impl Transport for S3Transport {
 /// tokio::io::AsyncRead inside the StreamingBody in a Rusoto API request
 /// response.
 struct StreamingBodyReader {
-    body_reader: Pin<Box<dyn AsyncRead + Send + Sync>>,
+    body_reader: Pin<Box<dyn AsyncRead + Send>>,
     runtime: Runtime,
 }
 
