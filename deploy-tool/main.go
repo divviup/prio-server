@@ -277,7 +277,7 @@ func createManifest(
 	for name, batchSigningPublicKey := range manifestWrapper.SpecificManifest.BatchSigningPublicKeys {
 		if batchSigningPublicKey.PublicKey != "" {
 			// We never create keys in Terraform, so this should never happen
-			return fmt.Errorf("unexpected batch signing key in Terraform output")
+			return fmt.Errorf("unexpected batch signing key in Terraform output for name %s", name)
 		}
 		log.Printf("generating ECDSA P256 batch signing key %s", name)
 
@@ -295,7 +295,7 @@ func createManifest(
 	for name, packetEncryptionCertificateSigningRequest := range manifestWrapper.SpecificManifest.PacketEncryptionKeyCSRs {
 		if packetEncryptionCertificateSigningRequest.CertificateSigningRequest != "" {
 			// We never create CSRs in Terraform, so this should never happen
-			return fmt.Errorf("unexpected packet encryption key CSR in Terraform output")
+			return fmt.Errorf("unexpected packet encryption key CSR in Terraform output for name %s", name)
 		}
 
 		if packetEncryptionKeyCSR, ok := packetEncryptionKeyCSRs[name]; ok {
@@ -413,6 +413,11 @@ func createManifests(
 		existingManifests[dataShareProcessorName] = struct{}{}
 
 		for keyName, certificateSigningRequest := range manifest.PacketEncryptionKeyCSRs {
+			if previouslySeenCsr, ok := packetEncryptionKeyCSRs[keyName]; ok {
+				if previouslySeenCsr != certificateSigningRequest {
+					return fmt.Errorf("found two different previously existing certificate signing requests for key name %s", previouslySeenCsr)
+				}
+			}
 			packetEncryptionKeyCSRs[keyName] = certificateSigningRequest
 		}
 	}

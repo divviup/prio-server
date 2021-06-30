@@ -274,3 +274,108 @@ func TestCreateManifests(t *testing.T) {
 		t.Error("packet encryption key should be created if manifest and packet encryption key did not exist")
 	}
 }
+
+func TestCreateManifestsExistingDuplicatePacketEncryptionKeyCsrs(t *testing.T) {
+	// Manifests described by Terraform output
+	specificManifests := map[string]SpecificManifestWrapper{
+		// This manifest represents an already deployed instance: there is a
+		// corresponding manifest in the manifestFetcher with a packet
+		// encryption key CSR and the packet encryption private key already
+		// exists in Kubernetes secrets
+		"manifest-already-posted-1": {
+			IngestorName:        "ingestor-1",
+			KubernetesNamespace: "packet-encryption-key-exists",
+			CertificateFQDN:     "packet-encryption-key-exists.fake.tld",
+			SpecificManifest: manifest.DataShareProcessorSpecificManifest{
+				Format:               1,
+				IngestionBucket:      "gs://irrelevant",
+				PeerValidationBucket: "gs://irrelevant",
+				BatchSigningPublicKeys: map[string]manifest.BatchSigningPublicKey{
+					"packet-encryption-key-exists-ingestor-1-batch-signing-key": {
+						Expiration: "",
+						PublicKey:  "",
+					},
+				},
+				PacketEncryptionKeyCSRs: map[string]manifest.PacketEncryptionCertificate{
+					"packet-encryption-key-exists-packet-encryption-key": {
+						CertificateSigningRequest: "",
+					},
+				},
+			},
+		},
+		// This manifest represents an already deployed instance which shares a
+		// packet encryption key with the previous manifest
+		"manifest-already-posted-2": {
+			IngestorName:        "ingestor-2",
+			KubernetesNamespace: "packet-encryption-key-exists",
+			CertificateFQDN:     "packet-encryption-key-exists.fake.tld",
+			SpecificManifest: manifest.DataShareProcessorSpecificManifest{
+				Format:               1,
+				IngestionBucket:      "gs://irrelevant",
+				PeerValidationBucket: "gs://irrelevant",
+				BatchSigningPublicKeys: map[string]manifest.BatchSigningPublicKey{
+					"packet-encryption-key-exists-ingestor-2-batch-signing-key": {
+						Expiration: "",
+						PublicKey:  "",
+					},
+				},
+				PacketEncryptionKeyCSRs: map[string]manifest.PacketEncryptionCertificate{
+					"packet-encryption-key-exists-packet-encryption-key": {
+						CertificateSigningRequest: "",
+					},
+				},
+			},
+		},
+	}
+
+	// Fetcher that gets manifests posted publicly
+	manifestFetcher := FakeManifestFetcher{
+		manifests: map[string]manifest.DataShareProcessorSpecificManifest{
+			"manifest-already-posted-1": {
+				Format:               1,
+				IngestionBucket:      "gs://irrelevant",
+				PeerValidationBucket: "gs://irrelevant",
+				BatchSigningPublicKeys: map[string]manifest.BatchSigningPublicKey{
+					"packet-encryption-key-exists-ingestor-1-batch-signing-key": {
+						Expiration: "2021-09-21T22:49:45Z",
+						PublicKey:  "fake-public-key",
+					},
+				},
+				PacketEncryptionKeyCSRs: map[string]manifest.PacketEncryptionCertificate{
+					"packet-encryption-key-exists-packet-encryption-key": {
+						CertificateSigningRequest: "fake-csr-1",
+					},
+				},
+			},
+			"manifest-already-posted-2": {
+				Format:               1,
+				IngestionBucket:      "gs://irrelevant",
+				PeerValidationBucket: "gs://irrelevant",
+				BatchSigningPublicKeys: map[string]manifest.BatchSigningPublicKey{
+					"packet-encryption-key-exists-ingestor-1-batch-signing-key": {
+						Expiration: "2021-09-21T22:49:45Z",
+						PublicKey:  "fake-public-key",
+					},
+				},
+				// Same key name as above but contents differ
+				PacketEncryptionKeyCSRs: map[string]manifest.PacketEncryptionCertificate{
+					"packet-encryption-key-exists-packet-encryption-key": {
+						CertificateSigningRequest: "fake-csr-2",
+					},
+				},
+			},
+		},
+	}
+
+	manifestWriter := FakeManifestWriter{
+		manifests: map[string]manifest.DataShareProcessorSpecificManifest{},
+	}
+
+	secretsClientGetter := FakeKubernetesSecretsClientGetter{
+		secrets: map[string]k8scorev1.Secret{},
+	}
+
+	if err := createManifests(&secretsClientGetter, specificManifests, &manifestFetcher, &manifestWriter); err == nil {
+		t.Error("manifest creation should fail when existing posted manifests contain two different CSRs for the same packet encryption key name")
+	}
+}
