@@ -1,8 +1,8 @@
 use crate::{
     config::{GcsPath, Identity, WorkloadIdentityPoolParameters},
-    gcp_oauth::GcpOauthTokenProvider,
+    gcp_oauth::GcpAccessTokenProvider,
     http::{
-        Method, OauthTokenProvider, RequestParameters, RetryingAgent, StaticOauthTokenProvider,
+        AccessTokenProvider, Method, RequestParameters, RetryingAgent, StaticAccessTokenProvider,
     },
     logging::event,
     transport::{Transport, TransportWriter},
@@ -46,7 +46,7 @@ fn gcp_upload_object_url(storage_api_url: &str, bucket: &str) -> Result<Url> {
 #[derive(Debug)]
 pub struct GcsTransport {
     path: GcsPath,
-    oauth_token_provider: GcpOauthTokenProvider,
+    oauth_token_provider: GcpAccessTokenProvider,
     agent: RetryingAgent,
     logger: Logger,
 }
@@ -83,7 +83,7 @@ impl GcsTransport {
         );
         Ok(GcsTransport {
             path: path.ensure_directory_prefix(),
-            oauth_token_provider: GcpOauthTokenProvider::new(
+            oauth_token_provider: GcpAccessTokenProvider::new(
                 // This token is used to access GCS storage
                 // https://developers.google.com/identity/protocols/oauth2/scopes#storage
                 "https://www.googleapis.com/auth/devstorage.read_write",
@@ -148,7 +148,7 @@ impl Transport for GcsTransport {
         // expiring during the lifetime of that object, and so obtain a token
         // here instead of passing the token provider into the
         // StreamingTransferWriter.
-        let oauth_token = self.oauth_token_provider.ensure_oauth_token()?;
+        let oauth_token = self.oauth_token_provider.ensure_access_token()?;
         let writer = StreamingTransferWriter::new(
             self.path.bucket.to_owned(),
             [&self.path.key, key].concat(),
@@ -240,7 +240,7 @@ impl StreamingTransferWriter {
         let request = agent.prepare_request(RequestParameters {
             url: upload_url,
             method: Method::Post,
-            token_provider: Some(&mut StaticOauthTokenProvider::from(oauth_token)),
+            token_provider: Some(&mut StaticAccessTokenProvider::from(oauth_token)),
         })?;
 
         let http_response = agent

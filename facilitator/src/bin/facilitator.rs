@@ -185,6 +185,10 @@ impl<'a, 'b> AppArgumentAdder for App<'a, 'b> {
             entity.suffix("-use-default-aws-credentials-provider");
         let use_default_aws_credentials_provider_env =
             leak_string(upper_snake_case(use_default_aws_credentials_provider));
+        let gcp_sa_to_impersonate_before_assuming_role =
+            entity.suffix("-gcp-sa-to-impersonate-before-assuming-role");
+        let gcp_sa_to_impersonate_before_assuming_role_env =
+            leak_string(upper_snake_case(gcp_sa_to_impersonate_before_assuming_role));
         self.arg(
             Arg::with_name(name)
                 .long(name)
@@ -241,6 +245,19 @@ impl<'a, 'b> AppArgumentAdder for App<'a, 'b> {
                     id,
                     id,
                     id,
+                ))),
+        )
+        .arg(
+            Arg::with_name(gcp_sa_to_impersonate_before_assuming_role)
+                .long(gcp_sa_to_impersonate_before_assuming_role)
+                .env(gcp_sa_to_impersonate_before_assuming_role_env)
+                .value_name("SERVICE_ACCOUNT")
+                .long_help(leak_string(format!(
+                    "If {} is an AWS IAM role and running in GCP, an identity \
+                    token will be obtained for the specified GCP service \
+                    account to then assume the AWS IAM role using STS \
+                    AssumeRoleWithWebIdentity.",
+                    id
                 ))),
         )
     }
@@ -1910,11 +1927,18 @@ fn transport_from_args(
 
 fn aws_credentials_provider(
     identity: Identity,
+    sa_to_impersonate: Option<&str>,
     service: &str,
     use_default_provider: bool,
     logger: &Logger,
 ) -> Result<aws_credentials::Provider> {
-    aws_credentials::Provider::new(identity, use_default_provider, service, logger)
+    aws_credentials::Provider::new(
+        identity,
+        sa_to_impersonate,
+        use_default_provider,
+        service,
+        logger,
+    )
 }
 
 fn transport_for_path(
@@ -1939,10 +1963,14 @@ fn transport_for_path(
         bool
     )?;
 
+    let sa_to_impersonate =
+        matches.value_of(entity.suffix("-gcp-sa-to-impersonate-before-assuming-role"));
+
     match path {
         StoragePath::S3Path(path) => {
             let credentials_provider = aws_credentials_provider(
                 identity,
+                sa_to_impersonate,
                 "s3",
                 use_default_aws_credentials_provider,
                 logger,
@@ -1972,6 +2000,7 @@ fn transport_for_path(
                             // effectively requiring that the authentication to
                             // AWS either use aws_credentials::Provider::Default
                             // or aws_credentials::Provider::WebIdentityFromKubernetesEnvironment.
+                            None,
                             None,
                             "IAM federation",
                             use_default_aws_credentials_provider,
@@ -2044,6 +2073,7 @@ fn intake_task_queue_from_args(
                 .ok_or_else(|| anyhow!("aws-sqs-region is required"))?;
             let credentials_provider = aws_credentials_provider(
                 identity,
+                None,
                 "sqs",
                 value_t!(
                     matches.value_of("task-queue-use-default-aws-credentials-provider"),
@@ -2095,6 +2125,7 @@ fn aggregation_task_queue_from_args(
                 .ok_or_else(|| anyhow!("aws-sqs-region is required"))?;
             let credentials_provider = aws_credentials_provider(
                 identity,
+                None,
                 "sqs",
                 value_t!(
                     matches.value_of("task-queue-use-default-aws-credentials-provider"),
