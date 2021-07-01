@@ -1,6 +1,9 @@
 use crate::{
     config::Identity,
-    http::{Method, RequestParameters, RetryingAgent},
+    gcp_oauth::{
+        AccessScope, GcpAccessTokenProvider, GkeMetadataServiceIdentityTokenProvider,
+        ImpersonatedServiceAccountIdentityTokenProvider, ProvideGcpIdentityToken,
+    },
     retries,
 };
 use anyhow::{anyhow, Context, Result};
@@ -21,15 +24,13 @@ use rusoto_core::{
 };
 use rusoto_mock::MockCredentialsProvider;
 use rusoto_sts::WebIdentityProvider;
-//use s3::signing::{canonical_request, signed_header_string, signing_key};
 use sha2::{Digest, Sha256};
-use slog::{debug, o, Logger};
+use slog::{o, Logger};
 use std::str;
 use std::{
     boxed::Box,
     convert::From,
     default::Default,
-    env,
     fmt::{self, Debug, Display},
     sync::Arc,
 };
@@ -94,18 +95,30 @@ pub enum Provider {
 
 impl Provider {
     /// Instantiates an appropriate Provider based on the provided configuration
-    /// values
+    /// values.
+    /// `aws_identity` is the AWS IAM entity (typically a role) for which this
+    /// provider will provide credentials.
+    /// `impersonate_gcp_service_account` is a GCP service account which should
+    /// be impersonated to obtain identity tokens allowing assumption of
+    /// `aws_identity`.
+    /// If `use_default_provider` is true, then ambient AWS credentials from the
+    /// environment or ~/.aws/credentials will be used and other arguments are
+    /// ignored.
     pub fn new(
-        identity: Identity,
+        aws_identity: Identity,
+        impersonate_gcp_service_account: Identity,
         use_default_provider: bool,
         purpose: &str,
         logger: &Logger,
     ) -> Result<Self> {
-        match (use_default_provider, identity.as_str()) {
+        match (use_default_provider, aws_identity.as_str()) {
             (true, _) => Self::new_default(),
-            (_, Some(identity)) => {
-                Self::new_web_identity_with_oidc(identity, purpose.to_owned(), logger)
-            }
+            (_, Some(identity)) => Self::new_web_identity_with_oidc(
+                identity,
+                purpose.to_owned(),
+                impersonate_gcp_service_account,
+                logger,
+            ),
             (_, None) => Self::new_web_identity_from_kubernetes_environment(),
         }
     }
@@ -129,25 +142,15 @@ impl Provider {
         ))
     }
 
-    // We use workload identity to map GCP service accounts to Kubernetes
-    // service accounts and make an auth token for the GCP account available to
-    // containers in the GKE metadata service. Sadly we can't use the Kubernetes
-    // feature to automount a service account token, because that would provide
-    // the token for the *Kubernetes* service account, not the GCP one.
-    // See terraform/modules/gke/gke.tf and terraform/modules/kuberenetes/kubernetes.tf
-    fn metadata_service_token_url() -> Url {
-        Url::parse("http://metadata.google.internal:80/computeMetadata/v1/instance/service-accounts/default/identity")
-            .expect("could not parse token metadata api url")
-    }
-
     fn new_web_identity_with_oidc(
         iam_role: &str,
         purpose: String,
+        impersonated_gcp_service_account: Identity,
         logger: &Logger,
     ) -> Result<Self> {
-        // When running in GKE, the token used to authenticate to AWS S3 is
-        // available from the instance metadata service.
-        // See terraform/modules/kubernetes/kubernetes.tf for discussion.
+        // When running in GKE, we obtain an identity token which we can then
+        // present to sts.amazonaws.com to get credentials that can authenticate
+        // to AWS S3.
         // This dynamic variable lets us provide a callback for fetching tokens,
         // allowing Rusoto to automatically get new credentials if they expire
         // (which they do every hour).
@@ -155,49 +158,29 @@ impl Provider {
             "iam_role" => iam_role.to_owned(),
             "purpose" => purpose.clone(),
         ));
+        let token_provider: Box<dyn ProvideGcpIdentityToken> =
+            match impersonated_gcp_service_account.as_str() {
+                Some(impersonated_gcp_service_account) => {
+                    Box::new(ImpersonatedServiceAccountIdentityTokenProvider::new(
+                        impersonated_gcp_service_account.to_owned(),
+                        GcpAccessTokenProvider::new(
+                            AccessScope::CloudPlatform,
+                            Identity::none(),
+                            None,
+                            None,
+                            &token_logger,
+                        )?,
+                        token_logger.clone(),
+                    ))
+                }
+                None => Box::new(GkeMetadataServiceIdentityTokenProvider::new(
+                    token_logger.clone(),
+                )),
+            };
         let oidc_token_variable = Variable::dynamic(move || {
-            debug!(
-                token_logger,
-                "obtaining OIDC token from GKE metadata service"
-            );
-            let aws_account_id = env::var("AWS_ACCOUNT_ID").map_err(|e| {
+            let token = token_provider.identity_token().map_err(|e| {
                 CredentialsError::new(format!(
-                    "could not read AWS account ID from environment: {}",
-                    e
-                ))
-            })?;
-
-            // We use ureq for this request because it is designed to use purely
-            // synchronous Rust. Ironically, we are in the context of an async
-            // runtime when this callback is invoked, but because the closure is
-            // not declared async, we cannot use .await to work with Futures.
-            let mut url = Self::metadata_service_token_url();
-
-            url.query_pairs_mut()
-                .append_pair("audience", &format!("sts.amazonaws.com/{}", aws_account_id))
-                .finish();
-
-            let agent = RetryingAgent::default();
-            let mut request = agent
-                .prepare_request(RequestParameters {
-                    url,
-                    method: Method::Get,
-                    ..Default::default()
-                })
-                .map_err(|e| CredentialsError::new(format!("failed to create request: {:?}", e)))?;
-
-            request = request.set("Metadata-Flavor", "Google");
-
-            let response = agent.call(&token_logger, &request).map_err(|e| {
-                CredentialsError::new(format!(
-                    "failed to fetch {} auth token from metadata service: {:?}",
-                    purpose, e
-                ))
-            })?;
-
-            let token = response.into_string().map_err(|e| {
-                CredentialsError::new(format!(
-                    "failed to fetch {} auth token from metadata service: {}",
+                    "failed to fetch {} identity token from GCP: {}",
                     purpose, e
                 ))
             })?;

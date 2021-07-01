@@ -62,6 +62,14 @@ impl Identity {
     pub(crate) fn as_str(&self) -> Option<&str> {
         self.inner.as_deref()
     }
+
+    pub(crate) fn is_some(&self) -> bool {
+        self.inner.is_some()
+    }
+
+    pub(crate) fn is_none(&self) -> bool {
+        self.inner.is_none()
+    }
 }
 
 /// Parameters necessary to configure federation from AWS IAM to GCP IAM using
@@ -94,9 +102,11 @@ impl WorkloadIdentityPoolParameters {
             Some(provider_id) => Some(Self {
                 workload_identity_pool_provider: provider_id.to_owned(),
                 aws_credentials_provider: aws_credentials::Provider::new(
-                    // We create this provider with no identity, effectively
-                    // requiring that the authentication to AWS use either
-                    // ambient AWS credentials or an EKS cluster OIDC provider.
+                    // We create this provider with no identity and no
+                    // impersonated GCP service account, requiring that the
+                    // authentication to AWS use either ambient AWS credentials
+                    // or an EKS cluster OIDC provider.
+                    Identity::none(),
                     Identity::none(),
                     use_default_aws_credentials_provider,
                     "IAM federation",
@@ -382,7 +392,7 @@ mod tests {
 
     #[test]
     fn identity() {
-        assert!(Identity::from_str("").unwrap().as_str().is_none());
+        assert!(Identity::from_str("").unwrap().is_none());
 
         assert_eq!(
             Identity::from_str("identity").unwrap().as_str(),
