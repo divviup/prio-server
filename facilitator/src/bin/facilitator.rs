@@ -721,6 +721,7 @@ fn main() -> Result<(), anyhow::Error> {
                 .add_storage_arguments(Entity::Ingestor, InOut::Input)
                 .add_manifest_base_url_argument(Entity::Peer)
                 .add_storage_arguments(Entity::Peer, InOut::Output)
+                .add_manifest_base_url_argument(Entity::Own)
                 .add_storage_arguments(Entity::Own, InOut::Output)
                 .add_use_bogus_packet_file_digest_argument()
                 .add_permit_malformed_batch_argument()
@@ -858,6 +859,7 @@ fn main() -> Result<(), anyhow::Error> {
                 .add_storage_arguments(Entity::Ingestor, InOut::Input)
                 .add_manifest_base_url_argument(Entity::Peer)
                 .add_storage_arguments(Entity::Peer, InOut::Output)
+                .add_manifest_base_url_argument(Entity::Own)
                 .add_storage_arguments(Entity::Own, InOut::Output)
                 .add_task_queue_arguments()
                 .add_metrics_scrape_port_argument()
@@ -924,6 +926,40 @@ fn main() -> Result<(), anyhow::Error> {
     };
 
     result
+}
+
+/// Check batch signing and packet encryption public keys in this instance's
+/// specific manifests against the corresponding private keys provided. Returns
+/// an error unless each advertised public key matches up with an available
+/// private key.
+fn crypto_self_check(matches: &ArgMatches, logger: &Logger) -> Result<()> {
+    let instance_name = matches.value_of("instance-name").unwrap();
+    let own_manifest = match matches.value_of("own-manifest-base-url") {
+        Some(manifest_base_url) => {
+            SpecificManifest::from_https(manifest_base_url, instance_name, logger)?
+        }
+        // Skip crypto self check if no own manifest is provided
+        None => return Ok(()),
+    };
+
+    let batch_signing_key = batch_signing_key_from_arg(matches)?;
+    own_manifest.verify_batch_signing_key(&batch_signing_key)?;
+    debug!(logger, "batch singing key self check OK!");
+
+    let packet_decryption_keys: Vec<PrivateKey> = matches
+        .values_of("packet-decryption-keys")
+        .unwrap()
+        .map(|k| {
+            PrivateKey::from_base64(k)
+                .context("could not parse encoded packet encryption key")
+                .unwrap()
+        })
+        .collect();
+
+    own_manifest.verify_packet_encryption_keys(&packet_decryption_keys)?;
+    debug!(logger, "packet decryption key self check OK!");
+
+    Ok(())
 }
 
 fn generate_sample_worker(
@@ -1308,6 +1344,7 @@ fn intake_batch_subcommand(
     sub_matches: &ArgMatches,
     parent_logger: &Logger,
 ) -> Result<(), anyhow::Error> {
+    crypto_self_check(sub_matches, parent_logger).context("crypto self check failed")?;
     intake_batch(
         "None",
         sub_matches.value_of("aggregation-id").unwrap(),
@@ -1328,6 +1365,8 @@ fn intake_batch_worker(
     let scrape_port = value_t!(sub_matches.value_of("metrics-scrape-port"), u16)?;
     let _runtime = start_metrics_scrape_endpoint(scrape_port, parent_logger)?;
     let mut queue = intake_task_queue_from_args(sub_matches, parent_logger)?;
+
+    crypto_self_check(sub_matches, parent_logger).context("crypto self check failed")?;
 
     loop {
         if let Some(task_handle) = queue.dequeue()? {
@@ -1421,6 +1460,7 @@ where
             SpecificManifest::from_https(manifest_base_url, instance_name, logger)?
                 .batch_signing_public_keys()?
         }
+
         (_, Some(private_key), Some(private_key_identifier)) => {
             public_key_map_from_arg(private_key, private_key_identifier)?
         }
@@ -1558,6 +1598,8 @@ fn aggregate_subcommand(
     sub_matches: &ArgMatches,
     parent_logger: &Logger,
 ) -> Result<(), anyhow::Error> {
+    crypto_self_check(sub_matches, parent_logger).context("crypto self check failed")?;
+
     let batch_ids: Vec<&str> = sub_matches
         .values_of("batch-id")
         .context("no batch-id")?
@@ -1592,6 +1634,7 @@ fn aggregate_worker(sub_matches: &ArgMatches, parent_logger: &Logger) -> Result<
     let metrics_collector = AggregateMetricsCollector::new()?;
     let scrape_port = value_t!(sub_matches.value_of("metrics-scrape-port"), u16)?;
     let _runtime = start_metrics_scrape_endpoint(scrape_port, parent_logger)?;
+    crypto_self_check(sub_matches, parent_logger).context("crypto self check failed")?;
 
     loop {
         if let Some(task_handle) = queue.dequeue()? {

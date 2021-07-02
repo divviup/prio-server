@@ -199,6 +199,7 @@ resource "kubernetes_config_map" "intake_batch_config_map" {
     INSTANCE_NAME                        = var.data_share_processor_name
     PEER_IDENTITY                        = var.remote_peer_validation_bucket_identity
     PEER_MANIFEST_BASE_URL               = "https://${var.peer_manifest_base_url}"
+    OWN_MANIFEST_BASE_URL                = "https://${var.own_manifest_base_url}"
     OWN_OUTPUT                           = var.own_validation_bucket
     RUST_LOG                             = "info"
     RUST_BACKTRACE                       = "1"
