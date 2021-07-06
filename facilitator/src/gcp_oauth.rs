@@ -460,6 +460,16 @@ impl GcpOauthTokenProvider {
         }
 
         let mut default_account_token = self.default_account_token.write().unwrap();
+
+        // Check if the token was updated between when we dropped the read lock
+        // and when we acquired the write lock
+        if let Some(token) = &*default_account_token {
+            if !token.expired() {
+                debug!(self.logger, "cached default account token is still valid");
+                return Ok(token.token.clone());
+            }
+        }
+
         let http_response = self.default_token_provider.default_token()?;
 
         let response = http_response
