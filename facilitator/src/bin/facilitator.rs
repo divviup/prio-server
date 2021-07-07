@@ -1965,7 +1965,7 @@ fn transport_for_path(
                 match matches.value_of("gcp-workload-identity-pool-provider") {
                     Some(workload_identity_pool_provider) => Some(WorkloadIdentityPoolParameters {
                         workload_identity_pool_provider: workload_identity_pool_provider.to_owned(),
-                        aws_credentials_provider: Box::new(aws_credentials_provider(
+                        aws_credentials_provider: aws_credentials_provider(
                             // The identity parameter is the GCP SA that must be
                             // impersonated to access the GCS bucket. We create
                             // this aws_credentials::Provider with no identity,
@@ -1976,7 +1976,7 @@ fn transport_for_path(
                             "IAM federation",
                             use_default_aws_credentials_provider,
                             logger,
-                        )?),
+                        )?,
                     }),
                     None => None,
                 };
