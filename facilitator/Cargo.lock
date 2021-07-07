@@ -436,12 +436,14 @@ dependencies = [
 
 [[package]]
 name = "crypto-bigint"
-version = "0.2.0"
+version = "0.2.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "281d926f72b42bf3ba840b88cd53e39f36be9f66e34c8df3fb336372b3753d41"
+checksum = "b32a398eb1ccfbe7e4f452bc749c44d38dd732e9a253f19da224c416f00ee7f4"
 dependencies = [
  "generic-array 0.14.4",
+ "rand_core 0.6.1",
  "subtle",
+ "zeroize",
 ]
 
 [[package]]
@@ -601,9 +603,9 @@ checksum = "e78d4f1cc4ae33bbfc157ed5d5a5ef3bc29227303d595861deb238fcec4e9457"
 
 [[package]]
 name = "elliptic-curve"
-version = "0.10.2"
+version = "0.10.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "59029dd05f60215bbe37eda4b32ba1a142abc8b01a938955b20b92ff0d713e8e"
+checksum = "dd035cb119cbc25e91bb6f1abbfe341388ddb47a1fe5e77ca6bcbe231e87580b"
 dependencies = [
  "crypto-bigint",
  "ff",

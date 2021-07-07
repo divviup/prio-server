@@ -16,7 +16,7 @@ chrono = { version = "0.4", features = ["serde"] }
 clap = "2.33.3"
 derivative = "2.1.1"
 dyn-clone = "1.0.4"
-elliptic-curve = { version = "0.10.2", features = ["pem"] }
+elliptic-curve = { version = "0.10.3", features = ["pem"] }
 hex = "0.4"
 hmac = "0.11"
 http = "^0.2"
