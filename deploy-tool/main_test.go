@@ -124,8 +124,18 @@ type FakeManifestWriter struct {
 	manifests map[string]manifest.DataShareProcessorSpecificManifest
 }
 
-func (w *FakeManifestWriter) WriteDataShareProcessorSpecificManifest(manifest manifest.DataShareProcessorSpecificManifest, path string) error {
+func (w *FakeManifestWriter) WriteDataShareProcessorSpecificManifest(
+	manifest manifest.DataShareProcessorSpecificManifest,
+	path string,
+) error {
 	w.manifests[path] = manifest
+	return nil
+}
+
+func (w *FakeManifestWriter) WriteIngestorGlobalManifest(
+	manifest manifest.IngestorGlobalManifest,
+	path string,
+) error {
 	return nil
 }
 

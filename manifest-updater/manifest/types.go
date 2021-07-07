@@ -12,6 +12,9 @@ type DataShareProcessorSpecificManifest struct {
 	// IngestionBucket is the region+name of the bucket that the data share
 	// processor which owns the manifest reads ingestion batches from.
 	IngestionBucket string `json:"ingestion-bucket"`
+	// PeerValidationIdentity is the identity is the identity that should be
+	// assumed by peers to write to the PeerValidationBucket
+	PeerValidationIdentity string `json:"peer-validation-identity,omitempty"`
 	// PeerValidationBucket is the region+name of the bucket that the data share
 	// processor which owns the manifest reads peer validation batches from.
 	PeerValidationBucket string `json:"peer-validation-bucket"`
