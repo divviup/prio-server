@@ -9,5 +9,5 @@ require (
 	github.com/google/uuid v1.2.0
 	github.com/prometheus/client_golang v1.11.0
 	github.com/rs/zerolog v1.23.0
-	google.golang.org/api v0.48.0
+	google.golang.org/api v0.50.0
 )
