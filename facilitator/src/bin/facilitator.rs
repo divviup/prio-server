@@ -725,6 +725,7 @@ fn main() -> Result<(), anyhow::Error> {
                 .add_storage_arguments(Entity::Own, InOut::Output)
                 .add_use_bogus_packet_file_digest_argument()
                 .add_permit_malformed_batch_argument()
+                .add_gcp_workload_identity_pool_provider_argument()
         )
         .subcommand(
             SubCommand::with_name("aggregate")
@@ -799,6 +800,7 @@ fn main() -> Result<(), anyhow::Error> {
                 .add_packet_decryption_key_argument()
                 .add_batch_signing_key_arguments(true)
                 .add_permit_malformed_batch_argument()
+                .add_gcp_workload_identity_pool_provider_argument()
         )
         .subcommand(
             SubCommand::with_name("lint-manifest")
@@ -865,6 +867,7 @@ fn main() -> Result<(), anyhow::Error> {
                 .add_metrics_scrape_port_argument()
                 .add_use_bogus_packet_file_digest_argument()
                 .add_permit_malformed_batch_argument()
+                .add_gcp_workload_identity_pool_provider_argument()
         )
         .subcommand(
             SubCommand::with_name("aggregate-worker")
@@ -887,6 +890,7 @@ fn main() -> Result<(), anyhow::Error> {
                 .add_task_queue_arguments()
                 .add_metrics_scrape_port_argument()
                 .add_permit_malformed_batch_argument()
+                .add_gcp_workload_identity_pool_provider_argument()
         )
         .get_matches();
 
@@ -1911,15 +1915,6 @@ fn transport_from_args(
     transport_for_path(path, identity, entity, matches, logger)
 }
 
-fn aws_credentials_provider(
-    identity: Identity,
-    service: &str,
-    use_default_provider: bool,
-    logger: &Logger,
-) -> Result<aws_credentials::Provider> {
-    aws_credentials::Provider::new(identity, use_default_provider, service, logger)
-}
-
 fn transport_for_path(
     path: StoragePath,
     identity: Identity,
@@ -1934,10 +1929,10 @@ fn transport_for_path(
 
     match path {
         StoragePath::S3Path(path) => {
-            let credentials_provider = aws_credentials_provider(
+            let credentials_provider = aws_credentials::Provider::new(
                 identity,
-                "s3",
                 use_default_aws_credentials_provider,
+                "s3",
                 logger,
             )?;
             Ok(Box::new(S3Transport::new(
@@ -1954,31 +1949,15 @@ fn transport_for_path(
                 None => None,
             };
 
-            let workload_identity_pool_params =
-                match matches.value_of("gcp-workload-identity-pool-provider") {
-                    Some(workload_identity_pool_provider) => Some(WorkloadIdentityPoolParameters {
-                        workload_identity_pool_provider: workload_identity_pool_provider.to_owned(),
-                        aws_credentials_provider: aws_credentials_provider(
-                            // The identity parameter is the GCP SA that must be
-                            // impersonated to access the GCS bucket. We create
-                            // this aws_credentials::Provider with no identity,
-                            // effectively requiring that the authentication to
-                            // AWS either use aws_credentials::Provider::Default
-                            // or aws_credentials::Provider::WebIdentityFromKubernetesEnvironment.
-                            Identity::none(),
-                            "IAM federation",
-                            use_default_aws_credentials_provider,
-                            logger,
-                        )?,
-                    }),
-                    None => None,
-                };
-
             Ok(Box::new(GcsTransport::new(
                 path,
                 identity,
                 key_file_reader,
-                workload_identity_pool_params,
+                WorkloadIdentityPoolParameters::new(
+                    matches.value_of("gcp-workload-identity-pool-provider"),
+                    use_default_aws_credentials_provider,
+                    logger,
+                )?,
                 logger,
             )?))
         }
@@ -2035,13 +2014,13 @@ fn intake_task_queue_from_args(
             let sqs_region = matches
                 .value_of("aws-sqs-region")
                 .ok_or_else(|| anyhow!("aws-sqs-region is required"))?;
-            let credentials_provider = aws_credentials_provider(
+            let credentials_provider = aws_credentials::Provider::new(
                 identity,
-                "sqs",
                 value_t!(
                     matches.value_of("task-queue-use-default-aws-credentials-provider"),
                     bool
                 )?,
+                "sqs",
                 logger,
             )?;
             Ok(Box::new(AwsSqsTaskQueue::new(
@@ -2086,13 +2065,13 @@ fn aggregation_task_queue_from_args(
             let sqs_region = matches
                 .value_of("aws-sqs-region")
                 .ok_or_else(|| anyhow!("aws-sqs-region is required"))?;
-            let credentials_provider = aws_credentials_provider(
+            let credentials_provider = aws_credentials::Provider::new(
                 identity,
-                "sqs",
                 value_t!(
                     matches.value_of("task-queue-use-default-aws-credentials-provider"),
                     bool
                 )?,
+                "sqs",
                 logger,
             )?;
             Ok(Box::new(AwsSqsTaskQueue::new(
