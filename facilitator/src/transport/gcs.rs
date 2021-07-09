@@ -66,7 +66,7 @@ impl GcsTransport {
     ) -> Result<Self> {
         let logger = parent_logger.new(o!(
             event::STORAGE_PATH => path.to_string(),
-            event::IDENTITY => identity.unwrap_or("default identity").to_owned(),
+            event::IDENTITY => identity.to_string(),
         ));
         let ureq_agent = AgentBuilder::new()
             // We set an unusually long timeout for uploads to GCS, per Google's
@@ -87,7 +87,7 @@ impl GcsTransport {
                 // This token is used to access GCS storage
                 // https://developers.google.com/identity/protocols/oauth2/scopes#storage
                 "https://www.googleapis.com/auth/devstorage.read_write",
-                identity.map(|x| x.to_string()),
+                identity,
                 key_file_reader,
                 workload_identity_pool_params,
                 &logger,

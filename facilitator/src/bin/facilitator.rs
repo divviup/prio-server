@@ -1043,15 +1043,15 @@ fn get_ecies_public_key(
 }
 
 fn get_ingestion_identity_and_bucket(
-    identity: Option<&str>,
+    identity: Identity,
     bucket: Option<&str>,
     manifest_url: Option<&str>,
     ingestor_name: Option<&str>,
     locality_name: Option<&str>,
     logger: &Logger,
-) -> Result<(Option<String>, String)> {
+) -> Result<(Identity, StoragePath)> {
     match bucket {
-        Some(bucket) => Ok((identity.map(String::from), String::from(bucket))),
+        Some(bucket) => Ok((identity, StoragePath::from_str(bucket)?)),
         None => {
             let ingestor_name = ingestor_name
                 .ok_or_else(|| anyhow!("ingestor-name must be provided with manifest-base-url"))?;
@@ -1066,7 +1066,10 @@ fn get_ingestion_identity_and_bucket(
                 format!("unable to read SpecificManifest from {}", manifest_url),
             )?;
 
-            Ok((manifest.ingestion_identity(), manifest.ingestion_bucket()))
+            Ok((
+                manifest.ingestion_identity().to_owned(),
+                manifest.ingestion_bucket().to_owned(),
+            ))
         }
     }
 }
@@ -1143,15 +1146,13 @@ fn generate_sample(
     )?;
 
     let (peer_identity, peer_output_path) = get_ingestion_identity_and_bucket(
-        sub_matches.value_of("peer-identity"),
+        value_t!(sub_matches.value_of("peer-identity"), Identity)?,
         sub_matches.value_of("peer-output"),
         sub_matches.value_of("pha-manifest-base-url"),
         ingestor_name,
         locality_name,
         logger,
     )?;
-
-    let peer_output_path = StoragePath::from_str(&peer_output_path)?;
 
     let packet_encryption_public_key = get_ecies_public_key(
         sub_matches.value_of("pha-ecies-public-key"),
@@ -1165,7 +1166,7 @@ fn generate_sample(
         transport: SignableTransport {
             transport: transport_for_path(
                 peer_output_path,
-                peer_identity.as_deref(),
+                peer_identity,
                 Entity::Peer,
                 sub_matches,
                 logger,
@@ -1176,16 +1177,14 @@ fn generate_sample(
         drop_nth_packet: None,
     };
 
-    let (facilitator_identity, faciliator_output) = get_ingestion_identity_and_bucket(
-        sub_matches.value_of("facilitator-identity"),
+    let (facilitator_identity, facilitator_output) = get_ingestion_identity_and_bucket(
+        value_t!(sub_matches.value_of("facilitator-identity"), Identity)?,
         sub_matches.value_of("facilitator-output"),
         sub_matches.value_of("facilitator-manifest-base-url"),
         ingestor_name,
         locality_name,
         logger,
     )?;
-
-    let faciliator_output = StoragePath::from_str(&faciliator_output)?;
 
     let packet_encryption_public_key = get_ecies_public_key(
         sub_matches.value_of("facilitator-ecies-public-key"),
@@ -1206,8 +1205,8 @@ fn generate_sample(
     let mut facilitator_transport = SampleOutput {
         transport: SignableTransport {
             transport: transport_for_path(
-                faciliator_output,
-                facilitator_identity.as_deref(),
+                facilitator_output,
+                facilitator_identity,
                 Entity::Facilitator,
                 sub_matches,
                 logger,
@@ -1267,12 +1266,13 @@ where
                 sub_matches.value_of("instance-name").unwrap(),
                 parent_logger,
             )?
-            .validation_bucket()
+            .peer_validation_bucket()
+            .to_owned()
         } else if let Some(path) = sub_matches.value_of(Entity::Peer.suffix(InOut::Output.str())) {
-            StoragePath::from_str(path)
+            StoragePath::from_str(path)?
         } else {
-            Err(anyhow!("peer-output or peer-manifest-base-url required."))
-        }?;
+            return Err(anyhow!("peer-output or peer-manifest-base-url required."));
+        };
 
     let mut peer_validation_transport = SignableTransport {
         transport: transport_from_args(
@@ -1515,12 +1515,15 @@ where
         (Some(manifest_base_url), _) => {
             PortalServerGlobalManifest::from_https(manifest_base_url, logger)?
                 .sum_part_bucket(is_first)
+                .to_owned()
         }
-        (_, Some(path)) => StoragePath::from_str(path),
-        _ => Err(anyhow!(
-            "portal-output or portal-manifest-base-url required"
-        )),
-    }?;
+        (_, Some(path)) => StoragePath::from_str(path)?,
+        _ => {
+            return Err(anyhow!(
+                "portal-output or portal-manifest-base-url required"
+            ))
+        }
+    };
     let aggregation_transport = transport_from_args(
         Entity::Portal,
         PathOrInOut::Path(portal_bucket),
@@ -1770,7 +1773,7 @@ fn lint_manifest(sub_matches: &ArgMatches, logger: &Logger) -> Result<(), anyhow
                     "one of manifest-base-url or manifest-path is required"
                 ));
             };
-            println!("Valid: {:?}\n{:#?}", manifest.validate(), manifest);
+            println!("Valid: Ok\n{:#?}", manifest);
         }
     }
 
@@ -1891,7 +1894,7 @@ fn transport_from_args(
     matches: &ArgMatches,
     logger: &Logger,
 ) -> Result<Box<dyn Transport>> {
-    let identity = matches.value_of(entity.suffix("-identity"));
+    let identity = value_t!(matches.value_of(entity.suffix("-identity")), Identity)?;
 
     let path = match path_or_in_out {
         PathOrInOut::Path(path) => path,
@@ -1924,16 +1927,6 @@ fn transport_for_path(
     matches: &ArgMatches,
     logger: &Logger,
 ) -> Result<Box<dyn Transport>> {
-    // We use the value "" to indicate that either ambient AWS credentials (for
-    // S3) or the default service account Oauth token (for GCS) should be used
-    // so that Terraform can explicitly indicate that the default identity
-    // should be used.
-    let identity = if let Some("") = identity {
-        None
-    } else {
-        identity
-    };
-
     let use_default_aws_credentials_provider = value_t!(
         matches.value_of(entity.suffix("-use-default-aws-credentials-provider")),
         bool
@@ -1972,7 +1965,7 @@ fn transport_for_path(
                             // effectively requiring that the authentication to
                             // AWS either use aws_credentials::Provider::Default
                             // or aws_credentials::Provider::WebIdentityFromKubernetesEnvironment.
-                            None,
+                            Identity::none(),
                             "IAM federation",
                             use_default_aws_credentials_provider,
                             logger,
@@ -2019,7 +2012,7 @@ fn intake_task_queue_from_args(
             .value_of("task-queue-kind")
             .ok_or_else(|| anyhow!("task-queue-kind is required"))?,
     )?;
-    let identity = matches.value_of("task-queue-identity");
+    let identity = value_t!(matches.value_of("task-queue-identity"), Identity)?;
     let queue_name = matches
         .value_of("task-queue-name")
         .ok_or_else(|| anyhow!("task-queue-name is required"))?;
@@ -2070,7 +2063,7 @@ fn aggregation_task_queue_from_args(
             .value_of("task-queue-kind")
             .ok_or_else(|| anyhow!("task-queue-kind is required"))?,
     )?;
-    let identity = matches.value_of("task-queue-identity");
+    let identity = value_t!(matches.value_of("task-queue-identity"), Identity)?;
     let queue_name = matches
         .value_of("task-queue-name")
         .ok_or_else(|| anyhow!("task-queue-name is required"))?;

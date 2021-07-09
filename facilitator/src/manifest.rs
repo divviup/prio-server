@@ -13,9 +13,12 @@ use ring::{
 };
 use serde::Deserialize;
 use slog::Logger;
-use std::{collections::HashMap, str::FromStr};
+use std::collections::HashMap;
 
-use crate::{config::StoragePath, http, BatchSigningKey};
+use crate::{
+    config::{Identity, StoragePath},
+    http, BatchSigningKey,
+};
 
 // See discussion in SpecificManifest::batch_signing_public_key
 const ECDSA_P256_SPKI_PREFIX: &[u8] = &[
@@ -140,15 +143,15 @@ pub struct SpecificManifest {
     format: u32,
     /// URL of the ingestion bucket owned by this data share processor, which
     /// may be in the form "s3://{region}/{name}" or "gs://{name}".
-    ingestion_bucket: String,
+    ingestion_bucket: StoragePath,
     /// The ARN of the AWS IAM role that should be assumed by an ingestion
     /// server to write to this data share processor's ingestion bucket, if the
     /// ingestor does not have an AWS account of their own. This will not be
     /// present if the data share processor's ingestion bucket is not in AWS S3.
-    ingestion_identity: Option<String>,
+    ingestion_identity: Identity,
     /// URL of the validation bucket owned by this data share processor, which
     /// may be in the form "s3://{region}/{name}" or "gs://{name}".
-    peer_validation_bucket: String,
+    peer_validation_bucket: StoragePath,
     /// Keys used by this data share processor to sign batches.
     batch_signing_public_keys: HashMap<String, BatchSigningPublicKey>,
     /// Certificate signing requests containing public keys that should be used
@@ -196,11 +199,10 @@ impl SpecificManifest {
         Ok(self.packet_encryption_keys.clone())
     }
 
-    /// Returns the StoragePath for the data share processor's validation
+    /// Returns the StoragePath for the data share processor's peer validation
     /// bucket.
-    pub fn validation_bucket(&self) -> Result<StoragePath> {
-        // For the time being, the path is assumed to be an S3 bucket.
-        StoragePath::from_str(&self.peer_validation_bucket)
+    pub fn peer_validation_bucket(&self) -> &StoragePath {
+        &self.peer_validation_bucket
     }
 
     /// Returns true if all the members of the parsed manifest are valid, false
@@ -208,18 +210,18 @@ impl SpecificManifest {
     pub fn validate(&self) -> Result<()> {
         self.batch_signing_public_keys()
             .context("bad manifest: public keys")?;
-        self.validation_bucket()
-            .context("bad manifest: valiation bucket")?;
-        StoragePath::from_str(&self.ingestion_bucket).context("bad manifest: ingestion bucket")?;
         Ok(())
     }
 
-    pub fn ingestion_identity(&self) -> Option<String> {
-        self.ingestion_identity.clone()
+    /// Returns the identity that should be assumed to write to the data share
+    /// processor's ingestion bucket
+    pub fn ingestion_identity(&self) -> &Identity {
+        &self.ingestion_identity
     }
 
-    pub fn ingestion_bucket(&self) -> String {
-        self.ingestion_bucket.clone()
+    /// Returns the StoragePath for the data share processor's ingestion bucket
+    pub fn ingestion_bucket(&self) -> &StoragePath {
+        &self.ingestion_bucket
     }
 
     /// Checks if the batch signing public key in the manifest matches the
@@ -412,10 +414,10 @@ pub struct PortalServerGlobalManifest {
     format: u32,
     /// URL of the bucket to which facilitator servers should write sum parts,
     /// which may be in the form "s3://{region}/{name}" or "gs://{name}".
-    facilitator_sum_part_bucket: String,
+    facilitator_sum_part_bucket: StoragePath,
     /// URL of the bucket to which PHA servers should write sum parts, which may
     /// be in the form "s3://{region}/{name}" or "gs://{name}".
-    pha_sum_part_bucket: String,
+    pha_sum_part_bucket: StoragePath,
 }
 
 impl PortalServerGlobalManifest {
@@ -437,23 +439,12 @@ impl PortalServerGlobalManifest {
 
     /// Returns the StoragePath for this portal server, returning the PHA bucket
     /// if is_pha is true, or the facilitator bucket otherwise.
-    pub fn sum_part_bucket(&self, is_pha: bool) -> Result<StoragePath> {
-        // For now, the path is assumed to be a GCS bucket.
-        StoragePath::from_str(if is_pha {
+    pub fn sum_part_bucket(&self, is_pha: bool) -> &StoragePath {
+        if is_pha {
             &self.pha_sum_part_bucket
         } else {
             &self.facilitator_sum_part_bucket
-        })
-    }
-
-    /// Returns true if all the members of the parsed manifest are valid, false
-    /// otherwise.
-    pub fn validate(&self) -> Result<()> {
-        self.sum_part_bucket(true)
-            .context("bad manifest: pha sum part bucket")?;
-        self.sum_part_bucket(false)
-            .context("bad manifest: facilitator sum part bucket")?;
-        Ok(())
+        }
     }
 }
 
@@ -531,10 +522,9 @@ mod tests {
             DEFAULT_PACKET_ENCRYPTION_CSR,
         },
     };
-    use assert_matches::assert_matches;
     use ring::signature::{EcdsaKeyPair, ECDSA_P256_SHA256_ASN1_SIGNING};
     use rusoto_core::Region;
-    use std::array::IntoIter;
+    use std::{array::IntoIter, str::FromStr};
     use url::Url;
 
     fn url_fetcher(url: &str, logger: &Logger) -> Result<String> {
@@ -710,9 +700,9 @@ mod tests {
             format: 1,
             batch_signing_public_keys: expected_batch_keys,
             packet_encryption_keys: expected_packet_encryption_csrs,
-            ingestion_bucket: "s3://us-west-1/ingestion".to_string(),
-            ingestion_identity: Some("arn:aws:iam:something:fake".to_owned()),
-            peer_validation_bucket: "gs://validation/path/fragment".to_string(),
+            ingestion_bucket: StoragePath::from_str("s3://us-west-1/ingestion").unwrap(),
+            ingestion_identity: Identity::from_str("arn:aws:iam:something:fake").unwrap(),
+            peer_validation_bucket: StoragePath::from_str("gs://validation/path/fragment").unwrap(),
         };
         assert_eq!(manifest, expected_manifest);
         let batch_signing_keys = manifest.batch_signing_public_keys().unwrap();
@@ -727,14 +717,12 @@ mod tests {
             .verify(content, signature.as_ref())
             .unwrap();
 
-        assert_matches!(
-            manifest.validation_bucket(),
-            Ok(StoragePath::GcsPath(path)) => {
-                assert_eq!(path, GcsPath {
-                    bucket: "validation".to_owned(),
-                    key: "path/fragment".to_owned(),
-                });
-            }
+        assert_eq!(
+            manifest.peer_validation_bucket(),
+            &StoragePath::GcsPath(GcsPath {
+                bucket: "validation".to_owned(),
+                key: "path/fragment".to_owned(),
+            }),
         );
 
         let packet_decryption_keys = manifest.packet_decryption_keys().unwrap();
@@ -1148,24 +1136,20 @@ mod tests {
 
         let manifest = PortalServerGlobalManifest::from_slice(manifest.as_bytes()).unwrap();
 
-        assert_matches!(
+        assert_eq!(
             manifest.sum_part_bucket(false),
-            Ok(StoragePath::GcsPath(path)) => {
-                assert_eq!(path, GcsPath {
-                    bucket: "facilitator-bucket".to_owned(),
-                    key: "".to_owned(),
-                });
-            }
+            &StoragePath::GcsPath(GcsPath {
+                bucket: "facilitator-bucket".to_owned(),
+                key: "".to_owned(),
+            }),
         );
-        assert_matches!(
+        assert_eq!(
             manifest.sum_part_bucket(true),
-            Ok(StoragePath::S3Path(path)) => {
-                assert_eq!(path, S3Path {
-                    region: Region::UsWest1,
-                    bucket: "pha-bucket".to_owned(),
-                    key: "".to_owned(),
-                });
-            }
+            &StoragePath::S3Path(S3Path {
+                region: Region::UsWest1,
+                bucket: "pha-bucket".to_owned(),
+                key: "".to_owned(),
+            }),
         );
     }
 
@@ -1472,9 +1456,9 @@ mod tests {
 
         let specific_manifest = SpecificManifest {
             format: 1,
-            ingestion_bucket: "gs://irrelevant".to_owned(),
-            ingestion_identity: None,
-            peer_validation_bucket: "gs://irrelevant".to_owned(),
+            ingestion_bucket: StoragePath::from_str("gs://irrelevant").unwrap(),
+            ingestion_identity: Identity::none(),
+            peer_validation_bucket: StoragePath::from_str("gs://irrelevant").unwrap(),
             batch_signing_public_keys: IntoIter::new([
                 (
                     "batch-signing-key-1".to_owned(),

@@ -101,7 +101,7 @@ impl Provider {
         purpose: &str,
         logger: &Logger,
     ) -> Result<Self> {
-        match (use_default_provider, identity) {
+        match (use_default_provider, identity.as_str()) {
             (true, _) => Self::new_default(),
             (_, Some(identity)) => {
                 Self::new_web_identity_with_oidc(identity, purpose.to_owned(), logger)
