@@ -1390,7 +1390,7 @@ fn intake_batch_worker(
     let metrics_collector = IntakeMetricsCollector::new()?;
     let scrape_port = value_t!(sub_matches.value_of("metrics-scrape-port"), u16)?;
     let _runtime = start_metrics_scrape_endpoint(scrape_port, parent_logger)?;
-    let mut queue = intake_task_queue_from_args(sub_matches, parent_logger)?;
+    let queue = intake_task_queue_from_args(sub_matches, parent_logger)?;
 
     crypto_self_check(sub_matches, parent_logger).context("crypto self check failed")?;
 
@@ -1663,7 +1663,7 @@ fn aggregate_subcommand(
 }
 
 fn aggregate_worker(sub_matches: &ArgMatches, parent_logger: &Logger) -> Result<(), anyhow::Error> {
-    let mut queue = aggregation_task_queue_from_args(sub_matches, parent_logger)?;
+    let queue = aggregation_task_queue_from_args(sub_matches, parent_logger)?;
     let metrics_collector = AggregateMetricsCollector::new()?;
     let scrape_port = value_t!(sub_matches.value_of("metrics-scrape-port"), u16)?;
     let _runtime = start_metrics_scrape_endpoint(scrape_port, parent_logger)?;

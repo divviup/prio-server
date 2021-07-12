@@ -54,7 +54,7 @@ impl<T: Task> AwsSqsTaskQueue<T> {
 }
 
 impl<T: Task> TaskQueue<T> for AwsSqsTaskQueue<T> {
-    fn dequeue(&mut self) -> Result<Option<TaskHandle<T>>> {
+    fn dequeue(&self) -> Result<Option<TaskHandle<T>>> {
         info!(self.logger, "pull task");
 
         let client = self.sqs_client()?;
@@ -116,7 +116,7 @@ impl<T: Task> TaskQueue<T> for AwsSqsTaskQueue<T> {
         }))
     }
 
-    fn acknowledge_task(&mut self, task: TaskHandle<T>) -> Result<()> {
+    fn acknowledge_task(&self, task: TaskHandle<T>) -> Result<()> {
         info!(
             self.logger, "acknowledging task";
             event::TASK_ACKNOWLEDGEMENT_ID => &task.acknowledgment_id,
@@ -139,7 +139,7 @@ impl<T: Task> TaskQueue<T> for AwsSqsTaskQueue<T> {
         .context("failed to delete/acknowledge message in SQS")
     }
 
-    fn nacknowledge_task(&mut self, task: TaskHandle<T>) -> Result<()> {
+    fn nacknowledge_task(&self, task: TaskHandle<T>) -> Result<()> {
         // In SQS, messages are nacked by changing the message visibility
         // timeout to 0
         // https://docs.aws.amazon.com/AWSSimpleQueueService/latest/SQSDeveloperGuide/sqs-visibility-timeout.html#terminating-message-visibility-timeout
@@ -152,7 +152,7 @@ impl<T: Task> TaskQueue<T> for AwsSqsTaskQueue<T> {
             .context("failed to nacknowledge task")
     }
 
-    fn extend_task_deadline(&mut self, task: &TaskHandle<T>, increment: &Duration) -> Result<()> {
+    fn extend_task_deadline(&self, task: &TaskHandle<T>, increment: &Duration) -> Result<()> {
         info!(
             self.logger, "extending deadline on task by 10 minutes";
             event::TASK_ACKNOWLEDGEMENT_ID => &task.acknowledgment_id,
@@ -184,7 +184,7 @@ impl<T: Task> AwsSqsTaskQueue<T> {
     /// Changes the message visibility of the SQS message described by the TaskHandle, resetting it
     /// to the specified visibility timeout.
     fn change_message_visibility(
-        &mut self,
+        &self,
         task: &TaskHandle<T>,
         visibility_timeout: &Duration,
     ) -> Result<()> {
