@@ -15,6 +15,15 @@ variable "use_aws" {
   default = false
 }
 
+variable "pure_gcp" {
+  type        = bool
+  default     = false
+  description = <<DESCRIPTION
+A data share processor that runs on GCP (i.e., use_aws=false) will still manage
+some resources in AWS (IAM roles) _unless_ this variable is set to true.
+DESCRIPTION
+}
+
 variable "aws_region" {
   type = string
 }
@@ -241,6 +250,7 @@ data "terraform_remote_state" "state" {
 }
 
 data "google_client_config" "current" {}
+data "aws_caller_identity" "current" {}
 
 provider "google" {
   # This will use "Application Default Credentials". Run `gcloud auth
@@ -284,12 +294,12 @@ provider "helm" {
   }
 }
 
-module "manifest" {
-  source                                = "./modules/manifest"
-  environment                           = var.environment
-  gcp_region                            = var.gcp_region
-  managed_dns_zone                      = var.managed_dns_zone
-  sum_part_bucket_service_account_email = google_service_account.sum_part_bucket_writer.email
+module "manifest_gcp" {
+  source = "./modules/manifest_gcp"
+
+  environment             = var.environment
+  gcp_region              = var.gcp_region
+  global_manifest_content = local.global_manifest
 }
 
 module "gke" {
@@ -359,11 +369,18 @@ locals {
       portal_server_manifest_base_url         = var.ingestors[pair[1]].localities[pair[0]].portal_server_manifest_base_url
     }
   }
+  global_manifest = jsonencode({
+    format = 0
+    server-identity = {
+      aws-account-id            = tonumber(data.aws_caller_identity.current.account_id)
+      gcp-service-account-email = google_service_account.sum_part_bucket_writer.email
+    }
+  })
   # For now, we only support advertising manifests in GCS but in #655 we will
   # add support for S3
   manifest = {
-    bucket      = module.manifest.bucket
-    base_url    = module.manifest.base_url
+    bucket      = module.manifest_gcp[0].bucket
+    base_url    = module.manifest_gcp[0].base_url
     aws_region  = ""
     aws_profile = ""
   }
@@ -390,7 +407,7 @@ module "locality_kubernetes" {
   source               = "./modules/locality_kubernetes"
   environment          = var.environment
   gcp_project          = var.gcp_project
-  manifest_bucket      = module.manifest.bucket
+  manifest_bucket      = local.manifest.bucket
   kubernetes_namespace = each.value.metadata[0].name
   ingestors            = keys(var.ingestors)
 
@@ -417,7 +434,7 @@ module "data_share_processors" {
   peer_share_processor_manifest_base_url         = each.value.peer_share_processor_manifest_base_url
   remote_bucket_writer_gcp_service_account_email = google_service_account.sum_part_bucket_writer.email
   portal_server_manifest_base_url                = each.value.portal_server_manifest_base_url
-  own_manifest_base_url                          = module.manifest.base_url
+  own_manifest_base_url                          = local.manifest.base_url
   is_first                                       = var.is_first
   intake_max_age                                 = var.intake_max_age
   aggregation_period                             = var.aggregation_period
@@ -453,12 +470,12 @@ resource "google_service_account_iam_binding" "data_share_processors_to_sum_part
 module "fake_server_resources" {
   count                 = local.is_env_with_ingestor ? 1 : 0
   source                = "./modules/fake_server_resources"
-  manifest_bucket       = module.manifest.bucket
+  manifest_bucket       = local.manifest.bucket
   gcp_region            = var.gcp_region
   gcp_project           = var.gcp_project
   environment           = var.environment
   ingestor_pairs        = local.locality_ingestor_pairs
-  own_manifest_base_url = module.manifest.base_url
+  own_manifest_base_url = local.manifest.base_url
   pushgateway           = var.pushgateway
   container_registry    = var.container_registry
   facilitator_image     = var.facilitator_image
@@ -470,7 +487,7 @@ module "fake_server_resources" {
 module "portal_server_resources" {
   count                        = local.deployment_has_ingestor ? 1 : 0
   source                       = "./modules/portal_server_resources"
-  manifest_bucket              = module.manifest.bucket
+  manifest_bucket              = local.manifest.bucket
   gcp_region                   = var.gcp_region
   environment                  = var.environment
   sum_part_bucket_writer_email = google_service_account.sum_part_bucket_writer.email
