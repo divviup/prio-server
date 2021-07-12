@@ -85,10 +85,6 @@ resource "aws_iam_role" "tester_role" {
   ]
 }
 ROLE
-
-  tags = {
-    environment = "prio-${var.environment}"
-  }
 }
 
 resource "aws_iam_role_policy" "bucket_role_policy" {

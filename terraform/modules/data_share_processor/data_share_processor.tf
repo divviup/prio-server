@@ -263,10 +263,6 @@ resource "aws_iam_role" "bucket_role" {
   ]
 }
 ROLE
-
-  tags = {
-    environment = "prio-${var.environment}"
-  }
 }
 
 # The bucket_role defined above is created in our AWS account and used to

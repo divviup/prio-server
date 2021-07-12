@@ -60,7 +60,8 @@ cluster_settings = {
   initial_node_count = 2
   min_node_count     = 1
   max_node_count     = 3
-  machine_type       = "e2-standard-2"
+  gcp_machine_type   = "e2-standard-2"
+  aws_machine_types  = []
 }
 test_peer_environment = {
   env_with_ingestor            = "staging-facil"

@@ -177,7 +177,8 @@ variable "cluster_settings" {
     initial_node_count = number
     min_node_count     = number
     max_node_count     = number
-    machine_type       = string
+    gcp_machine_type   = string
+    aws_machine_types  = list(string)
   })
 }
 
@@ -221,6 +222,11 @@ terraform {
       source  = "hashicorp/random"
       version = "~> 3.1.0"
     }
+    # `tls` provider needed to load EKS cluster OIDC provider certificate
+    tls = {
+      source  = "hashicorp/tls"
+      version = "~> 3.1.0"
+    }
   }
 }
 
@@ -256,19 +262,25 @@ provider "aws" {
   # https://github.com/hashicorp/terraform/issues/12512
   region  = var.aws_region
   profile = var.aws_profile
+
+  default_tags {
+    tags = {
+      "prio-env" = var.environment
+    }
+  }
 }
 
 provider "kubernetes" {
-  host                   = module.gke.cluster_endpoint
-  cluster_ca_certificate = base64decode(module.gke.certificate_authority_data)
-  token                  = data.google_client_config.current.access_token
+  host                   = local.kubernetes_cluster.endpoint
+  cluster_ca_certificate = base64decode(local.kubernetes_cluster.certificate_authority_data)
+  token                  = local.kubernetes_cluster.token
 }
 
 provider "helm" {
   kubernetes {
-    host                   = module.gke.cluster_endpoint
-    cluster_ca_certificate = base64decode(module.gke.certificate_authority_data)
-    token                  = data.google_client_config.current.access_token
+    host                   = local.kubernetes_cluster.endpoint
+    cluster_ca_certificate = base64decode(local.kubernetes_cluster.certificate_authority_data)
+    token                  = local.kubernetes_cluster.token
   }
 }
 
@@ -354,6 +366,13 @@ locals {
     base_url    = module.manifest.base_url
     aws_region  = ""
     aws_profile = ""
+  }
+  kubernetes_cluster = {
+    name                       = module.gke.cluster_name
+    endpoint                   = module.gke.cluster_endpoint
+    certificate_authority_data = module.gke.certificate_authority_data
+    token                      = module.gke.token
+    kubectl_command            = "gcloud container clusters get-credentials ${module.gke[0].cluster_name} --region ${var.gcp_region} --project ${var.gcp_project}"
   }
 }
 
@@ -479,7 +498,7 @@ output "manifest_bucket" {
 }
 
 output "gke_kubeconfig" {
-  value = "Run this command to update your kubectl config: gcloud container clusters get-credentials ${module.gke.cluster_name} --region ${var.gcp_region} --project ${var.gcp_project}"
+  value = "Run this command to update your kubectl config: ${local.kubernetes_cluster.kubectl_command}"
 }
 
 output "specific_manifests" {

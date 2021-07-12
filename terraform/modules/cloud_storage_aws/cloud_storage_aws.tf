@@ -77,10 +77,6 @@ resource "aws_s3_bucket" "ingestion_bucket" {
   ]
 }
 POLICY
-
-  tags = {
-    environment = "prio-${var.environment}"
-  }
 }
 
 # The peer validation bucket for this data share processor, configured to permit
@@ -133,8 +129,4 @@ resource "aws_s3_bucket" "peer_validation_bucket" {
   ]
 }
 POLICY
-
-  tags = {
-    environment = "prio-${var.environment}"
-  }
 }

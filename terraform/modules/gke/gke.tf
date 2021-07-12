@@ -19,7 +19,8 @@ variable "cluster_settings" {
     initial_node_count = number
     min_node_count     = number
     max_node_count     = number
-    machine_type       = string
+    gcp_machine_type   = string
+    aws_machine_types  = list(string)
   })
 }
 
@@ -112,7 +113,7 @@ resource "google_container_node_pool" "worker_nodes" {
   node_config {
     disk_size_gb = "25"
     image_type   = "COS_CONTAINERD"
-    machine_type = var.cluster_settings.machine_type
+    machine_type = var.cluster_settings.gcp_machine_type
     oauth_scopes = [
       "storage-ro",
       "logging-write",
@@ -169,6 +170,8 @@ resource "google_kms_crypto_key_iam_binding" "etcd-encryption-key-iam-binding" {
   ]
 }
 
+data "google_client_config" "current" {}
+
 output "cluster_name" {
   value = google_container_cluster.cluster.name
 }
@@ -183,4 +186,8 @@ output "certificate_authority_data" {
 
 output "kms_keyring" {
   value = google_kms_key_ring.keyring.id
+}
+
+output "token" {
+  value = data.google_client_config.current.access_token
 }
