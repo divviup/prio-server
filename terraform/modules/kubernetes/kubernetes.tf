@@ -34,19 +34,12 @@ variable "ingestion_bucket" {
   type = string
 }
 
-variable "ingestion_bucket_identity" {
-  type = string
-}
 
 variable "ingestor_manifest_base_url" {
   type = string
 }
 
 variable "peer_validation_bucket" {
-  type = string
-}
-
-variable "peer_validation_bucket_identity" {
   type = string
 }
 
@@ -205,7 +198,6 @@ resource "kubernetes_config_map" "intake_batch_config_map" {
     IS_FIRST                             = var.is_first ? "true" : "false"
     AWS_ACCOUNT_ID                       = data.aws_caller_identity.current.account_id
     BATCH_SIGNING_PRIVATE_KEY_IDENTIFIER = kubernetes_secret.batch_signing_key.metadata[0].name
-    INGESTOR_IDENTITY                    = var.ingestion_bucket_identity
     INGESTOR_INPUT                       = var.ingestion_bucket
     INGESTOR_MANIFEST_BASE_URL           = "https://${var.ingestor_manifest_base_url}"
     INSTANCE_NAME                        = var.data_share_processor_name
@@ -237,13 +229,11 @@ resource "kubernetes_config_map" "aggregate_config_map" {
     AWS_ACCOUNT_ID                       = data.aws_caller_identity.current.account_id
     BATCH_SIGNING_PRIVATE_KEY_IDENTIFIER = kubernetes_secret.batch_signing_key.metadata[0].name
     INGESTOR_INPUT                       = var.ingestion_bucket
-    INGESTOR_IDENTITY                    = var.ingestion_bucket_identity
     INGESTOR_MANIFEST_BASE_URL           = "https://${var.ingestor_manifest_base_url}"
     INSTANCE_NAME                        = var.data_share_processor_name
     OWN_INPUT                            = var.own_validation_bucket
     OWN_MANIFEST_BASE_URL                = "https://${var.own_manifest_base_url}"
     PEER_INPUT                           = var.peer_validation_bucket
-    PEER_IDENTITY                        = var.peer_validation_bucket_identity
     PEER_MANIFEST_BASE_URL               = "https://${var.peer_manifest_base_url}"
     PORTAL_IDENTITY                      = var.sum_part_bucket_service_account_email
     PORTAL_MANIFEST_BASE_URL             = "https://${var.portal_server_manifest_base_url}"
@@ -301,10 +291,8 @@ resource "kubernetes_cron_job" "workflow_manager" {
                 "--k8s-namespace", var.kubernetes_namespace,
                 "--ingestor-label", var.ingestor,
                 "--ingestor-input", var.ingestion_bucket,
-                "--ingestor-identity", var.ingestion_bucket_identity,
                 "--own-validation-input", var.own_validation_bucket,
                 "--peer-validation-input", var.peer_validation_bucket,
-                "--peer-validation-identity", var.peer_validation_bucket_identity,
                 "--push-gateway", var.pushgateway,
                 "--task-queue-kind", var.intake_queue.topic_kind,
                 "--intake-tasks-topic", var.intake_queue.topic,
@@ -560,6 +548,14 @@ output "gcp_service_account_unique_id" {
 
 output "gcp_service_account_email" {
   value = module.account_mapping.gcp_service_account_email
+}
+
+# To be populated in a subsequent commit that wires up the AWS side of
+# module account_mapping
+output "aws_iam_role" {
+  value = {
+    arn = ""
+  }
 }
 
 output "batch_signing_key" {
