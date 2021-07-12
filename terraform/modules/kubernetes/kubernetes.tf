@@ -131,20 +131,22 @@ data "aws_caller_identity" "current" {}
 # [2] https://kubernetes.io/docs/tasks/configure-pod-container/configure-service-account/#service-account-token-volume-projection
 
 module "account_mapping" {
-  source                  = "../account_mapping"
-  google_account_name     = "${var.environment}-${var.data_share_processor_name}-workflow-manager"
-  kubernetes_account_name = "${var.data_share_processor_name}-workflow-manager"
-  kubernetes_namespace    = var.kubernetes_namespace
-  environment             = var.environment
+  source                          = "../account_mapping"
+  gcp_service_account_name        = "${var.environment}-${var.data_share_processor_name}-workflow-manager"
+  gcp_project                     = data.google_project.project.project_id
+  kubernetes_service_account_name = "${var.data_share_processor_name}-workflow-manager"
+  kubernetes_namespace            = var.kubernetes_namespace
+  environment                     = var.environment
+  allow_gcp_sa_token_creation     = true
 }
 
 # Allows the Kubernetes service account to request auth tokens for the GCP
 # service account.
 resource "google_service_account_iam_binding" "workflow_manager_token" {
-  service_account_id = module.account_mapping.google_service_account_name
+  service_account_id = module.account_mapping.gcp_service_account_name
   role               = "roles/iam.serviceAccountTokenCreator"
   members = [
-    module.account_mapping.service_account
+    module.account_mapping.kubernetes_service_account_name
   ]
 }
 
@@ -309,7 +311,7 @@ resource "kubernetes_cron_job" "workflow_manager" {
             # https://kubernetes.io/docs/concepts/workloads/controllers/job/#handling-pod-and-container-failures
             # https://github.com/kubernetes/kubernetes/issues/74848
             restart_policy                  = "Never"
-            service_account_name            = module.account_mapping.kubernetes_account_name
+            service_account_name            = module.account_mapping.kubernetes_service_account_name
             automount_service_account_token = true
           }
         }
@@ -376,7 +378,7 @@ resource "kubernetes_deployment" "intake_batch" {
         }
       }
       spec {
-        service_account_name            = module.account_mapping.kubernetes_account_name
+        service_account_name            = module.account_mapping.kubernetes_service_account_name
         automount_service_account_token = false
         container {
           name  = "facile-container"
@@ -488,7 +490,7 @@ resource "kubernetes_deployment" "aggregate" {
         }
       }
       spec {
-        service_account_name            = module.account_mapping.kubernetes_account_name
+        service_account_name            = module.account_mapping.kubernetes_service_account_name
         automount_service_account_token = false
         container {
           name  = "facile-container"
@@ -543,11 +545,11 @@ resource "kubernetes_deployment" "aggregate" {
   }
 }
 output "service_account_unique_id" {
-  value = module.account_mapping.google_service_account_unique_id
+  value = module.account_mapping.gcp_service_account_unique_id
 }
 
 output "service_account_email" {
-  value = module.account_mapping.google_service_account_email
+  value = module.account_mapping.gcp_service_account_email
 }
 
 output "batch_signing_key" {

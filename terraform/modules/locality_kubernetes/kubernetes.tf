@@ -2,6 +2,10 @@ variable "environment" {
   type = string
 }
 
+variable "gcp_project" {
+  type = string
+}
+
 variable "kubernetes_namespace" {
   type = string
 }
@@ -31,11 +35,12 @@ variable "packet_encryption_rotation" {
 }
 
 module "account_mapping" {
-  source                  = "../account_mapping"
-  google_account_name     = "${var.environment}-${var.kubernetes_namespace}-manifest-updater"
-  kubernetes_account_name = "manifest-updater"
-  kubernetes_namespace    = var.kubernetes_namespace
-  environment             = var.environment
+  source                          = "../account_mapping"
+  gcp_service_account_name        = "${var.environment}-${var.kubernetes_namespace}-manifest-updater"
+  gcp_project                     = var.gcp_project
+  kubernetes_service_account_name = "manifest-updater"
+  kubernetes_namespace            = var.kubernetes_namespace
+  environment                     = var.environment
 }
 
 # Create a new manifest_updater role that is authorized to work with k8s secrets
@@ -76,7 +81,7 @@ resource "kubernetes_role_binding" "manifest_updater_rolebinding" {
 
   subject {
     kind      = "ServiceAccount"
-    name      = module.account_mapping.kubernetes_account_name
+    name      = module.account_mapping.kubernetes_service_account_name
     namespace = var.kubernetes_namespace
   }
 }
@@ -85,7 +90,7 @@ resource "kubernetes_role_binding" "manifest_updater_rolebinding" {
 resource "google_storage_bucket_iam_member" "manifest_bucket_owner" {
   bucket = var.manifest_bucket
   role   = "roles/storage.legacyBucketWriter"
-  member = "serviceAccount:${module.account_mapping.google_service_account_email}"
+  member = "serviceAccount:${module.account_mapping.gcp_service_account_email}"
 }
 
 

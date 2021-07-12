@@ -6,6 +6,10 @@ variable "gcp_region" {
   type = string
 }
 
+variable "gcp_project" {
+  type = string
+}
+
 variable "prometheus_server_persistent_disk_size_gb" {
   type = string
 }
@@ -260,7 +264,7 @@ resource "helm_release" "stackdriver_exporter" {
 
   set {
     name  = "serviceAccount.name"
-    value = module.account_mapping.kubernetes_account_name
+    value = module.account_mapping.kubernetes_service_account_name
   }
 
   set {
@@ -297,14 +301,15 @@ VALUE
 # Kubernetes service account
 # https://github.com/prometheus-community/stackdriver_exporter#credentials-and-permissions
 module "account_mapping" {
-  source                  = "../account_mapping"
-  google_account_name     = "${var.environment}-stackdriver-exporter"
-  kubernetes_account_name = "stackdriver-exporter"
-  kubernetes_namespace    = kubernetes_namespace.monitoring.metadata[0].name
-  environment             = var.environment
+  source                          = "../account_mapping"
+  gcp_service_account_name        = "${var.environment}-stackdriver-exporter"
+  gcp_project                     = var.gcp_project
+  kubernetes_service_account_name = "stackdriver-exporter"
+  kubernetes_namespace            = kubernetes_namespace.monitoring.metadata[0].name
+  environment                     = var.environment
 }
 
 resource "google_project_iam_member" "stackdriver_exporter" {
   role   = "roles/monitoring.viewer"
-  member = "serviceAccount:${module.account_mapping.google_service_account_email}"
+  member = "serviceAccount:${module.account_mapping.gcp_service_account_email}"
 }

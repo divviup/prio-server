@@ -393,6 +393,7 @@ module "locality_kubernetes" {
   for_each             = kubernetes_namespace.namespaces
   source               = "./modules/locality_kubernetes"
   environment          = var.environment
+  gcp_project          = var.gcp_project
   manifest_bucket      = module.manifest.bucket
   kubernetes_namespace = each.value.metadata[0].name
   ingestors            = keys(var.ingestors)
@@ -458,6 +459,7 @@ module "fake_server_resources" {
   source                = "./modules/fake_server_resources"
   manifest_bucket       = module.manifest.bucket
   gcp_region            = var.gcp_region
+  gcp_project           = var.gcp_project
   environment           = var.environment
   ingestor_pairs        = local.locality_ingestor_pairs
   own_manifest_base_url = module.manifest.base_url
@@ -481,11 +483,12 @@ module "portal_server_resources" {
 }
 
 module "monitoring" {
-  source                 = "./modules/monitoring"
-  environment            = var.environment
-  gcp_region             = var.gcp_region
-  victorops_routing_key  = var.victorops_routing_key
-  aggregation_period     = var.aggregation_period
+  source                = "./modules/monitoring"
+  environment           = var.environment
+  gcp_region            = var.gcp_region
+  gcp_project           = var.gcp_project
+  victorops_routing_key = var.victorops_routing_key
+  aggregation_period    = var.aggregation_period
 
   prometheus_server_persistent_disk_size_gb = var.prometheus_server_persistent_disk_size_gb
 }
