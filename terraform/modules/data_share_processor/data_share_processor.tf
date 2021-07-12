@@ -363,6 +363,7 @@ module "kubernetes" {
   aggregate_queue                         = module.pubsub["aggregate"].queue
   intake_worker_count                     = var.intake_worker_count
   aggregate_worker_count                  = var.aggregate_worker_count
+  use_aws                                 = var.use_aws
 }
 
 output "data_share_processor_name" {

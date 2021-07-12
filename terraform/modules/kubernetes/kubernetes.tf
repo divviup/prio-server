@@ -121,6 +121,25 @@ variable "aggregate_worker_count" {
   type = number
 }
 
+variable "use_aws" {
+  type = bool
+}
+
+variable "eks_oidc_provider" {
+  type = object({
+    arn = string
+    url = string
+  })
+  default = {
+    arn = ""
+    url = ""
+  }
+}
+
+locals {
+  workflow_manager_iam_entity = "${var.environment}-${var.data_share_processor_name}-workflow-manager"
+}
+
 data "aws_caller_identity" "current" {}
 
 # Workload identity[1] lets us map GCP service accounts to Kubernetes service
@@ -135,8 +154,10 @@ data "aws_caller_identity" "current" {}
 
 module "account_mapping" {
   source                          = "../account_mapping"
-  gcp_service_account_name        = "${var.environment}-${var.data_share_processor_name}-workflow-manager"
+  gcp_service_account_name        = var.use_aws ? "" : local.workflow_manager_iam_entity
   gcp_project                     = data.google_project.project.project_id
+  aws_iam_role_name               = var.use_aws ? local.workflow_manager_iam_entity : ""
+  eks_oidc_provider               = var.eks_oidc_provider
   kubernetes_service_account_name = "${var.data_share_processor_name}-workflow-manager"
   kubernetes_namespace            = var.kubernetes_namespace
   environment                     = var.environment
@@ -553,9 +574,7 @@ output "gcp_service_account_email" {
 # To be populated in a subsequent commit that wires up the AWS side of
 # module account_mapping
 output "aws_iam_role" {
-  value = {
-    arn = ""
-  }
+  value = module.account_mapping.aws_iam_role
 }
 
 output "batch_signing_key" {
