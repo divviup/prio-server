@@ -277,6 +277,13 @@ provider "kubernetes" {
   token                  = data.google_client_config.current.access_token
 }
 
+provider "helm" {
+  kubernetes {
+    host                   = module.gke.cluster_endpoint
+    cluster_ca_certificate = base64decode(module.gke.certificate_authority_data)
+    token                  = data.google_client_config.current.access_token
+  }
+}
 
 module "manifest" {
   source                                = "./modules/manifest"
@@ -477,8 +484,6 @@ module "monitoring" {
   source                 = "./modules/monitoring"
   environment            = var.environment
   gcp_region             = var.gcp_region
-  cluster_endpoint       = module.gke.cluster_endpoint
-  cluster_ca_certificate = base64decode(module.gke.certificate_authority_data)
   victorops_routing_key  = var.victorops_routing_key
   aggregation_period     = var.aggregation_period
 

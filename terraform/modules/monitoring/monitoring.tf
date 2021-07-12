@@ -6,14 +6,6 @@ variable "gcp_region" {
   type = string
 }
 
-variable "cluster_endpoint" {
-  type = string
-}
-
-variable "cluster_ca_certificate" {
-  type = string
-}
-
 variable "prometheus_server_persistent_disk_size_gb" {
   type = string
 }
@@ -26,13 +18,12 @@ variable "aggregation_period" {
   type = string
 }
 
-data "google_client_config" "current" {}
-
-provider "helm" {
-  kubernetes {
-    host                   = var.cluster_endpoint
-    cluster_ca_certificate = var.cluster_ca_certificate
-    token                  = data.google_client_config.current.access_token
+terraform {
+  required_providers {
+    helm = {
+      source  = "hashicorp/helm"
+      version = "~> 2.2.0"
+    }
   }
 }
 
