@@ -415,6 +415,7 @@ module "locality_kubernetes" {
   for_each             = kubernetes_namespace.namespaces
   source               = "./modules/locality_kubernetes"
   environment          = var.environment
+  use_aws              = var.use_aws
   gcp_project          = var.gcp_project
   manifest_bucket      = local.manifest.bucket
   kubernetes_namespace = each.value.metadata[0].name
@@ -498,6 +499,7 @@ module "portal_server_resources" {
   count                        = local.deployment_has_ingestor ? 1 : 0
   source                       = "./modules/portal_server_resources"
   manifest_bucket              = local.manifest.bucket
+  use_aws                      = var.use_aws
   gcp_region                   = var.gcp_region
   environment                  = var.environment
   sum_part_bucket_writer_email = google_service_account.sum_part_bucket_writer.email

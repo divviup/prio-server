@@ -34,10 +34,29 @@ variable "packet_encryption_rotation" {
   type = number
 }
 
+variable "use_aws" {
+  type = bool
+}
+
+variable "eks_oidc_provider" {
+  type = object({
+    arn = string
+    url = string
+  })
+  default = {
+    arn = ""
+    url = ""
+  }
+}
+
+
+
 module "account_mapping" {
   source                          = "../account_mapping"
-  gcp_service_account_name        = "${var.environment}-${var.kubernetes_namespace}-manifest-updater"
+  gcp_service_account_name        = var.use_aws ? "" : local.iam_entity_name
   gcp_project                     = var.gcp_project
+  aws_iam_role_name               = var.use_aws ? local.iam_entity_name : ""
+  eks_oidc_provider               = var.eks_oidc_provider
   kubernetes_service_account_name = "manifest-updater"
   kubernetes_namespace            = var.kubernetes_namespace
   environment                     = var.environment
@@ -86,15 +105,46 @@ resource "kubernetes_role_binding" "manifest_updater_rolebinding" {
   }
 }
 
-# Legacy bucket writer is what we want: https://cloud.google.com/storage/docs/access-control/iam-roles
-resource "google_storage_bucket_iam_member" "manifest_bucket_owner" {
+resource "google_storage_bucket_iam_member" "manifest_bucket_writer" {
+  count = var.use_aws ? 0 : 1
+
   bucket = var.manifest_bucket
   role   = "roles/storage.legacyBucketWriter"
   member = "serviceAccount:${module.account_mapping.gcp_service_account_email}"
 }
 
+data "aws_s3_bucket" "manifest_bucket" {
+  count  = var.use_aws ? 1 : 0
+  bucket = var.manifest_bucket
+}
+
+# Allow the IAM role to write and replace objects in the manifest bucket
+resource "aws_iam_role_policy" "manifest_bucket_writer" {
+  count = var.use_aws ? 1 : 0
+
+  name = "prio-${var.environment}-${var.kubernetes_namespace}-manifest-updater"
+  role = module.account_mapping.aws_iam_role.name
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Sid    = "PutObject"
+        Effect = "Allow"
+        Action = [
+          "s3:PutObject",
+          "s3:PutObjectAcl",
+          "s3:GetObject",
+          "s3:GetObjectAcl",
+          "s3:DeleteObjectAcl",
+        ]
+        Resource = data.aws_s3_bucket.manifest_bucket[0].arn
+      }
+    ]
+  })
+}
 
 locals {
+  iam_entity_name = "${var.environment}-${var.kubernetes_namespace}-manifest-updater"
   crd = yamlencode({
     "apiVersion" : "prio.isrg-prio.org/v1",
     "kind" : "Locality",
