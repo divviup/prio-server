@@ -103,11 +103,21 @@ variable "pushgateway" {
 }
 
 variable "intake_queue" {
-  type = string
+  type = object({
+    topic_kind        = string
+    topic             = string
+    subscription_kind = string
+    subscription      = string
+  })
 }
 
 variable "aggregate_queue" {
-  type = string
+  type = object({
+    topic_kind        = string
+    topic             = string
+    subscription_kind = string
+    subscription      = string
+  })
 }
 
 variable "intake_worker_count" {
@@ -206,8 +216,8 @@ resource "kubernetes_config_map" "intake_batch_config_map" {
     RUST_LOG                             = "info"
     RUST_BACKTRACE                       = "1"
     PUSHGATEWAY                          = var.pushgateway
-    TASK_QUEUE_KIND                      = "gcp-pubsub"
-    TASK_QUEUE_NAME                      = var.intake_queue
+    TASK_QUEUE_KIND                      = var.intake_queue.subscription_kind
+    TASK_QUEUE_NAME                      = var.intake_queue.subscription
     GCP_PROJECT_ID                       = data.google_project.project.project_id
   }
 }
@@ -240,8 +250,8 @@ resource "kubernetes_config_map" "aggregate_config_map" {
     RUST_LOG                             = "info"
     RUST_BACKTRACE                       = "1"
     PUSHGATEWAY                          = var.pushgateway
-    TASK_QUEUE_KIND                      = "gcp-pubsub"
-    TASK_QUEUE_NAME                      = var.aggregate_queue
+    TASK_QUEUE_KIND                      = var.aggregate_queue.subscription_kind
+    TASK_QUEUE_NAME                      = var.aggregate_queue.subscription
     GCP_PROJECT_ID                       = data.google_project.project.project_id
     PERMIT_MALFORMED_BATCH               = "true"
   }
@@ -296,9 +306,9 @@ resource "kubernetes_cron_job" "workflow_manager" {
                 "--peer-validation-input", var.peer_validation_bucket,
                 "--peer-validation-identity", var.peer_validation_bucket_identity,
                 "--push-gateway", var.pushgateway,
-                "--task-queue-kind", "gcp-pubsub",
-                "--intake-tasks-topic", var.intake_queue,
-                "--aggregate-tasks-topic", var.aggregate_queue,
+                "--task-queue-kind", var.intake_queue.topic_kind,
+                "--intake-tasks-topic", var.intake_queue.topic,
+                "--aggregate-tasks-topic", var.aggregate_queue.topic,
                 "--gcp-project-id", data.google_project.project.project_id,
               ]
             }
@@ -544,11 +554,11 @@ resource "kubernetes_deployment" "aggregate" {
     }
   }
 }
-output "service_account_unique_id" {
+output "gcp_service_account_unique_id" {
   value = module.account_mapping.gcp_service_account_unique_id
 }
 
-output "service_account_email" {
+output "gcp_service_account_email" {
   value = module.account_mapping.gcp_service_account_email
 }
 

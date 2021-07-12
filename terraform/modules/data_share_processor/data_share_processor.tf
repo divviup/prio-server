@@ -230,6 +230,9 @@ locals {
     "gs://${local.peer_validation_bucket_name}"
   )
   own_validation_bucket_name = "${local.resource_prefix}-own-validation"
+
+  intake_queue    = module.pubsub["intake"].queue
+  aggregate_queue = module.pubsub["aggregate"].queue
 }
 
 data "aws_caller_identity" "current" {}
@@ -259,7 +262,7 @@ resource "aws_iam_role" "bucket_role" {
       "Action": "sts:AssumeRoleWithWebIdentity",
       "Condition": {
         "StringEquals": {
-          "accounts.google.com:sub": "${module.kubernetes.service_account_unique_id}",
+          "accounts.google.com:sub": "${module.kubernetes.gcp_service_account_unique_id}",
           "accounts.google.com:oaud": "sts.amazonaws.com/gke-identity-federation"
         }
       }
@@ -359,8 +362,8 @@ module "cloud_storage_gcp" {
 module "bucket" {
   source        = "../../modules/cloud_storage_gcp/bucket"
   name          = "${local.resource_prefix}-own-validation"
-  bucket_reader = module.kubernetes.service_account_email
-  bucket_writer = module.kubernetes.service_account_email
+  bucket_reader = module.kubernetes.gcp_service_account_email
+  bucket_writer = module.kubernetes.gcp_service_account_email
   kms_key       = google_kms_crypto_key.bucket_encryption.id
   gcp_region    = var.gcp_region
   # Ensure the GCS service account exists and has permission to use the KMS key
@@ -373,8 +376,8 @@ module "pubsub" {
   source                     = "../../modules/pubsub"
   environment                = var.environment
   data_share_processor_name  = var.data_share_processor_name
-  publisher_service_account  = module.kubernetes.service_account_email
-  subscriber_service_account = module.kubernetes.service_account_email
+  publisher_service_account  = module.kubernetes.gcp_service_account_email
+  subscriber_service_account = module.kubernetes.gcp_service_account_email
   task                       = each.key
 }
 
@@ -429,7 +432,7 @@ output "certificate_fqdn" {
 }
 
 output "service_account_email" {
-  value = module.kubernetes.service_account_email
+  value = module.kubernetes.gcp_service_account_email
 }
 
 output "specific_manifest" {

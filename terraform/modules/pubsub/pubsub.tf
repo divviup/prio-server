@@ -92,5 +92,10 @@ resource "google_pubsub_subscription" "dead_letter" {
 }
 
 output "queue" {
-  value = google_pubsub_topic.task.name
+  value = {
+    topic_kind        = "gcp-pubsub"
+    topic             = google_pubsub_topic.task.name
+    subscription_kind = "gcp-pubsub"
+    subscription      = google_pubsub_subscription.task.name
+  }
 }
