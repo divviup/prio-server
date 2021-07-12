@@ -22,6 +22,10 @@ variable "use_aws" {
   type = bool
 }
 
+variable "pure_gcp" {
+  type = bool
+}
+
 variable "aws_region" {
   type = string
 }
@@ -429,11 +433,29 @@ output "service_account_email" {
 }
 
 output "specific_manifest" {
-  value = {
-    format                 = 1
-    ingestion-identity     = var.use_aws ? local.ingestor_server_identity.aws-iam-entity : null
-    ingestion-bucket       = local.ingestion_bucket_url,
-    peer-validation-bucket = local.peer_validation_bucket_url,
+  value = var.pure_gcp ? {
+    format                   = 2
+    ingestion-identity       = var.use_aws ? local.ingestor_server_identity.aws-iam-entity : null
+    ingestion-bucket         = local.ingestion_bucket_url
+    peer-validation-identity = var.use_aws ? aws_iam_role.bucket_role.arn : null
+    peer-validation-bucket   = local.peer_validation_bucket_url,
+    batch-signing-public-keys = {
+      (module.kubernetes.batch_signing_key) = {
+        public-key = ""
+        expiration = ""
+      }
+    }
+    packet-encryption-keys = {
+      (var.packet_decryption_key_kubernetes_secret) = {
+        certificate-signing-request = ""
+      }
+    }
+    } : {
+    format                   = 1
+    ingestion-identity       = var.use_aws ? local.ingestor_server_identity.aws-iam-entity : null
+    ingestion-bucket         = local.ingestion_bucket_url,
+    peer-validation-identity = null
+    peer-validation-bucket   = local.peer_validation_bucket_url,
     batch-signing-public-keys = {
       (module.kubernetes.batch_signing_key) = {
         public-key = ""

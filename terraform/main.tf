@@ -369,13 +369,22 @@ locals {
       portal_server_manifest_base_url         = var.ingestors[pair[1]].localities[pair[0]].portal_server_manifest_base_url
     }
   }
-  global_manifest = jsonencode({
-    format = 0
-    server-identity = {
-      aws-account-id            = tonumber(data.aws_caller_identity.current.account_id)
-      gcp-service-account-email = google_service_account.sum_part_bucket_writer.email
+  global_manifest = jsonencode(
+    # If pure GCP, we use the newer global manifest format
+    var.pure_gcp ? {
+      format = 1
+      server-identity = {
+        gcp-service-account-id    = var.use_aws ? null : tostring(google_service_account.sum_part_bucket_writer.unique_id)
+        gcp-service-account-email = google_service_account.sum_part_bucket_writer.email
+      }
+      } : {
+      format = 0
+      server-identity = {
+        aws-account-id            = tonumber(data.aws_caller_identity.current.account_id)
+        gcp-service-account-email = google_service_account.sum_part_bucket_writer.email
+      }
     }
-  })
+  )
   # For now, we only support advertising manifests in GCS but in #655 we will
   # add support for S3
   manifest = {
@@ -424,6 +433,7 @@ module "data_share_processors" {
   data_share_processor_name                      = each.key
   ingestor                                       = each.value.ingestor
   use_aws                                        = var.use_aws
+  pure_gcp                                       = var.pure_gcp
   aws_region                                     = var.aws_region
   gcp_region                                     = var.gcp_region
   gcp_project                                    = var.gcp_project
