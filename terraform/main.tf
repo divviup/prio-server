@@ -250,19 +250,6 @@ provider "google-beta" {
   project = var.gcp_project
 }
 
-# Activate some services which the deployment will require.
-resource "google_project_service" "compute" {
-  service = "compute.googleapis.com"
-}
-
-resource "google_project_service" "container" {
-  service = "container.googleapis.com"
-}
-
-resource "google_project_service" "kms" {
-  service = "cloudkms.googleapis.com"
-}
-
 provider "aws" {
   # aws_s3_bucket resources will be created in the region specified in this
   # provider.
@@ -291,8 +278,6 @@ module "manifest" {
   gcp_region                            = var.gcp_region
   managed_dns_zone                      = var.managed_dns_zone
   sum_part_bucket_service_account_email = google_service_account.sum_part_bucket_writer.email
-
-  depends_on = [google_project_service.compute]
 }
 
 module "gke" {
@@ -302,14 +287,6 @@ module "gke" {
   gcp_region       = var.gcp_region
   gcp_project      = var.gcp_project
   cluster_settings = var.cluster_settings
-  network          = google_compute_network.network.self_link
-  base_subnet      = local.cluster_subnet_block
-
-  depends_on = [
-    google_project_service.compute,
-    google_project_service.container,
-    google_project_service.kms,
-  ]
 }
 
 # While we create a distinct data share processor for each (ingestor, locality)

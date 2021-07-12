@@ -23,6 +23,19 @@ variable "cluster_settings" {
   })
 }
 
+# Activate some services which the deployment will require.
+resource "google_project_service" "compute" {
+  service = "compute.googleapis.com"
+}
+
+resource "google_project_service" "container" {
+  service = "container.googleapis.com"
+}
+
+resource "google_project_service" "kms" {
+  service = "cloudkms.googleapis.com"
+}
+
 resource "google_container_cluster" "cluster" {
   # The google provider seems to have not been updated to consider VPC-native
   # clusters as GA, even though they are GA and in fact are now the default for
@@ -46,7 +59,7 @@ resource "google_container_cluster" "cluster" {
   # We opt into a VPC native cluster because they have several benefits (see
   # https://cloud.google.com/kubernetes-engine/docs/how-to/alias-ips).
   networking_mode = "VPC_NATIVE"
-  network         = var.network
+  network         = google_compute_network.network.self_link
   subnetwork      = google_compute_subnetwork.subnet.self_link
   ip_allocation_policy {
     cluster_ipv4_cidr_block  = module.subnets.network_cidr_blocks["kubernetes_cluster"]
@@ -83,6 +96,8 @@ resource "google_container_cluster" "cluster" {
   # Enables boot integrity checking and monitoring for nodes in the cluster.
   # More configuration values are defined in node pools below.
   enable_shielded_nodes = true
+
+  depends_on = [google_project_service.container]
 }
 
 resource "google_container_node_pool" "worker_nodes" {
@@ -114,6 +129,8 @@ resource "google_container_node_pool" "worker_nodes" {
       enable_integrity_monitoring = true
     }
   }
+
+  depends_on = [google_project_service.compute]
 }
 
 # KMS keyring to store etcd encryption key
@@ -122,6 +139,8 @@ resource "google_kms_key_ring" "keyring" {
   # Keyrings can also be zonal, but ours must be regional to match the GKE
   # cluster.
   location = var.gcp_region
+
+  depends_on = [google_project_service.kms]
 }
 
 # KMS key used by GKE cluster to encrypt contents of cluster etcd, crucially to
