@@ -1,6 +1,8 @@
 use anyhow::{anyhow, Context, Result};
 use rusoto_core::{region::ParseRegionError, Region};
 use serde::{de, Deserialize, Deserializer};
+use slog::Logger;
+
 use std::{
     convert::Infallible,
     fmt::{self, Display, Formatter},
@@ -73,6 +75,38 @@ pub struct WorkloadIdentityPoolParameters {
     /// or user that is permitted to impersonate a GCP service account via the
     /// workload_identity_pool_provider
     pub aws_credentials_provider: aws_credentials::Provider,
+}
+
+impl WorkloadIdentityPoolParameters {
+    /// Creates Some(WorkloadIdentityPoolParameters) suitable for use with
+    /// GcpAccessTokenProvider if workload_identity_pool_provider_id is set and
+    /// is not the empty string, or None otherwise.
+    pub fn new(
+        workload_identity_pool_provider_id: Option<&str>,
+        use_default_aws_credentials_provider: bool,
+        logger: &Logger,
+    ) -> Result<Option<Self>> {
+        let parameters = match workload_identity_pool_provider_id {
+            // We treat the empty string as equivalent to None, to allow the
+            // gcp-workload-identity-pool-provider command line argument to be
+            // unconditionally set.
+            None | Some("") => None,
+            Some(provider_id) => Some(Self {
+                workload_identity_pool_provider: provider_id.to_owned(),
+                aws_credentials_provider: aws_credentials::Provider::new(
+                    // We create this provider with no identity, effectively
+                    // requiring that the authentication to AWS use either
+                    // ambient AWS credentials or an EKS cluster OIDC provider.
+                    Identity::none(),
+                    use_default_aws_credentials_provider,
+                    "IAM federation",
+                    logger,
+                )?,
+            }),
+        };
+
+        Ok(parameters)
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
