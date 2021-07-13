@@ -249,6 +249,7 @@ data "terraform_remote_state" "state" {
   }
 }
 
+data "google_project" "current" {}
 data "google_client_config" "current" {}
 data "aws_caller_identity" "current" {}
 
@@ -485,23 +486,85 @@ module "data_share_processors" {
   intake_worker_count                            = each.value.intake_worker_count
   aggregate_worker_count                         = each.value.aggregate_worker_count
   eks_oidc_provider                              = var.use_aws ? module.eks[0].oidc_provider : { url = "", arn = "" }
+  gcp_workload_identity_pool_provider            = local.gcp_workload_identity_pool_provider
 }
 
 # The portal owns two sum part buckets (one for each data share processor) and
 # the one for this data share processor gets configured by the portal operator
 # to permit writes from this GCP service account, whose email the portal
-# operator discovers in our global manifest.
+# operator discovers in our global manifest. We use a GCP SA to write sum parts
+# even if our data share processor runs on AWS.
 resource "google_service_account" "sum_part_bucket_writer" {
   account_id   = "prio-${var.environment}-sum-writer"
   display_name = "prio-${var.environment}-sum-part-bucket-writer"
 }
 
-# Permit the service accounts for all the data share processors to request Oauth
-# tokens allowing them to impersonate the sum part bucket writer.
+# If running in GCP, permit the service accounts for all the data share
+# processors to request access and identity tokens allowing them to impersonate
+# the sum part bucket writer.
 resource "google_service_account_iam_binding" "data_share_processors_to_sum_part_bucket_writer_token_creator" {
+  count              = var.use_aws ? 0 : 1
   service_account_id = google_service_account.sum_part_bucket_writer.name
   role               = "roles/iam.serviceAccountTokenCreator"
-  members            = [for v in module.data_share_processors : "serviceAccount:${v.service_account_email}"]
+  members            = [for v in module.data_share_processors : "serviceAccount:${v.gcp_service_account_email}"]
+}
+
+# If running EKS, we must create a Workload Identity Pool and Workload Identity
+# Pool Provider to federate accounts.google.com with sts.amazonaws.com so that
+# our data share processor AWS IAM roles will be able to impersonate the sum
+# part bucket writer GCP service account.
+resource "google_iam_workload_identity_pool" "aws_identity_federation" {
+  count                     = var.use_aws ? 1 : 0
+  provider                  = google-beta
+  workload_identity_pool_id = "aws-identity-federation"
+}
+
+# A Workload Identity Pool *Provider* goes with the Workload Identity Pool and
+# is bound to our AWS account ID by its numeric identifier. We don't specify any
+# additional conditions or policies here, and instead use a GCP SA IAM binding
+# on the sum part bucket writer.
+resource "google_iam_workload_identity_pool_provider" "aws_identity_federation" {
+  count                              = var.use_aws ? 1 : 0
+  provider                           = google-beta
+  workload_identity_pool_provider_id = "aws-identity-federation"
+  workload_identity_pool_id          = google_iam_workload_identity_pool.aws_identity_federation[0].workload_identity_pool_id
+  aws {
+    account_id = data.aws_caller_identity.current.account_id
+  }
+}
+
+resource "google_service_account_iam_binding" "data_share_processors_to_sum_part_bucket_writer_workload_identity_user" {
+  count              = var.use_aws ? 1 : 0
+  service_account_id = google_service_account.sum_part_bucket_writer.name
+  role               = "roles/iam.workloadIdentityUser"
+  # This principal allows an IAM role to impersonate the service account via the
+  # Workload Identity Pool
+  # https://cloud.google.com/iam/docs/access-resources-aws#impersonate
+  members = [
+    for v in module.data_share_processors : join("/", [
+      "principalSet://iam.googleapis.com/projects",
+      data.google_project.current.number,
+      "locations/global/workloadIdentityPools",
+      google_iam_workload_identity_pool.aws_identity_federation[0].workload_identity_pool_id,
+      "attribute.aws_role/arn:aws:sts::${data.aws_caller_identity.current.account_id}:assumed-role",
+      v.aws_iam_role.name,
+    ])
+  ]
+}
+
+locals {
+  gcp_workload_identity_pool_provider = var.use_aws ? (
+    join("/", [
+      "//iam.googleapis.com/projects",
+      data.google_project.current.number,
+      "locations/global/workloadIdentityPools",
+      google_iam_workload_identity_pool.aws_identity_federation[0].workload_identity_pool_id,
+      "providers",
+      google_iam_workload_identity_pool_provider.aws_identity_federation[0].workload_identity_pool_provider_id,
+    ])
+    ) : (
+    ""
+  )
 }
 
 module "fake_server_resources" {

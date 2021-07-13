@@ -48,7 +48,19 @@ variable "peer_manifest_base_url" {
 }
 
 variable "remote_peer_validation_bucket_identity" {
-  type = string
+  type = object({
+    identity                                      = string
+    gcp_sa_to_impersonate_while_assuming_identity = string
+  })
+  description = <<DESCRIPTION
+Identity to use when writing to the peer's validation bucket. .identity is the
+identity that can write to the peer's validation bucket; a GCP service account
+email if the peer's bucket is in GCS or an AWS IAM role ARN if the peer's bucket
+is in S3. .gcp_sa_to_impersonate_while_assuming_identity is the email of a GCP
+service account that must be impersonated to obtain identity tokens for an
+identity which will be discovered at runtime in the peer's specific manifest.
+Only one or the other value should be set.
+DESCRIPTION
 }
 
 variable "own_validation_bucket" {
@@ -140,6 +152,10 @@ variable "eks_oidc_provider" {
   }
 }
 
+variable "gcp_workload_identity_pool_provider" {
+  type = string
+}
+
 locals {
   workflow_manager_iam_entity = "${var.environment}-${var.data_share_processor_name}-workflow-manager"
 }
@@ -198,22 +214,23 @@ resource "kubernetes_config_map" "intake_batch_config_map" {
   data = {
     # PACKET_DECRYPTION_KEYS is a Kubernetes secret
     # BATCH_SIGNING_PRIVATE_KEY is a Kubernetes secret
-    IS_FIRST                             = var.is_first ? "true" : "false"
-    BATCH_SIGNING_PRIVATE_KEY_IDENTIFIER = kubernetes_secret.batch_signing_key.metadata[0].name
-    INGESTOR_INPUT                       = var.ingestion_bucket
-    INGESTOR_MANIFEST_BASE_URL           = "https://${var.ingestor_manifest_base_url}"
-    INSTANCE_NAME                        = var.data_share_processor_name
-    PEER_IDENTITY                        = var.remote_peer_validation_bucket_identity
-    PEER_MANIFEST_BASE_URL               = "https://${var.peer_manifest_base_url}"
-    OWN_MANIFEST_BASE_URL                = "https://${var.own_manifest_base_url}"
-    OWN_OUTPUT                           = var.own_validation_bucket
-    RUST_LOG                             = "info"
-    RUST_BACKTRACE                       = "1"
-    PUSHGATEWAY                          = var.pushgateway
-    TASK_QUEUE_KIND                      = var.intake_queue.subscription_kind
-    TASK_QUEUE_NAME                      = var.intake_queue.subscription
-    AWS_SQS_REGION                       = var.use_aws ? var.aws_region : ""
-    GCP_PROJECT_ID                       = var.use_aws ? "" : data.google_project.project.project_id
+    IS_FIRST                                        = var.is_first ? "true" : "false"
+    BATCH_SIGNING_PRIVATE_KEY_IDENTIFIER            = kubernetes_secret.batch_signing_key.metadata[0].name
+    INGESTOR_INPUT                                  = var.ingestion_bucket
+    INGESTOR_MANIFEST_BASE_URL                      = "https://${var.ingestor_manifest_base_url}"
+    INSTANCE_NAME                                   = var.data_share_processor_name
+    PEER_IDENTITY                                   = var.remote_peer_validation_bucket_identity.identity
+    PEER_MANIFEST_BASE_URL                          = "https://${var.peer_manifest_base_url}"
+    PEER_GCP_SA_TO_IMPERSONATE_BEFORE_ASSUMING_ROLE = var.remote_peer_validation_bucket_identity.gcp_sa_to_impersonate_while_assuming_identity
+    OWN_OUTPUT                                      = var.own_validation_bucket
+    RUST_LOG                                        = "info"
+    RUST_BACKTRACE                                  = "1"
+    PUSHGATEWAY                                     = var.pushgateway
+    TASK_QUEUE_KIND                                 = var.intake_queue.subscription_kind
+    TASK_QUEUE_NAME                                 = var.intake_queue.subscription
+    AWS_SQS_REGION                                  = var.use_aws ? var.aws_region : ""
+    GCP_PROJECT_ID                                  = var.use_aws ? "" : data.google_project.project.project_id
+    GCP_WORKLOAD_IDENTITY_POOL_PROVIDER             = var.gcp_workload_identity_pool_provider
   }
 }
 
@@ -248,6 +265,7 @@ resource "kubernetes_config_map" "aggregate_config_map" {
     AWS_SQS_REGION                       = var.use_aws ? var.aws_region : ""
     GCP_PROJECT_ID                       = var.use_aws ? "" : data.google_project.project.project_id
     PERMIT_MALFORMED_BATCH               = "true"
+    GCP_WORKLOAD_IDENTITY_POOL_PROVIDER  = var.gcp_workload_identity_pool_provider
   }
 }
 

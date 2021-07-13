@@ -125,6 +125,10 @@ variable "eks_oidc_provider" {
   }
 }
 
+variable "gcp_workload_identity_pool_provider" {
+  type = string
+}
+
 # We need the ingestion server's manifest so that we can discover the GCP
 # service account it will use to upload ingestion batches. Some ingestors
 # (Apple) are singletons, and advertise a single global manifest which contains
@@ -182,7 +186,16 @@ locals {
   # If running in pure GCP, we will discover a bucket writer IAM role created by
   # the peer at runtime, in their specific manifest, but must impersonate a GCP
   # SA in order to obtain identity tokens.
-  remote_validation_bucket_writer = var.use_aws ? var.remote_bucket_writer_gcp_service_account_email : aws_iam_role.bucket_role[0].arn
+  remote_validation_bucket_writer = var.use_aws ? {
+    identity                                      = var.remote_bucket_writer_gcp_service_account_email
+    gcp_sa_to_impersonate_while_assuming_identity = ""
+    } : var.pure_gcp ? {
+    identity                                      = ""
+    gcp_sa_to_impersonate_while_assuming_identity = var.remote_bucket_writer_gcp_service_account_email
+    } : {
+    identity                                      = aws_iam_role.bucket_role[0].arn
+    gcp_sa_to_impersonate_while_assuming_identity = ""
+  }
 
   ingestion_bucket_name = "${local.resource_prefix}-ingestion"
   ingestion_bucket_url = var.use_aws ? (
@@ -387,6 +400,7 @@ module "kubernetes" {
   use_aws                                 = var.use_aws
   eks_oidc_provider                       = var.eks_oidc_provider
   aws_region                              = var.aws_region
+  gcp_workload_identity_pool_provider     = var.gcp_workload_identity_pool_provider
 }
 
 output "data_share_processor_name" {
