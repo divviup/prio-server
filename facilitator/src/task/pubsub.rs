@@ -116,7 +116,7 @@ impl<T: Task> GcpPubSubTaskQueue<T> {
         let logger = parent_logger.new(o!(
             "gcp_project_id" => gcp_project_id.to_owned(),
             event::TASK_QUEUE_ID => subscription_id.to_owned(),
-            event::IDENTITY => identity.unwrap_or("default identity").to_owned(),
+            event::IDENTITY => identity.to_string(),
         ));
         let ureq_agent = AgentBuilder::new()
             // Empirically, if there are no messages available in the
@@ -143,7 +143,7 @@ impl<T: Task> GcpPubSubTaskQueue<T> {
                 // This token is used to access PubSub API
                 // https://developers.google.com/identity/protocols/oauth2/scopes
                 "https://www.googleapis.com/auth/pubsub",
-                identity.map(|x| x.to_string()),
+                identity,
                 // GCP key file; None because PubSub is only used if the
                 // workload is on GKE
                 None,

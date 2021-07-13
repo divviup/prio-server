@@ -2,6 +2,7 @@ use anyhow::{anyhow, Context, Result};
 use rusoto_core::{region::ParseRegionError, Region};
 use serde::{de, Deserialize, Deserializer};
 use std::{
+    convert::Infallible,
     fmt::{self, Display, Formatter},
     path::PathBuf,
     str::FromStr,
@@ -10,8 +11,56 @@ use std::{
 use crate::aws_credentials;
 
 /// Identity represents a cloud identity: Either an AWS IAM ARN (i.e. "arn:...")
-/// or a GCP ServiceAccount (i.e. "foo@bar.com").
-pub type Identity<'a> = Option<&'a str>;
+/// or a GCP ServiceAccount (i.e. "foo@bar.com"). It treats the empty string as
+/// equivalent to None, allowing arguments to unconditionally be provided to
+/// facilitator.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Identity {
+    inner: Option<String>,
+}
+
+// We provide FromStr for clap::value_t
+impl FromStr for Identity {
+    type Err = Infallible;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Ok(Self::from(s))
+    }
+}
+
+impl From<&str> for Identity {
+    fn from(s: &str) -> Self {
+        let inner = match s {
+            "" => None,
+            s => Some(s.to_owned()),
+        };
+
+        Self { inner }
+    }
+}
+
+impl Display for Identity {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.inner.as_deref().unwrap_or("default identity"))
+    }
+}
+
+impl<'de> Deserialize<'de> for Identity {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let s = String::deserialize(deserializer)?;
+        Ok(Self::from(s.as_str()))
+    }
+}
+
+impl Identity {
+    pub fn none() -> Self {
+        Self { inner: None }
+    }
+
+    pub(crate) fn as_str(&self) -> Option<&str> {
+        self.inner.as_deref()
+    }
+}
 
 /// Parameters necessary to configure federation from AWS IAM to GCP IAM using
 /// GCP workload identity pool
@@ -296,6 +345,25 @@ mod tests {
     use rusoto_core::Region;
     use serde_test::{assert_de_tokens, Token};
     use std::str::FromStr;
+
+    #[test]
+    fn identity() {
+        assert!(Identity::from_str("").unwrap().as_str().is_none());
+
+        assert_eq!(
+            Identity::from_str("identity").unwrap().as_str(),
+            Some("identity")
+        );
+    }
+
+    #[test]
+    fn deserialize_identity() {
+        assert_de_tokens(&Identity::from_str("").unwrap(), &[Token::Str("")]);
+        assert_de_tokens(
+            &Identity::from_str("identity").unwrap(),
+            &[Token::Str("identity")],
+        );
+    }
 
     #[test]
     fn parse_s3path() {

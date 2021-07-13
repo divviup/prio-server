@@ -16,7 +16,7 @@ use url::Url;
 
 use crate::{
     aws_credentials::{self, basic_runtime, get_caller_identity_token},
-    config::WorkloadIdentityPoolParameters,
+    config::{Identity, WorkloadIdentityPoolParameters},
     http::{
         Method, OauthTokenProvider, RequestParameters, RetryingAgent, StaticOauthTokenProvider,
     },
@@ -330,7 +330,7 @@ pub(crate) struct GcpOauthTokenProvider {
     default_token_provider: Box<dyn ProvideDefaultToken>,
     /// Holds the service account email to impersonate, if one was provided to
     /// GcpOauthTokenProvider::new.
-    account_to_impersonate: Option<String>,
+    account_to_impersonate: Identity,
     /// This field is None after instantiation and is Some after the first
     /// successful request for a token for the default service account, though
     /// the contained token may be expired.
@@ -384,7 +384,7 @@ impl OauthTokenProvider for GcpOauthTokenProvider {
     /// impersonation is taking place, provides the default service account
     /// Oauth token.
     fn ensure_oauth_token(&mut self) -> Result<String> {
-        match self.account_to_impersonate {
+        match self.account_to_impersonate.as_str() {
             Some(_) => self.ensure_impersonated_service_account_oauth_token(),
             None => self.ensure_default_account_token(),
         }
@@ -396,14 +396,14 @@ impl GcpOauthTokenProvider {
     /// account.
     pub(crate) fn new(
         scope: &str,
-        account_to_impersonate: Option<String>,
+        account_to_impersonate: Identity,
         key_file_reader: Option<Box<dyn Read>>,
         workload_identity_pool_params: Option<WorkloadIdentityPoolParameters>,
         parent_logger: &Logger,
     ) -> Result<Self> {
         let logger = parent_logger.new(o!(
             "scope" => scope.to_owned(),
-            "account_to_impersonate" => account_to_impersonate.clone().unwrap_or_else(|| "none".to_owned()),
+            "account_to_impersonate" => account_to_impersonate.to_string(),
         ));
         let agent = RetryingAgent::default();
 
@@ -491,7 +491,7 @@ impl GcpOauthTokenProvider {
     /// Returns the current OAuth token for the impersonated service account, if
     /// it is valid. Otherwise obtains and returns a new one.
     fn ensure_impersonated_service_account_oauth_token(&mut self) -> Result<String> {
-        if self.account_to_impersonate.is_none() {
+        if self.account_to_impersonate.as_str().is_none() {
             return Err(anyhow!("no service account to impersonate was provided"));
         }
 
@@ -507,7 +507,10 @@ impl GcpOauthTokenProvider {
 
         let default_token = self.ensure_default_account_token()?;
         let mut impersonated_account_token = self.impersonated_account_token.write().unwrap();
-        let service_account_to_impersonate = self.account_to_impersonate.clone().unwrap();
+        let service_account_to_impersonate = match self.account_to_impersonate.as_str() {
+            Some(account) => account,
+            None => return Err(anyhow!("no service account to impersonate was provided")),
+        };
 
         let request = self.agent.prepare_request(RequestParameters {
             url: access_token_url_for_service_account(
@@ -555,6 +558,7 @@ mod tests {
     use assert_matches::assert_matches;
     use mockito::{mock, Matcher};
     use serde_json::json;
+    use std::str::FromStr;
 
     use crate::{config::leak_string, logging::setup_test_logging};
 
@@ -707,7 +711,7 @@ jbxbE/VdW03+iXZyrnDNFAFAsRR+XgjeYheAUVLelg9qBjM7jYNf
         let mut provider = GcpOauthTokenProvider {
             scope: "fake-scope".to_string(),
             default_token_provider: Box::new(FakeDefaultTokenProvider {}),
-            account_to_impersonate: Some("fake-service-account".to_string()),
+            account_to_impersonate: Identity::from_str("fake-service-account").unwrap(),
             default_account_token: Arc::new(RwLock::new(None)),
             impersonated_account_token: Arc::new(RwLock::new(None)),
             agent: RetryingAgent::default(),
