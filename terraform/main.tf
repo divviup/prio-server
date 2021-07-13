@@ -295,19 +295,35 @@ provider "helm" {
 }
 
 module "manifest_gcp" {
-  source = "./modules/manifest_gcp"
-
+  source                  = "./modules/manifest_gcp"
+  count                   = var.use_aws ? 0 : 1
   environment             = var.environment
   gcp_region              = var.gcp_region
   global_manifest_content = local.global_manifest
 }
 
+module "manifest_aws" {
+  source                  = "./modules/manifest_aws"
+  count                   = var.use_aws ? 1 : 0
+  environment             = var.environment
+  global_manifest_content = local.global_manifest
+}
+
 module "gke" {
   source           = "./modules/gke"
+  count            = var.use_aws ? 0 : 1
   environment      = var.environment
   resource_prefix  = "prio-${var.environment}"
   gcp_region       = var.gcp_region
   gcp_project      = var.gcp_project
+  cluster_settings = var.cluster_settings
+}
+
+module "eks" {
+  source           = "./modules/eks"
+  count            = var.use_aws ? 1 : 0
+  environment      = var.environment
+  resource_prefix  = "prio-${var.environment}"
   cluster_settings = var.cluster_settings
 }
 
@@ -369,6 +385,11 @@ locals {
       portal_server_manifest_base_url         = var.ingestors[pair[1]].localities[pair[0]].portal_server_manifest_base_url
     }
   }
+  # Are we in a paired env deploy that uses a test ingestor?
+  deployment_has_ingestor = lookup(var.test_peer_environment, "env_with_ingestor", "") == "" ? false : true
+  # Does this specific environment home the ingestor?
+  is_env_with_ingestor = local.deployment_has_ingestor && lookup(var.test_peer_environment, "env_with_ingestor", "") == var.environment ? true : false
+
   global_manifest = jsonencode(
     # If pure GCP, we use the newer global manifest format
     var.pure_gcp ? {
@@ -385,32 +406,35 @@ locals {
       }
     }
   )
-  # For now, we only support advertising manifests in GCS but in #655 we will
-  # add support for S3
-  manifest = {
+
+  manifest = var.use_aws ? {
+    bucket      = module.manifest_aws[0].bucket
+    base_url    = module.manifest_aws[0].base_url
+    aws_region  = var.aws_region
+    aws_profile = var.aws_profile
+    } : {
     bucket      = module.manifest_gcp[0].bucket
     base_url    = module.manifest_gcp[0].base_url
     aws_region  = ""
     aws_profile = ""
   }
-  kubernetes_cluster = {
-    name                       = module.gke.cluster_name
-    endpoint                   = module.gke.cluster_endpoint
-    certificate_authority_data = module.gke.certificate_authority_data
-    token                      = module.gke.token
+
+  kubernetes_cluster = var.use_aws ? {
+    name                       = module.eks[0].cluster_name
+    endpoint                   = module.eks[0].cluster_endpoint
+    certificate_authority_data = module.eks[0].certificate_authority_data
+    token                      = module.eks[0].token
+    kubectl_command            = "aws --profile ${var.aws_profile} eks update-kubeconfig --region ${var.aws_region} --name ${module.eks[0].cluster_name}"
+    } : {
+    name                       = module.gke[0].cluster_name
+    endpoint                   = module.gke[0].cluster_endpoint
+    certificate_authority_data = module.gke[0].certificate_authority_data
+    token                      = module.gke[0].token
     kubectl_command            = "gcloud container clusters get-credentials ${module.gke[0].cluster_name} --region ${var.gcp_region} --project ${var.gcp_project}"
   }
 }
 
-locals {
-  // Does this series of deployment have a fake ingestor (integration-tester)
-  deployment_has_ingestor = lookup(var.test_peer_environment, "env_with_ingestor", "") == "" ? false : true
-  // Does this specific environment home the ingestor
-  is_env_with_ingestor = local.deployment_has_ingestor && lookup(var.test_peer_environment, "env_with_ingestor", "") == var.environment ? true : false
-}
-
-# Call the locality_kubernetes module per
-# each locality/namespace
+# Call the locality_kubernetes module for each locality/namespace
 module "locality_kubernetes" {
   for_each             = kubernetes_namespace.namespaces
   source               = "./modules/locality_kubernetes"
@@ -420,6 +444,7 @@ module "locality_kubernetes" {
   manifest_bucket      = local.manifest.bucket
   kubernetes_namespace = each.value.metadata[0].name
   ingestors            = keys(var.ingestors)
+  eks_oidc_provider    = var.use_aws ? module.eks[0].oidc_provider : { url = "", arn = "" }
 
   batch_signing_key_expiration     = var.batch_signing_key_expiration
   batch_signing_key_rotation       = var.batch_signing_key_rotation
@@ -450,7 +475,7 @@ module "data_share_processors" {
   intake_max_age                                 = var.intake_max_age
   aggregation_period                             = var.aggregation_period
   aggregation_grace_period                       = var.aggregation_grace_period
-  kms_keyring                                    = module.gke.kms_keyring
+  kms_keyring                                    = var.use_aws ? "" : module.gke[0].kms_keyring
   pushgateway                                    = var.pushgateway
   workflow_manager_image                         = var.workflow_manager_image
   workflow_manager_version                       = var.workflow_manager_version
@@ -459,6 +484,7 @@ module "data_share_processors" {
   container_registry                             = var.container_registry
   intake_worker_count                            = each.value.intake_worker_count
   aggregate_worker_count                         = each.value.aggregate_worker_count
+  eks_oidc_provider                              = var.use_aws ? module.eks[0].oidc_provider : { url = "", arn = "" }
 }
 
 # The portal owns two sum part buckets (one for each data share processor) and
@@ -481,7 +507,6 @@ resource "google_service_account_iam_binding" "data_share_processors_to_sum_part
 module "fake_server_resources" {
   count                 = local.is_env_with_ingestor ? 1 : 0
   source                = "./modules/fake_server_resources"
-  manifest_bucket       = local.manifest.bucket
   gcp_region            = var.gcp_region
   gcp_project           = var.gcp_project
   environment           = var.environment
@@ -507,16 +532,21 @@ module "portal_server_resources" {
   depends_on = [module.gke]
 }
 
-module "monitoring" {
-  source                = "./modules/monitoring"
-  environment           = var.environment
-  gcp_region            = var.gcp_region
-  gcp_project           = var.gcp_project
-  victorops_routing_key = var.victorops_routing_key
-  aggregation_period    = var.aggregation_period
+# The monitoring module is disabled for now because it needs some AWS tweaks
+# (wire up an EBS volume for metrics storage and forward SQS metrics into
+# Prometheus). I'm commenting it out instead of putting in a count variable
+# because this way we don't have to `terraform state mv` its resources into
+# place when we turn it on.
+# module "monitoring" {
+#   source                = "./modules/monitoring"
+#   environment           = var.environment
+#   gcp_region            = var.gcp_region
+#   gcp_project           = var.gcp_project
+#   victorops_routing_key = var.victorops_routing_key
+#   aggregation_period    = var.aggregation_period
 
-  prometheus_server_persistent_disk_size_gb = var.prometheus_server_persistent_disk_size_gb
-}
+#   prometheus_server_persistent_disk_size_gb = var.prometheus_server_persistent_disk_size_gb
+#}
 
 output "manifest_bucket" {
   value = {
@@ -526,7 +556,7 @@ output "manifest_bucket" {
   }
 }
 
-output "gke_kubeconfig" {
+output "kubeconfig" {
   value = "Run this command to update your kubectl config: ${local.kubernetes_cluster.kubectl_command}"
 }
 

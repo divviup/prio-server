@@ -125,6 +125,10 @@ variable "use_aws" {
   type = bool
 }
 
+variable "aws_region" {
+  type = string
+}
+
 variable "eks_oidc_provider" {
   type = object({
     arn = string
@@ -140,18 +144,6 @@ locals {
   workflow_manager_iam_entity = "${var.environment}-${var.data_share_processor_name}-workflow-manager"
 }
 
-data "aws_caller_identity" "current" {}
-
-# Workload identity[1] lets us map GCP service accounts to Kubernetes service
-# accounts. We need this so that pods can use GCP API, but also AWS APIs like S3
-# via Web Identity Federation. To use the credentials, the container must fetch
-# the authentication token from the instance metadata service. Kubernetes has
-# features for automatically providing a service account token (e.g. via a
-# a mounted volume[2]), but that would be a token for the *Kubernetes* level
-# service account, and not the one we can present to AWS.
-# [1] https://cloud.google.com/kubernetes-engine/docs/how-to/workload-identity
-# [2] https://kubernetes.io/docs/tasks/configure-pod-container/configure-service-account/#service-account-token-volume-projection
-
 module "account_mapping" {
   source                          = "../account_mapping"
   gcp_service_account_name        = var.use_aws ? "" : local.workflow_manager_iam_entity
@@ -162,16 +154,6 @@ module "account_mapping" {
   kubernetes_namespace            = var.kubernetes_namespace
   environment                     = var.environment
   allow_gcp_sa_token_creation     = true
-}
-
-# Allows the Kubernetes service account to request auth tokens for the GCP
-# service account.
-resource "google_service_account_iam_binding" "workflow_manager_token" {
-  service_account_id = module.account_mapping.gcp_service_account_name
-  role               = "roles/iam.serviceAccountTokenCreator"
-  members = [
-    module.account_mapping.kubernetes_service_account_name
-  ]
 }
 
 resource "kubernetes_secret" "batch_signing_key" {
@@ -217,7 +199,6 @@ resource "kubernetes_config_map" "intake_batch_config_map" {
     # PACKET_DECRYPTION_KEYS is a Kubernetes secret
     # BATCH_SIGNING_PRIVATE_KEY is a Kubernetes secret
     IS_FIRST                             = var.is_first ? "true" : "false"
-    AWS_ACCOUNT_ID                       = data.aws_caller_identity.current.account_id
     BATCH_SIGNING_PRIVATE_KEY_IDENTIFIER = kubernetes_secret.batch_signing_key.metadata[0].name
     INGESTOR_INPUT                       = var.ingestion_bucket
     INGESTOR_MANIFEST_BASE_URL           = "https://${var.ingestor_manifest_base_url}"
@@ -231,7 +212,8 @@ resource "kubernetes_config_map" "intake_batch_config_map" {
     PUSHGATEWAY                          = var.pushgateway
     TASK_QUEUE_KIND                      = var.intake_queue.subscription_kind
     TASK_QUEUE_NAME                      = var.intake_queue.subscription
-    GCP_PROJECT_ID                       = data.google_project.project.project_id
+    AWS_SQS_REGION                       = var.use_aws ? var.aws_region : ""
+    GCP_PROJECT_ID                       = var.use_aws ? "" : data.google_project.project.project_id
   }
 }
 
@@ -247,7 +229,6 @@ resource "kubernetes_config_map" "aggregate_config_map" {
     # PACKET_DECRYPTION_KEYS is a Kubernetes secret
     # BATCH_SIGNING_PRIVATE_KEY is a Kubernetes secret
     IS_FIRST                             = var.is_first ? "true" : "false"
-    AWS_ACCOUNT_ID                       = data.aws_caller_identity.current.account_id
     BATCH_SIGNING_PRIVATE_KEY_IDENTIFIER = kubernetes_secret.batch_signing_key.metadata[0].name
     INGESTOR_INPUT                       = var.ingestion_bucket
     INGESTOR_MANIFEST_BASE_URL           = "https://${var.ingestor_manifest_base_url}"
@@ -264,6 +245,8 @@ resource "kubernetes_config_map" "aggregate_config_map" {
     TASK_QUEUE_KIND                      = var.aggregate_queue.subscription_kind
     TASK_QUEUE_NAME                      = var.aggregate_queue.subscription
     GCP_PROJECT_ID                       = data.google_project.project.project_id
+    AWS_SQS_REGION                       = var.use_aws ? var.aws_region : ""
+    GCP_PROJECT_ID                       = var.use_aws ? "" : data.google_project.project.project_id
     PERMIT_MALFORMED_BATCH               = "true"
   }
 }
@@ -318,7 +301,8 @@ resource "kubernetes_cron_job" "workflow_manager" {
                 "--task-queue-kind", var.intake_queue.topic_kind,
                 "--intake-tasks-topic", var.intake_queue.topic,
                 "--aggregate-tasks-topic", var.aggregate_queue.topic,
-                "--gcp-project-id", data.google_project.project.project_id,
+                "--gcp-project-id", var.use_aws ? "" : data.google_project.project.project_id,
+                "--aws-sns-region", var.use_aws ? var.aws_region : "",
               ]
             }
             # If we use any other restart policy, then when the job is finally
@@ -571,8 +555,6 @@ output "gcp_service_account_email" {
   value = module.account_mapping.gcp_service_account_email
 }
 
-# To be populated in a subsequent commit that wires up the AWS side of
-# module account_mapping
 output "aws_iam_role" {
   value = module.account_mapping.aws_iam_role
 }

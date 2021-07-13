@@ -10,10 +10,6 @@ variable "gcp_project" {
   type = string
 }
 
-variable "manifest_bucket" {
-  type = string
-}
-
 variable "own_manifest_base_url" {
   type = string
 }
@@ -206,10 +202,6 @@ resource "kubernetes_deployment" "integration-tester" {
         container {
           name  = "integration-tester"
           image = "${var.container_registry}/${var.facilitator_image}:${var.facilitator_version}"
-          env {
-            name  = "AWS_ACCOUNT_ID"
-            value = data.aws_caller_identity.current.account_id
-          }
           env {
             name  = "RUST_BACKTRACE"
             value = "FULL"

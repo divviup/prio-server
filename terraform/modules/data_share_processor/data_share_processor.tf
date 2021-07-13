@@ -114,6 +114,17 @@ variable "aggregate_worker_count" {
   type = number
 }
 
+variable "eks_oidc_provider" {
+  type = object({
+    arn = string
+    url = string
+  })
+  default = {
+    arn = ""
+    url = ""
+  }
+}
+
 # We need the ingestion server's manifest so that we can discover the GCP
 # service account it will use to upload ingestion batches. Some ingestors
 # (Apple) are singletons, and advertise a single global manifest which contains
@@ -192,8 +203,8 @@ locals {
     "gs://${local.own_validation_bucket_name}"
   )
 
-  intake_queue    = module.pubsub["intake"].queue
-  aggregate_queue = module.pubsub["aggregate"].queue
+  intake_queue    = var.use_aws ? module.sns_sqs["intake"].queue : module.pubsub["intake"].queue
+  aggregate_queue = var.use_aws ? module.sns_sqs["aggregate"].queue : module.pubsub["aggregate"].queue
 }
 
 # For data share processors that run in GKE but are not pure GKE, or ones that
@@ -324,13 +335,23 @@ module "cloud_storage_gcp" {
 }
 
 module "pubsub" {
-  for_each                   = toset(["intake", "aggregate"])
+  for_each                   = toset(var.use_aws ? [] : ["intake", "aggregate"])
   source                     = "../../modules/pubsub"
   environment                = var.environment
   data_share_processor_name  = var.data_share_processor_name
   publisher_service_account  = module.kubernetes.gcp_service_account_email
   subscriber_service_account = module.kubernetes.gcp_service_account_email
   task                       = each.key
+}
+
+module "sns_sqs" {
+  for_each                  = toset(var.use_aws ? ["intake", "aggregate"] : [])
+  source                    = "../../modules/sns_sqs"
+  environment               = var.environment
+  data_share_processor_name = var.data_share_processor_name
+  publisher_iam_role        = module.kubernetes.aws_iam_role.arn
+  subscriber_iam_role       = module.kubernetes.aws_iam_role.arn
+  task                      = each.key
 }
 
 module "kubernetes" {
@@ -359,11 +380,13 @@ module "kubernetes" {
   workflow_manager_version                = var.workflow_manager_version
   facilitator_image                       = var.facilitator_image
   facilitator_version                     = var.facilitator_version
-  intake_queue                            = module.pubsub["intake"].queue
-  aggregate_queue                         = module.pubsub["aggregate"].queue
+  intake_queue                            = local.intake_queue
+  aggregate_queue                         = local.aggregate_queue
   intake_worker_count                     = var.intake_worker_count
   aggregate_worker_count                  = var.aggregate_worker_count
   use_aws                                 = var.use_aws
+  eks_oidc_provider                       = var.eks_oidc_provider
+  aws_region                              = var.aws_region
 }
 
 output "data_share_processor_name" {
