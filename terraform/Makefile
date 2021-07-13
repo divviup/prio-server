@@ -101,10 +101,12 @@ apply-bootstrap: prep ## Have terraform bring up the minimal resources needed to
 		-input=false \
 		-refresh=true \
 		-var-file="$(VARS)" \
-		-target=module.manifest \
+		-target=module.manifest_gcp \
+		-target=module.manifest_aws \
 		-target=module.fake_server_resources \
-		-target=module.portal_server_resources
-		-target=module.gke
+		-target=module.portal_server_resources \
+		-target=module.gke \
+		-target=module.eks
 	echo "If that succeeded, run 'terraform output --json | (cd ../deploy-tool/ ; go run main.go )'"
 
 .PHONY: destroy-bootstrap
@@ -114,10 +116,12 @@ destroy-bootstrap: prep ## Have terraform destroy the resources brought up by ap
 		-input=false \
 		-refresh=true \
 		-var-file="$(VARS)" \
-		-target=module.manifest \
+		-target=module.manifest_gcp \
+		-target=module.manifest_aws \
 		-target=module.fake_server_resources \
 		-target=module.portal_server_resources \
-		-target=module.gke
+		-target=module.gke \
+		-target=module.eks
 
 .PHONY: apply-target
 apply-target: prep ## Have terraform do the things for a specific resource. This will cost money.
