@@ -24,8 +24,8 @@ use facilitator::{
     kubernetes::KubernetesClient,
     logging::{event, setup_logging, LoggingConfiguration},
     manifest::{
-        DataShareProcessorGlobalManifest, IngestionServerManifest, PortalServerGlobalManifest,
-        SpecificManifest,
+        DataShareProcessorGlobalManifest, DataShareProcessorSpecificManifest,
+        IngestionServerManifest, PortalServerGlobalManifest,
     },
     metrics::{start_metrics_scrape_endpoint, AggregateMetricsCollector, IntakeMetricsCollector},
     sample::{SampleGenerator, SampleOutput},
@@ -939,9 +939,11 @@ fn main() -> Result<(), anyhow::Error> {
 fn crypto_self_check(matches: &ArgMatches, logger: &Logger) -> Result<()> {
     let instance_name = matches.value_of("instance-name").unwrap();
     let own_manifest = match matches.value_of("own-manifest-base-url") {
-        Some(manifest_base_url) => {
-            SpecificManifest::from_https(manifest_base_url, instance_name, logger)?
-        }
+        Some(manifest_base_url) => DataShareProcessorSpecificManifest::from_https(
+            manifest_base_url,
+            instance_name,
+            logger,
+        )?,
         // Skip crypto self check if no own manifest is provided
         None => return Ok(()),
     };
@@ -1014,21 +1016,21 @@ fn get_ecies_public_key(
                 })?;
                 let peer_name = &format!("{}-{}", locality_name, ingestor_name);
                 let manifest =
-                    SpecificManifest::from_https(manifest_url, peer_name, logger).context(
-                        format!("unable to read SpecificManifest from {}", manifest_url),
-                    )?;
-                let packet_decryption_keys = manifest
-                    .packet_decryption_keys()
-                    .context("unable to get packet decryption keys from the SpecificManifest")?;
-                let (key_identifier, packet_decryption_key) = packet_decryption_keys
-                    .into_iter()
+                    DataShareProcessorSpecificManifest::from_https(manifest_url, peer_name, logger)
+                        .context(format!(
+                            "unable to read DataShareProcessorSpecificManifest from {}",
+                            manifest_url
+                        ))?;
+
+                let (key_identifier, packet_decryption_key) = manifest
+                    .packet_encryption_keys()
+                    .iter()
                     .next()
-                    .context("No packet decryption keys in manifest")?;
+                    .context("No packet encryption keys in manifest")?;
 
-                let public_key = packet_decryption_key.base64_public_key()?;
-
-                let public_key = PublicKey::from_base64(&public_key)
-                    .context("unable to create public key from base64 ecies key")?;
+                let public_key =
+                    PublicKey::from_base64(&packet_decryption_key.base64_public_key()?)
+                        .context("unable to create public key from base64 ecies key")?;
 
                 debug!(
                     logger,
@@ -1066,9 +1068,12 @@ fn get_ingestion_identity_and_bucket(
                 anyhow!("If bucket is not provided, manifest_url must be provided")
             })?;
 
-            let manifest = SpecificManifest::from_https(manifest_url, peer_name, logger).context(
-                format!("unable to read SpecificManifest from {}", manifest_url),
-            )?;
+            let manifest =
+                DataShareProcessorSpecificManifest::from_https(manifest_url, peer_name, logger)
+                    .context(format!(
+                        "unable to read DataShareProcessorSpecificManifest from {}",
+                        manifest_url
+                    ))?;
 
             Ok((
                 manifest.ingestion_identity().to_owned(),
@@ -1265,7 +1270,7 @@ where
     // peer manifest or provided directly via command line argument.
     let peer_validation_bucket =
         if let Some(base_url) = sub_matches.value_of("peer-manifest-base-url") {
-            SpecificManifest::from_https(
+            DataShareProcessorSpecificManifest::from_https(
                 base_url,
                 sub_matches.value_of("instance-name").unwrap(),
                 parent_logger,
@@ -1460,10 +1465,12 @@ where
         sub_matches.value_of("batch-signing-private-key"),
         sub_matches.value_of("batch-signing-private-key-identifier"),
     ) {
-        (Some(manifest_base_url), _, _) => {
-            SpecificManifest::from_https(manifest_base_url, instance_name, logger)?
-                .batch_signing_public_keys()?
-        }
+        (Some(manifest_base_url), _, _) => DataShareProcessorSpecificManifest::from_https(
+            manifest_base_url,
+            instance_name,
+            logger,
+        )?
+        .batch_signing_public_keys()?,
 
         (_, Some(private_key), Some(private_key_identifier)) => {
             public_key_map_from_arg(private_key, private_key_identifier)?
@@ -1494,10 +1501,12 @@ where
         sub_matches.value_of("peer-public-key-identifier"),
         sub_matches.value_of("peer-manifest-base-url"),
     ) {
-        (_, _, Some(manifest_base_url)) => {
-            SpecificManifest::from_https(manifest_base_url, instance_name, logger)?
-                .batch_signing_public_keys()?
-        }
+        (_, _, Some(manifest_base_url)) => DataShareProcessorSpecificManifest::from_https(
+            manifest_base_url,
+            instance_name,
+            logger,
+        )?
+        .batch_signing_public_keys()?,
         (Some(public_key), Some(public_key_identifier), _) => {
             public_key_map_from_arg(public_key, public_key_identifier)?
         }
@@ -1757,9 +1766,9 @@ fn lint_manifest(sub_matches: &ArgMatches, logger: &Logger) -> Result<(), anyhow
                 .value_of("instance")
                 .context("instance is required when manifest-kind=data-share-processor-specific")?;
             let manifest = if let Some(base_url) = manifest_base_url {
-                SpecificManifest::from_https(base_url, instance, logger)?
+                DataShareProcessorSpecificManifest::from_https(base_url, instance, logger)?
             } else if let Some(body) = manifest_body {
-                SpecificManifest::from_slice(body.as_bytes())?
+                DataShareProcessorSpecificManifest::from_slice(body.as_bytes())?
             } else {
                 return Err(anyhow!(
                     "one of manifest-base-url or manifest-path is required"
