@@ -23,29 +23,25 @@ pub trait TaskQueue<T: Task>: Debug {
     /// passed to acknowledge_task to permanently remove the task. If
     /// acknowledge_task is never called, the task will eventually be
     /// re-delivered via dequeue().
-    fn dequeue(&mut self) -> Result<Option<TaskHandle<T>>>;
+    fn dequeue(&self) -> Result<Option<TaskHandle<T>>>;
 
     /// Signal to the task queue that the task has been handled and should be
     /// removed from the queue.
-    fn acknowledge_task(&mut self, handle: TaskHandle<T>) -> Result<()>;
+    fn acknowledge_task(&self, handle: TaskHandle<T>) -> Result<()>;
 
     /// Signal to the task queue that the task was not handled and should be
     /// retried later.
-    fn nacknowledge_task(&mut self, handle: TaskHandle<T>) -> Result<()>;
+    fn nacknowledge_task(&self, handle: TaskHandle<T>) -> Result<()>;
 
     /// Signal to the task queue that more time is needed to handle the task.
-    fn extend_task_deadline(&mut self, handle: &TaskHandle<T>, increment: &Duration) -> Result<()>;
+    fn extend_task_deadline(&self, handle: &TaskHandle<T>, increment: &Duration) -> Result<()>;
 
     /// Extend the deadline for the provided task if enough time has elapsed
     /// since the start of handling the task to require an extension. Returns
     /// Ok(()) if either the task deadline does not need extension or if the
     /// deadline was successfully extended, or an error if something goes wrong
     /// extending the deadline.
-    fn maybe_extend_task_deadline(
-        &mut self,
-        handle: &TaskHandle<T>,
-        elapsed: &Duration,
-    ) -> Result<()> {
+    fn maybe_extend_task_deadline(&self, handle: &TaskHandle<T>, elapsed: &Duration) -> Result<()> {
         // We assume that 10 minutes is a reasonable deadline increment
         // regardless of queue implementation or what the task is. In the future
         // this could be a tunable parameter on facilitator.
