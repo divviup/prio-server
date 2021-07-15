@@ -1,6 +1,6 @@
 use crate::{
     config::Identity,
-    gcp_oauth::GcpOauthTokenProvider,
+    gcp_oauth::{AccessScope, GcpAccessTokenProvider},
     http::{Method, RequestParameters, RetryingAgent},
     logging::event,
     task::{Task, TaskHandle, TaskQueue},
@@ -99,7 +99,7 @@ pub struct GcpPubSubTaskQueue<T: Task> {
     pubsub_api_endpoint: String,
     gcp_project_id: String,
     subscription_id: String,
-    oauth_token_provider: GcpOauthTokenProvider,
+    access_token_provider: GcpAccessTokenProvider,
     phantom_task: PhantomData<*const T>,
     agent: RetryingAgent,
     logger: Logger,
@@ -139,10 +139,8 @@ impl<T: Task> GcpPubSubTaskQueue<T> {
                 .to_owned(),
             gcp_project_id: gcp_project_id.to_string(),
             subscription_id: subscription_id.to_string(),
-            oauth_token_provider: GcpOauthTokenProvider::new(
-                // This token is used to access PubSub API
-                // https://developers.google.com/identity/protocols/oauth2/scopes
-                "https://www.googleapis.com/auth/pubsub",
+            access_token_provider: GcpAccessTokenProvider::new(
+                AccessScope::PubSub,
                 identity,
                 // GCP key file; None because PubSub is only used if the
                 // workload is on GKE
@@ -170,7 +168,7 @@ impl<T: Task> TaskQueue<T> for GcpPubSubTaskQueue<T> {
                 &self.subscription_id,
             )?,
             method: Method::Post,
-            token_provider: Some(&mut self.oauth_token_provider),
+            token_provider: Some(&self.access_token_provider),
         })?;
 
         let http_response = self
@@ -233,7 +231,7 @@ impl<T: Task> TaskQueue<T> for GcpPubSubTaskQueue<T> {
                 &self.subscription_id,
             )?,
             method: Method::Post,
-            token_provider: Some(&mut self.oauth_token_provider),
+            token_provider: Some(&self.access_token_provider),
         })?;
 
         self.agent
@@ -296,7 +294,7 @@ impl<T: Task> GcpPubSubTaskQueue<T> {
                 &self.subscription_id,
             )?,
             method: Method::Post,
-            token_provider: Some(&mut self.oauth_token_provider),
+            token_provider: Some(&self.access_token_provider),
         })?;
 
         self.agent

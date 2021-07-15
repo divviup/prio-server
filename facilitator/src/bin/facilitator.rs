@@ -185,6 +185,10 @@ impl<'a, 'b> AppArgumentAdder for App<'a, 'b> {
             entity.suffix("-use-default-aws-credentials-provider");
         let use_default_aws_credentials_provider_env =
             leak_string(upper_snake_case(use_default_aws_credentials_provider));
+        let gcp_sa_to_impersonate_before_assuming_role =
+            entity.suffix("-gcp-sa-to-impersonate-before-assuming-role");
+        let gcp_sa_to_impersonate_before_assuming_role_env =
+            leak_string(upper_snake_case(gcp_sa_to_impersonate_before_assuming_role));
         self.arg(
             Arg::with_name(name)
                 .long(name)
@@ -241,6 +245,19 @@ impl<'a, 'b> AppArgumentAdder for App<'a, 'b> {
                     id,
                     id,
                     id,
+                ))),
+        )
+        .arg(
+            Arg::with_name(gcp_sa_to_impersonate_before_assuming_role)
+                .long(gcp_sa_to_impersonate_before_assuming_role)
+                .env(gcp_sa_to_impersonate_before_assuming_role_env)
+                .value_name("SERVICE_ACCOUNT")
+                .long_help(leak_string(format!(
+                    "If {} is an AWS IAM role and running in GCP, an identity \
+                    token will be obtained for the specified GCP service \
+                    account to then assume the AWS IAM role using STS \
+                    AssumeRoleWithWebIdentity.",
+                    id
                 ))),
         )
     }
@@ -1936,10 +1953,16 @@ fn transport_for_path(
         bool
     )?;
 
+    let sa_to_impersonate = value_t!(
+        matches.value_of(entity.suffix("-gcp-sa-to-impersonate-before-assuming-role")),
+        Identity
+    )?;
+
     match path {
         StoragePath::S3Path(path) => {
             let credentials_provider = aws_credentials::Provider::new(
                 identity,
+                sa_to_impersonate,
                 use_default_aws_credentials_provider,
                 "s3",
                 logger,
@@ -2025,6 +2048,7 @@ fn intake_task_queue_from_args(
                 .ok_or_else(|| anyhow!("aws-sqs-region is required"))?;
             let credentials_provider = aws_credentials::Provider::new(
                 identity,
+                Identity::none(),
                 value_t!(
                     matches.value_of("task-queue-use-default-aws-credentials-provider"),
                     bool
@@ -2076,6 +2100,7 @@ fn aggregation_task_queue_from_args(
                 .ok_or_else(|| anyhow!("aws-sqs-region is required"))?;
             let credentials_provider = aws_credentials::Provider::new(
                 identity,
+                Identity::none(),
                 value_t!(
                     matches.value_of("task-queue-use-default-aws-credentials-provider"),
                     bool

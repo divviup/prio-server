@@ -1,4 +1,5 @@
 use anyhow::{Context, Result};
+use dyn_clone::DynClone;
 use slog::Logger;
 use std::{convert::From, default::Default, fmt::Debug, time::Duration};
 use ureq::{Agent, AgentBuilder, Request, Response, SerdeValue};
@@ -62,14 +63,14 @@ impl RetryingAgent {
     /// like `send()` or `send_bytes()` directly on the returned `Request`, but
     /// must use `RetryingAgent::send_json_request`, `::send_bytes` or
     /// `::send_string` to get retries.
-    /// Returns an Error if the OauthTokenProvider returns an error when
-    /// supplying the request with an OauthToken.
+    /// Returns an Error if the AccessTokenProvider returns an error when
+    /// supplying the request with an access token.
     pub(crate) fn prepare_request(&self, parameters: RequestParameters) -> Result<Request> {
         let mut request = self
             .agent
             .request_url(parameters.method.to_primitive_string(), &parameters.url);
         if let Some(token_provider) = parameters.token_provider {
-            let token = token_provider.ensure_oauth_token()?;
+            let token = token_provider.ensure_access_token()?;
             request = request.set("Authorization", &format!("Bearer {}", token));
         }
         Ok(request)
@@ -146,28 +147,30 @@ impl RetryingAgent {
 }
 
 /// Defines a behavior responsible for produing bearer authorization tokens
-pub(crate) trait OauthTokenProvider: Debug {
+pub(crate) trait AccessTokenProvider: Debug + DynClone + Send + Sync {
     /// Returns a valid bearer authroization token
-    fn ensure_oauth_token(&mut self) -> Result<String>;
+    fn ensure_access_token(&self) -> Result<String>;
 }
 
-/// StaticOauthTokenProvider is an OauthTokenProvider that contains a String
-/// as the token. This structure implements the OauthTokenProvider trait and can
+dyn_clone::clone_trait_object!(AccessTokenProvider);
+
+/// StaticAccessTokenProvider is an AccessTokenProvider that contains a String
+/// as the token. This structure implements the AccessTokenProvider trait and can
 /// be used in RequestParameters.
-#[derive(Debug)]
-pub(crate) struct StaticOauthTokenProvider {
+#[derive(Clone, Debug)]
+pub(crate) struct StaticAccessTokenProvider {
     pub token: String,
 }
 
-impl OauthTokenProvider for StaticOauthTokenProvider {
-    fn ensure_oauth_token(&mut self) -> Result<String> {
+impl AccessTokenProvider for StaticAccessTokenProvider {
+    fn ensure_access_token(&self) -> Result<String> {
         Ok(self.token.clone())
     }
 }
 
-impl From<String> for StaticOauthTokenProvider {
+impl From<String> for StaticAccessTokenProvider {
     fn from(token: String) -> Self {
-        StaticOauthTokenProvider { token }
+        StaticAccessTokenProvider { token }
     }
 }
 
@@ -179,9 +182,9 @@ pub(crate) struct RequestParameters<'a> {
     /// The method of the request (GET, POST, etc)
     pub method: Method,
     /// If this field is set, the request with be sent with an "Authorization"
-    /// header containing a bearer token obtained from the OauthTokenProvider.
+    /// header containing a bearer token obtained from the AccessTokenProvider.
     /// If unset, the request is sent unauthenticated.
-    pub token_provider: Option<&'a mut dyn OauthTokenProvider>,
+    pub token_provider: Option<&'a dyn AccessTokenProvider>,
 }
 
 impl Default for RequestParameters<'_> {
@@ -255,14 +258,14 @@ mod tests {
             .expect_at_most(1)
             .create();
 
-        let mut oauth_token_provider = StaticOauthTokenProvider {
+        let oauth_token_provider = StaticAccessTokenProvider {
             token: "fake-token".to_string(),
         };
 
         let request_parameters = RequestParameters {
             url: Url::parse(&format!("{}/resource", mockito::server_url())).unwrap(),
             method: Method::Get,
-            token_provider: Some(&mut oauth_token_provider),
+            token_provider: Some(&oauth_token_provider),
         };
 
         let agent = RetryingAgent::default();

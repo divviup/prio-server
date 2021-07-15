@@ -7,7 +7,6 @@ import (
 	"github.com/letsencrypt/prio-server/workflow-manager/tokenfetcher"
 
 	"github.com/aws/aws-sdk-go/aws"
-	"github.com/aws/aws-sdk-go/aws/arn"
 	"github.com/aws/aws-sdk-go/aws/credentials"
 	"github.com/aws/aws-sdk-go/aws/credentials/stscreds"
 	"github.com/aws/aws-sdk-go/aws/session"
@@ -15,16 +14,10 @@ import (
 )
 
 func webIDP(sess *session.Session, identity string) (*credentials.Credentials, error) {
-	parsed, err := arn.Parse(identity)
-	if err != nil {
-		return nil, err
-	}
-	audience := fmt.Sprintf("sts.amazonaws.com/%s", parsed.AccountID)
-
 	stsSTS := sts.New(sess)
 	roleSessionName := ""
 	roleProvider := stscreds.NewWebIdentityRoleProviderWithToken(
-		stsSTS, identity, roleSessionName, tokenfetcher.NewTokenFetcher(audience))
+		stsSTS, identity, roleSessionName, tokenfetcher.NewTokenFetcher("sts.amazonaws.com/gke-identity-federation"))
 
 	return credentials.NewCredentials(roleProvider), nil
 }
