@@ -10,6 +10,13 @@ variable "global_manifest_content" {
   type = string
 }
 
+variable "managed_dns_zone" {
+  type = object({
+    name        = string
+    gcp_project = string
+  })
+}
+
 # Make a bucket where we will store global and specific manifests and from which
 # peers can fetch them.
 # https://cloud.google.com/cdn/docs/setting-up-cdn-with-bucket
@@ -50,10 +57,93 @@ resource "google_storage_bucket_object" "global_manifest" {
   content       = var.global_manifest_content
 }
 
+locals {
+  use_custom_domain = var.managed_dns_zone.name != ""
+  domain_name       = "${var.environment}.${data.google_dns_managed_zone.manifests[0].dns_name}"
+}
+
+# Now we configure an external HTTPS load balancer backed by the bucket.
+resource "google_compute_managed_ssl_certificate" "manifests" {
+  count = local.use_custom_domain ? 1 : 0
+
+  # Managed SSL certificates are GA but the Terraform provider still restricts
+  # them to the beta variant.
+  provider = google-beta
+
+  name = "prio-${var.environment}-manifests"
+  managed {
+    domains = [local.domain_name]
+  }
+}
+
+# We expect a managed DNS zone in which we can create subdomains for a given
+# env's manifest endpoint to already exist, outside of this Terraform module.
+data "google_dns_managed_zone" "manifests" {
+  count = local.use_custom_domain ? 1 : 0
+
+  name = var.managed_dns_zone.name
+  # The managed zone is not necessarily in the same GCP project as this env, so
+  # we pass the project all the way from tfvars to here.
+  project = var.managed_dns_zone.gcp_project
+}
+
+# Create an A record from which this env's manifests will be served.
+resource "google_dns_record_set" "manifests" {
+  count = local.use_custom_domain ? 1 : 0
+
+  project      = var.managed_dns_zone.gcp_project
+  name         = local.domain_name
+  managed_zone = data.google_dns_managed_zone.manifests[0].name
+  type         = "A"
+  ttl          = 300
+  rrdatas      = [google_compute_global_address.manifests[0].address]
+}
+
+# Reserve an external IP address for the load balancer.
+# https://cloud.google.com/cdn/docs/setting-up-cdn-with-bucket#ip-address
+resource "google_compute_global_address" "manifests" {
+  count = local.use_custom_domain ? 1 : 0
+
+  name = "prio-${var.environment}-manifests"
+}
+
+resource "google_compute_backend_bucket" "manifests" {
+  count = local.use_custom_domain ? 1 : 0
+
+  name        = "prio-${var.environment}-manifest-backend"
+  bucket_name = google_storage_bucket.manifests.name
+  enable_cdn  = true
+}
+
+resource "google_compute_url_map" "manifests" {
+  count = local.use_custom_domain ? 1 : 0
+
+  name            = "prio-${var.environment}-manifests"
+  default_service = google_compute_backend_bucket.manifests[0].id
+}
+
+resource "google_compute_target_https_proxy" "manifests" {
+  count = local.use_custom_domain ? 1 : 0
+
+  name             = "prio-${var.environment}-manifests"
+  url_map          = google_compute_url_map.manifests[0].id
+  ssl_certificates = [google_compute_managed_ssl_certificate.manifests[0].id]
+}
+
+resource "google_compute_global_forwarding_rule" "manifests" {
+  count = local.use_custom_domain ? 1 : 0
+
+  name       = "prio-${var.environment}-manifests"
+  ip_address = google_compute_global_address.manifests[0].address
+  port_range = "443"
+  target     = google_compute_target_https_proxy.manifests[0].id
+}
+
 output "bucket" {
   value = google_storage_bucket.manifests.name
 }
 
 output "base_url" {
-  value = "storage.googleapis.com/${google_storage_bucket.manifests.name}"
+  # local.domain_name is a fully qualified DNS name, ending in '.'
+  value = local.use_custom_domain ? trimsuffix(local.domain_name, ".") : "storage.googleapis.com/${google_storage_bucket.manifests.name}"
 }

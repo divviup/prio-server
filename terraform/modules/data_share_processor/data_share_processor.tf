@@ -178,7 +178,7 @@ locals {
 
   peer_share_processor_server_identity               = jsondecode(data.http.peer_share_processor_global_manifest.body).server-identity
   peer_share_processor_gcp_service_account_email     = local.peer_share_processor_server_identity.gcp-service-account-email
-  peer_share_processor_gcp_service_account_unique_id = local.peer_share_processor_server_identity.gcp-service-account-id
+  peer_share_processor_gcp_service_account_unique_id = lookup(local.peer_share_processor_server_identity, "gcp-service-account-id", "")
 
   # If running EKS, we impersonate a GCP SA shared across the whole env to write
   # to the peer's validation buckets in S3.
@@ -266,7 +266,7 @@ resource "aws_iam_role" "bucket_role" {
 # TODO: Make this policy as restrictive as possible:
 # https://github.com/abetterinternet/prio-server/issues/140
 resource "aws_iam_role_policy" "bucket_role_policy" {
-  count = var.use_aws && !var.pure_gcp ? 1 : 0
+  count = var.use_aws || !var.pure_gcp ? 1 : 0
 
   name = "${local.resource_prefix}-bucket-role-policy"
   role = aws_iam_role.bucket_role[0].id

@@ -56,7 +56,14 @@ variable "manifest_domain" {
 }
 
 variable "managed_dns_zone" {
-  type = map(string)
+  type = object({
+    name        = string
+    gcp_project = string
+  })
+  default = {
+    name        = ""
+    gcp_project = ""
+  }
 }
 
 variable "test_peer_environment" {
@@ -301,6 +308,7 @@ module "manifest_gcp" {
   environment             = var.environment
   gcp_region              = var.gcp_region
   global_manifest_content = local.global_manifest
+  managed_dns_zone        = var.managed_dns_zone
 }
 
 module "manifest_aws" {
