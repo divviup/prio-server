@@ -111,9 +111,10 @@ impl Transport for GcsTransport {
 
         // Per API reference, the object key must be URL encoded.
         // API reference: https://cloud.google.com/storage/docs/json_api/v1/objects/get
-        let encoded_key = urlencoding::encode(&[&self.path.key, key].concat());
-
-        let mut url = gcp_object_url(&self.path.bucket, &encoded_key)?;
+        let mut url = gcp_object_url(
+            &self.path.bucket,
+            &urlencoding::encode(&[&self.path.key, key].concat()),
+        )?;
 
         // Ensures response body will be content and not JSON metadata.
         // https://cloud.google.com/storage/docs/json_api/v1/objects/get#parameters
