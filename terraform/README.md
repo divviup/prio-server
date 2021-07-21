@@ -56,7 +56,7 @@ This will deploy just enough of an environment to permit peers to begin deployin
 
     ENV=your-new-environment make apply
 
-Once bootstrapped, subsequent deployments should use `ENV=your-new-environment make apply`. Multiple environments may be deployed to the same GCP region and project.
+Once bootstrapped, subsequent deployments should use `ENV=your-new-environment make apply`. Multiple environments may be deployed to the same GCP region and project. After running successfully, the `apply` target will instruct you to run `deploy-tool` in order to generate secrets and post specific manifests. `deploy-tool` must be re-run when deploying new localities into an environment to create their secrets and manifests.
 
 ## Paired test environments
 
@@ -72,12 +72,12 @@ The values must correspond to the names of the environments you are using. Pick 
     ENV=with-ingestor make apply-bootstrap
     ENV=without-ingestor make apply-bootstrap
 
-After the successful `apply-bootstrap` you may need to wait several minutes for managed TLS certificates to finish provisioning. Once those are in place, move on to the full deployment:
+After the successful `apply-bootstrap`, you will need to run `deploy-tool` against the environment with the ingestors in order to generate global manifests that can later be used to deploy per-locality resources. Additionally, you may need to wait several minutes for managed TLS certificates to finish provisioning. Once those are in place, move on to the full deployment:
 
     ENV=with-ingestor make apply
     ENV=without-ingestor make apply
 
-Note that you MUST deploy the env which hosts ingestors before the other one as otherwise ingestor global manifests won't be available.
+Note that you MUST deploy the env which hosts ingestors before the other one as otherwise ingestor global manifests won't be available. After invoking the `apply` target, make sure to run `deploy-tool` to generate secrets and specific manifests.
 
 In your test setup, you might want to exercise reading and writing data to AWS S3 buckets, to simulate interacting with a peer data share processor that runs in AWS. Add `use_aws = true` to the `.tfvars` file for the environment you specified as `env_without_ingestor` and that env's ingestion and peer validation buckets will be created in S3.
 
