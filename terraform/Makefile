@@ -155,8 +155,8 @@ destroy-target: prep ## Destroy a specific resource. Caution though, this destro
 
 .PHONY: destroy-backend
 destroy-backend: ## Destroy storage bucket
-	@if ! gsutil rm -r $(STORAGE_BUCKET_URL); \
+	@if ! gsutil rm -r $(STORAGE_BUCKET_URL); then \
 		echo "$(BOLD)$(RED)Unable to delete cloud storage bucket $(STORAGE_BUCKET_URL).$(RESET)"; \
 	else
-		echo "$(BOLD)$(RED)Cloud storage bucket $(STORAGE_BUCKET_URL) does not exist.$(RESET)"; \
+		echo "$(BOLD)$(GREEN)Cloud storage bucket $(STORAGE_BUCKET_URL) deleted successfully.$(RESET)"; \
 	fi

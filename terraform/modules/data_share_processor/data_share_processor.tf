@@ -174,6 +174,16 @@ locals {
   ingestor_gcp_service_account_id = lookup(local.ingestor_server_identity, "gcp-service-account-id", "")
   ingestor_aws_role_arn           = lookup(local.ingestor_server_identity, "aws-iam-entity", "")
 
+  # If the ingestor has a GCP service account, grant write access to
+  # aws_iam_role.ingestion_bucket_writer, the IAM role configured to allow
+  # assumption by the GCP SA. If the ingestor has an AWS IAM role, just grant
+  # permission to it.
+  ingestion_bucket_writer_role = local.ingestor_aws_role_arn == "" ? (
+    aws_iam_role.ingestion_bucket_writer[0].arn
+    ) : (
+    local.ingestor_aws_role_arn
+  )
+
   resource_prefix = "prio-${var.environment}-${var.data_share_processor_name}"
 
   peer_share_processor_server_identity               = jsondecode(data.http.peer_share_processor_global_manifest.body).server-identity
@@ -313,18 +323,10 @@ module "cloud_storage_aws" {
   count  = var.use_aws ? 1 : 0
   source = "../../modules/cloud_storage_aws"
 
-  resource_prefix       = local.resource_prefix
-  bucket_reader         = module.kubernetes.aws_iam_role.arn
-  ingestion_bucket_name = local.ingestion_bucket_name
-  # If the ingestor has a GCP service account, grant write access to
-  # aws_iam_role.ingestion_bucket_writer, the IAM role configured to allow
-  # assumption by the GCP SA. If the ingestor has an AWS IAM role, just grant
-  # permission to it.
-  ingestion_bucket_writer = local.ingestor_aws_role_arn == "" ? (
-    aws_iam_role.ingestion_bucket_writer[0].arn
-    ) : (
-    local.ingestor_aws_role_arn
-  )
+  resource_prefix               = local.resource_prefix
+  bucket_reader                 = module.kubernetes.aws_iam_role.arn
+  ingestion_bucket_name         = local.ingestion_bucket_name
+  ingestion_bucket_writer       = local.ingestion_bucket_writer_role
   peer_validation_bucket_name   = local.peer_validation_bucket_name
   peer_validation_bucket_writer = aws_iam_role.bucket_role[0].arn
   own_validation_bucket_name    = "${local.resource_prefix}-own-validation"
@@ -430,7 +432,7 @@ output "aws_iam_role" {
 output "specific_manifest" {
   value = var.pure_gcp ? {
     format                   = 2
-    ingestion-identity       = var.use_aws ? local.ingestor_server_identity.aws-iam-entity : null
+    ingestion-identity       = var.use_aws ? local.ingestion_bucket_writer_role : null
     ingestion-bucket         = local.ingestion_bucket_url
     peer-validation-identity = var.use_aws ? aws_iam_role.bucket_role[0].arn : null
     peer-validation-bucket   = local.peer_validation_bucket_url
@@ -447,7 +449,7 @@ output "specific_manifest" {
     }
     } : {
     format                   = 1
-    ingestion-identity       = var.use_aws ? local.ingestor_server_identity.aws-iam-entity : null
+    ingestion-identity       = var.use_aws ? local.ingestion_bucket_writer_role : null
     ingestion-bucket         = local.ingestion_bucket_url
     peer-validation-identity = null
     peer-validation-bucket   = local.peer_validation_bucket_url

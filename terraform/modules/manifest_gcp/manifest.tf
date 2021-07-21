@@ -59,7 +59,7 @@ resource "google_storage_bucket_object" "global_manifest" {
 
 locals {
   use_custom_domain = var.managed_dns_zone.name != ""
-  domain_name       = "${var.environment}.${data.google_dns_managed_zone.manifests[0].dns_name}"
+  domain_name       = local.use_custom_domain ? "${var.environment}.${data.google_dns_managed_zone.manifests[0].dns_name}" : ""
 }
 
 # Now we configure an external HTTPS load balancer backed by the bucket.
