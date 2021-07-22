@@ -63,7 +63,7 @@ impl Identity {
         self.inner.as_deref()
     }
 
-    pub(crate) fn is_some(&self) -> bool {
+    pub fn is_some(&self) -> bool {
         self.inner.is_some()
     }
 

@@ -254,6 +254,15 @@ impl DataShareProcessorSpecificManifest {
         }
     }
 
+    /// Returns the identity that should be assumed to write to the data share
+    /// processor's peer validation bucket
+    pub fn peer_validation_identity(&self) -> Identity {
+        match self {
+            Self::V1(_) => Identity::none(),
+            Self::V2(manifest) => manifest.peer_validation_identity.clone(),
+        }
+    }
+
     /// Returns the StoragePath for the data share processor's peer validation
     /// bucket.
     pub fn peer_validation_bucket(&self) -> &StoragePath {
