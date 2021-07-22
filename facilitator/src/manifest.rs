@@ -18,7 +18,7 @@ use std::{collections::HashMap, fmt::Debug};
 
 use crate::{
     config::{Identity, StoragePath},
-    http, BatchSigningKey,
+    http, BatchSigningKey, Error,
 };
 
 // See discussion in SpecificManifest::batch_signing_public_key
@@ -197,14 +197,14 @@ impl DataShareProcessorSpecificManifest {
     /// Load the specific manifest for the specified peer relative to the
     /// provided base path. Returns an error if the manifest could not be
     /// downloaded or parsed.
-    pub fn from_https(base_path: &str, peer_name: &str, logger: &Logger) -> Result<Self> {
+    pub fn from_https(base_path: &str, peer_name: &str, logger: &Logger) -> Result<Self, Error> {
         let manifest_url = format!("{}/{}-manifest.json", base_path, peer_name);
         Self::from_slice(fetch_manifest(&manifest_url, logger)?.as_bytes())
     }
 
     /// Loads the manifest from the provided String. Returns an error if
     /// the manifest could not be parsed.
-    pub fn from_slice(json: &[u8]) -> Result<Self> {
+    pub fn from_slice(json: &[u8]) -> Result<Self, Error> {
         let manifest: HashMap<String, Value> =
             serde_json::from_slice(json).context("failed to decode JSON as map")?;
         let format = manifest
@@ -222,7 +222,7 @@ impl DataShareProcessorSpecificManifest {
                 serde_json::from_slice(json)
                     .context("failed to decode v2 specific manifest from JSON")?,
             ),
-            _ => return Err(anyhow!("unsupported manifest format {}", format)),
+            _ => return Err(anyhow!("unsupported manifest format {}", format).into()),
         };
 
         Ok(manifest)
@@ -470,7 +470,11 @@ impl IngestionServerManifest {
     /// it. First tries to load a global manifest, then falls back to a specific
     /// manifest for the specified locality. Returns an error if no manifest
     /// could be found at either location, or if either was unparseable.
-    pub fn from_https(base_path: &str, locality: Option<&str>, logger: &Logger) -> Result<Self> {
+    pub fn from_https(
+        base_path: &str,
+        locality: Option<&str>,
+        logger: &Logger,
+    ) -> Result<Self, Error> {
         IngestionServerManifest::from_http(base_path, locality, logger, fetch_manifest)
     }
 
@@ -479,7 +483,7 @@ impl IngestionServerManifest {
         locality: Option<&str>,
         logger: &Logger,
         fetcher: ManifestFetcher,
-    ) -> Result<Self> {
+    ) -> Result<Self, Error> {
         match fetcher(&format!("{}/global-manifest.json", base_path), logger) {
             Ok(body) => IngestionServerManifest::from_slice(body.as_bytes()),
             Err(err) => match locality {
@@ -494,11 +498,11 @@ impl IngestionServerManifest {
 
     /// Loads the manifest from the provided String. Returns an error if
     /// the manifest could not be parsed.
-    pub fn from_slice(json: &[u8]) -> Result<Self> {
+    pub fn from_slice(json: &[u8]) -> Result<Self, Error> {
         let manifest: Self =
             serde_json::from_slice(json).context("failed to decode JSON manifest")?;
         if manifest.format != 1 {
-            return Err(anyhow!("unsupported manifest format {}", manifest.format));
+            return Err(anyhow!("unsupported manifest format {}", manifest.format).into());
         }
         Ok(manifest)
     }
@@ -572,13 +576,13 @@ impl PortalServerGlobalManifest {
 
 /// A function that fetches a manifest from the provided URL, returning the
 /// manifest body as a String on success.
-type ManifestFetcher = fn(&str, &Logger) -> Result<String>;
+type ManifestFetcher = fn(&str, &Logger) -> Result<String, Error>;
 
 /// Obtains a manifest file from the provided URL, returning an error if the URL
 /// is not https or if a problem occurs during the transfer.
-fn fetch_manifest(manifest_url: &str, logger: &Logger) -> Result<String> {
+fn fetch_manifest(manifest_url: &str, logger: &Logger) -> Result<String, Error> {
     if !manifest_url.starts_with("https://") {
-        return Err(anyhow!("Manifest must be fetched over HTTPS"));
+        return Err(anyhow!("Manifest must be fetched over HTTPS").into());
     }
     http::simple_get_request(
         url::Url::parse(manifest_url)
@@ -652,8 +656,8 @@ mod tests {
     use std::{array::IntoIter, str::FromStr};
     use url::Url;
 
-    fn url_fetcher(url: &str, logger: &Logger) -> Result<String> {
-        http::simple_get_request(Url::parse(url)?, logger)
+    fn url_fetcher(url: &str, logger: &Logger) -> Result<String, Error> {
+        http::simple_get_request(Url::parse(url).context("url parse")?, logger)
     }
 
     #[test]

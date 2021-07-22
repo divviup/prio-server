@@ -34,7 +34,7 @@ use facilitator::{
         GcsTransport, LocalFileTransport, S3Transport, SignableTransport, Transport,
         VerifiableAndDecryptableTransport, VerifiableTransport,
     },
-    BatchSigningKey, DATE_FORMAT,
+    BatchSigningKey, Error, DATE_FORMAT,
 };
 
 fn num_validator<F: FromStr>(s: String) -> Result<(), String> {
@@ -962,11 +962,20 @@ fn main() -> Result<(), anyhow::Error> {
 fn crypto_self_check(matches: &ArgMatches, logger: &Logger) -> Result<()> {
     let instance_name = matches.value_of("instance-name").unwrap();
     let own_manifest = match matches.value_of("own-manifest-base-url") {
-        Some(manifest_base_url) => DataShareProcessorSpecificManifest::from_https(
+        Some(manifest_base_url) => match DataShareProcessorSpecificManifest::from_https(
             manifest_base_url,
             instance_name,
             logger,
-        )?,
+        ) {
+            Ok(manifest) => manifest,
+            // At deploy time, the manifest won't exist yet, and we will get a
+            // 404 Not Found or 403 Not Authorized response. Skip the crypto
+            // self check and move on because otherwise the deployment will
+            // never become healthy and the deploy will fail (#834).
+            Err(Error::HttpError(ureq::Error::Status(404, _)))
+            | Err(Error::HttpError(ureq::Error::Status(403, _))) => return Ok(()),
+            v => v?,
+        },
         // Skip crypto self check if no own manifest is provided
         None => return Ok(()),
     };
