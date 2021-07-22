@@ -223,6 +223,7 @@ resource "kubernetes_config_map" "intake_batch_config_map" {
     PEER_MANIFEST_BASE_URL                          = "https://${var.peer_manifest_base_url}"
     PEER_GCP_SA_TO_IMPERSONATE_BEFORE_ASSUMING_ROLE = var.remote_peer_validation_bucket_identity.gcp_sa_to_impersonate_while_assuming_identity
     OWN_OUTPUT                                      = var.own_validation_bucket
+    OWN_MANIFEST_BASE_URL                           = "https://${var.own_manifest_base_url}"
     RUST_LOG                                        = "info"
     RUST_BACKTRACE                                  = "1"
     PUSHGATEWAY                                     = var.pushgateway
