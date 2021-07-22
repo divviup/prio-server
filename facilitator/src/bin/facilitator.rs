@@ -212,7 +212,9 @@ impl<'a, 'b> AppArgumentAdder for App<'a, 'b> {
                     running in GKE.",
                     entity.str(),
                     use_default_aws_credentials_provider
-                ))),
+                )))
+                .default_value("")
+                .hide_default_value(true),
         )
         // It's counterintuitive that users must explicitly opt into the
         // default credentials provider. This was done to preserve backward
@@ -258,7 +260,9 @@ impl<'a, 'b> AppArgumentAdder for App<'a, 'b> {
                     account to then assume the AWS IAM role using STS \
                     AssumeRoleWithWebIdentity.",
                     id
-                ))),
+                )))
+                .default_value("")
+                .hide_default_value(true),
         )
     }
 
@@ -393,7 +397,9 @@ impl<'a, 'b> AppArgumentAdder for App<'a, 'b> {
                 .long_help(
                     "Identity to assume when accessing task queue. Should only \
                     be set when running under GKE and task-queue-kind is PubSub.",
-                ),
+                )
+                .default_value("")
+                .hide_default_value(true),
         )
         // It's counterintuitive that users must explicitly opt into the
         // default credentials provider. This was done to preserve backward
