@@ -517,6 +517,17 @@ resource "google_service_account_iam_binding" "data_share_processors_to_sum_part
   members            = [for v in module.data_share_processors : "serviceAccount:${v.gcp_service_account_email}"]
 }
 
+# GCP services we must enable to use Workload Identity Pool
+resource "google_project_service" "sts" {
+  count = var.use_aws ? 1 : 0
+  service = "sts.googleapis.com"
+}
+
+resource "google_project_service" "iamcredentials" {
+  count = var.use_aws ? 1 : 0
+  service = "iamcredentials.googleapis.com"
+}
+
 # If running EKS, we must create a Workload Identity Pool and Workload Identity
 # Pool Provider to federate accounts.google.com with sts.amazonaws.com so that
 # our data share processor AWS IAM roles will be able to impersonate the sum
