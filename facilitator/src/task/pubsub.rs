@@ -7,7 +7,7 @@ use crate::{
 };
 use anyhow::{anyhow, Context, Result};
 use serde::Deserialize;
-use slog::{info, o, Logger};
+use slog::{debug, info, o, Logger};
 use std::{io::Cursor, marker::PhantomData, time::Duration};
 use ureq::AgentBuilder;
 use url::Url;
@@ -159,7 +159,7 @@ impl<T: Task> GcpPubSubTaskQueue<T> {
 
 impl<T: Task> TaskQueue<T> for GcpPubSubTaskQueue<T> {
     fn dequeue(&self) -> Result<Option<TaskHandle<T>>> {
-        info!(self.logger, "pull task");
+        debug!(self.logger, "pull task");
 
         let request = self.agent.prepare_request(RequestParameters {
             url: gcp_pubsub_pull_url(
@@ -258,7 +258,7 @@ impl<T: Task> TaskQueue<T> for GcpPubSubTaskQueue<T> {
     }
 
     fn extend_task_deadline(&self, handle: &TaskHandle<T>, increment: &Duration) -> Result<()> {
-        info!(
+        debug!(
             self.logger, "extending deadline on task";
             event::TASK_ACKNOWLEDGEMENT_ID => &handle.acknowledgment_id,
         );
