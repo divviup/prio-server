@@ -178,7 +178,7 @@ locals {
   # aws_iam_role.ingestion_bucket_writer, the IAM role configured to allow
   # assumption by the GCP SA. If the ingestor has an AWS IAM role, just grant
   # permission to it.
-  ingestion_bucket_writer_role = local.ingestor_aws_role_arn == "" ? (
+  ingestion_bucket_writer_role = (var.use_aws && local.ingestor_aws_role_arn == "") ? (
     aws_iam_role.ingestion_bucket_writer[0].arn
     ) : (
     local.ingestor_aws_role_arn
