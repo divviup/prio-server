@@ -248,6 +248,7 @@ resource "aws_iam_role" "worker_node_role" {
   managed_policy_arns = [
     "arn:aws:iam::aws:policy/AmazonEKSWorkerNodePolicy",
     "arn:aws:iam::aws:policy/AmazonEC2ContainerRegistryReadOnly",
+    "arn:aws:iam::aws:policy/CloudWatchAgentServerPolicy",
   ]
 
   assume_role_policy = jsonencode({

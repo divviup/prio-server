@@ -519,12 +519,12 @@ resource "google_service_account_iam_binding" "data_share_processors_to_sum_part
 
 # GCP services we must enable to use Workload Identity Pool
 resource "google_project_service" "sts" {
-  count = var.use_aws ? 1 : 0
+  count   = var.use_aws ? 1 : 0
   service = "sts.googleapis.com"
 }
 
 resource "google_project_service" "iamcredentials" {
-  count = var.use_aws ? 1 : 0
+  count   = var.use_aws ? 1 : 0
   service = "iamcredentials.googleapis.com"
 }
 
