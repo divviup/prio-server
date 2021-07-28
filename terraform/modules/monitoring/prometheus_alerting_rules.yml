@@ -70,3 +70,32 @@ groups:
       description: "There are undelivered messages in the dead letter queue for
         PubSub subscription {{ $labels.subscription_id }} in environment
         ${environment}."
+  - alert: intake_task_queue_growth_sqs
+    expr: aws_sqs_approximate_number_of_messages_visible_average{queue_name!~"${environment}-.*-dead-letter",queue_name=~"${environment}-.*-intake"} offset 20m > 0
+    for: 3h
+    labels:
+      severity: page
+      environment: ${environment}
+    annotations:
+      summary: "SQS queue {{ $labels.queue_name }} not emptying"
+      description: "SQS queue {{ $labels.queue_name }} in environment
+        ${environment} has had undelivered messages for 3 hours"
+  - alert: aggregate_task_queue_growth_sqs
+    expr: aws_sqs_approximate_number_of_messages_visible_average{queue_name!~"${environment}-.*-dead-letter",queue_name=~"${environment}-.*-aggregate"} offset 20m > 0
+    for: 10h
+    labels:
+      severity: page
+      environment: ${environment}
+    annotations:
+      summary: "SQS queue {{ $labels.queue_name }} not emptying"
+      description: "SQS queue {{ $labels.queue_name }} in environment
+        ${environment} has had undelivered messages for 10 hours"
+  - alert: dead_letter_queue_sqs
+    expr: aws_sqs_approximate_number_of_messages_visible_average{queue_name=~"${environment}-.*-dead-letter"} offset 20m > 0
+    for: 5m
+    labels:
+      severity: page
+    annotations:
+      summary: "Undelivered messages in dead letter queue {{ $labels.queue_name }}"
+      description: "There are undelivered messages in the dead letter queue for
+        SQS queue {{ $labels.queue_name }} in environment ${environment}."

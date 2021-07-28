@@ -619,16 +619,20 @@ module "portal_server_resources" {
 # Prometheus). I'm commenting it out instead of putting in a count variable
 # because this way we don't have to `terraform state mv` its resources into
 # place when we turn it on.
-# module "monitoring" {
-#   source                = "./modules/monitoring"
-#   environment           = var.environment
-#   gcp_region            = var.gcp_region
-#   gcp_project           = var.gcp_project
-#   victorops_routing_key = var.victorops_routing_key
-#   aggregation_period    = var.aggregation_period
+module "monitoring" {
+  source      = "./modules/monitoring"
+  environment = var.environment
+  use_aws     = var.use_aws
+  gcp = {
+    region  = var.gcp_region
+    project = var.gcp_project
+  }
+  victorops_routing_key = var.victorops_routing_key
+  aggregation_period    = var.aggregation_period
+  eks_oidc_provider     = var.use_aws ? module.eks[0].oidc_provider : { url = "", arn = "" }
 
-#   prometheus_server_persistent_disk_size_gb = var.prometheus_server_persistent_disk_size_gb
-#}
+  prometheus_server_persistent_disk_size_gb = var.prometheus_server_persistent_disk_size_gb
+}
 
 output "manifest_bucket" {
   value = {

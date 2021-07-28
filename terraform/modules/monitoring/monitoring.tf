@@ -2,12 +2,26 @@ variable "environment" {
   type = string
 }
 
-variable "gcp_region" {
-  type = string
+variable "use_aws" {
+  type = bool
 }
 
-variable "gcp_project" {
-  type = string
+variable "gcp" {
+  type = object({
+    region  = string
+    project = string
+  })
+}
+
+variable "eks_oidc_provider" {
+  type = object({
+    arn = string
+    url = string
+  })
+  default = {
+    arn = ""
+    url = ""
+  }
 }
 
 variable "prometheus_server_persistent_disk_size_gb" {
@@ -87,11 +101,12 @@ data "google_compute_zones" "available" {}
 # disks on our behalf, but only zonal ones, and we prefer regional disks for
 # durability.
 resource "google_compute_region_disk" "prometheus_server" {
-  name = "${var.environment}-prometheus-server"
+  count = var.use_aws ? 0 : 1
+  name  = "${var.environment}-prometheus-server"
   # GCP regional disks support replication across at most two zones
   replica_zones = [data.google_compute_zones.available.names[0], data.google_compute_zones.available.names[1]]
   size          = var.prometheus_server_persistent_disk_size_gb
-  region        = var.gcp_region
+  region        = var.gcp.region
 
   lifecycle {
     ignore_changes = [labels]
@@ -99,7 +114,8 @@ resource "google_compute_region_disk" "prometheus_server" {
 }
 
 # Create a Kubernetes persistent volume representing the GCP disk
-resource "kubernetes_persistent_volume" "prometheus_server" {
+resource "kubernetes_persistent_volume" "prometheus_server_gcp" {
+  count = var.use_aws ? 0 : 1
   metadata {
     # Kubernetes PVs are _not_ namespaced
     name = "prometheus-server-volume"
@@ -114,7 +130,48 @@ resource "kubernetes_persistent_volume" "prometheus_server" {
     persistent_volume_source {
       gce_persistent_disk {
         fs_type = "ext4"
-        pd_name = google_compute_region_disk.prometheus_server.name
+        pd_name = google_compute_region_disk.prometheus_server[0].name
+      }
+    }
+  }
+}
+
+data "aws_availability_zones" "available" {
+  state = "available"
+}
+
+# Create an AWS EBS volume for use by prometheus-server. EBS volumes are zonal,
+# which means we don't get the redundancy that GCP disks provide. It also means
+# that the prometheus-server pod _must_ be scheduled onto a node in the same AZ
+# as the volume, and thus that the cluster must have at least one node in that
+# AZ.
+resource "aws_ebs_volume" "prometheus_server" {
+  count             = var.use_aws ? 1 : 0
+  availability_zone = data.aws_availability_zones.available.names[1]
+  size              = var.prometheus_server_persistent_disk_size_gb
+  tags = {
+    Name = "${var.environment}-prometheus-server"
+  }
+}
+
+# Create a Kubernetes persistent volume representing the Elastic Block Store
+# volume
+resource "kubernetes_persistent_volume" "prometheus_server_aws" {
+  count = var.use_aws ? 1 : 0
+  metadata {
+    name = "prometheus-server-volume"
+  }
+  spec {
+    access_modes = ["ReadWriteOnce"]
+    capacity = {
+      storage = "${var.prometheus_server_persistent_disk_size_gb}Gi"
+    }
+    storage_class_name = "standard"
+    volume_mode        = "Filesystem"
+    persistent_volume_source {
+      aws_elastic_block_store {
+        fs_type   = "ext4"
+        volume_id = aws_ebs_volume.prometheus_server[0].id
       }
     }
   }
@@ -135,7 +192,11 @@ resource "kubernetes_persistent_volume_claim" "prometheus_server" {
         storage = "${var.prometheus_server_persistent_disk_size_gb}Gi"
       }
     }
-    volume_name = kubernetes_persistent_volume.prometheus_server.metadata[0].name
+    volume_name = var.use_aws ? (
+      kubernetes_persistent_volume.prometheus_server_aws[0].metadata[0].name
+      ) : (
+      kubernetes_persistent_volume.prometheus_server_gcp[0].metadata[0].name
+    )
   }
 }
 
@@ -243,7 +304,51 @@ resource "helm_release" "grafana" {
   }
 }
 
-data "google_project" "current" {}
+# The Prometheus CloudWatch Exporter forwards metrics from AWS CloudWatch into
+# Prometheus. Documentation and config reference:
+# https://github.com/prometheus/cloudwatch_exporter
+# https://artifacthub.io/packages/helm/prometheus-community/prometheus-cloudwatch-exporter
+# https://github.com/prometheus-community/helm-charts/tree/main/charts/prometheus-cloudwatch-exporter
+resource "helm_release" "cloudwatch_exporter" {
+  count      = var.use_aws ? 1 : 0
+  name       = "cloudwatch-exporter"
+  chart      = "prometheus-cloudwatch-exporter"
+  repository = "https://prometheus-community.github.io/helm-charts"
+  namespace  = kubernetes_namespace.monitoring.metadata[0].name
+
+  set {
+    name  = "serviceAccount.create"
+    value = false
+  }
+
+  set {
+    name  = "serviceAccount.name"
+    value = module.account_mapping.kubernetes_service_account_name
+  }
+
+  set {
+    name = "config"
+    value = yamlencode({
+      # Individual metrics to be forwarded to Prometheus must be enumerated here
+      metrics = [
+        # SQS queue depth
+        {
+          aws_namespace   = "AWS/SQS"
+          aws_metric_name = "ApproximateNumberOfMessagesVisible"
+          aws_dimensions  = ["QueueName"]
+        }
+      ]
+    })
+  }
+
+  values = [
+    <<VALUE
+service:
+  annotations:
+    prometheus.io/scrape: "true"
+VALUE
+  ]
+}
 
 # The Stackdriver Prometheus exporter forwards metrics from Google Cloud
 # Monitoring (aka Stackdriver) into Prometheus. Documentation and config
@@ -252,6 +357,7 @@ data "google_project" "current" {}
 # https://artifacthub.io/packages/helm/prometheus-community/prometheus-stackdriver-exporter
 # https://github.com/prometheus-community/helm-charts/tree/main/charts/prometheus-stackdriver-exporter
 resource "helm_release" "stackdriver_exporter" {
+  count      = var.use_aws ? 0 : 1
   name       = "stackdriver-exporter"
   chart      = "prometheus-stackdriver-exporter"
   repository = "https://prometheus-community.github.io/helm-charts"
@@ -259,7 +365,7 @@ resource "helm_release" "stackdriver_exporter" {
 
   set {
     name  = "stackdriver.projectId"
-    value = data.google_project.current.project_id
+    value = var.gcp.project
   }
 
   set {
@@ -296,20 +402,40 @@ VALUE
   ]
 }
 
-# stackdriver-exporter needs some GCP level permissions to access the
-# Stackdriver API, so we make it a GCP service account and map it to a
-# Kubernetes service account
+# stackdriver-exporter or cloudwatch-exporter need some GCP or AWS level
+# permissions to access the respective metrics APIs, so we make them a GCP
+# service account or AWS IAM role as appropriate
 # https://github.com/prometheus-community/stackdriver_exporter#credentials-and-permissions
 module "account_mapping" {
   source                          = "../account_mapping"
-  gcp_service_account_name        = "${var.environment}-stackdriver-exporter"
-  gcp_project                     = var.gcp_project
+  gcp_service_account_name        = var.use_aws ? "" : "${var.environment}-stackdriver-exporter"
+  gcp_project                     = var.gcp.project
+  aws_iam_role_name               = var.use_aws ? "${var.environment}-stackdriver-exporter" : ""
+  eks_oidc_provider               = var.eks_oidc_provider
   kubernetes_service_account_name = "stackdriver-exporter"
   kubernetes_namespace            = kubernetes_namespace.monitoring.metadata[0].name
   environment                     = var.environment
 }
 
 resource "google_project_iam_member" "stackdriver_exporter" {
+  count  = var.use_aws ? 0 : 1
   role   = "roles/monitoring.viewer"
   member = "serviceAccount:${module.account_mapping.gcp_service_account_email}"
+}
+
+resource "aws_iam_role_policy" "cloudwatch_exporter" {
+  count = var.use_aws ? 1 : 0
+  name  = "${var.environment}-prometheus-cloudwatch-exporter"
+  role  = module.account_mapping.aws_iam_role.name
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Action   = ["cloudwatch:ListMetrics", "cloudwatch:GetMetricStatistics"]
+        Effect   = "Allow"
+        Resource = "*"
+      }
+    ]
+  })
 }
