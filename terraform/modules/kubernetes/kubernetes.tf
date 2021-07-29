@@ -34,9 +34,6 @@ variable "ingestion_bucket" {
   type = string
 }
 
-variable "ingestion_bucket_identity" {
-  type = string
-}
 
 variable "ingestor_manifest_base_url" {
   type = string
@@ -46,16 +43,24 @@ variable "peer_validation_bucket" {
   type = string
 }
 
-variable "peer_validation_bucket_identity" {
-  type = string
-}
-
 variable "peer_manifest_base_url" {
   type = string
 }
 
 variable "remote_peer_validation_bucket_identity" {
-  type = string
+  type = object({
+    identity                                      = string
+    gcp_sa_to_impersonate_while_assuming_identity = string
+  })
+  description = <<DESCRIPTION
+Identity to use when writing to the peer's validation bucket. .identity is the
+identity that can write to the peer's validation bucket; a GCP service account
+email if the peer's bucket is in GCS or an AWS IAM role ARN if the peer's bucket
+is in S3. .gcp_sa_to_impersonate_while_assuming_identity is the email of a GCP
+service account that must be impersonated to obtain identity tokens for an
+identity which will be discovered at runtime in the peer's specific manifest.
+Only one or the other value should be set.
+DESCRIPTION
 }
 
 variable "own_validation_bucket" {
@@ -103,11 +108,21 @@ variable "pushgateway" {
 }
 
 variable "intake_queue" {
-  type = string
+  type = object({
+    topic_kind        = string
+    topic             = string
+    subscription_kind = string
+    subscription      = string
+  })
 }
 
 variable "aggregate_queue" {
-  type = string
+  type = object({
+    topic_kind        = string
+    topic             = string
+    subscription_kind = string
+    subscription      = string
+  })
 }
 
 variable "intake_worker_count" {
@@ -118,34 +133,43 @@ variable "aggregate_worker_count" {
   type = number
 }
 
-data "aws_caller_identity" "current" {}
-
-# Workload identity[1] lets us map GCP service accounts to Kubernetes service
-# accounts. We need this so that pods can use GCP API, but also AWS APIs like S3
-# via Web Identity Federation. To use the credentials, the container must fetch
-# the authentication token from the instance metadata service. Kubernetes has
-# features for automatically providing a service account token (e.g. via a
-# a mounted volume[2]), but that would be a token for the *Kubernetes* level
-# service account, and not the one we can present to AWS.
-# [1] https://cloud.google.com/kubernetes-engine/docs/how-to/workload-identity
-# [2] https://kubernetes.io/docs/tasks/configure-pod-container/configure-service-account/#service-account-token-volume-projection
-
-module "account_mapping" {
-  source                  = "../account_mapping"
-  google_account_name     = "${var.environment}-${var.data_share_processor_name}-workflow-manager"
-  kubernetes_account_name = "${var.data_share_processor_name}-workflow-manager"
-  kubernetes_namespace    = var.kubernetes_namespace
-  environment             = var.environment
+variable "use_aws" {
+  type = bool
 }
 
-# Allows the Kubernetes service account to request auth tokens for the GCP
-# service account.
-resource "google_service_account_iam_binding" "workflow_manager_token" {
-  service_account_id = module.account_mapping.google_service_account_name
-  role               = "roles/iam.serviceAccountTokenCreator"
-  members = [
-    module.account_mapping.service_account
-  ]
+variable "aws_region" {
+  type = string
+}
+
+variable "eks_oidc_provider" {
+  type = object({
+    arn = string
+    url = string
+  })
+  default = {
+    arn = ""
+    url = ""
+  }
+}
+
+variable "gcp_workload_identity_pool_provider" {
+  type = string
+}
+
+locals {
+  workflow_manager_iam_entity = "${var.environment}-${var.data_share_processor_name}-workflow-manager"
+}
+
+module "account_mapping" {
+  source                          = "../account_mapping"
+  gcp_service_account_name        = var.use_aws ? "" : local.workflow_manager_iam_entity
+  gcp_project                     = data.google_project.project.project_id
+  aws_iam_role_name               = var.use_aws ? local.workflow_manager_iam_entity : ""
+  eks_oidc_provider               = var.eks_oidc_provider
+  kubernetes_service_account_name = "${var.data_share_processor_name}-workflow-manager"
+  kubernetes_namespace            = var.kubernetes_namespace
+  environment                     = var.environment
+  allow_gcp_sa_token_creation     = true
 }
 
 resource "kubernetes_secret" "batch_signing_key" {
@@ -190,23 +214,24 @@ resource "kubernetes_config_map" "intake_batch_config_map" {
   data = {
     # PACKET_DECRYPTION_KEYS is a Kubernetes secret
     # BATCH_SIGNING_PRIVATE_KEY is a Kubernetes secret
-    IS_FIRST                             = var.is_first ? "true" : "false"
-    AWS_ACCOUNT_ID                       = data.aws_caller_identity.current.account_id
-    BATCH_SIGNING_PRIVATE_KEY_IDENTIFIER = kubernetes_secret.batch_signing_key.metadata[0].name
-    INGESTOR_IDENTITY                    = var.ingestion_bucket_identity
-    INGESTOR_INPUT                       = var.ingestion_bucket
-    INGESTOR_MANIFEST_BASE_URL           = "https://${var.ingestor_manifest_base_url}"
-    INSTANCE_NAME                        = var.data_share_processor_name
-    PEER_IDENTITY                        = var.remote_peer_validation_bucket_identity
-    PEER_MANIFEST_BASE_URL               = "https://${var.peer_manifest_base_url}"
-    OWN_MANIFEST_BASE_URL                = "https://${var.own_manifest_base_url}"
-    OWN_OUTPUT                           = var.own_validation_bucket
-    RUST_LOG                             = "info"
-    RUST_BACKTRACE                       = "1"
-    PUSHGATEWAY                          = var.pushgateway
-    TASK_QUEUE_KIND                      = "gcp-pubsub"
-    TASK_QUEUE_NAME                      = var.intake_queue
-    GCP_PROJECT_ID                       = data.google_project.project.project_id
+    IS_FIRST                                        = var.is_first ? "true" : "false"
+    BATCH_SIGNING_PRIVATE_KEY_IDENTIFIER            = kubernetes_secret.batch_signing_key.metadata[0].name
+    INGESTOR_INPUT                                  = var.ingestion_bucket
+    INGESTOR_MANIFEST_BASE_URL                      = "https://${var.ingestor_manifest_base_url}"
+    INSTANCE_NAME                                   = var.data_share_processor_name
+    PEER_IDENTITY                                   = var.remote_peer_validation_bucket_identity.identity
+    PEER_MANIFEST_BASE_URL                          = "https://${var.peer_manifest_base_url}"
+    PEER_GCP_SA_TO_IMPERSONATE_BEFORE_ASSUMING_ROLE = var.remote_peer_validation_bucket_identity.gcp_sa_to_impersonate_while_assuming_identity
+    OWN_OUTPUT                                      = var.own_validation_bucket
+    OWN_MANIFEST_BASE_URL                           = "https://${var.own_manifest_base_url}"
+    RUST_LOG                                        = "info"
+    RUST_BACKTRACE                                  = "1"
+    PUSHGATEWAY                                     = var.pushgateway
+    TASK_QUEUE_KIND                                 = var.intake_queue.subscription_kind
+    TASK_QUEUE_NAME                                 = var.intake_queue.subscription
+    AWS_SQS_REGION                                  = var.use_aws ? var.aws_region : ""
+    GCP_PROJECT_ID                                  = var.use_aws ? "" : data.google_project.project.project_id
+    GCP_WORKLOAD_IDENTITY_POOL_PROVIDER             = var.gcp_workload_identity_pool_provider
   }
 }
 
@@ -222,26 +247,26 @@ resource "kubernetes_config_map" "aggregate_config_map" {
     # PACKET_DECRYPTION_KEYS is a Kubernetes secret
     # BATCH_SIGNING_PRIVATE_KEY is a Kubernetes secret
     IS_FIRST                             = var.is_first ? "true" : "false"
-    AWS_ACCOUNT_ID                       = data.aws_caller_identity.current.account_id
     BATCH_SIGNING_PRIVATE_KEY_IDENTIFIER = kubernetes_secret.batch_signing_key.metadata[0].name
     INGESTOR_INPUT                       = var.ingestion_bucket
-    INGESTOR_IDENTITY                    = var.ingestion_bucket_identity
     INGESTOR_MANIFEST_BASE_URL           = "https://${var.ingestor_manifest_base_url}"
     INSTANCE_NAME                        = var.data_share_processor_name
     OWN_INPUT                            = var.own_validation_bucket
     OWN_MANIFEST_BASE_URL                = "https://${var.own_manifest_base_url}"
     PEER_INPUT                           = var.peer_validation_bucket
-    PEER_IDENTITY                        = var.peer_validation_bucket_identity
     PEER_MANIFEST_BASE_URL               = "https://${var.peer_manifest_base_url}"
     PORTAL_IDENTITY                      = var.sum_part_bucket_service_account_email
     PORTAL_MANIFEST_BASE_URL             = "https://${var.portal_server_manifest_base_url}"
     RUST_LOG                             = "info"
     RUST_BACKTRACE                       = "1"
     PUSHGATEWAY                          = var.pushgateway
-    TASK_QUEUE_KIND                      = "gcp-pubsub"
-    TASK_QUEUE_NAME                      = var.aggregate_queue
+    TASK_QUEUE_KIND                      = var.aggregate_queue.subscription_kind
+    TASK_QUEUE_NAME                      = var.aggregate_queue.subscription
     GCP_PROJECT_ID                       = data.google_project.project.project_id
+    AWS_SQS_REGION                       = var.use_aws ? var.aws_region : ""
+    GCP_PROJECT_ID                       = var.use_aws ? "" : data.google_project.project.project_id
     PERMIT_MALFORMED_BATCH               = "true"
+    GCP_WORKLOAD_IDENTITY_POOL_PROVIDER  = var.gcp_workload_identity_pool_provider
   }
 }
 
@@ -289,15 +314,14 @@ resource "kubernetes_cron_job" "workflow_manager" {
                 "--k8s-namespace", var.kubernetes_namespace,
                 "--ingestor-label", var.ingestor,
                 "--ingestor-input", var.ingestion_bucket,
-                "--ingestor-identity", var.ingestion_bucket_identity,
                 "--own-validation-input", var.own_validation_bucket,
                 "--peer-validation-input", var.peer_validation_bucket,
-                "--peer-validation-identity", var.peer_validation_bucket_identity,
                 "--push-gateway", var.pushgateway,
-                "--task-queue-kind", "gcp-pubsub",
-                "--intake-tasks-topic", var.intake_queue,
-                "--aggregate-tasks-topic", var.aggregate_queue,
-                "--gcp-project-id", data.google_project.project.project_id,
+                "--task-queue-kind", var.intake_queue.topic_kind,
+                "--intake-tasks-topic", var.intake_queue.topic,
+                "--aggregate-tasks-topic", var.aggregate_queue.topic,
+                "--gcp-project-id", var.use_aws ? "" : data.google_project.project.project_id,
+                "--aws-sns-region", var.use_aws ? var.aws_region : "",
               ]
             }
             # If we use any other restart policy, then when the job is finally
@@ -309,7 +333,7 @@ resource "kubernetes_cron_job" "workflow_manager" {
             # https://kubernetes.io/docs/concepts/workloads/controllers/job/#handling-pod-and-container-failures
             # https://github.com/kubernetes/kubernetes/issues/74848
             restart_policy                  = "Never"
-            service_account_name            = module.account_mapping.kubernetes_account_name
+            service_account_name            = module.account_mapping.kubernetes_service_account_name
             automount_service_account_token = true
           }
         }
@@ -376,7 +400,7 @@ resource "kubernetes_deployment" "intake_batch" {
         }
       }
       spec {
-        service_account_name            = module.account_mapping.kubernetes_account_name
+        service_account_name            = module.account_mapping.kubernetes_service_account_name
         automount_service_account_token = false
         container {
           name  = "facile-container"
@@ -488,7 +512,7 @@ resource "kubernetes_deployment" "aggregate" {
         }
       }
       spec {
-        service_account_name            = module.account_mapping.kubernetes_account_name
+        service_account_name            = module.account_mapping.kubernetes_service_account_name
         automount_service_account_token = false
         container {
           name  = "facile-container"
@@ -542,12 +566,16 @@ resource "kubernetes_deployment" "aggregate" {
     }
   }
 }
-output "service_account_unique_id" {
-  value = module.account_mapping.google_service_account_unique_id
+output "gcp_service_account_unique_id" {
+  value = module.account_mapping.gcp_service_account_unique_id
 }
 
-output "service_account_email" {
-  value = module.account_mapping.google_service_account_email
+output "gcp_service_account_email" {
+  value = module.account_mapping.gcp_service_account_email
+}
+
+output "aws_iam_role" {
+  value = module.account_mapping.aws_iam_role
 }
 
 output "batch_signing_key" {

@@ -38,7 +38,7 @@ Pods will always need to assume an identity in the cloud they are running on in 
 
 #### Service account key files
 
-The simplest means of impersonating a GCP service account is a [service acount key file](https://cloud.google.com/iam/docs/creating-managing-service-account-keys). The GCP IAM service emits a JSON document containing credentials for a GCP service account. The JSON document is then placed into a Kubernetes secret and made available to the Kubernetes pods as an environment variable. The downside of this approach is that it requires sharing a GCP secret into AWS and that rotating the GCP credential means updating a Kubernetes secret in the EKS cluster.
+The simplest means of impersonating a GCP service account is a [service account key file](https://cloud.google.com/iam/docs/creating-managing-service-account-keys). The GCP IAM service emits a JSON document containing credentials for a GCP service account. The JSON document is then placed into a Kubernetes secret and made available to the Kubernetes pods as an environment variable. The downside of this approach is that it requires sharing a GCP secret into AWS and that rotating the GCP credential means updating a Kubernetes secret in the EKS cluster.
 
 In this authentication flow, neither the Kubernetes service account nor an AWS IAM role come into play. The Kubernetes pod uses the private key in the key file to sign a request to sign a JWT, sends it to `iamcredentials.googleapis.com` and obtains an Oauth token which can be presented as a bearer token in subsequent API requests to other GCP services.
 

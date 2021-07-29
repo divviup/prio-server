@@ -196,7 +196,8 @@ cluster_settings = {
   initial_node_count = 4
   min_node_count     = 1
   max_node_count     = 5
-  machine_type       = "e2-standard-8"
+  gcp_machine_type   = "e2-standard-8"
+  aws_machine_types  = []
 }
 is_first                                  = false
 use_aws                                   = false
