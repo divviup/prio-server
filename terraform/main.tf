@@ -418,11 +418,13 @@ locals {
 
   manifest = var.use_aws ? {
     bucket      = module.manifest_aws[0].bucket
+    bucket_url  = module.manifest_aws[0].bucket_url
     base_url    = module.manifest_aws[0].base_url
     aws_region  = var.aws_region
     aws_profile = var.aws_profile
     } : {
     bucket      = module.manifest_gcp[0].bucket
+    bucket_url  = module.manifest_gcp[0].bucket_url
     base_url    = module.manifest_gcp[0].base_url
     aws_region  = ""
     aws_profile = ""
@@ -636,7 +638,7 @@ module "monitoring" {
 
 output "manifest_bucket" {
   value = {
-    bucket      = local.manifest.bucket
+    bucket_url  = local.manifest.bucket_url
     aws_region  = local.manifest.aws_region
     aws_profile = local.manifest.aws_profile
   }
@@ -664,9 +666,6 @@ output "singleton_ingestor" {
     tester_kubernetes_namespace = module.fake_server_resources[0].test_kubernetes_namespace
     batch_signing_key_name      = module.fake_server_resources[0].batch_signing_key_name
   } : {}
-}
-output "own_manifest_base_url" {
-  value = local.manifest.base_url
 }
 
 output "use_test_pha_decryption_key" {

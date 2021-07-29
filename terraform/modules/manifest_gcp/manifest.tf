@@ -143,6 +143,10 @@ output "bucket" {
   value = google_storage_bucket.manifests.name
 }
 
+output "bucket_url" {
+  value = "gs://${google_storage_bucket.manifests.name}"
+}
+
 output "base_url" {
   # local.domain_name is a fully qualified DNS name, ending in '.'
   value = local.use_custom_domain ? trimsuffix(local.domain_name, ".") : "storage.googleapis.com/${google_storage_bucket.manifests.name}"
