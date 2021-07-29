@@ -211,7 +211,7 @@ terraform {
     google = {
       source = "hashicorp/google"
       # Ensure that this matches the google-beta provider version below.
-      version = "~> 3.75.0"
+      version = "~> 3.77.0"
     }
     google-beta = {
       source = "hashicorp/google-beta"
