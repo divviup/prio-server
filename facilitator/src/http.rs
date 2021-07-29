@@ -5,7 +5,7 @@ use std::{convert::From, default::Default, fmt::Debug, time::Duration};
 use ureq::{Agent, AgentBuilder, Request, Response, SerdeValue};
 use url::Url;
 
-use crate::retries::retry_request;
+use crate::{retries::retry_request, Error};
 
 /// Method contains the HTTP methods supported by this crate.
 #[derive(Debug)]
@@ -65,7 +65,7 @@ impl RetryingAgent {
     /// `::send_string` to get retries.
     /// Returns an Error if the AccessTokenProvider returns an error when
     /// supplying the request with an access token.
-    pub(crate) fn prepare_request(&self, parameters: RequestParameters) -> Result<Request> {
+    pub(crate) fn prepare_request(&self, parameters: RequestParameters) -> Result<Request, Error> {
         let mut request = self
             .agent
             .request_url(parameters.method.to_primitive_string(), &parameters.url);
@@ -96,13 +96,12 @@ impl RetryingAgent {
         logger: &Logger,
         request: &Request,
         body: &SerdeValue,
-    ) -> Result<Response> {
-        retry_request(
+    ) -> Result<Response, Error> {
+        Ok(retry_request(
             logger,
             || request.clone().send_json(body.clone()),
             |ureq_error| self.is_error_retryable(ureq_error),
-        )
-        .context("failed to send JSON request")
+        )?)
     }
 
     /// Send the provided request with the provided bytes as the body.
@@ -111,13 +110,12 @@ impl RetryingAgent {
         logger: &Logger,
         request: &Request,
         data: &[u8],
-    ) -> Result<Response> {
-        retry_request(
+    ) -> Result<Response, Error> {
+        Ok(retry_request(
             logger,
             || request.clone().send_bytes(data),
             |ureq_error| self.is_error_retryable(ureq_error),
-        )
-        .context("failed to send request with bytes body")
+        )?)
     }
 
     /// Send the provided data as a form encoded body.
@@ -126,23 +124,21 @@ impl RetryingAgent {
         logger: &Logger,
         request: &Request,
         data: &[(&str, &str)],
-    ) -> Result<Response> {
-        retry_request(
+    ) -> Result<Response, Error> {
+        Ok(retry_request(
             logger,
             || request.clone().send_form(data),
             |ureq_error| self.is_error_retryable(ureq_error),
-        )
-        .context("failed to send form")
+        )?)
     }
 
     /// Send the provided request with no body.
-    pub(crate) fn call(&self, logger: &Logger, request: &Request) -> Result<Response> {
-        retry_request(
+    pub(crate) fn call(&self, logger: &Logger, request: &Request) -> Result<Response, Error> {
+        Ok(retry_request(
             logger,
             || request.clone().call(),
             |ureq_error| self.is_error_retryable(ureq_error),
-        )
-        .context("failed to make request")
+        )?)
     }
 }
 
@@ -201,7 +197,7 @@ impl Default for RequestParameters<'_> {
 
 /// simple_get_request does a HTTP request to a URL and returns the body as a
 // string.
-pub(crate) fn simple_get_request(url: Url, logger: &Logger) -> Result<String> {
+pub(crate) fn simple_get_request(url: Url, logger: &Logger) -> Result<String, Error> {
     let agent = RetryingAgent::default();
     let request = agent
         .prepare_request(RequestParameters {
@@ -211,10 +207,10 @@ pub(crate) fn simple_get_request(url: Url, logger: &Logger) -> Result<String> {
         })
         .context("creating simple_get_request failed")?;
 
-    agent
+    Ok(agent
         .call(logger, &request)?
         .into_string()
-        .context("failed to convert GET response body into string")
+        .context("failed to convert GET response body into string")?)
 }
 
 #[cfg(test)]

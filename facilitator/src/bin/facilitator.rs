@@ -34,7 +34,7 @@ use facilitator::{
         GcsTransport, LocalFileTransport, S3Transport, SignableTransport, Transport,
         VerifiableAndDecryptableTransport, VerifiableTransport,
     },
-    BatchSigningKey, DATE_FORMAT,
+    BatchSigningKey, Error, DATE_FORMAT,
 };
 
 fn num_validator<F: FromStr>(s: String) -> Result<(), String> {
@@ -212,7 +212,9 @@ impl<'a, 'b> AppArgumentAdder for App<'a, 'b> {
                     running in GKE.",
                     entity.str(),
                     use_default_aws_credentials_provider
-                ))),
+                )))
+                .default_value("")
+                .hide_default_value(true),
         )
         // It's counterintuitive that users must explicitly opt into the
         // default credentials provider. This was done to preserve backward
@@ -258,7 +260,9 @@ impl<'a, 'b> AppArgumentAdder for App<'a, 'b> {
                     account to then assume the AWS IAM role using STS \
                     AssumeRoleWithWebIdentity.",
                     id
-                ))),
+                )))
+                .default_value("")
+                .hide_default_value(true),
         )
     }
 
@@ -393,7 +397,9 @@ impl<'a, 'b> AppArgumentAdder for App<'a, 'b> {
                 .long_help(
                     "Identity to assume when accessing task queue. Should only \
                     be set when running under GKE and task-queue-kind is PubSub.",
-                ),
+                )
+                .default_value("")
+                .hide_default_value(true),
         )
         // It's counterintuitive that users must explicitly opt into the
         // default credentials provider. This was done to preserve backward
@@ -956,11 +962,20 @@ fn main() -> Result<(), anyhow::Error> {
 fn crypto_self_check(matches: &ArgMatches, logger: &Logger) -> Result<()> {
     let instance_name = matches.value_of("instance-name").unwrap();
     let own_manifest = match matches.value_of("own-manifest-base-url") {
-        Some(manifest_base_url) => DataShareProcessorSpecificManifest::from_https(
+        Some(manifest_base_url) => match DataShareProcessorSpecificManifest::from_https(
             manifest_base_url,
             instance_name,
             logger,
-        )?,
+        ) {
+            Ok(manifest) => manifest,
+            // At deploy time, the manifest won't exist yet, and we will get a
+            // 404 Not Found or 403 Not Authorized response. Skip the crypto
+            // self check and move on because otherwise the deployment will
+            // never become healthy and the deploy will fail (#834).
+            Err(Error::HttpError(ureq::Error::Status(404, _)))
+            | Err(Error::HttpError(ureq::Error::Status(403, _))) => return Ok(()),
+            v => v?,
+        },
         // Skip crypto self check if no own manifest is provided
         None => return Ok(()),
     };
@@ -1285,15 +1300,26 @@ where
     // We need the bucket to which we will write validations for the
     // peer data share processor, which can either be fetched from the
     // peer manifest or provided directly via command line argument.
+    let mut peer_validation_identity = value_t!(
+        sub_matches.value_of(Entity::Peer.suffix("-identity")),
+        Identity
+    )?;
     let peer_validation_bucket =
         if let Some(base_url) = sub_matches.value_of("peer-manifest-base-url") {
-            DataShareProcessorSpecificManifest::from_https(
+            let peer_manifest = DataShareProcessorSpecificManifest::from_https(
                 base_url,
                 sub_matches.value_of("instance-name").unwrap(),
                 parent_logger,
-            )?
-            .peer_validation_bucket()
-            .to_owned()
+            )?;
+
+            // Allow peer manifest to override `peer-identity` parameter, if it
+            // contains an identity.
+            let peer_manifest_identity = peer_manifest.peer_validation_identity();
+            if peer_manifest_identity.is_some() {
+                peer_validation_identity = peer_manifest_identity;
+            }
+
+            peer_manifest.peer_validation_bucket().to_owned()
         } else if let Some(path) = sub_matches.value_of(Entity::Peer.suffix(InOut::Output.str())) {
             StoragePath::from_str(path)?
         } else {
@@ -1302,6 +1328,7 @@ where
 
     let mut peer_validation_transport = SignableTransport {
         transport: transport_from_args(
+            peer_validation_identity,
             Entity::Peer,
             PathOrInOut::Path(peer_validation_bucket),
             sub_matches,
@@ -1314,6 +1341,10 @@ where
     // shares, so it is simply provided by argument.
     let mut own_validation_transport = SignableTransport {
         transport: transport_from_args(
+            value_t!(
+                sub_matches.value_of(Entity::Own.suffix("-identity")),
+                Identity
+            )?,
             Entity::Own,
             PathOrInOut::InOut(InOut::Output),
             sub_matches,
@@ -1468,6 +1499,10 @@ where
     // We created the bucket to which we wrote copies of our validation
     // shares, so it is simply provided by argument.
     let own_validation_transport = transport_from_args(
+        value_t!(
+            sub_matches.value_of(Entity::Own.suffix("-identity")),
+            Identity
+        )?,
         Entity::Own,
         PathOrInOut::InOut(InOut::Input),
         sub_matches,
@@ -1504,6 +1539,10 @@ where
     // We created the bucket that peers wrote validations into, and so
     // it is simply provided via argument.
     let peer_validation_transport = transport_from_args(
+        value_t!(
+            sub_matches.value_of(Entity::Peer.suffix("-identity")),
+            Identity
+        )?,
         Entity::Peer,
         PathOrInOut::InOut(InOut::Input),
         sub_matches,
@@ -1555,6 +1594,10 @@ where
         }
     };
     let aggregation_transport = transport_from_args(
+        value_t!(
+            sub_matches.value_of(Entity::Portal.suffix("-identity")),
+            Identity
+        )?,
         Entity::Portal,
         PathOrInOut::Path(portal_bucket),
         sub_matches,
@@ -1850,10 +1893,16 @@ fn intake_transport_from_args(
     matches: &ArgMatches,
     logger: &Logger,
 ) -> Result<VerifiableAndDecryptableTransport> {
+    let identity = value_t!(
+        matches.value_of(Entity::Ingestor.suffix("-identity")),
+        Identity
+    )?;
+
     // To read (intake) content from an ingestor's bucket, we need the bucket, which we
     // know because our deployment created it, so it is always provided via the
     // ingestor-input argument.
     let intake_transport = transport_from_args(
+        identity,
         Entity::Ingestor,
         PathOrInOut::InOut(InOut::Input),
         matches,
@@ -1919,13 +1968,12 @@ enum PathOrInOut {
 }
 
 fn transport_from_args(
+    identity: Identity,
     entity: Entity,
     path_or_in_out: PathOrInOut,
     matches: &ArgMatches,
     logger: &Logger,
 ) -> Result<Box<dyn Transport>> {
-    let identity = value_t!(matches.value_of(entity.suffix("-identity")), Identity)?;
-
     let path = match path_or_in_out {
         PathOrInOut::Path(path) => path,
         PathOrInOut::InOut(in_out) => {

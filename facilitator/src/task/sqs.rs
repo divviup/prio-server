@@ -4,7 +4,7 @@ use rusoto_core::Region;
 use rusoto_sqs::{
     ChangeMessageVisibilityRequest, DeleteMessageRequest, ReceiveMessageRequest, Sqs, SqsClient,
 };
-use slog::{info, o, Logger};
+use slog::{debug, info, o, Logger};
 use std::{convert::TryFrom, marker::PhantomData, str::FromStr, time::Duration};
 use tokio::runtime::Runtime;
 
@@ -55,7 +55,7 @@ impl<T: Task> AwsSqsTaskQueue<T> {
 
 impl<T: Task> TaskQueue<T> for AwsSqsTaskQueue<T> {
     fn dequeue(&self) -> Result<Option<TaskHandle<T>>> {
-        info!(self.logger, "pull task");
+        debug!(self.logger, "pull task");
 
         let client = self.sqs_client()?;
 
@@ -153,7 +153,7 @@ impl<T: Task> TaskQueue<T> for AwsSqsTaskQueue<T> {
     }
 
     fn extend_task_deadline(&self, task: &TaskHandle<T>, increment: &Duration) -> Result<()> {
-        info!(
+        debug!(
             self.logger, "extending deadline on task by 10 minutes";
             event::TASK_ACKNOWLEDGEMENT_ID => &task.acknowledgment_id,
         );
