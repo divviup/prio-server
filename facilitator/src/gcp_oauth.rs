@@ -23,6 +23,8 @@ use rusoto_core::{credential::ProvideAwsCredentials, Region};
 use serde::{Deserialize, Serialize, Serializer};
 use slog::{debug, o, Logger};
 use std::{
+    collections::HashMap,
+    convert::TryFrom,
     fmt::{self, Debug, Display, Formatter},
     io::Read,
     str,
@@ -105,7 +107,7 @@ struct GenerateAccessTokenResponse {
 
 /// This is the subset of a GCP service account key file that we need to parse
 /// to construct a signed JWT.
-#[derive(Clone, Debug, Deserialize, PartialEq)]
+#[derive(Clone, Debug, Deserialize, Eq, Hash, PartialEq)]
 struct ServiceAccountKeyFile {
     /// The PEM-armored base64 encoding of the ASN.1 encoding of the account's
     /// RSA private key.
@@ -118,10 +120,17 @@ struct ServiceAccountKeyFile {
     token_uri: String,
 }
 
+impl TryFrom<Box<dyn Read>> for ServiceAccountKeyFile {
+    type Error = anyhow::Error;
+    fn try_from(reader: Box<dyn Read>) -> Result<Self, Self::Error> {
+        serde_json::from_reader(reader).context("failed to deserialize JSON key file")
+    }
+}
+
 /// OAuth access scopes used when obtaining access tokens. This enum only
 /// represents the access scopes we currently use.
 /// https://cloud.google.com/compute/docs/access/service-accounts#accesscopesiam
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub(crate) enum AccessScope {
     /// IAM credentials
     /// https://developers.google.com/identity/protocols/oauth2/scopes#iam
@@ -448,10 +457,10 @@ impl AccessTokenProvider for GcpAccessTokenProvider {
 impl GcpAccessTokenProvider {
     /// Creates a token provider which can impersonate the specified service
     /// account.
-    pub(crate) fn new(
+    fn new(
         scope: AccessScope,
         account_to_impersonate: Identity,
-        key_file_reader: Option<Box<dyn Read>>,
+        key_file: Option<ServiceAccountKeyFile>,
         workload_identity_pool_params: Option<WorkloadIdentityPoolParameters>,
         runtime_handle: &Handle,
         parent_logger: &Logger,
@@ -463,17 +472,16 @@ impl GcpAccessTokenProvider {
         ));
 
         let default_token_provider: Box<dyn ProvideDefaultAccessToken> =
-            match (key_file_reader, workload_identity_pool_params) {
+            match (key_file, workload_identity_pool_params) {
                 (Some(_), Some(_)) => {
                     return Err(anyhow!(
                         "either but not both of key_file_reader or aws_credentials may be provided"
                     ))
                 }
-                (Some(reader), None) => {
+                (Some(key_file), None) => {
                     let agent = RetryingAgent::new("iamcredentials.googleapis.com", api_metrics);
                     let provider = ServiceAccountKeyFileDefaultAccessTokenProvider {
-                        key_file: serde_json::from_reader(reader)
-                            .context("failed to deserialize JSON key file")?,
+                        key_file,
                         scope: scope.clone(),
                         agent,
                         logger: logger.clone(),
@@ -808,6 +816,84 @@ impl ProvideGcpIdentityToken for ImpersonatedServiceAccountIdentityTokenProvider
             .into_json::<GenerateIdTokenResponse>()
             .context("failed to deserialize response from IAM API")?
             .token)
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+struct GcpAccessTokenProviderFactoryKey {
+    scope: AccessScope,
+    account_to_impersonate: Identity,
+    key_file: Option<ServiceAccountKeyFile>,
+    workload_identity_pool_provider: Option<String>,
+}
+
+#[derive(Clone, Debug)]
+pub struct GcpAccessTokenProviderFactory {
+    runtime_handle: Handle,
+    logger: Logger,
+    api_metrics: ApiClientMetricsCollector,
+    providers: HashMap<GcpAccessTokenProviderFactoryKey, GcpAccessTokenProvider>,
+}
+
+impl GcpAccessTokenProviderFactory {
+    pub fn new(
+        runtime_handle: &Handle,
+        api_metrics: &ApiClientMetricsCollector,
+        logger: &Logger,
+    ) -> Self {
+        Self {
+            runtime_handle: runtime_handle.clone(),
+            logger: logger.clone(),
+            api_metrics: api_metrics.clone(),
+            providers: HashMap::new(),
+        }
+    }
+
+    pub(crate) fn get(
+        &mut self,
+        scope: AccessScope,
+        account_to_impersonate: Identity,
+        key_file_reader: Option<Box<dyn Read>>,
+        workload_identity_pool_parameters: Option<WorkloadIdentityPoolParameters>,
+    ) -> Result<GcpAccessTokenProvider> {
+        let key_file = match key_file_reader {
+            Some(reader) => Some(ServiceAccountKeyFile::try_from(reader)?),
+            None => None,
+        };
+        let key = GcpAccessTokenProviderFactoryKey {
+            scope: scope.clone(),
+            account_to_impersonate: account_to_impersonate.clone(),
+            key_file: key_file.clone(),
+            workload_identity_pool_provider: workload_identity_pool_parameters
+                .as_ref()
+                .map(|p| p.workload_identity_pool_provider.clone()),
+        };
+        match self.providers.get(&key) {
+            Some(provider) => {
+                debug!(
+                    self.logger,
+                    "reusing cached GCP access token provider {:?}", key
+                );
+                Ok(provider.clone())
+            }
+            None => {
+                debug!(
+                    self.logger,
+                    "creating new GCP access token provider {:?}", key
+                );
+                let provider = GcpAccessTokenProvider::new(
+                    scope,
+                    account_to_impersonate,
+                    key_file,
+                    workload_identity_pool_parameters,
+                    &self.runtime_handle,
+                    &self.logger,
+                    &self.api_metrics,
+                )?;
+                self.providers.insert(key, provider.clone());
+                Ok(provider)
+            }
+        }
     }
 }
 

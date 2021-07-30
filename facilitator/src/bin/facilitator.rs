@@ -21,6 +21,7 @@ use facilitator::{
         leak_string, Entity, Identity, InOut, ManifestKind, StoragePath, TaskQueueKind,
         WorkloadIdentityPoolParameters,
     },
+    gcp_oauth::GcpAccessTokenProviderFactory,
     intake::BatchIntaker,
     kubernetes::KubernetesClient,
     logging::{event, setup_logging, LoggingConfiguration},
@@ -970,8 +971,14 @@ fn main() -> Result<(), anyhow::Error> {
     let runtime = runtime::Builder::new_multi_thread().enable_all().build()?;
     let api_metrics = ApiClientMetricsCollector::new()?;
 
-    let mut aws_provider_factory =
-        aws_credentials::ProviderFactory::new(runtime.handle(), &api_metrics, &root_logger);
+    let mut gcp_access_token_provider_factory =
+        GcpAccessTokenProviderFactory::new(runtime.handle(), &api_metrics, &root_logger);
+    let mut aws_provider_factory = aws_credentials::ProviderFactory::new(
+        runtime.handle(),
+        &gcp_access_token_provider_factory,
+        &api_metrics,
+        &root_logger,
+    );
 
     let result = match matches.subcommand() {
         // The configuration of the Args above should guarantee that the
@@ -982,6 +989,7 @@ fn main() -> Result<(), anyhow::Error> {
             sub_matches,
             runtime.handle(),
             &mut aws_provider_factory,
+            &mut gcp_access_token_provider_factory,
             &api_metrics,
             &root_logger,
         ),
@@ -989,6 +997,7 @@ fn main() -> Result<(), anyhow::Error> {
             sub_matches,
             runtime.handle(),
             &mut aws_provider_factory,
+            &mut gcp_access_token_provider_factory,
             &api_metrics,
             &root_logger,
         ),
@@ -997,6 +1006,7 @@ fn main() -> Result<(), anyhow::Error> {
             sub_matches,
             runtime.handle(),
             &mut aws_provider_factory,
+            &mut gcp_access_token_provider_factory,
             &api_metrics,
             &root_logger,
         ),
@@ -1004,6 +1014,7 @@ fn main() -> Result<(), anyhow::Error> {
             sub_matches,
             runtime.handle(),
             &mut aws_provider_factory,
+            &mut gcp_access_token_provider_factory,
             &api_metrics,
             &root_logger,
         ),
@@ -1012,6 +1023,7 @@ fn main() -> Result<(), anyhow::Error> {
             sub_matches,
             runtime.handle(),
             &mut aws_provider_factory,
+            &mut gcp_access_token_provider_factory,
             &api_metrics,
             &root_logger,
         ),
@@ -1019,6 +1031,7 @@ fn main() -> Result<(), anyhow::Error> {
             sub_matches,
             runtime.handle(),
             &mut aws_provider_factory,
+            &mut gcp_access_token_provider_factory,
             &api_metrics,
             &root_logger,
         ),
@@ -1085,6 +1098,7 @@ fn generate_sample_worker(
     sub_matches: &ArgMatches,
     runtime_handle: &Handle,
     aws_provider_factory: &mut aws_credentials::ProviderFactory,
+    gcp_access_token_provider_factory: &mut GcpAccessTokenProviderFactory,
     api_metrics: &ApiClientMetricsCollector,
     root_logger: &Logger,
 ) -> Result<(), anyhow::Error> {
@@ -1098,6 +1112,7 @@ fn generate_sample_worker(
             sub_matches,
             runtime_handle,
             aws_provider_factory,
+            gcp_access_token_provider_factory,
             api_metrics,
             root_logger,
         );
@@ -1278,6 +1293,7 @@ fn generate_sample(
     sub_matches: &ArgMatches,
     runtime_handle: &Handle,
     aws_provider_factory: &mut aws_credentials::ProviderFactory,
+    gcp_access_token_provider_factory: &mut GcpAccessTokenProviderFactory,
     api_metrics: &ApiClientMetricsCollector,
     logger: &Logger,
 ) -> Result<(), anyhow::Error> {
@@ -1324,6 +1340,7 @@ fn generate_sample(
                 runtime_handle,
                 api_metrics,
                 aws_provider_factory,
+                gcp_access_token_provider_factory,
                 logger,
             )?,
             batch_signing_key: own_batch_signing_key,
@@ -1370,6 +1387,7 @@ fn generate_sample(
                 runtime_handle,
                 api_metrics,
                 aws_provider_factory,
+                gcp_access_token_provider_factory,
                 logger,
             )?,
             batch_signing_key: own_batch_signing_key,
@@ -1410,6 +1428,7 @@ fn intake_batch<F>(
     sub_matches: &ArgMatches,
     runtime_handle: &Handle,
     aws_provider_factory: &mut aws_credentials::ProviderFactory,
+    gcp_access_token_provider_factory: &mut GcpAccessTokenProviderFactory,
     metrics_collector: Option<&IntakeMetricsCollector>,
     api_metrics: &ApiClientMetricsCollector,
     parent_logger: &Logger,
@@ -1423,6 +1442,7 @@ where
         runtime_handle,
         api_metrics,
         aws_provider_factory,
+        gcp_access_token_provider_factory,
         parent_logger,
     )?;
 
@@ -1465,6 +1485,7 @@ where
             runtime_handle,
             api_metrics,
             aws_provider_factory,
+            gcp_access_token_provider_factory,
             parent_logger,
         )?,
         batch_signing_key: batch_signing_key_from_arg(sub_matches)?,
@@ -1521,6 +1542,7 @@ fn intake_batch_subcommand(
     sub_matches: &ArgMatches,
     runtime_handle: &Handle,
     aws_provider_factory: &mut aws_credentials::ProviderFactory,
+    gcp_access_token_provider_factory: &mut GcpAccessTokenProviderFactory,
     api_metrics: &ApiClientMetricsCollector,
     parent_logger: &Logger,
 ) -> Result<(), anyhow::Error> {
@@ -1534,6 +1556,7 @@ fn intake_batch_subcommand(
         sub_matches,
         runtime_handle,
         aws_provider_factory,
+        gcp_access_token_provider_factory,
         None,
         api_metrics,
         parent_logger,
@@ -1545,6 +1568,7 @@ fn intake_batch_worker(
     sub_matches: &ArgMatches,
     runtime_handle: &Handle,
     aws_provider_factory: &mut aws_credentials::ProviderFactory,
+    gcp_access_token_provider_factory: &mut GcpAccessTokenProviderFactory,
     api_metrics: &ApiClientMetricsCollector,
     parent_logger: &Logger,
 ) -> Result<(), anyhow::Error> {
@@ -1558,6 +1582,7 @@ fn intake_batch_worker(
         runtime_handle,
         api_metrics,
         aws_provider_factory,
+        gcp_access_token_provider_factory,
         parent_logger,
     )?;
 
@@ -1581,6 +1606,7 @@ fn intake_batch_worker(
                 sub_matches,
                 runtime_handle,
                 aws_provider_factory,
+                gcp_access_token_provider_factory,
                 Some(&metrics_collector),
                 api_metrics,
                 parent_logger,
@@ -1623,6 +1649,7 @@ fn aggregate<F>(
     sub_matches: &ArgMatches,
     runtime_handle: &Handle,
     aws_provider_factory: &mut aws_credentials::ProviderFactory,
+    gcp_access_token_provider_factory: &mut GcpAccessTokenProviderFactory,
     metrics_collector: Option<&AggregateMetricsCollector>,
     api_metrics: &ApiClientMetricsCollector,
     logger: &Logger,
@@ -1639,6 +1666,7 @@ where
         runtime_handle,
         api_metrics,
         aws_provider_factory,
+        gcp_access_token_provider_factory,
         logger,
     )?;
 
@@ -1655,6 +1683,7 @@ where
         runtime_handle,
         api_metrics,
         aws_provider_factory,
+        gcp_access_token_provider_factory,
         logger,
     )?;
 
@@ -1714,6 +1743,7 @@ where
         runtime_handle,
         api_metrics,
         aws_provider_factory,
+        gcp_access_token_provider_factory,
         logger,
     )?;
 
@@ -1786,6 +1816,7 @@ fn aggregate_subcommand(
     sub_matches: &ArgMatches,
     runtime_handle: &Handle,
     aws_provider_factory: &mut aws_credentials::ProviderFactory,
+    gcp_access_token_provider_factory: &mut GcpAccessTokenProviderFactory,
     api_metrics: &ApiClientMetricsCollector,
     parent_logger: &Logger,
 ) -> Result<(), anyhow::Error> {
@@ -1817,6 +1848,7 @@ fn aggregate_subcommand(
         sub_matches,
         runtime_handle,
         aws_provider_factory,
+        gcp_access_token_provider_factory,
         None,
         api_metrics,
         parent_logger,
@@ -1828,6 +1860,7 @@ fn aggregate_worker(
     sub_matches: &ArgMatches,
     runtime_handle: &Handle,
     aws_provider_factory: &mut aws_credentials::ProviderFactory,
+    gcp_access_token_provider_factory: &mut GcpAccessTokenProviderFactory,
     api_metrics: &ApiClientMetricsCollector,
     parent_logger: &Logger,
 ) -> Result<(), anyhow::Error> {
@@ -1837,6 +1870,7 @@ fn aggregate_worker(
         runtime_handle,
         api_metrics,
         aws_provider_factory,
+        gcp_access_token_provider_factory,
         parent_logger,
     )?;
     let metrics_collector = AggregateMetricsCollector::new()?;
@@ -1871,6 +1905,7 @@ fn aggregate_worker(
                 sub_matches,
                 runtime_handle,
                 aws_provider_factory,
+                gcp_access_token_provider_factory,
                 Some(&metrics_collector),
                 api_metrics,
                 parent_logger,
@@ -2039,6 +2074,7 @@ fn intake_transport_from_args(
     runtime_handle: &Handle,
     api_metrics: &ApiClientMetricsCollector,
     aws_provider_factory: &mut aws_credentials::ProviderFactory,
+    gcp_access_token_provider_factory: &mut GcpAccessTokenProviderFactory,
     logger: &Logger,
 ) -> Result<VerifiableAndDecryptableTransport> {
     let identity = value_t!(
@@ -2057,6 +2093,7 @@ fn intake_transport_from_args(
         runtime_handle,
         api_metrics,
         aws_provider_factory,
+        gcp_access_token_provider_factory,
         logger,
     )?;
 
@@ -2128,6 +2165,7 @@ fn transport_from_args(
     runtime_handle: &Handle,
     api_metrics: &ApiClientMetricsCollector,
     aws_provider_factory: &mut aws_credentials::ProviderFactory,
+    gcp_access_token_provider_factory: &mut GcpAccessTokenProviderFactory,
     logger: &Logger,
 ) -> Result<Box<dyn Transport>> {
     let path = match path_or_in_out {
@@ -2150,6 +2188,7 @@ fn transport_from_args(
         runtime_handle,
         api_metrics,
         aws_provider_factory,
+        gcp_access_token_provider_factory,
         logger,
     )
 }
@@ -2163,6 +2202,7 @@ fn transport_for_path(
     runtime_handle: &Handle,
     api_metrics: &ApiClientMetricsCollector,
     aws_provider_factory: &mut aws_credentials::ProviderFactory,
+    gcp_access_token_provider_factory: &mut GcpAccessTokenProviderFactory,
     logger: &Logger,
 ) -> Result<Box<dyn Transport>> {
     let use_default_aws_credentials_provider = value_t!(
@@ -2208,7 +2248,7 @@ fn transport_for_path(
                     use_default_aws_credentials_provider,
                     aws_provider_factory,
                 )?,
-                runtime_handle,
+                gcp_access_token_provider_factory,
                 logger,
                 api_metrics,
             )?))
@@ -2239,6 +2279,7 @@ fn intake_task_queue_from_args(
     runtime_handle: &Handle,
     api_metrics: &ApiClientMetricsCollector,
     aws_provider_factory: &mut aws_credentials::ProviderFactory,
+    gcp_access_token_provider_factory: &mut GcpAccessTokenProviderFactory,
     logger: &Logger,
 ) -> Result<Box<dyn TaskQueue<IntakeBatchTask>>> {
     let task_queue_kind = TaskQueueKind::from_str(
@@ -2262,7 +2303,7 @@ fn intake_task_queue_from_args(
                 gcp_project_id,
                 queue_name,
                 identity,
-                runtime_handle,
+                gcp_access_token_provider_factory,
                 logger,
                 api_metrics,
             )?))
@@ -2297,6 +2338,7 @@ fn aggregation_task_queue_from_args(
     runtime_handle: &Handle,
     api_metrics: &ApiClientMetricsCollector,
     aws_provider_factory: &mut aws_credentials::ProviderFactory,
+    gcp_access_token_provider_factory: &mut GcpAccessTokenProviderFactory,
     logger: &Logger,
 ) -> Result<Box<dyn TaskQueue<AggregationTask>>> {
     let task_queue_kind = TaskQueueKind::from_str(
@@ -2320,7 +2362,7 @@ fn aggregation_task_queue_from_args(
                 gcp_project_id,
                 queue_name,
                 identity,
-                runtime_handle,
+                gcp_access_token_provider_factory,
                 logger,
                 api_metrics,
             )?))

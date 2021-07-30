@@ -1,6 +1,6 @@
 use crate::{
     config::{GcsPath, Identity, WorkloadIdentityPoolParameters},
-    gcp_oauth::{AccessScope, GcpAccessTokenProvider},
+    gcp_oauth::{AccessScope, GcpAccessTokenProvider, GcpAccessTokenProviderFactory},
     http::{
         AccessTokenProvider, Method, RequestParameters, RetryingAgent, StaticAccessTokenProvider,
     },
@@ -15,7 +15,6 @@ use std::{
     io::{self, Read, Write},
     time::Duration,
 };
-use tokio::runtime::Handle;
 use ureq::AgentBuilder;
 use url::Url;
 use uuid::Uuid;
@@ -65,7 +64,7 @@ impl GcsTransport {
         identity: Identity,
         key_file_reader: Option<Box<dyn Read>>,
         workload_identity_pool_params: Option<WorkloadIdentityPoolParameters>,
-        runtime_handle: &Handle,
+        gcp_access_token_provider_factory: &mut GcpAccessTokenProviderFactory,
         parent_logger: &Logger,
         api_metrics: &ApiClientMetricsCollector,
     ) -> Result<Self> {
@@ -90,14 +89,11 @@ impl GcsTransport {
         );
         Ok(GcsTransport {
             path: path.ensure_directory_prefix(),
-            oauth_token_provider: GcpAccessTokenProvider::new(
+            oauth_token_provider: gcp_access_token_provider_factory.get(
                 AccessScope::DevStorageReadWrite,
                 identity,
                 key_file_reader,
                 workload_identity_pool_params,
-                runtime_handle,
-                &logger,
-                api_metrics,
             )?,
             agent: retrying_agent,
             logger,

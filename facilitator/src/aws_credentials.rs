@@ -1,7 +1,7 @@
 use crate::{
     config::Identity,
     gcp_oauth::{
-        AccessScope, GcpAccessTokenProvider, GkeMetadataServiceIdentityTokenProvider,
+        AccessScope, GcpAccessTokenProviderFactory, GkeMetadataServiceIdentityTokenProvider,
         ImpersonatedServiceAccountIdentityTokenProvider, ProvideGcpIdentityToken,
     },
     metrics::ApiClientMetricsCollector,
@@ -64,6 +64,7 @@ struct ProviderFactoryKey {
 #[derive(Clone, Debug)]
 pub struct ProviderFactory {
     runtime_handle: Handle,
+    gcp_access_token_provider_factory: GcpAccessTokenProviderFactory,
     api_metrics: ApiClientMetricsCollector,
     logger: Logger,
     providers: HashMap<ProviderFactoryKey, Provider>,
@@ -74,11 +75,13 @@ impl ProviderFactory {
     /// `runtime_handle` and `logger` will be used when creating any `Provider`.
     pub fn new(
         runtime_handle: &Handle,
+        gcp_access_token_provider_factory: &GcpAccessTokenProviderFactory,
         api_metrics: &ApiClientMetricsCollector,
         logger: &Logger,
     ) -> Self {
         Self {
             runtime_handle: runtime_handle.clone(),
+            gcp_access_token_provider_factory: gcp_access_token_provider_factory.clone(),
             api_metrics: api_metrics.clone(),
             logger: logger.clone(),
             providers: HashMap::new(),
@@ -116,7 +119,7 @@ impl ProviderFactory {
                     impersonate_gcp_service_account,
                     use_default_provider,
                     purpose,
-                    &self.runtime_handle,
+                    &mut self.gcp_access_token_provider_factory,
                     &self.logger,
                     &self.api_metrics,
                 )?;
@@ -193,7 +196,7 @@ impl Provider {
         impersonate_gcp_service_account: Identity,
         use_default_provider: bool,
         purpose: &'static str,
-        runtime_handle: &Handle,
+        gcp_access_token_provider_factory: &mut GcpAccessTokenProviderFactory,
         logger: &Logger,
         api_metrics: &ApiClientMetricsCollector,
     ) -> Result<Self> {
@@ -203,7 +206,7 @@ impl Provider {
                 identity,
                 purpose,
                 impersonate_gcp_service_account,
-                runtime_handle,
+                gcp_access_token_provider_factory,
                 logger,
                 api_metrics,
             ),
@@ -240,7 +243,7 @@ impl Provider {
         iam_role: &str,
         purpose: &'static str,
         impersonated_gcp_service_account: Identity,
-        runtime_handle: &Handle,
+        gcp_access_token_provider_factory: &mut GcpAccessTokenProviderFactory,
         logger: &Logger,
         api_metrics: &ApiClientMetricsCollector,
     ) -> Result<Self> {
@@ -259,14 +262,11 @@ impl Provider {
                 Some(impersonated_gcp_service_account) => {
                     Box::new(ImpersonatedServiceAccountIdentityTokenProvider::new(
                         impersonated_gcp_service_account.to_owned(),
-                        GcpAccessTokenProvider::new(
+                        gcp_access_token_provider_factory.get(
                             AccessScope::CloudPlatform,
                             Identity::none(),
                             None,
                             None,
-                            runtime_handle,
-                            &token_logger,
-                            api_metrics,
                         )?,
                         token_logger.clone(),
                         api_metrics,

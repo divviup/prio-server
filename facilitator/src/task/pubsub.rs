@@ -1,6 +1,6 @@
 use crate::{
     config::Identity,
-    gcp_oauth::{AccessScope, GcpAccessTokenProvider},
+    gcp_oauth::{AccessScope, GcpAccessTokenProvider, GcpAccessTokenProviderFactory},
     http::{Method, RequestParameters, RetryingAgent},
     logging::event,
     metrics::ApiClientMetricsCollector,
@@ -10,7 +10,6 @@ use anyhow::{anyhow, Context, Result};
 use serde::Deserialize;
 use slog::{debug, info, o, Logger};
 use std::{io::Cursor, marker::PhantomData, time::Duration};
-use tokio::runtime::Handle;
 use ureq::AgentBuilder;
 use url::Url;
 
@@ -113,7 +112,7 @@ impl<T: Task> GcpPubSubTaskQueue<T> {
         gcp_project_id: &str,
         subscription_id: &str,
         identity: Identity,
-        runtime_handle: &Handle,
+        gcp_access_token_provider_factory: &mut GcpAccessTokenProviderFactory,
         parent_logger: &Logger,
         api_metrics: &ApiClientMetricsCollector,
     ) -> Result<Self> {
@@ -145,7 +144,7 @@ impl<T: Task> GcpPubSubTaskQueue<T> {
                 .to_owned(),
             gcp_project_id: gcp_project_id.to_string(),
             subscription_id: subscription_id.to_string(),
-            access_token_provider: GcpAccessTokenProvider::new(
+            access_token_provider: gcp_access_token_provider_factory.get(
                 AccessScope::PubSub,
                 identity,
                 // GCP key file; None because PubSub is only used if the
@@ -154,9 +153,6 @@ impl<T: Task> GcpPubSubTaskQueue<T> {
                 // AWS credentials provider; None because PubSub is only used if
                 // the workload is on GKE
                 None,
-                runtime_handle,
-                &logger,
-                api_metrics,
             )?,
             phantom_task: PhantomData,
             agent: retrying_agent,
