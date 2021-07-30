@@ -1,9 +1,6 @@
 use anyhow::{anyhow, Context, Result};
 use rusoto_core::{region::ParseRegionError, Region};
 use serde::{de, Deserialize, Deserializer};
-use slog::Logger;
-use tokio::runtime::Handle;
-
 use std::{
     convert::Infallible,
     fmt::{self, Display, Formatter},
@@ -11,13 +8,13 @@ use std::{
     str::FromStr,
 };
 
-use crate::{aws_credentials, metrics::ApiClientMetricsCollector};
+use crate::aws_credentials;
 
 /// Identity represents a cloud identity: Either an AWS IAM ARN (i.e. "arn:...")
 /// or a GCP ServiceAccount (i.e. "foo@bar.com"). It treats the empty string as
 /// equivalent to None, allowing arguments to unconditionally be provided to
 /// facilitator.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub struct Identity {
     inner: Option<String>,
 }
@@ -93,9 +90,7 @@ impl WorkloadIdentityPoolParameters {
     pub fn new(
         workload_identity_pool_provider_id: Option<&str>,
         use_default_aws_credentials_provider: bool,
-        runtime_handle: &Handle,
-        api_metrics: &ApiClientMetricsCollector,
-        logger: &Logger,
+        aws_provider_factory: &mut aws_credentials::ProviderFactory,
     ) -> Result<Option<Self>> {
         let parameters = match workload_identity_pool_provider_id {
             // We treat the empty string as equivalent to None, to allow the
@@ -104,7 +99,7 @@ impl WorkloadIdentityPoolParameters {
             None | Some("") => None,
             Some(provider_id) => Some(Self {
                 workload_identity_pool_provider: provider_id.to_owned(),
-                aws_credentials_provider: aws_credentials::Provider::new(
+                aws_credentials_provider: aws_provider_factory.get(
                     // We create this provider with no identity and no
                     // impersonated GCP service account, requiring that the
                     // authentication to AWS use either ambient AWS credentials
@@ -113,9 +108,6 @@ impl WorkloadIdentityPoolParameters {
                     Identity::none(),
                     use_default_aws_credentials_provider,
                     "IAM federation",
-                    runtime_handle,
-                    logger,
-                    api_metrics,
                 )?,
             }),
         };
