@@ -307,7 +307,7 @@ impl DataShareProcessorSpecificManifest {
         let test_message: Vec<u8> = (0..100).map(|_| rand::random::<u8>()).collect();
         let signature = batch_signing_private_key
             .key
-            .sign(&SystemRandom::new(), &&test_message)
+            .sign(&SystemRandom::new(), &test_message)
             .context(format!(
                 "failed to sign test message with private key {}",
                 batch_signing_private_key.identifier
@@ -347,7 +347,7 @@ impl DataShareProcessorSpecificManifest {
             ))?;
 
             for private_key in packet_encryption_private_keys {
-                match decrypt_share(&encrypted, &private_key) {
+                match decrypt_share(&encrypted, private_key) {
                     Ok(decrypted) => {
                         // AEAD decryption succeeding but yielding incorrect
                         // plaintext is incredibly unlikely
@@ -1722,7 +1722,7 @@ mod tests {
         assert_eq!(test_message, decrypted);
 
         let expected_encrypted = encrypt_share(&test_message, &expected).unwrap();
-        let decrypted = decrypt_share(&&expected_encrypted, &private_key).unwrap();
+        let decrypted = decrypt_share(&expected_encrypted, &private_key).unwrap();
         assert_eq!(test_message, decrypted);
     }
 

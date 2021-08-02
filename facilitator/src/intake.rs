@@ -220,7 +220,7 @@ impl<'a> BatchIntaker<'a> {
                 }
                 processed_packets += 1;
                 if processed_packets % callback_cadence == 0 {
-                    callback(&logger);
+                    callback(logger);
                 }
             },
         )?;

@@ -587,7 +587,7 @@ impl GcpAccessTokenProvider {
         let request = self.agent.prepare_request(RequestParameters {
             url: Self::access_token_url_for_service_account(
                 self.iam_service_base_url,
-                &service_account_to_impersonate,
+                service_account_to_impersonate,
             )?,
             method: Method::Post,
             token_provider: Some(&StaticAccessTokenProvider::from(default_token)),
