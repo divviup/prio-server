@@ -94,7 +94,9 @@ CONFIG
   }
 }
 
-data "google_compute_zones" "available" {}
+data "google_compute_zones" "available" {
+  count = var.use_aws ? 0 : 1
+}
 
 # Create a GCP persistent disk for use by prometheus-server, with replicas in
 # multiple zones. The Prometheus Helm chart can create and manage persistent
@@ -104,7 +106,7 @@ resource "google_compute_region_disk" "prometheus_server" {
   count = var.use_aws ? 0 : 1
   name  = "${var.environment}-prometheus-server"
   # GCP regional disks support replication across at most two zones
-  replica_zones = [data.google_compute_zones.available.names[0], data.google_compute_zones.available.names[1]]
+  replica_zones = [data.google_compute_zones.available[0].names[0], data.google_compute_zones.available[0].names[1]]
   size          = var.prometheus_server_persistent_disk_size_gb
   region        = var.gcp.region
 
@@ -137,6 +139,7 @@ resource "kubernetes_persistent_volume" "prometheus_server_gcp" {
 }
 
 data "aws_availability_zones" "available" {
+  count = var.use_aws ? 1 : 0
   state = "available"
 }
 
@@ -147,7 +150,7 @@ data "aws_availability_zones" "available" {
 # AZ.
 resource "aws_ebs_volume" "prometheus_server" {
   count             = var.use_aws ? 1 : 0
-  availability_zone = data.aws_availability_zones.available.names[1]
+  availability_zone = data.aws_availability_zones.available[0].names[0]
   size              = var.prometheus_server_persistent_disk_size_gb
   tags = {
     Name = "${var.environment}-prometheus-server"
@@ -168,6 +171,27 @@ resource "kubernetes_persistent_volume" "prometheus_server_aws" {
     }
     storage_class_name = "standard"
     volume_mode        = "Filesystem"
+    # We put a node affinity on the PV to ensure that prometheus-server gets
+    # scheduled onto a node in the AZ where the EBS volume is. This is done
+    # automatically for gce_persistent_disk persistent volumes, but we have to
+    # do it ourselves for EBS.
+    node_affinity {
+      required {
+        node_selector_term {
+          match_expressions {
+            key      = "failure-domain.beta.kubernetes.io/zone"
+            operator = "In"
+            values   = [aws_ebs_volume.prometheus_server[0].availability_zone]
+          }
+          match_expressions {
+            key      = "failure-domain.beta.kubernetes.io/region"
+            operator = "In"
+            # Per Terraform docs, id is "Region of the Availability Zones"
+            values = [data.aws_availability_zones.available[0].id]
+          }
+        }
+      }
+    }
     persistent_volume_source {
       aws_elastic_block_store {
         fs_type   = "ext4"
