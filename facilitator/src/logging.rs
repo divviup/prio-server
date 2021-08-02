@@ -90,7 +90,7 @@ impl From<Level> for Severity {
 }
 
 /// Options for configuring logging in this application
-pub struct LoggingConfiguration {
+pub struct LoggingConfiguration<'a> {
     /// If true, logging output will be forced to JSON format using
     /// [slog-json][1]. If false, logging format will be determined by detecting
     /// whether `stderr` is a `tty`. If it is, output is formatted using
@@ -100,9 +100,9 @@ pub struct LoggingConfiguration {
     /// [2]: https://docs.rs/slog-term
     pub force_json_output: bool,
     /// A version string which shall be attached to all log messages
-    pub version_string: &'static str,
+    pub version_string: &'a str,
     /// Messages above this log level will be discarded
-    pub log_level: &'static str,
+    pub log_level: &'a str,
 }
 
 /// IoErrorDrain is a supertrait that lets us work generically with
@@ -160,7 +160,7 @@ pub fn setup_logging(config: &LoggingConfiguration) -> Result<Logger> {
     let root_logger = Logger::root(
         drain,
         o!(
-            "version"=> config.version_string,
+            "version"=> config.version_string.to_owned(),
             "file" => FnValue(|record| {
                 record.file()
             }),

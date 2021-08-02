@@ -9,7 +9,7 @@ use ring::signature::{
 };
 use slog::{debug, error, info, Logger};
 use std::{
-    collections::HashMap, fs, fs::File, io::Read, str::FromStr, time::Duration, time::Instant,
+    collections::HashMap, env, fs, fs::File, io::Read, str::FromStr, time::Duration, time::Instant,
 };
 use uuid::Uuid;
 
@@ -918,11 +918,13 @@ fn main() -> Result<(), anyhow::Error> {
         .get_matches();
 
     let force_json_log_output = value_t!(matches.value_of("force-json-log-output"), bool)?;
-
+    let log_level = &env::var("RUST_LOG")
+        .unwrap_or_else(|_| "INFO".to_owned())
+        .to_uppercase();
     let root_logger = setup_logging(&LoggingConfiguration {
         force_json_output: force_json_log_output,
         version_string: option_env!("BUILD_INFO").unwrap_or("(BUILD_INFO unavailable)"),
-        log_level: option_env!("RUST_LOG").unwrap_or("INFO"),
+        log_level,
     })?;
     let args: Vec<String> = std::env::args().collect();
     info!(
