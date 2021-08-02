@@ -259,7 +259,7 @@ impl StreamingTransferWriter {
             minimum_upload_chunk_size,
             buffer: Vec::with_capacity(minimum_upload_chunk_size * 2),
             object_upload_position: 0,
-            upload_session_uri: Url::parse(&upload_session_uri).context(format!(
+            upload_session_uri: Url::parse(upload_session_uri).context(format!(
                 "failed to parse upload_session_uri url: {}",
                 &upload_session_uri
             ))?,

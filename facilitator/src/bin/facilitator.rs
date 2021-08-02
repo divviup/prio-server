@@ -942,7 +942,7 @@ fn main() -> Result<(), anyhow::Error> {
             generate_sample(&Uuid::new_v4(), sub_matches, &root_logger)
         }
         ("generate-ingestion-sample-worker", Some(sub_matches)) => {
-            generate_sample_worker(&sub_matches, &root_logger)
+            generate_sample_worker(sub_matches, &root_logger)
         }
         ("intake-batch", Some(sub_matches)) => intake_batch_subcommand(sub_matches, &root_logger),
         ("intake-batch-worker", Some(sub_matches)) => {
@@ -1010,7 +1010,7 @@ fn generate_sample_worker(
 
     loop {
         let trace_id = Uuid::new_v4();
-        let result = generate_sample(&trace_id, &sub_matches, root_logger);
+        let result = generate_sample(&trace_id, sub_matches, root_logger);
 
         if let Err(e) = result {
             error!(
@@ -1261,7 +1261,7 @@ fn generate_sample(
     };
 
     let mut sample_generator = SampleGenerator::new(
-        &sub_matches.value_of("aggregation-id").unwrap(),
+        sub_matches.value_of("aggregation-id").unwrap(),
         value_t!(sub_matches.value_of("dimension"), i32)?,
         value_t!(sub_matches.value_of("epsilon"), f64)?,
         value_t!(sub_matches.value_of("batch-start-time"), i64)?,
@@ -1276,7 +1276,7 @@ fn generate_sample(
         &value_t!(sub_matches.value_of("batch-id"), Uuid).unwrap_or_else(|_| Uuid::new_v4()),
         &sub_matches.value_of("date").map_or_else(
             || Utc::now().naive_utc(),
-            |v| NaiveDateTime::parse_from_str(&v, DATE_FORMAT).unwrap(),
+            |v| NaiveDateTime::parse_from_str(v, DATE_FORMAT).unwrap(),
         ),
         value_t!(sub_matches.value_of("packet-count"), usize)?,
     )?;
@@ -1361,7 +1361,7 @@ where
 
     let mut batch_intaker = BatchIntaker::new(
         trace_id,
-        &aggregation_id,
+        aggregation_id,
         &batch_id,
         &date,
         &mut intake_transport,
@@ -1696,7 +1696,7 @@ fn aggregate_subcommand(
 
     aggregate(
         "None",
-        &sub_matches.value_of("aggregation-id").unwrap(),
+        sub_matches.value_of("aggregation-id").unwrap(),
         sub_matches.value_of("aggregation-start").unwrap(),
         sub_matches.value_of("aggregation-end").unwrap(),
         batch_info,

@@ -551,13 +551,13 @@ mod tests {
 
         let mut batch_writer: BatchWriter<'_, IngestionHeader, IngestionDataSharePacket> =
             BatchWriter::new(
-                Batch::new_ingestion(&aggregation_name, &batch_id, &date),
+                Batch::new_ingestion(aggregation_name, &batch_id, &date),
                 &mut write_transport,
                 "trace-id",
             );
         let mut batch_reader: BatchReader<'_, IngestionHeader, IngestionDataSharePacket> =
             BatchReader::new(
-                Batch::new_ingestion(&aggregation_name, &batch_id, &date),
+                Batch::new_ingestion(aggregation_name, &batch_id, &date),
                 &mut read_transport,
                 false,
                 "trace-id",
@@ -625,13 +625,13 @@ mod tests {
 
         let mut batch_writer: BatchWriter<'_, IngestionHeader, IngestionDataSharePacket> =
             BatchWriter::new(
-                Batch::new_validation(&aggregation_name, &batch_id, &date, is_first),
+                Batch::new_validation(aggregation_name, &batch_id, &date, is_first),
                 &mut write_transport,
                 "trace-id",
             );
         let mut batch_reader: BatchReader<'_, IngestionHeader, IngestionDataSharePacket> =
             BatchReader::new(
-                Batch::new_validation(&aggregation_name, &batch_id, &date, is_first),
+                Batch::new_validation(aggregation_name, &batch_id, &date, is_first),
                 &mut read_transport,
                 false,
                 "trace-id",
@@ -711,13 +711,13 @@ mod tests {
 
         let mut batch_writer: BatchWriter<'_, IngestionHeader, IngestionDataSharePacket> =
             BatchWriter::new(
-                Batch::new_sum(&instance_name, &aggregation_name, &start, &end, is_first),
+                Batch::new_sum(instance_name, aggregation_name, &start, &end, is_first),
                 &mut write_transport,
                 "trace-id",
             );
         let mut batch_reader: BatchReader<'_, IngestionHeader, IngestionDataSharePacket> =
             BatchReader::new(
-                Batch::new_sum(instance_name, &aggregation_name, &start, &end, is_first),
+                Batch::new_sum(instance_name, aggregation_name, &start, &end, is_first),
                 &mut read_transport,
                 false,
                 "trace-id",
@@ -778,13 +778,13 @@ mod tests {
 
         let mut batch_writer: BatchWriter<'_, IngestionHeader, IngestionDataSharePacket> =
             BatchWriter::new(
-                Batch::new_sum(&instance_name, &aggregation_name, &start, &end, true),
+                Batch::new_sum(instance_name, aggregation_name, &start, &end, true),
                 &mut write_transport,
                 "trace-id",
             );
         let mut batch_reader: BatchReader<'_, IngestionHeader, IngestionDataSharePacket> =
             BatchReader::new(
-                Batch::new_sum(instance_name, &aggregation_name, &start, &end, true),
+                Batch::new_sum(instance_name, aggregation_name, &start, &end, true),
                 &mut read_transport,
                 true, // permit_malformed_batch
                 "trace-id",

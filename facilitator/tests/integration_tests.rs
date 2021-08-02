@@ -209,7 +209,7 @@ fn aggregation_including_invalid_batch() {
         let mut pha_batch_intaker = BatchIntaker::new(
             "None",
             aggregation_name,
-            &uuid,
+            uuid,
             &date,
             &mut pha_ingest_transport,
             &mut pha_own_validation_transport,
@@ -223,7 +223,7 @@ fn aggregation_including_invalid_batch() {
         let mut facilitator_batch_intaker = BatchIntaker::new(
             "None",
             aggregation_name,
-            &uuid,
+            uuid,
             &date,
             &mut facilitator_ingest_transport,
             &mut facilitator_own_validation_transport,
