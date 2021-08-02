@@ -1,4 +1,4 @@
-FROM rust:1.53.0-alpine as builder
+FROM rust:1.54.0-alpine as builder
 
 RUN apk add libc-dev openssl-dev && apk update
 
@@ -23,7 +23,7 @@ RUN sed -i /build.rs/d facilitator/Cargo.toml
 RUN mkdir -p facilitator/src
 RUN echo "fn main() {println!(\"if you see this, the build broke\")}" > facilitator/src/main.rs
 # This cargo build command must match the one below, or the build cache will not be reused.
-RUN cargo build --manifest-path ./facilitator/Cargo.toml
+RUN cargo build --manifest-path ./facilitator/Cargo.toml --release
 
 # Clean up and copy the real source.
 # After this we have a layer that should be cacheable so long as the dependencies don't change.
@@ -38,10 +38,14 @@ ARG BUILD_INFO=unspecified
 ENV OPENSSL_STATIC=true
 
 # This cargo build command must match the one above, or the build cache will not be reused.
-RUN cargo build --manifest-path ./facilitator/Cargo.toml
-# We build in debug mode so the build runs quickly, then strip the binary for size.
-RUN strip facilitator/target/debug/facilitator
+RUN cargo build --manifest-path ./facilitator/Cargo.toml --release
+
+# Build a minimal container from Alpine containing only the stripped binary and
+# no intermediate build artifacts
+FROM alpine:3.14
+
+RUN apk add libgcc && apk update
 
 # Build a minimal container containing only the binary, the one .so it needs, and root certs.
-RUN cp /usr/src/prio-server/facilitator/target/debug/facilitator /facilitator
+COPY --from=builder /usr/src/prio-server/facilitator/target/release/facilitator /facilitator
 ENTRYPOINT ["/facilitator"]
