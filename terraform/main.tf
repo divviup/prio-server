@@ -399,22 +399,20 @@ locals {
   # Does this specific environment home the ingestor?
   is_env_with_ingestor = local.deployment_has_ingestor && lookup(var.test_peer_environment, "env_with_ingestor", "") == var.environment ? true : false
 
-  global_manifest = jsonencode(
-    # If pure GCP, we use the newer global manifest format
-    var.pure_gcp ? {
-      format = 1
-      server-identity = {
-        gcp-service-account-id    = var.use_aws ? null : tostring(google_service_account.sum_part_bucket_writer.unique_id)
-        gcp-service-account-email = google_service_account.sum_part_bucket_writer.email
-      }
-      } : {
-      format = 0
-      server-identity = {
-        aws-account-id            = tonumber(data.aws_caller_identity.current.account_id)
-        gcp-service-account-email = google_service_account.sum_part_bucket_writer.email
-      }
+  # If pure GCP, we use the newer global manifest format
+  global_manifest = var.pure_gcp ? jsonencode({
+    format = 1
+    server-identity = {
+      gcp-service-account-id    = var.use_aws ? null : tostring(google_service_account.sum_part_bucket_writer.unique_id)
+      gcp-service-account-email = google_service_account.sum_part_bucket_writer.email
     }
-  )
+    }) : jsonencode({
+    format = 0
+    server-identity = {
+      aws-account-id            = tonumber(data.aws_caller_identity.current.account_id)
+      gcp-service-account-email = google_service_account.sum_part_bucket_writer.email
+    }
+  })
 
   manifest = var.use_aws ? {
     bucket      = module.manifest_aws[0].bucket
