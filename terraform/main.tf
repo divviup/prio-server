@@ -43,14 +43,18 @@ variable "ingestors" {
     localities = map(object({
       intake_worker_count                    = number
       aggregate_worker_count                 = number
-      peer_share_processor_manifest_base_url = string
-      portal_server_manifest_base_url        = string
+      peer_share_processor_manifest_base_url = optional(string)
+      portal_server_manifest_base_url        = optional(string)
       aggregation_period                     = optional(string)
       aggregation_grace_period               = optional(string)
     }))
   }))
   description = <<DESCRIPTION
 Map of ingestor names to per-ingestor configuration.
+peer_share_processor_manifest_base_url is optional and overrides
+default_peer_share_processor_manifest_base_url for the locality.
+portal_server_manifest_base_url is optional and overrides
+default_portal_server_manifest_base_url for the locality.
 aggregation_period and aggregation_grace_period values are optional and override
 default_aggregation_period and default_aggregation_grace_period, respectively,
 for the locality. The values should be strings parseable by Go's
@@ -128,6 +132,22 @@ variable "default_aggregation_grace_period" {
 Aggregation grace period used by workflow manager if none is provided by the locality
 configuration. The value should be a string parseable by Go's
 time.ParseDuration.
+DESCRIPTION
+}
+
+variable "default_peer_share_processor_manifest_base_url" {
+  type        = string
+  description = <<DESCRIPTION
+Base URL relative to which the peer share processor's manifests can be found, if
+none is provided by the locality configuration.
+DESCRIPTION
+}
+
+variable "default_portal_server_manifest_base_url" {
+  type        = string
+  description = <<DESCRIPTION
+Base URL relative to which the portal server's manifests can be found, if none
+is provided by the locality configuration.
 DESCRIPTION
 }
 
@@ -403,8 +423,14 @@ locals {
       ingestor_manifest_base_url              = var.ingestors[pair[1]].manifest_base_url
       intake_worker_count                     = var.ingestors[pair[1]].localities[pair[0]].intake_worker_count
       aggregate_worker_count                  = var.ingestors[pair[1]].localities[pair[0]].aggregate_worker_count
-      peer_share_processor_manifest_base_url  = var.ingestors[pair[1]].localities[pair[0]].peer_share_processor_manifest_base_url
-      portal_server_manifest_base_url         = var.ingestors[pair[1]].localities[pair[0]].portal_server_manifest_base_url
+      peer_share_processor_manifest_base_url = coalesce(
+        var.ingestors[pair[1]].localities[pair[0]].peer_share_processor_manifest_base_url,
+        var.default_peer_share_processor_manifest_base_url
+      )
+      portal_server_manifest_base_url = coalesce(
+        var.ingestors[pair[1]].localities[pair[0]].portal_server_manifest_base_url,
+        var.default_portal_server_manifest_base_url
+      )
       aggregation_period = coalesce(
         var.ingestors[pair[1]].localities[pair[0]].aggregation_period,
         var.default_aggregation_period

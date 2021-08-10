@@ -23,82 +23,56 @@ ingestors = {
         aggregation_grace_period               = "30m"
       }
       us-ct = {
-        intake_worker_count                    = 8
-        aggregate_worker_count                 = 3
-        peer_share_processor_manifest_base_url = "en-analytics.cancer.gov"
-        portal_server_manifest_base_url        = "manifest.enpa-pha.io"
+        intake_worker_count    = 8
+        aggregate_worker_count = 3
       }
       us-md = {
-        intake_worker_count                    = 8
-        aggregate_worker_count                 = 3
-        peer_share_processor_manifest_base_url = "en-analytics.cancer.gov"
-        portal_server_manifest_base_url        = "manifest.enpa-pha.io"
+        intake_worker_count    = 8
+        aggregate_worker_count = 3
       }
       us-va = {
-        intake_worker_count                    = 8
-        aggregate_worker_count                 = 3
-        peer_share_processor_manifest_base_url = "en-analytics.cancer.gov"
-        portal_server_manifest_base_url        = "manifest.enpa-pha.io"
+        intake_worker_count    = 8
+        aggregate_worker_count = 3
       }
       us-wa = {
-        intake_worker_count                    = 10
-        aggregate_worker_count                 = 3
-        peer_share_processor_manifest_base_url = "en-analytics.cancer.gov"
-        portal_server_manifest_base_url        = "manifest.enpa-pha.io"
+        intake_worker_count    = 10
+        aggregate_worker_count = 3
       }
       us-ca = {
-        intake_worker_count                    = 25
-        aggregate_worker_count                 = 7
-        peer_share_processor_manifest_base_url = "en-analytics.cancer.gov"
-        portal_server_manifest_base_url        = "manifest.enpa-pha.io"
+        intake_worker_count    = 25
+        aggregate_worker_count = 7
       }
       us-ut = {
-        intake_worker_count                    = 10
-        aggregate_worker_count                 = 3
-        peer_share_processor_manifest_base_url = "en-analytics.cancer.gov"
-        portal_server_manifest_base_url        = "manifest.enpa-pha.io"
+        intake_worker_count    = 10
+        aggregate_worker_count = 3
       }
       us-wi = {
-        intake_worker_count                    = 12
-        aggregate_worker_count                 = 3
-        peer_share_processor_manifest_base_url = "en-analytics.cancer.gov"
-        portal_server_manifest_base_url        = "manifest.enpa-pha.io"
+        intake_worker_count    = 12
+        aggregate_worker_count = 3
       }
       us-ma = {
-        intake_worker_count                    = 12
-        aggregate_worker_count                 = 3
-        peer_share_processor_manifest_base_url = "en-analytics.cancer.gov"
-        portal_server_manifest_base_url        = "manifest.enpa-pha.io"
+        intake_worker_count    = 12
+        aggregate_worker_count = 3
       }
       us-nm = {
-        intake_worker_count                    = 5
-        aggregate_worker_count                 = 3
-        peer_share_processor_manifest_base_url = "en-analytics.cancer.gov"
-        portal_server_manifest_base_url        = "manifest.enpa-pha.io"
+        intake_worker_count    = 5
+        aggregate_worker_count = 3
       }
       us-hi = {
-        intake_worker_count                    = 5
-        aggregate_worker_count                 = 3
-        peer_share_processor_manifest_base_url = "en-analytics.cancer.gov"
-        portal_server_manifest_base_url        = "manifest.enpa-pha.io"
+        intake_worker_count    = 5
+        aggregate_worker_count = 3
       }
       us-co = {
-        intake_worker_count                    = 8
-        aggregate_worker_count                 = 3
-        peer_share_processor_manifest_base_url = "en-analytics.cancer.gov"
-        portal_server_manifest_base_url        = "manifest.enpa-pha.io"
+        intake_worker_count    = 8
+        aggregate_worker_count = 3
       }
       us-dc = {
-        intake_worker_count                    = 5
-        aggregate_worker_count                 = 3
-        peer_share_processor_manifest_base_url = "en-analytics.cancer.gov"
-        portal_server_manifest_base_url        = "manifest.enpa-pha.io"
+        intake_worker_count    = 5
+        aggregate_worker_count = 3
       }
       us-la = {
-        intake_worker_count                    = 5
-        aggregate_worker_count                 = 3
-        peer_share_processor_manifest_base_url = "en-analytics.cancer.gov"
-        portal_server_manifest_base_url        = "manifest.enpa-pha.io"
+        intake_worker_count    = 5
+        aggregate_worker_count = 3
       }
     }
   }
@@ -114,82 +88,56 @@ ingestors = {
         portal_server_manifest_base_url        = "manifest.int.enpa-pha.io"
       }
       us-ct = {
-        intake_worker_count                    = 3
-        aggregate_worker_count                 = 3
-        peer_share_processor_manifest_base_url = "en-analytics.cancer.gov"
-        portal_server_manifest_base_url        = "manifest.enpa-pha.io"
+        intake_worker_count    = 3
+        aggregate_worker_count = 3
       }
       us-md = {
-        intake_worker_count                    = 3
-        aggregate_worker_count                 = 3
-        peer_share_processor_manifest_base_url = "en-analytics.cancer.gov"
-        portal_server_manifest_base_url        = "manifest.enpa-pha.io"
+        intake_worker_count    = 3
+        aggregate_worker_count = 3
       }
       us-va = {
-        intake_worker_count                    = 3
-        aggregate_worker_count                 = 3
-        peer_share_processor_manifest_base_url = "en-analytics.cancer.gov"
-        portal_server_manifest_base_url        = "manifest.enpa-pha.io"
+        intake_worker_count    = 3
+        aggregate_worker_count = 3
       }
       us-wa = {
-        intake_worker_count                    = 3
-        aggregate_worker_count                 = 3
-        peer_share_processor_manifest_base_url = "en-analytics.cancer.gov"
-        portal_server_manifest_base_url        = "manifest.enpa-pha.io"
+        intake_worker_count    = 3
+        aggregate_worker_count = 3
       }
       us-ca = {
-        intake_worker_count                    = 15
-        aggregate_worker_count                 = 3
-        peer_share_processor_manifest_base_url = "en-analytics.cancer.gov"
-        portal_server_manifest_base_url        = "manifest.enpa-pha.io"
+        intake_worker_count    = 15
+        aggregate_worker_count = 3
       }
       us-ut = {
-        intake_worker_count                    = 3
-        aggregate_worker_count                 = 3
-        peer_share_processor_manifest_base_url = "en-analytics.cancer.gov"
-        portal_server_manifest_base_url        = "manifest.enpa-pha.io"
+        intake_worker_count    = 3
+        aggregate_worker_count = 3
       }
       us-wi = {
-        intake_worker_count                    = 3
-        aggregate_worker_count                 = 3
-        peer_share_processor_manifest_base_url = "en-analytics.cancer.gov"
-        portal_server_manifest_base_url        = "manifest.enpa-pha.io"
+        intake_worker_count    = 3
+        aggregate_worker_count = 3
       }
       us-ma = {
-        intake_worker_count                    = 3
-        aggregate_worker_count                 = 3
-        peer_share_processor_manifest_base_url = "en-analytics.cancer.gov"
-        portal_server_manifest_base_url        = "manifest.enpa-pha.io"
+        intake_worker_count    = 3
+        aggregate_worker_count = 3
       }
       us-nm = {
-        intake_worker_count                    = 3
-        aggregate_worker_count                 = 3
-        peer_share_processor_manifest_base_url = "en-analytics.cancer.gov"
-        portal_server_manifest_base_url        = "manifest.enpa-pha.io"
+        intake_worker_count    = 3
+        aggregate_worker_count = 3
       }
       us-hi = {
-        intake_worker_count                    = 3
-        aggregate_worker_count                 = 3
-        peer_share_processor_manifest_base_url = "en-analytics.cancer.gov"
-        portal_server_manifest_base_url        = "manifest.enpa-pha.io"
+        intake_worker_count    = 3
+        aggregate_worker_count = 3
       }
       us-co = {
-        intake_worker_count                    = 3
-        aggregate_worker_count                 = 3
-        peer_share_processor_manifest_base_url = "en-analytics.cancer.gov"
-        portal_server_manifest_base_url        = "manifest.enpa-pha.io"
+        intake_worker_count    = 3
+        aggregate_worker_count = 3
       }
       us-dc = {
-        intake_worker_count                    = 3
-        aggregate_worker_count                 = 3
-        peer_share_processor_manifest_base_url = "en-analytics.cancer.gov"
-        portal_server_manifest_base_url        = "manifest.enpa-pha.io"
+        intake_worker_count    = 3
+        aggregate_worker_count = 3
       }
       us-la = {
-        intake_worker_count                    = 3
-        aggregate_worker_count                 = 3
-        peer_share_processor_manifest_base_url = "en-analytics.cancer.gov"
-        portal_server_manifest_base_url        = "manifest.enpa-pha.io"
+        intake_worker_count    = 3
+        aggregate_worker_count = 3
       }
     }
   }
@@ -210,3 +158,6 @@ facilitator_version                       = "0.6.13"
 pushgateway                               = "prometheus-pushgateway.monitoring:9091"
 prometheus_server_persistent_disk_size_gb = 1000
 victorops_routing_key                     = "prio-prod-us"
+
+default_peer_share_processor_manifest_base_url = "en-analytics.cancer.gov"
+default_portal_server_manifest_base_url        = "manifest.enpa-pha.io"
