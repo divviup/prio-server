@@ -45,9 +45,17 @@ variable "ingestors" {
       aggregate_worker_count                 = number
       peer_share_processor_manifest_base_url = string
       portal_server_manifest_base_url        = string
+      aggregation_period                     = optional(string)
+      aggregation_grace_period               = optional(string)
     }))
   }))
-  description = "Map of ingestor names to per-ingestor configuration."
+  description = <<DESCRIPTION
+Map of ingestor names to per-ingestor configuration.
+aggregation_period and aggregation_grace_period values are optional and override
+default_aggregation_period and default_aggregation_grace_period, respectively,
+for the locality. The values should be strings parseable by Go's
+time.ParseDuration.
+DESCRIPTION
 }
 
 variable "manifest_domain" {
@@ -103,21 +111,23 @@ for. The value should be a string parseable by Go's time.ParseDuration.
 DESCRIPTION
 }
 
-variable "aggregation_period" {
+variable "default_aggregation_period" {
   type        = string
   default     = "3h"
   description = <<DESCRIPTION
-Aggregation period used by workflow manager. The value should be a string
-parseable by Go's time.ParseDuration.
+Aggregation period used by workflow manager if none is provided by the locality
+configuration. The value should be a string parseable by Go's
+time.ParseDuration.
 DESCRIPTION
 }
 
-variable "aggregation_grace_period" {
+variable "default_aggregation_grace_period" {
   type        = string
   default     = "1h"
   description = <<DESCRIPTION
-Aggregation grace period used by workflow manager. The value should be a string
-parseable by Go's time.ParseDuration.
+Aggregation grace period used by workflow manager if none is provided by the locality
+configuration. The value should be a string parseable by Go's
+time.ParseDuration.
 DESCRIPTION
 }
 
@@ -202,6 +212,9 @@ terraform {
   backend "gcs" {}
 
   required_version = ">= 0.14.4"
+
+  # https://www.terraform.io/docs/language/expressions/type-constraints.html#experimental-optional-object-type-attributes
+  experiments = [module_variable_optional_attrs]
 
   required_providers {
     aws = {
@@ -392,6 +405,14 @@ locals {
       aggregate_worker_count                  = var.ingestors[pair[1]].localities[pair[0]].aggregate_worker_count
       peer_share_processor_manifest_base_url  = var.ingestors[pair[1]].localities[pair[0]].peer_share_processor_manifest_base_url
       portal_server_manifest_base_url         = var.ingestors[pair[1]].localities[pair[0]].portal_server_manifest_base_url
+      aggregation_period = coalesce(
+        var.ingestors[pair[1]].localities[pair[0]].aggregation_period,
+        var.default_aggregation_period
+      )
+      aggregation_grace_period = coalesce(
+        var.ingestors[pair[1]].localities[pair[0]].aggregation_grace_period,
+        var.default_aggregation_grace_period
+      )
     }
   }
   # Are we in a paired env deploy that uses a test ingestor?
@@ -482,8 +503,8 @@ module "data_share_processors" {
   own_manifest_base_url                          = local.manifest.base_url
   is_first                                       = var.is_first
   intake_max_age                                 = var.intake_max_age
-  aggregation_period                             = var.aggregation_period
-  aggregation_grace_period                       = var.aggregation_grace_period
+  aggregation_period                             = each.value.aggregation_period
+  aggregation_grace_period                       = each.value.aggregation_grace_period
   kms_keyring                                    = var.use_aws ? "" : module.gke[0].kms_keyring
   pushgateway                                    = var.pushgateway
   workflow_manager_image                         = var.workflow_manager_image
@@ -628,7 +649,7 @@ module "monitoring" {
     project = var.gcp_project
   }
   victorops_routing_key = var.victorops_routing_key
-  aggregation_period    = var.aggregation_period
+  aggregation_period    = var.default_aggregation_period
   eks_oidc_provider     = var.use_aws ? module.eks[0].oidc_provider : { url = "", arn = "" }
 
   prometheus_server_persistent_disk_size_gb = var.prometheus_server_persistent_disk_size_gb

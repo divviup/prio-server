@@ -19,6 +19,8 @@ ingestors = {
         aggregate_worker_count                 = 1
         peer_share_processor_manifest_base_url = "test-en-analytics.cancer.gov"
         portal_server_manifest_base_url        = "manifest.int.enpa-pha.io"
+        aggregation_period                     = "30m"
+        aggregation_grace_period               = "30m"
       }
       us-ct = {
         intake_worker_count                    = 8
@@ -201,8 +203,8 @@ cluster_settings = {
 }
 is_first                                  = false
 use_aws                                   = false
-aggregation_period                        = "8h"
-aggregation_grace_period                  = "4h"
+default_aggregation_period                = "8h"
+default_aggregation_grace_period          = "4h"
 workflow_manager_version                  = "0.6.13"
 facilitator_version                       = "0.6.13"
 pushgateway                               = "prometheus-pushgateway.monitoring:9091"

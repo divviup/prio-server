@@ -74,4 +74,5 @@ workflow_manager_version = "0.6.16"
 facilitator_version      = "0.6.16"
 pushgateway              = "prometheus-pushgateway.monitoring:9091"
 victorops_routing_key    = "prio-staging"
-aggregation_period       = "30m"
+
+default_aggregation_period = "30m"

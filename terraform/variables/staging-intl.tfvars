@@ -41,5 +41,6 @@ pure_gcp                 = true
 facilitator_version      = "0.6.15"
 workflow_manager_version = "0.6.15"
 pushgateway              = "prometheus-pushgateway.monitoring:9091"
-aggregation_period       = "30m"
-aggregation_grace_period = "10m"
+
+default_aggregation_period       = "30m"
+default_aggregation_grace_period = "10m"
