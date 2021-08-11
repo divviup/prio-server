@@ -54,6 +54,18 @@ prep: ## Prepare a new workspace (environment) if needed, configure the tfstate 
 		-backend=true \
 		-backend-config="bucket=$(STORAGE_BUCKET)"
 
+.PHONY: validate
+validate: prep ## Show what terraform believes about the validity of the defined resources
+	@terraform validate
+
+.PHONY: format
+format: prep ## Rewrites all Terraform configuration files to a canonical format.
+	@terraform fmt -recursive
+
+.PHONY: providers
+providers: prep ## Review provider information in terraform state
+	@terraform providers
+
 .PHONY: plan
 plan: prep ## Show what terraform thinks it will do
 	@terraform plan \
