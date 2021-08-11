@@ -9,10 +9,8 @@ ingestors = {
     manifest_base_url = "storage.googleapis.com/prio-manifests"
     localities = {
       na-na = {
-        intake_worker_count                    = 1
-        aggregate_worker_count                 = 1
-        peer_share_processor_manifest_base_url = "storage.googleapis.com/prio-staging-server-manifests"
-        portal_server_manifest_base_url        = "isrg-prio-staging-intl-manifest.s3.us-west-2.amazonaws.com/portal-server"
+        intake_worker_count    = 1
+        aggregate_worker_count = 1
       }
     }
   }
@@ -20,10 +18,8 @@ ingestors = {
     manifest_base_url = "exposure-notification.apple.com/manifest"
     localities = {
       na-na = {
-        intake_worker_count                    = 1
-        aggregate_worker_count                 = 1
-        peer_share_processor_manifest_base_url = "storage.googleapis.com/prio-staging-server-manifests"
-        portal_server_manifest_base_url        = "isrg-prio-staging-intl-manifest.s3.us-west-2.amazonaws.com/portal-server"
+        intake_worker_count    = 1
+        aggregate_worker_count = 1
       }
     }
   }
@@ -41,5 +37,9 @@ pure_gcp                 = true
 facilitator_version      = "0.6.15"
 workflow_manager_version = "0.6.15"
 pushgateway              = "prometheus-pushgateway.monitoring:9091"
-aggregation_period       = "30m"
-aggregation_grace_period = "10m"
+
+default_aggregation_period       = "30m"
+default_aggregation_grace_period = "10m"
+
+default_peer_share_processor_manifest_base_url = "storage.googleapis.com/prio-staging-server-manifests"
+default_portal_server_manifest_base_url        = "isrg-prio-staging-intl-manifest.s3.us-west-2.amazonaws.com/portal-server"
