@@ -34,12 +34,12 @@ cluster_settings = {
 is_first                 = false
 use_aws                  = true
 pure_gcp                 = true
-facilitator_version      = "0.6.15"
-workflow_manager_version = "0.6.15"
+facilitator_version      = "0.6.16"
+workflow_manager_version = "0.6.16"
 pushgateway              = "prometheus-pushgateway.monitoring:9091"
 
 default_aggregation_period       = "30m"
 default_aggregation_grace_period = "10m"
 
 default_peer_share_processor_manifest_base_url = "storage.googleapis.com/prio-staging-server-manifests"
-default_portal_server_manifest_base_url        = "isrg-prio-staging-intl-manifest.s3.us-west-2.amazonaws.com/portal-server"
+default_portal_server_manifest_base_url        = "manifest.int.enpa-pha.io"
