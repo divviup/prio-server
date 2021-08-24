@@ -41,7 +41,7 @@ groups:
         {{ $labels.kubernetes_name }} in environment ${environment} is failing
         more than 95% of the time in the last 8 hours"
   - alert: intake_task_queue_growth
-    expr: min_over_time(stackdriver_pubsub_subscription_pubsub_googleapis_com_subscription_num_undelivered_messages{subscription_id!~".*-dead-letter",subscription_id=~".*-intake"}[15m]) > 0
+    expr: min_over_time(stackdriver_pubsub_subscription_pubsub_googleapis_com_subscription_num_undelivered_messages{subscription_id!~".*-dead-letter",subscription_id=~".*-intake"}[30m]) > 0
     for: 3h
     labels:
       severity: page
@@ -51,7 +51,7 @@ groups:
       description: "PubSub subscription {{ $labels.subscription_id }} in
       environment ${environment} has had undelivered messages for 3 hours"
   - alert: aggregate_task_queue_growth
-    expr: min_over_time(stackdriver_pubsub_subscription_pubsub_googleapis_com_subscription_num_undelivered_messages{subscription_id!~".*-dead-letter",subscription_id=~".*-aggregate"}[15m]) > 0
+    expr: min_over_time(stackdriver_pubsub_subscription_pubsub_googleapis_com_subscription_num_undelivered_messages{subscription_id!~".*-dead-letter",subscription_id=~".*-aggregate"}[30m]) > 0
     for: 10h
     labels:
       severity: page
@@ -71,7 +71,7 @@ groups:
         PubSub subscription {{ $labels.subscription_id }} in environment
         ${environment}."
   - alert: intake_task_queue_growth_sqs
-    expr: min_over_time(aws_sqs_approximate_number_of_messages_visible_average{queue_name!~"${environment}-.*-dead-letter",queue_name=~"${environment}-.*-intake"}[15m] offset 20m) > 0
+    expr: min_over_time(aws_sqs_approximate_number_of_messages_visible_average{queue_name!~"${environment}-.*-dead-letter",queue_name=~"${environment}-.*-intake"}[30m] offset 20m) > 0
     for: 3h
     labels:
       severity: page
@@ -81,7 +81,7 @@ groups:
       description: "SQS queue {{ $labels.queue_name }} in environment
         ${environment} has had undelivered messages for 3 hours"
   - alert: aggregate_task_queue_growth_sqs
-    expr: min_over_time(aws_sqs_approximate_number_of_messages_visible_average{queue_name!~"${environment}-.*-dead-letter",queue_name=~"${environment}-.*-aggregate"}[15m] offset 20m) > 0
+    expr: min_over_time(aws_sqs_approximate_number_of_messages_visible_average{queue_name!~"${environment}-.*-dead-letter",queue_name=~"${environment}-.*-aggregate"}[30m] offset 20m) > 0
     for: 10h
     labels:
       severity: page
