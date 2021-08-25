@@ -61,7 +61,7 @@ groups:
       description: "PubSub subscription {{ $labels.subscription_id }} in
       environment ${environment} has had undelivered messages for 10 hours"
   - alert: dead_letter_queue
-    expr: min_over_time(stackdriver_pubsub_subscription_pubsub_googleapis_com_subscription_num_undelivered_messages{subscription_id=~".*-dead-letter"}[5m]) > 0
+    expr: min_over_time(stackdriver_pubsub_subscription_pubsub_googleapis_com_subscription_num_undelivered_messages{subscription_id=~".*-dead-letter"}[30m]) > 0
     for: 5m
     labels:
       severity: page
@@ -91,7 +91,7 @@ groups:
       description: "SQS queue {{ $labels.queue_name }} in environment
         ${environment} has had undelivered messages for 10 hours"
   - alert: dead_letter_queue_sqs
-    expr: min_over_time(aws_sqs_approximate_number_of_messages_visible_average{queue_name=~"${environment}-.*-dead-letter"}[5m] offset 20m) > 0
+    expr: min_over_time(aws_sqs_approximate_number_of_messages_visible_average{queue_name=~"${environment}-.*-dead-letter"}[30m] offset 20m) > 0
     for: 5m
     labels:
       severity: page
