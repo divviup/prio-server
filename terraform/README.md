@@ -58,6 +58,8 @@ This will deploy just enough of an environment to permit peers to begin deployin
 
 Once bootstrapped, subsequent deployments should use `ENV=your-new-environment make apply`. Multiple environments may be deployed to the same GCP region and project. After running successfully, the `apply` target will instruct you to run `deploy-tool` in order to generate secrets and post specific manifests. `deploy-tool` must be re-run when deploying new localities into an environment to create their secrets and manifests.
 
+US ENPA locality deployment depends on a discoverable manifest for that locality. This typically means that a partner entity needs to deploy their corresponding infrastructure first. When deploying a new locality, the absence of a required manifest will cause a 404 and a failure in the terraform plan.
+
 ## Paired test environments
 
 We have support for creating two paired test environments which can exchange validation shares, along with a convincing simulation of ingestion servers and a portal server. To do this, you will need to create two `.tfvars` files, and on top of the usual variables, each must contain a variable like:
