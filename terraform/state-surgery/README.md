@@ -101,6 +101,17 @@ Finally, check `terraform plan` output to make sure it is as expected.
 
     ENV=<env> TF_VAR_aws_profile=<profile> make plan
 
+If terraform emits a message about minor deviations in non-critical pieces of
+the state, like:
+
+   `~ resource_version = "156735235" -> "156738850"`
+
+and suggests providing the `-refresh-only` flag to `plan` and `apply`, then
+utilize the `plan-refresh` and `apply-refresh` `make` tarets to update the
+remote state.
+
+    ENV=<env> TF_VAR_aws_profile=<profile> make apply-refresh
+
 And now we can work with the doctored state as normal, using the `plan` and
 `apply` `make` targets.
 

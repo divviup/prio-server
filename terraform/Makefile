@@ -74,6 +74,14 @@ plan: prep ## Show what terraform thinks it will do
 		-refresh=true \
 		-var-file="$(VARS)"
 
+.PHONY: plan-refresh
+plan-refresh: prep ## Show what terraform thinks it will do, as a refresh-only operation against tfstate
+	@terraform plan \
+		-lock=true \
+		-input=false \
+		-refresh-only \
+		-var-file="$(VARS)"
+
 .PHONY: plan-target
 plan-target: prep ## Shows what a plan looks like for applying a specific resource
 	@echo "$(YELLOW)$(BOLD)[INFO]   $(RESET)"; echo "Example to type for the following question: module.gke.google_container_cluster.cluster"
@@ -120,6 +128,14 @@ apply-bootstrap: prep ## Have terraform bring up the minimal resources needed to
 		-target=module.gke \
 		-target=module.eks
 	echo "If that succeeded, run 'terraform output --json | (cd ../deploy-tool/ ; go run main.go )'"
+
+.PHONY: apply-refresh
+apply-refresh: prep ## Have terraform do the things as a refresh-only operation against tfstate. This may or may not cost money.
+	@terraform apply \
+		-lock=true \
+		-input=false \
+		-refresh-only \
+		-var-file="$(VARS)"
 
 .PHONY: destroy-bootstrap
 destroy-bootstrap: prep ## Have terraform destroy the resources brought up by apply-bootstrap
