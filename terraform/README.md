@@ -48,13 +48,17 @@ If you're having problems, check `gcloud config list` and `kubectl config curren
 
 To add a data share processor to support a new locality, add that locality's name to the `localities` variable in the relevant `variables/<environment>.tfvars` file.
 
-To bring up a whole new cluster, drop a `your-new-environment.tfvars` file in `variables`, fill in the required variables and then bootstrap it with:
+If you are bringing up a whole new cluster, the first thing you need to do is identify which GCP project and AWS account you want to deploy it into. Multiple clusters can co-exist in a single GCP project or AWS account, but to limit the blast radius of incidents, it's a good idea to compartmentalize deployments.
 
-    ENV=your-new-environment make apply-bootstrap
+Once you have identified (or created) the GCP project you will use, make a note of its unique project ID (not necessarily the same as its name) as you will need it for Terraform variables later. Once you have identified (or created) the AWS account, make sure you have an active configuration for it as discussed in [Amazon Web Services credentials](#amazon-web-services-credentials).
+
+Then, drop a `your-new-environment.tfvars` file in `variables`, fill in the required variables and then bootstrap it with:
+
+    ENV=your-new-environment TF_VAR_aws_profile=your-aws-profile make apply-bootstrap
 
 This will deploy just enough of an environment to permit peers to begin deploying resources. Once your environment is bootstrapped, and once all the other servers you intend to exchange data with have bootstrapped, finish the deploy with
 
-    ENV=your-new-environment make apply
+    ENV=your-new-environment TF_VAR_aws_profile=your-aws-profile make apply
 
 Once bootstrapped, subsequent deployments should use `ENV=your-new-environment make apply`. Multiple environments may be deployed to the same GCP region and project. After running successfully, the `apply` target will instruct you to run `deploy-tool` in order to generate secrets and post specific manifests. `deploy-tool` must be re-run when deploying new localities into an environment to create their secrets and manifests.
 
