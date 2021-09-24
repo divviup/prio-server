@@ -406,69 +406,139 @@ mod tests {
     use rusoto_s3::CreateMultipartUploadError;
     use std::io::Read;
 
-    // Rusoto provides us the ability to create mock clients and play canned
-    // responses to API requests. Besides that, we want to verify that we get
-    // the expected sequence of API requests, for instance to verify that we
-    // call AbortMultipartUpload if an UploadPart call fails. The mock client
-    // will crash if it runs out of canned responses to give the client, which
-    // will catch excess API calls. To make sure we issue the correct API calls,
-    // we use with_request_checker to examine the outgoing requests. We only get
-    // to examine a rusoto::signature::SignedRequest, which does not contain an
-    // explicit indication of which API call the HTTP request represents. So we
-    // have the `is_*_request` functions below, which compare HTTP method and
-    // URL parameters against the Amazon API specification to figure out what
-    // API call we are looking at.
+    // The testing strategy is to wire Rusoto to talk to a Mockito-managed HTTP
+    // endpoint. Mockito's standard mock/matching functionality is used to
+    // play canned API responses to the expected requests, which allows e.g.
+    // checking that we call AbortMultipartUpload if an UploadPart call fails.
+    // The `mock_*_request` functions below are used to create a mock which
+    // matches the expected HTTP method & URL parameters against the Amazon API
+    // specification to figure out what API call we are looking at. (Note that
+    // these functions do not call `Mock::create`, allowing further
+    // modification of the mock by the caller; but the caller is also
+    // responsible for eventually calling `Mock::create`.)
 
     const TEST_BUCKET: &str = "fake-bucket";
     const TEST_KEY: &str = "fake-key";
+    const TEST_UPLOAD_ID: &str = "fake-upload-id";
+    const TEST_ETAG: &str = "fake-etag-1";
+    const TEST_ETAG_2: &str = "fake-etag-2";
     const TEST_REGION: &str = "fake-region";
 
-    fn has_header(header_name: &str) -> Matcher {
-        let regex_text = format!("(^|&){}=", regex::escape(header_name));
+    // has_query_parameter returns a Matcher which matches if a query string
+    // includes the given key (with any value).
+    fn has_query_parameter(param: &str) -> Matcher {
+        let regex_text = format!("(^|&){}(=|&|$)", regex::escape(param));
         Matcher::Regex(regex_text)
     }
 
-    fn mock_create_multipart_upload_request() -> Mock {
+    fn mock_create_multipart_upload_request(bucket: &str, key: &str, upload_id: &str) -> Mock {
         // https://docs.aws.amazon.com/AmazonS3/latest/API/API_CreateMultipartUpload.html
-        mock("POST", Matcher::Any).match_query(has_header("uploads"))
+        let path = format!("/{}/{}", bucket, key);
+        let response_body = format!(
+            r#"<?xml version="1.0" encoding="UTF-8"?>
+<InitiateMultipartUploadResult>
+   <Bucket>{}</Bucket>
+   <Key>{}</Key>
+   <UploadId>{}</UploadId>
+</InitiateMultipartUploadResult>"#,
+            bucket, key, upload_id
+        );
+        mock("POST", Matcher::Exact(path))
+            .match_query(has_query_parameter("uploads"))
+            .with_body(response_body)
     }
 
-    fn mock_upload_part_request() -> Mock {
+    // Unfortunately, headers can't be removed from mocks, so we need to provide mocks with a
+    // minimal number of headers.
+    fn mock_upload_part_request_without_etag(
+        bucket: &str,
+        key: &str,
+        upload_id: &str,
+        part_number: u64,
+    ) -> Mock {
         // https://docs.aws.amazon.com/AmazonS3/latest/API/API_UploadPart.html
-        mock("PUT", Matcher::Any).match_query(Matcher::AllOf(vec![
-            has_header("partNumber"),
-            has_header("uploadId"),
+        let path = format!("/{}/{}", bucket, key);
+        mock("PUT", Matcher::Exact(path)).match_query(Matcher::AllOf(vec![
+            Matcher::UrlEncoded("partNumber".to_string(), part_number.to_string()),
+            Matcher::UrlEncoded("uploadId".to_string(), upload_id.to_string()),
         ]))
     }
 
-    fn mock_abort_multipart_upload_request() -> Mock {
+    fn mock_upload_part_request(
+        bucket: &str,
+        key: &str,
+        upload_id: &str,
+        part_number: u64,
+        etag: &str,
+    ) -> Mock {
+        // https://docs.aws.amazon.com/AmazonS3/latest/API/API_UploadPart.html
+        mock_upload_part_request_without_etag(bucket, key, upload_id, part_number)
+            .with_header("ETag", etag)
+    }
+
+    fn mock_abort_multipart_upload_request(bucket: &str, key: &str, upload_id: &str) -> Mock {
         // https://docs.aws.amazon.com/AmazonS3/latest/API/API_AbortMultipartUpload.html
-        mock("DELETE", Matcher::Any).match_query(has_header("uploadId"))
+        let path = format!("/{}/{}", bucket, key);
+        mock("DELETE", Matcher::Exact(path))
+            .match_query(Matcher::UrlEncoded(
+                "uploadId".to_string(),
+                upload_id.to_string(),
+            ))
+            .with_status(204)
     }
 
-    fn mock_complete_multipart_upload_request() -> Mock {
+    fn mock_complete_multipart_upload_request(
+        bucket: &str,
+        key: &str,
+        upload_id: &str,
+        part_etags: Vec<&str>,
+    ) -> Mock {
         // https://docs.aws.amazon.com/AmazonS3/latest/API/API_CompleteMultipartUpload.html
-        mock("POST", Matcher::Any).match_query(has_header("uploadId"))
+        let path = format!("/{}/{}", bucket, key);
+        let response_body = format!(
+            r#"<?xml version="1.0" encoding="UTF-8"?>
+<CompleteMultipartUploadResult>
+   <Location>fake-final-location</Location>
+   <Bucket>{}</Bucket>
+   <Key>{}</Key>
+   <ETag>fake-final-etag</ETag>
+</CompleteMultipartUploadResult>"#,
+            bucket, key
+        );
+        let body_matchers: Vec<Matcher> = part_etags
+            .into_iter()
+            .map(|etag| Matcher::Regex(regex::escape(etag)))
+            .collect();
+        mock("POST", Matcher::Exact(path))
+            .match_query(Matcher::UrlEncoded(
+                "uploadId".to_string(),
+                upload_id.to_string(),
+            ))
+            .match_body(Matcher::AllOf(body_matchers))
+            .with_body(response_body)
     }
 
-    fn mock_get_object_request() -> Mock {
-        mock("GET", "/fake-bucket/fake-key").match_query(Matcher::Missing)
+    fn mock_get_object_request(bucket: &str, key: &str) -> Mock {
+        let path = format!("/{}/{}", bucket, key);
+        mock("GET", Matcher::Exact(path)).match_query(Matcher::Missing)
     }
 
     #[test]
     fn multipart_upload_create_fails() {
         let logger = setup_test_logging();
 
-        let mocked_upload = mock_create_multipart_upload_request()
-            .with_status(401)
-            .create();
+        let mocked_upload =
+            mock_create_multipart_upload_request(TEST_BUCKET, TEST_KEY, TEST_UPLOAD_ID)
+                .with_status(401)
+                .with_body("")
+                .create();
 
         let err = MultipartUploadWriter::new(
             String::from(TEST_BUCKET),
             String::from(TEST_KEY),
             50,
             S3Client::new_with(
-                HttpClient::new().expect("Could not create HTTP client"),
+                HttpClient::new().unwrap(),
                 aws_credentials::Provider::new_mock(),
                 Region::Custom {
                     name: TEST_REGION.into(),
@@ -491,15 +561,16 @@ mod tests {
     fn multipart_upload_create_no_upload_id() {
         let logger = setup_test_logging();
 
-        let mocked_upload = mock_create_multipart_upload_request()
-            .with_body(
-                r#"<?xml version="1.0" encoding="UTF-8"?>
+        let mocked_upload =
+            mock_create_multipart_upload_request(TEST_BUCKET, TEST_KEY, TEST_UPLOAD_ID)
+                .with_body(
+                    r#"<?xml version="1.0" encoding="UTF-8"?>
 <InitiateMultipartUploadResult>
    <Bucket>fake-bucket</Bucket>
    <Key>fake-key</Key>
 </InitiateMultipartUploadResult>"#,
-            )
-            .create();
+                )
+                .create();
 
         // Response body format from
         // https://docs.aws.amazon.com/AmazonS3/latest/API/API_Operations_Amazon_Simple_Storage_Service.html
@@ -508,7 +579,7 @@ mod tests {
             String::from(TEST_KEY),
             50,
             S3Client::new_with(
-                HttpClient::new().expect("Could not create HTTP client"),
+                HttpClient::new().unwrap(),
                 aws_credentials::Provider::new_mock(),
                 Region::Custom {
                     name: TEST_REGION.into(),
@@ -531,22 +602,19 @@ mod tests {
 
         // Response body format from
         // https://docs.aws.amazon.com/AmazonS3/latest/API/API_Operations_Amazon_Simple_Storage_Service.html
-        let mocks = vec![
-            mock_create_multipart_upload_request().with_body(
-                r#"<?xml version="1.0" encoding="UTF-8"?>
-<InitiateMultipartUploadResult>
-   <Bucket>fake-bucket</Bucket>
-   <Key>fake-key</Key>
-   <UploadId>upload-id</UploadId>
-</InitiateMultipartUploadResult>"#,
-            ),
-            mock_upload_part_request()
-                .with_header("ETag", "fake-etag")
-                .create(),
+        let mocks: Vec<Mock> = vec![
+            mock_create_multipart_upload_request(TEST_BUCKET, TEST_KEY, TEST_UPLOAD_ID),
+            mock_upload_part_request(TEST_BUCKET, TEST_KEY, TEST_UPLOAD_ID, 1, TEST_ETAG),
             // HTTP 200 response to CompleteMultipartUpload that contains an
             // error. Should cause us to retry.
             // https://docs.aws.amazon.com/AmazonS3/latest/API/API_CompleteMultipartUpload.html#API_CompleteMultipartUpload_Examples
-            mock_complete_multipart_upload_request().with_body(
+            mock_complete_multipart_upload_request(
+                TEST_BUCKET,
+                TEST_KEY,
+                TEST_UPLOAD_ID,
+                vec![TEST_ETAG],
+            )
+            .with_body(
                 r#"<?xml version="1.0" encoding="UTF-8"?>
 <Error>
     <Code>InternalError</Code>
@@ -555,26 +623,23 @@ mod tests {
     <HostId>Uuag1LuByRx9e6j5Onimru9pO4ZVKnJ2Qz7/C1NPcfTWAtRPfTaOFg==</HostId>
 </Error>"#,
             ),
-            mock_complete_multipart_upload_request().with_body(
-                r#"<?xml version="1.0" encoding="UTF-8"?>
-<CompleteMultipartUploadResult>
-   <Location>string</Location>
-   <Bucket>fake-bucket</Bucket>
-   <Key>fake-key</Key>
-   <ETag>fake-etag</ETag>
-</CompleteMultipartUploadResult>"#,
+            mock_complete_multipart_upload_request(
+                TEST_BUCKET,
+                TEST_KEY,
+                TEST_UPLOAD_ID,
+                vec![TEST_ETAG],
             ),
         ]
         .into_iter()
         .map(Mock::create)
-        .collect::<Vec<Mock>>();
+        .collect();
 
         let mut writer = MultipartUploadWriter::new(
             String::from(TEST_BUCKET),
             String::from(TEST_KEY),
             50,
             S3Client::new_with(
-                HttpClient::new().expect("Could not create HTTP client"),
+                HttpClient::new().unwrap(),
                 aws_credentials::Provider::new_mock(),
                 Region::Custom {
                     name: TEST_REGION.into(),
@@ -599,56 +664,47 @@ mod tests {
 
         // Response body format from
         // https://docs.aws.amazon.com/AmazonS3/latest/API/API_Operations_Amazon_Simple_Storage_Service.html
-        let mocks = vec![
-            mock_create_multipart_upload_request().with_body(
-                r#"<?xml version="1.0" encoding="UTF-8"?>
-<InitiateMultipartUploadResult>
-   <Bucket>fake-bucket</Bucket>
-   <Key>fake-key</Key>
-   <UploadId>upload-id</UploadId>
-</InitiateMultipartUploadResult>"#,
-            ),
+        let mocks: Vec<Mock> = vec![
+            mock_create_multipart_upload_request(TEST_BUCKET, TEST_KEY, TEST_UPLOAD_ID),
             // 500 status will cause a retry.
-            mock_upload_part_request().with_status(500),
+            mock_upload_part_request_without_etag(TEST_BUCKET, TEST_KEY, TEST_UPLOAD_ID, 1)
+                .with_status(500),
             // HTTP 401 will cause failure.
-            mock_upload_part_request().with_status(401),
+            mock_upload_part_request_without_etag(TEST_BUCKET, TEST_KEY, TEST_UPLOAD_ID, 1)
+                .with_status(401),
             // Expected because of previous UploadPart failure.
-            mock_abort_multipart_upload_request().with_status(204),
+            mock_abort_multipart_upload_request(TEST_BUCKET, TEST_KEY, TEST_UPLOAD_ID),
             // HTTP 200 but no ETag header will cause failure.
-            mock_upload_part_request(),
+            mock_upload_part_request_without_etag(TEST_BUCKET, TEST_KEY, TEST_UPLOAD_ID, 1),
             // Expected because of previous UploadPart failure.
-            mock_abort_multipart_upload_request().with_status(204),
+            mock_abort_multipart_upload_request(TEST_BUCKET, TEST_KEY, TEST_UPLOAD_ID),
             // Well-formed response to UploadPart.
-            mock_upload_part_request()
-                .with_header("ETag", "fake-etag")
-                .expect(2),
+            mock_upload_part_request(TEST_BUCKET, TEST_KEY, TEST_UPLOAD_ID, 1, TEST_ETAG),
+            mock_upload_part_request(TEST_BUCKET, TEST_KEY, TEST_UPLOAD_ID, 2, TEST_ETAG_2),
             // Well-formed response to CompleteMultipartUpload.
-            mock_complete_multipart_upload_request()
-                .with_body(
-                    r#"<?xml version="1.0" encoding="UTF-8"?>
-<CompleteMultipartUploadResult>
-   <Location>string</Location>
-   <Bucket>fake-bucket</Bucket>
-   <Key>fake-key</Key>
-   <ETag>fake-etag</ETag>
-</CompleteMultipartUploadResult>"#,
-                )
-                .expect(2),
+            mock_complete_multipart_upload_request(
+                TEST_BUCKET,
+                TEST_KEY,
+                TEST_UPLOAD_ID,
+                vec![TEST_ETAG, TEST_ETAG_2],
+            ),
+            // Well-formed response to CompleteMultipartUpload.
+            mock_complete_multipart_upload_request(TEST_BUCKET, TEST_KEY, TEST_UPLOAD_ID, vec![]),
             // Failure response to CompleteMultipartUpload.
-            mock_complete_multipart_upload_request()
+            mock_complete_multipart_upload_request(TEST_BUCKET, TEST_KEY, TEST_UPLOAD_ID, vec![])
                 .with_status(400)
                 .with_body("first 400"),
         ]
         .into_iter()
         .map(Mock::create)
-        .collect::<Vec<Mock>>();
+        .collect();
 
         let mut writer = MultipartUploadWriter::new(
             String::from(TEST_BUCKET),
             String::from(TEST_KEY),
             50,
             S3Client::new_with(
-                HttpClient::new().expect("Could not create HTTP client"),
+                HttpClient::new().unwrap(),
                 aws_credentials::Provider::new_mock(),
                 Region::Custom {
                     name: TEST_REGION.into(),
@@ -682,7 +738,7 @@ mod tests {
     }
 
     #[test]
-    fn roundtrip_s3_transport() {
+    fn roundtrip_s3_transport_failed_get_object() {
         let logger = setup_test_logging();
         let s3_path = S3Path {
             region: Region::UsWest2,
@@ -690,123 +746,125 @@ mod tests {
             key: "".into(),
         };
 
-        // Failed GetObject request.
-        {
-            let mocked_get_object = mock_get_object_request().with_status(404).create();
+        let mocked_get_object = mock_get_object_request(TEST_BUCKET, TEST_KEY)
+            .with_status(404)
+            .create();
 
-            let mut transport = S3Transport::new_with_client(
-                s3_path.clone(),
-                aws_credentials::Provider::new_mock(),
-                Box::new(
-                    |_: &Region, credentials_provider: aws_credentials::Provider| {
-                        Ok(S3Client::new_with(
-                            HttpClient::new().expect("Could not create HTTP client"),
-                            credentials_provider,
-                            Region::Custom {
-                                name: TEST_REGION.into(),
-                                endpoint: mockito::server_url(),
-                            },
-                        ))
-                    },
-                ),
-                &logger,
-            );
+        let mut transport = S3Transport::new_with_client(
+            s3_path,
+            aws_credentials::Provider::new_mock(),
+            Box::new(
+                |_: &Region, credentials_provider: aws_credentials::Provider| {
+                    Ok(S3Client::new_with(
+                        HttpClient::new().unwrap(),
+                        credentials_provider,
+                        Region::Custom {
+                            name: TEST_REGION.into(),
+                            endpoint: mockito::server_url(),
+                        },
+                    ))
+                },
+            ),
+            &logger,
+        );
 
-            let ret = transport.get(TEST_KEY, "trace-id");
-            assert!(ret.is_err(), "unexpected return value {:?}", ret.err());
+        let ret = transport.get(TEST_KEY, "trace-id");
+        assert!(ret.is_err(), "unexpected return value {:?}", ret.err());
 
-            mocked_get_object.assert();
-            mockito::reset();
-        }
+        mocked_get_object.assert();
+    }
 
-        // Successful GetObject request.
-        {
-            let mocked_get_object = mock_get_object_request().with_body("fake-content").create();
+    #[test]
+    fn roundtrip_s3_transport_successful_get_object() {
+        let logger = setup_test_logging();
+        let s3_path = S3Path {
+            region: Region::UsWest2,
+            bucket: TEST_BUCKET.into(),
+            key: "".into(),
+        };
 
-            let mut transport = S3Transport::new_with_client(
-                s3_path.clone(),
-                aws_credentials::Provider::new_mock(),
-                Box::new(
-                    |_: &Region, credentials_provider: aws_credentials::Provider| {
-                        Ok(S3Client::new_with(
-                            HttpClient::new().expect("Could not create HTTP client"),
-                            credentials_provider,
-                            Region::Custom {
-                                name: TEST_REGION.into(),
-                                endpoint: mockito::server_url(),
-                            },
-                        ))
-                    },
-                ),
-                &logger,
-            );
+        let mocked_get_object = mock_get_object_request(TEST_BUCKET, TEST_KEY)
+            .with_body("fake-content")
+            .create();
 
-            let mut reader = transport
-                .get(TEST_KEY, "trace-id")
-                .expect("unexpected error getting reader");
-            let mut content = Vec::new();
-            reader.read_to_end(&mut content).expect("failed to read");
-            assert_eq!(Vec::from("fake-content"), content);
+        let mut transport = S3Transport::new_with_client(
+            s3_path,
+            aws_credentials::Provider::new_mock(),
+            Box::new(
+                |_: &Region, credentials_provider: aws_credentials::Provider| {
+                    Ok(S3Client::new_with(
+                        HttpClient::new().unwrap(),
+                        credentials_provider,
+                        Region::Custom {
+                            name: TEST_REGION.into(),
+                            endpoint: mockito::server_url(),
+                        },
+                    ))
+                },
+            ),
+            &logger,
+        );
 
-            mocked_get_object.assert();
-            mockito::reset();
-        }
+        let mut reader = transport
+            .get(TEST_KEY, "trace-id")
+            .expect("unexpected error getting reader");
+        let mut content = Vec::new();
+        reader.read_to_end(&mut content).expect("failed to read");
+        assert_eq!(Vec::from("fake-content"), content);
 
-        // Response to CreateMultipartUpload.
-        {
-            let mocks = vec![
-                mock_create_multipart_upload_request().with_body(
-                    r#"<?xml version="1.0" encoding="UTF-8"?>
-<InitiateMultipartUploadResult>
-   <Bucket>fake-bucket</Bucket>
-   <Key>fake-key</Key>
-   <UploadId>upload-id</UploadId>
-</InitiateMultipartUploadResult>"#,
-                ),
-                mock_upload_part_request().with_header("ETag", "fake-etag"),
-                mock_complete_multipart_upload_request().with_body(
-                    r#"<?xml version="1.0" encoding="UTF-8"?>
-<CompleteMultipartUploadResult>
-   <Location>string</Location>
-   <Bucket>fake-bucket</Bucket>
-   <Key>fake-key</Key>
-   <ETag>fake-etag</ETag>
-</CompleteMultipartUploadResult>"#,
-                ),
-                // Expected because of cancel_upload call.
-                mock_abort_multipart_upload_request().with_status(204),
-            ]
-            .into_iter()
-            .map(Mock::create)
-            .collect::<Vec<Mock>>();
+        mocked_get_object.assert();
+    }
 
-            let mut transport = S3Transport::new_with_client(
-                s3_path,
-                aws_credentials::Provider::new_mock(),
-                Box::new(
-                    |_: &Region, credentials_provider: aws_credentials::Provider| {
-                        Ok(S3Client::new_with(
-                            HttpClient::new().expect("Could not create HTTP client"),
-                            credentials_provider,
-                            Region::Custom {
-                                name: TEST_REGION.into(),
-                                endpoint: mockito::server_url(),
-                            },
-                        ))
-                    },
-                ),
-                &logger,
-            );
+    #[test]
+    fn roundtrip_s3_transport_create_multipart_upload() {
+        let logger = setup_test_logging();
+        let s3_path = S3Path {
+            region: Region::UsWest2,
+            bucket: TEST_BUCKET.into(),
+            key: "".into(),
+        };
 
-            let mut writer = transport.put(TEST_KEY, "trace-id").unwrap();
-            writer.write_all(b"fake-content").unwrap();
-            writer.complete_upload().unwrap();
-            writer.cancel_upload().unwrap();
+        let mocks: Vec<Mock> = vec![
+            mock_create_multipart_upload_request(TEST_BUCKET, TEST_KEY, TEST_UPLOAD_ID),
+            mock_upload_part_request(TEST_BUCKET, TEST_KEY, TEST_UPLOAD_ID, 1, TEST_ETAG),
+            mock_complete_multipart_upload_request(
+                TEST_BUCKET,
+                TEST_KEY,
+                TEST_UPLOAD_ID,
+                vec![TEST_ETAG],
+            ),
+            // Expected because of cancel_upload call.
+            mock_abort_multipart_upload_request(TEST_BUCKET, TEST_KEY, TEST_UPLOAD_ID),
+        ]
+        .into_iter()
+        .map(Mock::create)
+        .collect();
 
-            for mock in &mocks {
-                mock.assert()
-            }
-            mockito::reset();
+        let mut transport = S3Transport::new_with_client(
+            s3_path,
+            aws_credentials::Provider::new_mock(),
+            Box::new(
+                |_: &Region, credentials_provider: aws_credentials::Provider| {
+                    Ok(S3Client::new_with(
+                        HttpClient::new().unwrap(),
+                        credentials_provider,
+                        Region::Custom {
+                            name: TEST_REGION.into(),
+                            endpoint: mockito::server_url(),
+                        },
+                    ))
+                },
+            ),
+            &logger,
+        );
+
+        let mut writer = transport.put(TEST_KEY, "trace-id").unwrap();
+        writer.write_all(b"fake-content").unwrap();
+        writer.complete_upload().unwrap();
+        writer.cancel_upload().unwrap();
+
+        for mock in &mocks {
+            mock.assert()
         }
     }
 }
