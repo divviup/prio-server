@@ -25,7 +25,7 @@ use std::{
 use uuid::Uuid;
 
 pub struct BatchAggregator<'a> {
-    trace_id: &'a str,
+    trace_id: &'a Uuid,
     is_first: bool,
     permit_malformed_batch: bool,
     aggregation_name: &'a str,
@@ -44,7 +44,7 @@ pub struct BatchAggregator<'a> {
 impl<'a> BatchAggregator<'a> {
     #[allow(clippy::too_many_arguments)] // Grandfathered in
     pub fn new(
-        trace_id: &'a str,
+        trace_id: &'a Uuid,
         instance_name: &str,
         aggregation_name: &'a str,
         aggregation_start: &'a NaiveDateTime,
@@ -58,7 +58,7 @@ impl<'a> BatchAggregator<'a> {
         parent_logger: &Logger,
     ) -> Result<BatchAggregator<'a>> {
         let logger = parent_logger.new(o!(
-            event::TRACE_ID => trace_id.to_owned(),
+            event::TRACE_ID => trace_id.to_string(),
             event::AGGREGATION_NAME => aggregation_name.to_owned(),
             event::INGESTION_PATH => ingestion_transport.transport.transport.path(),
             event::OWN_VALIDATION_PATH => own_validation_transport.transport.path(),

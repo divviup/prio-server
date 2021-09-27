@@ -25,6 +25,8 @@ use std::collections::{HashMap, HashSet};
 use tempfile::TempDir;
 use uuid::Uuid;
 
+const TRACE_ID: Uuid = Uuid::from_bytes([97; 16]);
+
 #[test]
 fn end_to_end() {
     end_to_end_test(None, None)
@@ -110,7 +112,7 @@ fn aggregation_including_invalid_batch() {
 
     for (batch_uuid, date) in &batch_uuids_and_dates {
         let reference_sum = sample_generator
-            .generate_ingestion_sample("trace-id", batch_uuid, date, 100)
+            .generate_ingestion_sample(&TRACE_ID, batch_uuid, date, 100)
             .unwrap();
 
         reference_sums.push(reference_sum);
@@ -207,7 +209,7 @@ fn aggregation_including_invalid_batch() {
         };
 
         let mut pha_batch_intaker = BatchIntaker::new(
-            "None",
+            &TRACE_ID,
             aggregation_name,
             uuid,
             &date,
@@ -221,7 +223,7 @@ fn aggregation_including_invalid_batch() {
         .unwrap();
 
         let mut facilitator_batch_intaker = BatchIntaker::new(
-            "None",
+            &TRACE_ID,
             aggregation_name,
             uuid,
             &date,
@@ -307,7 +309,7 @@ fn aggregation_including_invalid_batch() {
 
     // Perform the aggregation on PHA and facilitator
     let err = BatchAggregator::new(
-        "None",
+        &TRACE_ID,
         instance_name,
         aggregation_name,
         &start_date,
@@ -328,7 +330,7 @@ fn aggregation_including_invalid_batch() {
     assert!(err.to_string().contains("packet file digest in header"));
 
     let err = BatchAggregator::new(
-        "None",
+        &TRACE_ID,
         instance_name,
         aggregation_name,
         &start_date,
@@ -406,11 +408,11 @@ fn end_to_end_test(drop_nth_pha: Option<usize>, drop_nth_facilitator: Option<usi
     );
 
     let batch_1_reference_sum = sample_generator
-        .generate_ingestion_sample("trace-id", &batch_1_uuid, &date, first_batch_packet_count)
+        .generate_ingestion_sample(&TRACE_ID, &batch_1_uuid, &date, first_batch_packet_count)
         .unwrap();
 
     let batch_2_reference_sum = sample_generator
-        .generate_ingestion_sample("trace-id", &batch_2_uuid, &date, 14)
+        .generate_ingestion_sample(&TRACE_ID, &batch_2_uuid, &date, 14)
         .unwrap();
 
     let mut ingestor_pub_keys = HashMap::new();
@@ -470,7 +472,7 @@ fn end_to_end_test(drop_nth_pha: Option<usize>, drop_nth_facilitator: Option<usi
 
     let mut intake_callback_count = 0;
     let mut batch_intaker = BatchIntaker::new(
-        "None",
+        &TRACE_ID,
         &aggregation_name,
         &batch_1_uuid,
         &date,
@@ -493,7 +495,7 @@ fn end_to_end_test(drop_nth_pha: Option<usize>, drop_nth_facilitator: Option<usi
     );
 
     BatchIntaker::new(
-        "None",
+        &TRACE_ID,
         &aggregation_name,
         &batch_2_uuid,
         &date,
@@ -509,7 +511,7 @@ fn end_to_end_test(drop_nth_pha: Option<usize>, drop_nth_facilitator: Option<usi
     .unwrap();
 
     BatchIntaker::new(
-        "None",
+        &TRACE_ID,
         &aggregation_name,
         &batch_1_uuid,
         &date,
@@ -525,7 +527,7 @@ fn end_to_end_test(drop_nth_pha: Option<usize>, drop_nth_facilitator: Option<usi
     .unwrap();
 
     BatchIntaker::new(
-        "None",
+        &TRACE_ID,
         &aggregation_name,
         &batch_2_uuid,
         &date,
@@ -572,7 +574,7 @@ fn end_to_end_test(drop_nth_pha: Option<usize>, drop_nth_facilitator: Option<usi
 
     let mut aggregation_callback_count = 0;
     BatchAggregator::new(
-        "None",
+        &TRACE_ID,
         instance_name,
         &aggregation_name,
         &start_date,
@@ -600,7 +602,7 @@ fn end_to_end_test(drop_nth_pha: Option<usize>, drop_nth_facilitator: Option<usi
 
     let mut aggregation_callback_count = 0;
     BatchAggregator::new(
-        "None",
+        &TRACE_ID,
         instance_name,
         &aggregation_name,
         &start_date,
@@ -630,7 +632,7 @@ fn end_to_end_test(drop_nth_pha: Option<usize>, drop_nth_facilitator: Option<usi
             ),
             &mut *pha_aggregation_transport.transport,
             false,
-            "trace-id",
+            &TRACE_ID,
             &logger,
         );
     let pha_sum_part = pha_aggregation_batch_reader.header(&pha_pub_keys).unwrap();
@@ -651,7 +653,7 @@ fn end_to_end_test(drop_nth_pha: Option<usize>, drop_nth_facilitator: Option<usi
             ),
             &mut *facilitator_aggregation_transport.transport,
             false, // permissive
-            "trace-id",
+            &TRACE_ID,
             &logger,
         );
 
