@@ -27,6 +27,7 @@ use tokio::{
     io::{AsyncRead, AsyncReadExt},
     runtime::Runtime,
 };
+use uuid::Uuid;
 
 /// ClientProvider allows mocking out a client for testing.
 type ClientProvider = Box<dyn Fn(&Region, aws_credentials::Provider) -> Result<S3Client>>;
@@ -108,10 +109,10 @@ impl Transport for S3Transport {
         self.path.to_string()
     }
 
-    fn get(&mut self, key: &str, trace_id: &str) -> Result<Box<dyn Read>> {
+    fn get(&mut self, key: &str, trace_id: &Uuid) -> Result<Box<dyn Read>> {
         let logger = self.logger.new(o!(
             event::STORAGE_KEY => key.to_owned(),
-            event::TRACE_ID => trace_id.to_owned(),
+            event::TRACE_ID => trace_id.to_string(),
             event::ACTION => "get s3 object",
         ));
         info!(logger, "get");
@@ -132,10 +133,10 @@ impl Transport for S3Transport {
         Ok(Box::new(StreamingBodyReader::new(body, runtime)))
     }
 
-    fn put(&mut self, key: &str, trace_id: &str) -> Result<Box<dyn TransportWriter>> {
+    fn put(&mut self, key: &str, trace_id: &Uuid) -> Result<Box<dyn TransportWriter>> {
         let logger = self.logger.new(o!(
             event::STORAGE_KEY => key.to_owned(),
-            event::TRACE_ID => trace_id.to_owned(),
+            event::TRACE_ID => trace_id.to_string(),
         ));
         info!(logger, "put");
         let writer = MultipartUploadWriter::new(
@@ -399,7 +400,7 @@ impl TransportWriter for MultipartUploadWriter {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::logging::setup_test_logging;
+    use crate::{logging::setup_test_logging, test_utils::DEFAULT_TRACE_ID};
     use rusoto_core::{request::HttpDispatchError, signature::SignedRequest};
     use rusoto_mock::{MockRequestDispatcher, MultipleMockRequestDispatcher};
     use rusoto_s3::CreateMultipartUploadError;
@@ -759,7 +760,7 @@ mod tests {
             &logger,
         );
 
-        let ret = transport.get(TEST_KEY, "trace-id");
+        let ret = transport.get(TEST_KEY, &DEFAULT_TRACE_ID);
         assert!(ret.is_err(), "unexpected return value {:?}", ret.err());
 
         let mut transport = S3Transport::new_with_client(
@@ -781,7 +782,7 @@ mod tests {
         );
 
         let mut reader = transport
-            .get(TEST_KEY, "trace-id")
+            .get(TEST_KEY, &DEFAULT_TRACE_ID)
             .expect("unexpected error getting reader");
         let mut content = Vec::new();
         reader.read_to_end(&mut content).expect("failed to read");
@@ -835,7 +836,7 @@ mod tests {
             &logger,
         );
 
-        let mut writer = transport.put(TEST_KEY, "trace-id").unwrap();
+        let mut writer = transport.put(TEST_KEY, &DEFAULT_TRACE_ID).unwrap();
         writer.write_all(b"fake-content").unwrap();
         writer.complete_upload().unwrap();
         writer.cancel_upload().unwrap();

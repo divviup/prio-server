@@ -1,5 +1,6 @@
 use crate::transport::{Transport, TransportWriter};
 use anyhow::{Context, Result};
+use uuid::Uuid;
 
 use std::{
     boxed::Box,
@@ -34,14 +35,14 @@ impl Transport for LocalFileTransport {
         self.directory.to_string_lossy().to_string()
     }
 
-    fn get(&mut self, key: &str, _trace_id: &str) -> Result<Box<dyn Read>> {
+    fn get(&mut self, key: &str, _trace_id: &Uuid) -> Result<Box<dyn Read>> {
         let path = self.directory.join(LocalFileTransport::relative_path(key));
         let f =
             File::open(path.as_path()).with_context(|| format!("opening {}", path.display()))?;
         Ok(Box::new(f))
     }
 
-    fn put(&mut self, key: &str, _trace_id: &str) -> Result<Box<dyn TransportWriter>> {
+    fn put(&mut self, key: &str, _trace_id: &Uuid) -> Result<Box<dyn TransportWriter>> {
         let path = self.directory.join(LocalFileTransport::relative_path(key));
         if let Some(parent) = path.parent() {
             create_dir_all(parent)
@@ -68,6 +69,7 @@ impl TransportWriter for File {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::test_utils::DEFAULT_TRACE_ID;
 
     #[test]
     fn roundtrip_file_transport() {
@@ -76,12 +78,12 @@ mod tests {
         let content = vec![1, 2, 3, 4, 5, 6, 7, 8];
 
         {
-            let ret = file_transport.get("path2", "");
+            let ret = file_transport.get("path2", &DEFAULT_TRACE_ID);
             assert!(ret.is_err(), "unexpected return value {:?}", ret.err());
         }
 
         for path in &["path", "path3/with/separators"] {
-            let writer = file_transport.put(path, "");
+            let writer = file_transport.put(path, &DEFAULT_TRACE_ID);
             assert!(writer.is_ok(), "unexpected error {:?}", writer.err());
 
             writer
@@ -89,7 +91,7 @@ mod tests {
                 .write_all(&content)
                 .expect("failed to write");
 
-            let reader = file_transport.get(path, "");
+            let reader = file_transport.get(path, &DEFAULT_TRACE_ID);
             assert!(reader.is_ok(), "create reader failed: {:?}", reader.err());
 
             let mut content_again = Vec::new();

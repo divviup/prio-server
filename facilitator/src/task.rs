@@ -65,8 +65,7 @@ pub trait Task: Debug + Display + Sized + serde::de::DeserializeOwned + Clone {}
 #[serde(rename_all = "kebab-case")]
 pub struct IntakeBatchTask {
     /// The trace identifier for the intake
-    /// TODO: https://github.com/abetterinternet/prio-server/issues/452
-    pub trace_id: Option<Uuid>,
+    pub trace_id: Uuid,
     /// The identifier for the aggregation
     pub aggregation_id: String,
     /// The identifier of the batch, typically a UUID
@@ -80,13 +79,10 @@ impl Task for IntakeBatchTask {}
 
 impl Display for IntakeBatchTask {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        if let Some(id) = self.trace_id {
-            writeln!(f, "trace ID: {}", id)?;
-        }
         write!(
             f,
-            "aggregation ID: {}\nbatch ID: {}\ndate: {}",
-            self.aggregation_id, self.batch_id, self.date
+            "trace ID: {}\naggregation ID: {}\nbatch ID: {}\ndate: {}",
+            self.trace_id, self.aggregation_id, self.batch_id, self.date
         )
     }
 }
@@ -96,8 +92,7 @@ impl Display for IntakeBatchTask {
 #[serde(rename_all = "kebab-case")]
 pub struct AggregationTask {
     /// The trace identifier for the aggregation
-    /// TODO: https://github.com/abetterinternet/prio-server/issues/452
-    pub trace_id: Option<Uuid>,
+    pub trace_id: Uuid,
     /// The identifier for the aggregation
     pub aggregation_id: String,
     /// The start of the range of time covered by the aggregation in UTC, with
@@ -114,12 +109,10 @@ impl Task for AggregationTask {}
 
 impl Display for AggregationTask {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        if let Some(id) = self.trace_id {
-            writeln!(f, "trace ID: {}", id)?;
-        }
         write!(
             f,
-            "aggregation ID: {}\naggregation start: {}\naggregation end: {}\nnumber of batches: {}",
+            "trace ID: {}\naggregation ID: {}\naggregation start: {}\naggregation end: {}\nnumber of batches: {}",
+            self.trace_id,
             self.aggregation_id,
             self.aggregation_start,
             self.aggregation_end,

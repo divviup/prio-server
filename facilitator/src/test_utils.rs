@@ -4,6 +4,7 @@ use ring::signature::{
     EcdsaKeyPair, KeyPair, UnparsedPublicKey, ECDSA_P256_SHA256_ASN1,
     ECDSA_P256_SHA256_ASN1_SIGNING,
 };
+use uuid::Uuid;
 
 /// Default keys used in testing and for sample data generation. These are
 /// stored in base64 to make it convenient to copy/paste them into other tools
@@ -66,6 +67,9 @@ pub const DEFAULT_PACKET_ENCRYPTION_CERTIFICATE_SIGNING_REQUEST: &str =
 pub const DEFAULT_PACKET_ENCRYPTION_CERTIFICATE_SIGNING_REQUEST_PRIVATE_KEY: &str =
     "BCJj6p2SSjFdEVLeJYgp/6c49WBLPBtd8LxzcqkPB1Zr43O349vSuL6ucJBF0SukB\
     g+lDgGfS4gbETfXJ4i8MrHwu3/ts6VHR1/U9EIkHEFnEDZQ30r3NVASbEeJjd0/Ug==";
+
+// Default trace ID for tests, useful if no better trace ID is available.
+pub const DEFAULT_TRACE_ID: Uuid = Uuid::from_bytes([97; 16]);
 
 pub fn default_packet_encryption_certificate_signing_request(
 ) -> PacketEncryptionCertificateSigningRequest {

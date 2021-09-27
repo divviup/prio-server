@@ -11,6 +11,7 @@ use std::{
     fmt::Debug,
     io::{Read, Write},
 };
+use uuid::Uuid;
 
 pub use self::s3::S3Transport;
 pub use gcs::GcsTransport;
@@ -72,10 +73,10 @@ impl<T: TransportWriter + ?Sized> TransportWriter for Box<T> {
 pub trait Transport: Debug {
     /// Returns an std::io::Read instance from which the contents of the value
     /// of the provided key may be read.
-    fn get(&mut self, key: &str, trace_id: &str) -> Result<Box<dyn Read>>;
+    fn get(&mut self, key: &str, trace_id: &Uuid) -> Result<Box<dyn Read>>;
     /// Returns an std::io::Write instance into which the contents of the value
     /// may be written.
-    fn put(&mut self, key: &str, trace_id: &str) -> Result<Box<dyn TransportWriter>>;
+    fn put(&mut self, key: &str, trace_id: &Uuid) -> Result<Box<dyn TransportWriter>>;
 
     fn path(&self) -> String;
 }

@@ -39,7 +39,7 @@ pub struct BatchIntaker<'a> {
 impl<'a> BatchIntaker<'a> {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
-        trace_id: &'a str,
+        trace_id: &'a Uuid,
         aggregation_name: &str,
         batch_id: &Uuid,
         date: &NaiveDateTime,
@@ -51,7 +51,7 @@ impl<'a> BatchIntaker<'a> {
         parent_logger: &Logger,
     ) -> Result<BatchIntaker<'a>> {
         let logger = parent_logger.new(o!(
-            event::TRACE_ID => trace_id.to_owned(),
+            event::TRACE_ID => trace_id.to_string(),
             event::AGGREGATION_NAME => aggregation_name.to_owned(),
             event::BATCH_ID => batch_id.to_string(),
             event::BATCH_DATE => date.format(DATE_FORMAT).to_string(),
@@ -277,7 +277,7 @@ mod tests {
             default_ingestor_public_key, default_packet_encryption_certificate_signing_request,
             default_pha_signing_private_key,
             DEFAULT_PACKET_ENCRYPTION_CERTIFICATE_SIGNING_REQUEST_PRIVATE_KEY,
-            DEFAULT_PHA_ECIES_PRIVATE_KEY,
+            DEFAULT_PHA_ECIES_PRIVATE_KEY, DEFAULT_TRACE_ID,
         },
         transport::{LocalFileTransport, SignableTransport, VerifiableTransport},
     };
@@ -336,7 +336,7 @@ mod tests {
         );
 
         sample_generator
-            .generate_ingestion_sample("trace-id", &batch_uuid, &date, 10)
+            .generate_ingestion_sample(&DEFAULT_TRACE_ID, &batch_uuid, &date, 10)
             .unwrap();
 
         let mut ingestor_pub_keys = HashMap::new();
@@ -395,7 +395,7 @@ mod tests {
         };
 
         let mut pha_ingestor = BatchIntaker::new(
-            "None",
+            &DEFAULT_TRACE_ID,
             &aggregation_name,
             &batch_uuid,
             &date,
@@ -413,7 +413,7 @@ mod tests {
             .expect("PHA failed to generate validation");
 
         let mut facilitator_ingestor = BatchIntaker::new(
-            "None",
+            &DEFAULT_TRACE_ID,
             &aggregation_name,
             &batch_uuid,
             &date,
@@ -482,7 +482,7 @@ mod tests {
         );
 
         sample_generator
-            .generate_ingestion_sample("trace-id", &batch_uuid, &date, 10)
+            .generate_ingestion_sample(&DEFAULT_TRACE_ID, &batch_uuid, &date, 10)
             .unwrap();
 
         let mut ingestor_pub_keys = HashMap::new();
@@ -513,7 +513,7 @@ mod tests {
         };
 
         let mut pha_ingestor = BatchIntaker::new(
-            "None",
+            &DEFAULT_TRACE_ID,
             &aggregation_name,
             &batch_uuid,
             &date,
@@ -584,7 +584,7 @@ mod tests {
         sample_generator.set_generate_short_packet(5);
 
         sample_generator
-            .generate_ingestion_sample("trace-id", &batch_uuid, &date, 10)
+            .generate_ingestion_sample(&DEFAULT_TRACE_ID, &batch_uuid, &date, 10)
             .unwrap();
 
         let mut ingestor_pub_keys = HashMap::new();
@@ -616,7 +616,7 @@ mod tests {
         };
 
         let mut pha_ingestor = BatchIntaker::new(
-            "None",
+            &DEFAULT_TRACE_ID,
             &aggregation_name,
             &batch_uuid,
             &date,

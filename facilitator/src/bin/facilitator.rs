@@ -944,11 +944,15 @@ fn main() -> Result<(), anyhow::Error> {
         ("generate-ingestion-sample-worker", Some(sub_matches)) => {
             generate_sample_worker(sub_matches, &root_logger)
         }
-        ("intake-batch", Some(sub_matches)) => intake_batch_subcommand(sub_matches, &root_logger),
+        ("intake-batch", Some(sub_matches)) => {
+            intake_batch_subcommand(&Uuid::new_v4(), sub_matches, &root_logger)
+        }
         ("intake-batch-worker", Some(sub_matches)) => {
             intake_batch_worker(sub_matches, &root_logger)
         }
-        ("aggregate", Some(sub_matches)) => aggregate_subcommand(sub_matches, &root_logger),
+        ("aggregate", Some(sub_matches)) => {
+            aggregate_subcommand(&Uuid::new_v4(), sub_matches, &root_logger)
+        }
         ("aggregate-worker", Some(sub_matches)) => aggregate_worker(sub_matches, &root_logger),
         ("lint-manifest", Some(sub_matches)) => lint_manifest(sub_matches, &root_logger),
         (_, _) => Ok(()),
@@ -1272,7 +1276,7 @@ fn generate_sample(
     );
 
     sample_generator.generate_ingestion_sample(
-        &trace_id.to_string(),
+        trace_id,
         &value_t!(sub_matches.value_of("batch-id"), Uuid).unwrap_or_else(|_| Uuid::new_v4()),
         &sub_matches.value_of("date").map_or_else(
             || Utc::now().naive_utc(),
@@ -1285,7 +1289,7 @@ fn generate_sample(
 
 #[allow(clippy::too_many_arguments)]
 fn intake_batch<F>(
-    trace_id: &str,
+    trace_id: &Uuid,
     aggregation_id: &str,
     batch_id: &str,
     date: &str,
@@ -1400,12 +1404,13 @@ where
 }
 
 fn intake_batch_subcommand(
+    trace_id: &Uuid,
     sub_matches: &ArgMatches,
     parent_logger: &Logger,
 ) -> Result<(), anyhow::Error> {
     crypto_self_check(sub_matches, parent_logger).context("crypto self check failed")?;
     intake_batch(
-        "None",
+        trace_id,
         sub_matches.value_of("aggregation-id").unwrap(),
         sub_matches.value_of("batch-id").unwrap(),
         sub_matches.value_of("date").unwrap(),
@@ -1434,11 +1439,7 @@ fn intake_batch_worker(
             );
             let task_start = Instant::now();
 
-            let trace_id = task_handle
-                .task
-                .trace_id
-                .map(|id| id.to_string())
-                .unwrap_or_else(|| String::from("None"));
+            let trace_id = task_handle.task.trace_id;
 
             let result = intake_batch(
                 &trace_id,
@@ -1454,7 +1455,7 @@ fn intake_batch_worker(
                     {
                         error!(
                             logger, "{}", e;
-                            event::TRACE_ID => trace_id.clone(),
+                            event::TRACE_ID => trace_id.to_string(),
                             event::TASK_HANDLE => task_handle.clone(),
                         );
                     }
@@ -1467,7 +1468,7 @@ fn intake_batch_worker(
                     error!(
                         parent_logger, "error while processing intake task: {:?}", err;
                         event::TASK_HANDLE => task_handle.clone(),
-                        event::TRACE_ID => trace_id,
+                        event::TRACE_ID => trace_id.to_string(),
                     );
                     queue.nacknowledge_task(task_handle)?;
                 }
@@ -1480,7 +1481,7 @@ fn intake_batch_worker(
 
 #[allow(clippy::too_many_arguments)]
 fn aggregate<F>(
-    trace_id: &str,
+    trace_id: &Uuid,
     aggregation_id: &str,
     start: &str,
     end: &str,
@@ -1673,6 +1674,7 @@ where
 }
 
 fn aggregate_subcommand(
+    trace_id: &Uuid,
     sub_matches: &ArgMatches,
     parent_logger: &Logger,
 ) -> Result<(), anyhow::Error> {
@@ -1695,7 +1697,7 @@ fn aggregate_subcommand(
     let batch_info: Vec<_> = batch_ids.into_iter().zip(batch_dates).collect();
 
     aggregate(
-        "None",
+        trace_id,
         sub_matches.value_of("aggregation-id").unwrap(),
         sub_matches.value_of("aggregation-start").unwrap(),
         sub_matches.value_of("aggregation-end").unwrap(),
@@ -1729,11 +1731,7 @@ fn aggregate_worker(sub_matches: &ArgMatches, parent_logger: &Logger) -> Result<
                 .map(|b| (b.id.as_str(), b.time.as_str()))
                 .collect();
 
-            let trace_id = task_handle
-                .task
-                .trace_id
-                .map(|id| id.to_string())
-                .unwrap_or_else(|| String::from("None"));
+            let trace_id = task_handle.task.trace_id;
 
             let result = aggregate(
                 &trace_id,
@@ -1750,7 +1748,7 @@ fn aggregate_worker(sub_matches: &ArgMatches, parent_logger: &Logger) -> Result<
                     {
                         error!(
                             logger, "{}", e;
-                            event::TRACE_ID => trace_id.clone(),
+                            event::TRACE_ID => trace_id.to_string(),
                             event::TASK_HANDLE => task_handle.clone(),
                         );
                     }
@@ -1762,7 +1760,7 @@ fn aggregate_worker(sub_matches: &ArgMatches, parent_logger: &Logger) -> Result<
                 Err(err) => {
                     error!(
                         parent_logger, "error while processing task: {:?}", err;
-                        event::TRACE_ID => trace_id,
+                        event::TRACE_ID => trace_id.to_string(),
                         event::TASK_HANDLE => task_handle.clone(),
                     );
                     queue.nacknowledge_task(task_handle)?;

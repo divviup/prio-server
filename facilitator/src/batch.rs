@@ -109,7 +109,7 @@ impl Batch {
 /// Allows reading files, including signature validation, from an ingestion or
 /// validation batch containing a header, a packet file and a signature.
 pub struct BatchReader<'a, H, P> {
-    trace_id: &'a str,
+    trace_id: &'a Uuid,
     batch: Batch,
     transport: &'a mut dyn Transport,
     packet_schema: Schema,
@@ -131,7 +131,7 @@ impl<'a, H: Header, P: Packet> BatchReader<'a, H, P> {
         batch: Batch,
         transport: &'a mut dyn Transport,
         permit_malformed_batch: bool,
-        trace_id: &'a str,
+        trace_id: &'a Uuid,
         parent_logger: &Logger,
     ) -> Self {
         let logger = parent_logger.new(o!(
@@ -276,13 +276,13 @@ pub struct BatchWriter<'a, H, P> {
     batch: Batch,
     transport: &'a mut dyn Transport,
     packet_schema: Schema,
-    trace_id: &'a str,
+    trace_id: &'a Uuid,
     phantom_header: PhantomData<*const H>,
     phantom_packet: PhantomData<*const P>,
 }
 
 impl<'a, H: Header, P: Packet> BatchWriter<'a, H, P> {
-    pub fn new(batch: Batch, transport: &'a mut dyn Transport, trace_id: &'a str) -> Self {
+    pub fn new(batch: Batch, transport: &'a mut dyn Transport, trace_id: &'a Uuid) -> Self {
         BatchWriter {
             batch,
             transport,
@@ -404,7 +404,7 @@ mod tests {
         logging::setup_test_logging,
         test_utils::{
             default_facilitator_signing_public_key, default_ingestor_private_key,
-            default_ingestor_public_key,
+            default_ingestor_public_key, DEFAULT_TRACE_ID,
         },
         transport::LocalFileTransport,
         Error,
@@ -488,7 +488,7 @@ mod tests {
         // Verify file layout is as expected
         for extension in filenames {
             transport
-                .get(&format!("{}.{}", base_path, extension), "trace-id")
+                .get(&format!("{}.{}", base_path, extension), &DEFAULT_TRACE_ID)
                 .unwrap_or_else(|_| panic!("could not get batch file {}", extension));
         }
 
@@ -553,14 +553,14 @@ mod tests {
             BatchWriter::new(
                 Batch::new_ingestion(aggregation_name, &batch_id, &date),
                 &mut write_transport,
-                "trace-id",
+                &DEFAULT_TRACE_ID,
             );
         let mut batch_reader: BatchReader<'_, IngestionHeader, IngestionDataSharePacket> =
             BatchReader::new(
                 Batch::new_ingestion(aggregation_name, &batch_id, &date),
                 &mut read_transport,
                 false,
-                "trace-id",
+                &DEFAULT_TRACE_ID,
                 &logger,
             );
         let base_path = format!(
@@ -627,14 +627,14 @@ mod tests {
             BatchWriter::new(
                 Batch::new_validation(aggregation_name, &batch_id, &date, is_first),
                 &mut write_transport,
-                "trace-id",
+                &DEFAULT_TRACE_ID,
             );
         let mut batch_reader: BatchReader<'_, IngestionHeader, IngestionDataSharePacket> =
             BatchReader::new(
                 Batch::new_validation(aggregation_name, &batch_id, &date, is_first),
                 &mut read_transport,
                 false,
-                "trace-id",
+                &DEFAULT_TRACE_ID,
                 &logger,
             );
         let base_path = format!(
@@ -713,14 +713,14 @@ mod tests {
             BatchWriter::new(
                 Batch::new_sum(instance_name, aggregation_name, &start, &end, is_first),
                 &mut write_transport,
-                "trace-id",
+                &DEFAULT_TRACE_ID,
             );
         let mut batch_reader: BatchReader<'_, IngestionHeader, IngestionDataSharePacket> =
             BatchReader::new(
                 Batch::new_sum(instance_name, aggregation_name, &start, &end, is_first),
                 &mut read_transport,
                 false,
-                "trace-id",
+                &DEFAULT_TRACE_ID,
                 &logger,
             );
         let batch_path = format!(
@@ -780,14 +780,14 @@ mod tests {
             BatchWriter::new(
                 Batch::new_sum(instance_name, aggregation_name, &start, &end, true),
                 &mut write_transport,
-                "trace-id",
+                &DEFAULT_TRACE_ID,
             );
         let mut batch_reader: BatchReader<'_, IngestionHeader, IngestionDataSharePacket> =
             BatchReader::new(
                 Batch::new_sum(instance_name, aggregation_name, &start, &end, true),
                 &mut read_transport,
                 true, // permit_malformed_batch
-                "trace-id",
+                &DEFAULT_TRACE_ID,
                 &logger,
             );
 

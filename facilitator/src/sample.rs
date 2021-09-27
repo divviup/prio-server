@@ -151,13 +151,13 @@ impl<'a> SampleGenerator<'a> {
     /// Returns a `ReferenceSum` containing the sum over the unshared data.
     pub fn generate_ingestion_sample(
         &mut self,
-        trace_id: &str,
+        trace_id: &Uuid,
         batch_uuid: &Uuid,
         date: &NaiveDateTime,
         packet_count: usize,
     ) -> Result<ReferenceSum> {
         let local_logger = self.logger.new(o!(
-            event::TRACE_ID => trace_id.to_owned(),
+            event::TRACE_ID => trace_id.to_string(),
             event::BATCH_ID => batch_uuid.to_string(),
             event::BATCH_DATE => date.format(DATE_FORMAT).to_string(),
             "pha_output_path" => self.pha_output.transport.transport.path(),
@@ -375,7 +375,7 @@ mod tests {
         logging::setup_test_logging,
         test_utils::{
             default_ingestor_private_key, DEFAULT_FACILITATOR_ECIES_PRIVATE_KEY,
-            DEFAULT_PHA_ECIES_PRIVATE_KEY,
+            DEFAULT_PHA_ECIES_PRIVATE_KEY, DEFAULT_TRACE_ID,
         },
         transport::{LocalFileTransport, Transport},
     };
@@ -427,7 +427,7 @@ mod tests {
 
         sample_generator
             .generate_ingestion_sample(
-                "trace-id",
+                &DEFAULT_TRACE_ID,
                 &batch_uuid,
                 &NaiveDate::from_ymd(2009, 2, 13).and_hms(23, 31, 0),
                 10,
@@ -440,7 +440,7 @@ mod tests {
             LocalFileTransport::new(tempdir.path().to_path_buf().join("facilitator")),
         ];
         for transport in transports {
-            let reader = transport.get(&expected_path, "trace-id").unwrap();
+            let reader = transport.get(&expected_path, &DEFAULT_TRACE_ID).unwrap();
 
             let parsed_header = IngestionHeader::read(reader).unwrap();
             assert_eq!(parsed_header.batch_uuid, batch_uuid);
