@@ -22,17 +22,19 @@ use rusoto_core::{
     },
     Region, RusotoError, RusotoResult,
 };
+#[cfg(test)]
 use rusoto_mock::MockCredentialsProvider;
 use rusoto_sts::WebIdentityProvider;
 use sha2::{Digest, Sha256};
 use slog::{o, Logger};
 use std::str;
+#[cfg(test)]
+use std::sync::Arc;
 use std::{
     boxed::Box,
     convert::From,
     default::Default,
     fmt::{self, Debug, Display},
-    sync::Arc,
 };
 use tokio::runtime::{Builder, Runtime};
 use url::Url;
@@ -90,6 +92,7 @@ pub enum Provider {
     WebIdentityFromKubernetesEnvironment(AutoRefreshingProvider<WebIdentityProvider>),
     /// Rusoto's mock credentials provider, wrapped in an Arc to provide
     /// Send + Sync. Should only be used in tests.
+    #[cfg(test)]
     Mock(Arc<MockCredentialsProvider>),
 }
 
@@ -130,7 +133,8 @@ impl Provider {
     }
 
     /// Instantiates a mock credentials provider.
-    pub fn new_mock() -> Self {
+    #[cfg(test)]
+    pub(crate) fn new_mock() -> Self {
         Self::Mock(Arc::new(MockCredentialsProvider))
     }
 
@@ -225,6 +229,7 @@ impl Display for Provider {
                     role_arn
                 )
             }
+            #[cfg(test)]
             Self::Mock(_) => write!(f, "mock credentials"),
         }
     }
@@ -237,6 +242,7 @@ impl ProvideAwsCredentials for Provider {
             Self::Default(p) => p.credentials().await,
             Self::WebIdentityWithOidc(p) => p.credentials().await,
             Self::WebIdentityFromKubernetesEnvironment(p) => p.credentials().await,
+            #[cfg(test)]
             Self::Mock(p) => p.credentials().await,
         }
     }
