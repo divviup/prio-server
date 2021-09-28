@@ -31,5 +31,5 @@ pushgateway              = "prometheus-pushgateway.monitoring:9091"
 default_aggregation_period       = "8h"
 default_aggregation_grace_period = "4h"
 
-default_peer_share_processor_manifest_base_url = "storage.googleapis.com/prio-prod-server-manifests"
+default_peer_share_processor_manifest_base_url = "storage.googleapis.com/prio-enpa-g-prod-manifests"
 default_portal_server_manifest_base_url        = "manifest.global.enpa-pha.io"
