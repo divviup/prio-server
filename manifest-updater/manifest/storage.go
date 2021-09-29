@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"path"
 	"strings"
 
 	"cloud.google.com/go/storage"
@@ -53,6 +54,8 @@ type Bucket struct {
 	// URL is the URL of the bucket, with the scheme "gs" for GCS buckets or
 	// "s3" for S3 buckets; e.g., "gs://bucket-name" or "s3://bucket-name"
 	URL string `json:"bucket_url"`
+	// KeyPrefix is a key prefix applied to every key read or written.
+	KeyPrefix string
 	// AWSRegion is the region the bucket is in, if it is an S3 bucket
 	AWSRegion string `json:"aws_region,omitempty"`
 	// AWSProfile is the AWS CLI config profile that should be used to
@@ -64,9 +67,9 @@ type Bucket struct {
 // the provided bucket
 func NewStorage(bucket *Bucket) (Storage, error) {
 	if strings.HasPrefix(bucket.URL, "gs://") {
-		return newGCS(strings.TrimPrefix(bucket.URL, "gs://"))
+		return newGCS(strings.TrimPrefix(bucket.URL, "gs://"), bucket.KeyPrefix)
 	} else if strings.HasPrefix(bucket.URL, "s3://") {
-		return newS3(strings.TrimPrefix(bucket.URL, "s3://"), bucket.AWSRegion, bucket.AWSProfile)
+		return newS3(strings.TrimPrefix(bucket.URL, "s3://"), bucket.KeyPrefix, bucket.AWSRegion, bucket.AWSProfile)
 	} else {
 		return nil, fmt.Errorf("bad bucket URL %s", bucket.URL)
 	}
@@ -74,17 +77,18 @@ func NewStorage(bucket *Bucket) (Storage, error) {
 
 // GCSStorage is a Storage that stores manifests in a Google Cloud Storage bucket
 type GCSStorage struct {
-	client                 *storage.Client
-	manifestBucketLocation string
+	client         *storage.Client
+	manifestBucket string
+	keyPrefix      string
 }
 
 // newGCS creates a GCSStorage
-func newGCS(manifestBucketLocation string) (*GCSStorage, error) {
+func newGCS(manifestBucketLocation, keyPrefix string) (*GCSStorage, error) {
 	client, err := storage.NewClient(context.Background())
 	if err != nil {
 		return nil, fmt.Errorf("unable to create a new storage client from background credentials: %w", err)
 	}
-	return &GCSStorage{client, manifestBucketLocation}, nil
+	return &GCSStorage{client, manifestBucketLocation, keyPrefix}, nil
 }
 
 func (s *GCSStorage) WriteIngestorGlobalManifest(manifest IngestorGlobalManifest) error {
@@ -119,9 +123,9 @@ func (s *GCSStorage) writeManifest(manifest interface{}, path string) error {
 	return nil
 }
 
-func (s *GCSStorage) getWriter(path string) *storage.Writer {
-	ioWriter := s.client.Bucket(s.manifestBucketLocation).
-		Object(path).
+func (s *GCSStorage) getWriter(key string) *storage.Writer {
+	ioWriter := s.client.Bucket(s.manifestBucket).
+		Object(path.Join(s.keyPrefix, key)).
 		NewWriter(context.Background())
 	ioWriter.CacheControl = "no-cache"
 	ioWriter.ContentType = "application/json; charset=UTF-8"
@@ -188,9 +192,9 @@ func (s *GCSStorage) IngestorGlobalManifestExists() (bool, error) {
 // getReader returns a storage.Reader for the object at the provided path, if it
 // exists. If it does not exist, returns (nil, nil). Returns an error if some
 // error besides the object not existing occurs.
-func (s *GCSStorage) getReader(path string) (*storage.Reader, error) {
-	reader, err := s.client.Bucket(s.manifestBucketLocation).
-		Object(path).
+func (s *GCSStorage) getReader(key string) (*storage.Reader, error) {
+	reader, err := s.client.Bucket(s.manifestBucket).
+		Object(path.Join(s.keyPrefix, key)).
 		NewReader(context.Background())
 	if err != nil {
 		if err == storage.ErrObjectNotExist {
@@ -207,10 +211,11 @@ func (s *GCSStorage) getReader(path string) (*storage.Reader, error) {
 type S3Storage struct {
 	client         *s3.S3
 	manifestBucket string
+	keyPrefix      string
 }
 
 // newS3 creates an S3Writer that stores manifests in the specified S3 bucket
-func newS3(manifestBucket, region, profile string) (*S3Storage, error) {
+func newS3(manifestBucket, keyPrefix, region, profile string) (*S3Storage, error) {
 	sess, err := session.NewSession()
 	if err != nil {
 		return nil, fmt.Errorf("making AWS session: %w", err)
@@ -225,6 +230,7 @@ func newS3(manifestBucket, region, profile string) (*S3Storage, error) {
 	return &S3Storage{
 		client:         s3Client,
 		manifestBucket: manifestBucket,
+		keyPrefix:      keyPrefix,
 	}, nil
 }
 
@@ -236,9 +242,9 @@ func (s *S3Storage) WriteDataShareProcessorSpecificManifest(manifest DataSharePr
 	return s.writeManifest(manifest, fmt.Sprintf("%s-manifest.json", dataShareProcessorName))
 }
 
-func (s *S3Storage) writeManifest(manifest interface{}, path string) error {
+func (s *S3Storage) writeManifest(manifest interface{}, key string) error {
 	log.Info().
-		Str("path", path).
+		Str("path", key).
 		Str("bucket", s.manifestBucket).
 		Msg("writing a manifest file")
 
@@ -247,19 +253,16 @@ func (s *S3Storage) writeManifest(manifest interface{}, path string) error {
 		return fmt.Errorf("failed to marshal manifest to JSON: %w", err)
 	}
 
-	input := &s3.PutObjectInput{
+	if _, err := s.client.PutObject(&s3.PutObjectInput{
 		ACL:          aws.String(s3.BucketCannedACLPublicRead),
 		Body:         aws.ReadSeekCloser(bytes.NewReader(jsonManifest)),
 		Bucket:       aws.String(s.manifestBucket),
-		Key:          aws.String(path),
+		Key:          aws.String(path.Join(s.keyPrefix, key)),
 		CacheControl: aws.String("no-cache"),
 		ContentType:  aws.String("application/json; charset=UTF-8"),
-	}
-
-	if _, err := s.client.PutObject(input); err != nil {
+	}); err != nil {
 		return fmt.Errorf("storage.PutObject: %w", err)
 	}
-
 	return nil
 }
 
@@ -319,10 +322,10 @@ func (s *S3Storage) IngestorGlobalManifestExists() (bool, error) {
 // the object exists. The returned io.ReadCloser should be Close()d by the
 // caller. Returns (nil, nil) if the object does not exist or an error if
 // something else goes wrong.
-func (s *S3Storage) getReader(path string) (io.ReadCloser, error) {
+func (s *S3Storage) getReader(key string) (io.ReadCloser, error) {
 	input := &s3.GetObjectInput{
 		Bucket: aws.String(s.manifestBucket),
-		Key:    aws.String(path),
+		Key:    aws.String(path.Join(s.keyPrefix, key)),
 	}
 
 	output, err := s.client.GetObject(input)
