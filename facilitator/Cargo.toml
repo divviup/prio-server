@@ -57,6 +57,7 @@ xml-rs = "0.8"
 
 [dev-dependencies]
 assert_matches = "1.5.0"
+hex = "0.4.3"
 mockito = "0.30.0"
 rusoto_mock = { version = "^0.47", default_features = false, features = ["rustls"] }
 serde_test = "1.0"

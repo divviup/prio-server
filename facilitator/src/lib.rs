@@ -1,5 +1,11 @@
-use anyhow::Result;
+use crate::idl::{IngestionDataSharePacket, ValidationPacket};
+use anyhow::{anyhow, Context, Result};
+use prio::{
+    field::Field32,
+    server::{Server, ServerError},
+};
 use ring::{digest, signature::EcdsaKeyPair};
+use std::convert::TryFrom;
 use std::io::Write;
 
 pub mod aggregation;
@@ -39,15 +45,57 @@ pub enum Error {
     HttpError(#[from] ureq::Error),
 }
 
-/// An implementation of transport::TransportWriter that computes a SHA256
-/// digest over the content it is provided.
-pub struct DigestWriter {
+pub fn generate_validation_packet(
+    servers: &mut Vec<Server<Field32>>,
+    packet: &IngestionDataSharePacket,
+) -> Result<ValidationPacket> {
+    let r_pit = Field32::from(
+        u32::try_from(packet.r_pit)
+            .with_context(|| format!("illegal r_pit value {}", packet.r_pit))?,
+    );
+
+    // TODO(timg): if this fails for a non-empty subset of the
+    // ingestion packets, do we abort handling of the entire
+    // batch (as implemented currently) or should we record it
+    // as an invalid UUID and emit a validation batch for the
+    // other packets?
+    for server in servers.iter_mut() {
+        let validation_message = match server
+            .generate_verification_message(r_pit, &packet.encrypted_payload)
+        {
+            Ok(m) => m,
+            Err(ServerError::Encrypt(_)) => {
+                continue;
+            }
+            Err(e) => {
+                return Err(anyhow::Error::new(e).context("error generating verification message"));
+            }
+        };
+
+        return Ok(ValidationPacket {
+            uuid: packet.uuid,
+            f_r: u32::from(validation_message.f_r) as i64,
+            g_r: u32::from(validation_message.g_r) as i64,
+            h_r: u32::from(validation_message.h_r) as i64,
+        });
+    }
+
+    return Err(anyhow!(
+        "failed to construct validation message for packet {} because all decryption attempts failed (key mismatch?)",
+        packet.uuid
+    ));
+}
+
+/// A wrapper-writer that computes a SHA256 digest over the content it is provided.
+pub struct DigestWriter<W: Write> {
+    writer: W,
     context: digest::Context,
 }
 
-impl DigestWriter {
-    fn new() -> DigestWriter {
+impl<W: Write> DigestWriter<W> {
+    fn new(writer: W) -> DigestWriter<W> {
         DigestWriter {
+            writer,
             context: digest::Context::new(&digest::SHA256),
         }
     }
@@ -58,46 +106,17 @@ impl DigestWriter {
     }
 }
 
-impl Write for DigestWriter {
+impl<W: Write> Write for DigestWriter<W> {
     fn write(&mut self, buf: &[u8]) -> Result<usize, std::io::Error> {
-        self.context.update(buf);
-        Ok(buf.len())
+        let rslt = self.writer.write(buf);
+        if let Ok(n) = rslt {
+            self.context.update(&buf[..n]);
+        }
+        rslt
     }
 
     fn flush(&mut self) -> Result<(), std::io::Error> {
-        Ok(())
-    }
-}
-
-/// SidecarWriter wraps a vector of std::io::Writes of one type and writes all
-/// provided buffers to them. It also writes all buffers to an additional
-/// instance of std::io:Write that may be of a different type than the ones in
-/// the vector.
-pub struct SidecarWriter<T: Write, W: Write> {
-    writers: Vec<T>,
-    sidecar: W,
-}
-
-impl<T: Write, W: Write> SidecarWriter<T, W> {
-    fn new(writers: Vec<T>, sidecar: W) -> SidecarWriter<T, W> {
-        SidecarWriter { writers, sidecar }
-    }
-}
-
-impl<T: Write, W: Write> Write for SidecarWriter<T, W> {
-    fn write(&mut self, buf: &[u8]) -> Result<usize, std::io::Error> {
-        for writer in &mut self.writers {
-            writer.write_all(buf)?;
-        }
-        self.sidecar.write_all(buf)?;
-        Ok(buf.len())
-    }
-
-    fn flush(&mut self) -> Result<(), std::io::Error> {
-        for writer in &mut self.writers {
-            writer.flush()?;
-        }
-        self.sidecar.flush()
+        self.writer.flush()
     }
 }
 
@@ -129,22 +148,17 @@ mod tests {
 
     #[test]
     fn digest_writer_test() {
-        let mut writer = DigestWriter::new();
-        let written = writer
-            .write("I expect to be written into sha256".to_string().as_bytes())
-            .unwrap();
+        const TEST_STR: &[u8] = b"I expect to be written into sha256";
+        const TEST_STR_DIGEST: &str =
+            "b1b64ca32c118bfd5d1f40fdb25314468f82c0e9427f4f107ddfa89ce357a3ec"; // verified via sha256sum
 
-        assert_eq!(written, 34);
+        let mut written: Vec<u8> = Vec::new();
+        let mut writer = DigestWriter::new(&mut written);
+        let written_cnt = writer.write(TEST_STR).unwrap();
+        let digest = hex::encode(writer.finish().as_ref());
 
-        let digest = writer.finish();
-        let sha = digest.as_ref();
-
-        let hexed_sha = format!("{:02x?}", sha);
-        let hexed_sha = hexed_sha.replace(|ch| !char::is_alphanumeric(ch), "");
-
-        assert_eq!(
-            hexed_sha,
-            "b1b64ca32c118bfd5d1f40fdb25314468f82c0e9427f4f107ddfa89ce357a3ec".to_string()
-        )
+        assert_eq!(written_cnt, TEST_STR.len());
+        assert_eq!(&written[..], TEST_STR);
+        assert_eq!(&digest, TEST_STR_DIGEST);
     }
 }

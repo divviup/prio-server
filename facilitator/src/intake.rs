@@ -1,21 +1,22 @@
 use crate::{
     batch::{Batch, BatchReader, BatchWriter},
+    generate_validation_packet,
     idl::{IngestionDataSharePacket, IngestionHeader, Packet, ValidationHeader, ValidationPacket},
     logging::event,
     metrics::IntakeMetricsCollector,
     transport::{SignableTransport, VerifiableAndDecryptableTransport},
     BatchSigningKey, Error, DATE_FORMAT,
 };
-use anyhow::{anyhow, ensure, Context, Result};
+use anyhow::{ensure, Result};
 use chrono::NaiveDateTime;
 use prio::{
     encrypt::{PrivateKey, PublicKey},
     field::Field32,
-    server::{Server, ServerError},
+    server::Server,
 };
 use ring::signature::UnparsedPublicKey;
 use slog::{debug, info, o, Logger};
-use std::{collections::HashMap, convert::TryFrom, iter::Iterator};
+use std::{collections::HashMap, iter::Iterator};
 use uuid::Uuid;
 
 /// BatchIntaker is responsible for validating a batch of data packet shares
@@ -27,8 +28,6 @@ pub struct BatchIntaker<'a> {
     packet_decryption_keys: &'a Vec<PrivateKey>,
     peer_validation_batch: BatchWriter<'a, ValidationHeader, ValidationPacket>,
     peer_validation_batch_signing_key: &'a BatchSigningKey,
-    own_validation_batch: BatchWriter<'a, ValidationHeader, ValidationPacket>,
-    own_validation_batch_signing_key: &'a BatchSigningKey,
     is_first: bool,
     callback_cadence: u32,
     metrics_collector: Option<&'a IntakeMetricsCollector>,
@@ -44,7 +43,6 @@ impl<'a> BatchIntaker<'a> {
         batch_id: &Uuid,
         date: &NaiveDateTime,
         ingestion_transport: &'a mut VerifiableAndDecryptableTransport,
-        own_validation_transport: &'a mut SignableTransport,
         peer_validation_transport: &'a mut SignableTransport,
         is_first: bool,
         permit_malformed_batch: bool,
@@ -56,7 +54,6 @@ impl<'a> BatchIntaker<'a> {
             event::BATCH_ID => batch_id.to_string(),
             event::BATCH_DATE => date.format(DATE_FORMAT).to_string(),
             event::INGESTION_PATH => ingestion_transport.transport.transport.path(),
-            event::OWN_VALIDATION_PATH => own_validation_transport.transport.path(),
             event::PEER_VALIDATION_PATH => peer_validation_transport.transport.path(),
         ));
         Ok(BatchIntaker {
@@ -74,13 +71,7 @@ impl<'a> BatchIntaker<'a> {
                 &mut *peer_validation_transport.transport,
                 trace_id,
             ),
-            own_validation_batch: BatchWriter::new(
-                Batch::new_validation(aggregation_name, batch_id, date, is_first),
-                &mut *own_validation_transport.transport,
-                trace_id,
-            ),
             peer_validation_batch_signing_key: &peer_validation_transport.batch_signing_key,
-            own_validation_batch_signing_key: &own_validation_transport.batch_signing_key,
             is_first,
             callback_cadence: 1000,
             metrics_collector: None,
@@ -159,71 +150,22 @@ impl<'a> BatchIntaker<'a> {
         let callback_cadence = self.callback_cadence;
         let logger = &self.logger;
 
-        let packet_file_digest = self.peer_validation_batch.multi_packet_file_writer(
-            vec![&mut self.own_validation_batch],
-            |mut packet_writer| loop {
-                let packet = match IngestionDataSharePacket::read(&mut ingestion_packet_reader) {
-                    Ok(p) => p,
-                    Err(Error::EofError) => return Ok(()),
-                    Err(e) => return Err(e.into()),
-                };
-
-                let r_pit = u32::try_from(packet.r_pit)
-                    .with_context(|| format!("illegal r_pit value {}", packet.r_pit))?;
-
-                // TODO(timg): if this fails for a non-empty subset of the
-                // ingestion packets, do we abort handling of the entire
-                // batch (as implemented currently) or should we record it
-                // as an invalid UUID and emit a validation batch for the
-                // other packets?
-                let mut did_create_validation_packet = false;
-                for server in servers.iter_mut() {
-                    let validation_message = match server.generate_verification_message(
-                        Field32::from(r_pit),
-                        &packet.encrypted_payload,
-                    ) {
-                        Ok(m) => m,
-                        Err(ServerError::Encrypt(e)) => {
-                            debug!(
-                                logger,
-                                "Input share could not be decrypted. Will try \
-                                more packet decryption keys if available.";
-                                o!(
-                                    "decryption_error" => format!("{:?}", e),
-                                    event::PACKET_UUID => packet.uuid.to_string(),
-                                )
-                            );
-                            continue;
-                        }
-                        Err(e) => {
-                            return Err(anyhow::Error::new(e)
-                                .context("error generating verification message"));
-                        }
+        let packet_file_digest =
+            self.peer_validation_batch
+                .packet_file_writer(|mut packet_writer| loop {
+                    let packet = match IngestionDataSharePacket::read(&mut ingestion_packet_reader)
+                    {
+                        Ok(p) => p,
+                        Err(Error::EofError) => return Ok(()),
+                        Err(e) => return Err(e.into()),
                     };
-
-                    let packet = ValidationPacket {
-                        uuid: packet.uuid,
-                        f_r: u32::from(validation_message.f_r) as i64,
-                        g_r: u32::from(validation_message.g_r) as i64,
-                        h_r: u32::from(validation_message.h_r) as i64,
-                    };
-                    packet.write(&mut packet_writer)?;
-                    did_create_validation_packet = true;
-                    break;
-                }
-                if !did_create_validation_packet {
-                    return Err(anyhow!(
-                        "failed to construct validation message for packet {}, \
-                        probably due to packet decryption key mismatch",
-                        packet.uuid
-                    ));
-                }
-                processed_packets += 1;
-                if processed_packets % callback_cadence == 0 {
-                    callback(logger);
-                }
-            },
-        )?;
+                    let validation_packet = generate_validation_packet(&mut servers, &packet)?;
+                    validation_packet.write(&mut packet_writer)?;
+                    processed_packets += 1;
+                    if processed_packets % callback_cadence == 0 {
+                        callback(logger);
+                    }
+                })?;
 
         // If the caller requested it, we insert a bogus packet file digest into
         // the own and peer validaton batch headers instead of the real computed
@@ -250,18 +192,11 @@ impl<'a> BatchIntaker<'a> {
         let peer_header_signature = self
             .peer_validation_batch
             .put_header(&header, &self.peer_validation_batch_signing_key.key)?;
-        let own_header_signature = self
-            .own_validation_batch
-            .put_header(&header, &self.own_validation_batch_signing_key.key)?;
 
         // Construct and write out signature
         self.peer_validation_batch.put_signature(
             &peer_header_signature,
             &self.peer_validation_batch_signing_key.identifier,
-        )?;
-        self.own_validation_batch.put_signature(
-            &own_header_signature,
-            &self.own_validation_batch_signing_key.identifier,
         )
     }
 }
@@ -288,9 +223,7 @@ mod tests {
     fn share_validator() {
         let logger = setup_test_logging();
         let pha_tempdir = tempfile::TempDir::new().unwrap();
-        let pha_copy_tempdir = tempfile::TempDir::new().unwrap();
         let facilitator_tempdir = tempfile::TempDir::new().unwrap();
-        let facilitator_copy_tempdir = tempfile::TempDir::new().unwrap();
 
         let aggregation_name = "fake-aggregation-1".to_owned();
         let date = NaiveDateTime::from_timestamp(1234567890, 654321);
@@ -380,20 +313,6 @@ mod tests {
             batch_signing_key: default_facilitator_signing_private_key(),
         };
 
-        let mut pha_own_validate_transport = SignableTransport {
-            transport: Box::new(LocalFileTransport::new(
-                pha_copy_tempdir.path().to_path_buf(),
-            )),
-            batch_signing_key: default_pha_signing_private_key(),
-        };
-
-        let mut facilitator_own_validate_transport = SignableTransport {
-            transport: Box::new(LocalFileTransport::new(
-                facilitator_copy_tempdir.path().to_path_buf(),
-            )),
-            batch_signing_key: default_facilitator_signing_private_key(),
-        };
-
         let mut pha_ingestor = BatchIntaker::new(
             &DEFAULT_TRACE_ID,
             &aggregation_name,
@@ -401,7 +320,6 @@ mod tests {
             &date,
             &mut pha_ingest_transport,
             &mut pha_peer_validate_transport,
-            &mut pha_own_validate_transport,
             true,
             false,
             &logger,
@@ -419,7 +337,6 @@ mod tests {
             &date,
             &mut facilitator_ingest_transport,
             &mut facilitator_peer_validate_transport,
-            &mut facilitator_own_validate_transport,
             false,
             false,
             &logger,
@@ -435,7 +352,6 @@ mod tests {
     fn wrong_decryption_key() {
         let logger = setup_test_logging();
         let pha_tempdir = tempfile::TempDir::new().unwrap();
-        let pha_copy_tempdir = tempfile::TempDir::new().unwrap();
         let facilitator_tempdir = tempfile::TempDir::new().unwrap();
 
         let aggregation_name = "fake-aggregation-1".to_owned();
@@ -505,13 +421,6 @@ mod tests {
             batch_signing_key: default_pha_signing_private_key(),
         };
 
-        let mut pha_own_validate_transport = SignableTransport {
-            transport: Box::new(LocalFileTransport::new(
-                pha_copy_tempdir.path().to_path_buf(),
-            )),
-            batch_signing_key: default_pha_signing_private_key(),
-        };
-
         let mut pha_ingestor = BatchIntaker::new(
             &DEFAULT_TRACE_ID,
             &aggregation_name,
@@ -519,7 +428,6 @@ mod tests {
             &date,
             &mut pha_ingest_transport,
             &mut pha_peer_validate_transport,
-            &mut pha_own_validate_transport,
             true,
             false,
             &logger,
@@ -536,7 +444,6 @@ mod tests {
     fn wrong_packet_dimension() {
         let logger = setup_test_logging();
         let pha_tempdir = tempfile::TempDir::new().unwrap();
-        let pha_copy_tempdir = tempfile::TempDir::new().unwrap();
         let facilitator_tempdir = tempfile::TempDir::new().unwrap();
 
         let aggregation_name = "fake-aggregation-1".to_owned();
@@ -608,13 +515,6 @@ mod tests {
             batch_signing_key: default_pha_signing_private_key(),
         };
 
-        let mut pha_own_validate_transport = SignableTransport {
-            transport: Box::new(LocalFileTransport::new(
-                pha_copy_tempdir.path().to_path_buf(),
-            )),
-            batch_signing_key: default_pha_signing_private_key(),
-        };
-
         let mut pha_ingestor = BatchIntaker::new(
             &DEFAULT_TRACE_ID,
             &aggregation_name,
@@ -622,7 +522,6 @@ mod tests {
             &date,
             &mut pha_ingest_transport,
             &mut pha_peer_validate_transport,
-            &mut pha_own_validate_transport,
             true,
             false,
             &logger,
