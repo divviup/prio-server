@@ -202,31 +202,31 @@ func TestScheduleAggregationTasks(t *testing.T) {
 
 	var testCases = []struct {
 		name                    string
-		hasOwnValidation        bool
+		hasIntakeBatch          bool
 		hasPeerValidation       bool
 		taskMarkerExists        bool
 		expectedAggregationTask *task.Aggregation
 		expectedTaskMarker      string
 	}{
 		{
-			name:                    "within-window-no-own-no-peer",
-			hasOwnValidation:        false,
+			name:                    "within-window-no-intake-no-peer",
+			hasIntakeBatch:          false,
 			hasPeerValidation:       false,
 			taskMarkerExists:        false,
 			expectedAggregationTask: nil,
 			expectedTaskMarker:      "",
 		},
 		{
-			name:                    "within-window-no-own-has-peer",
-			hasOwnValidation:        false,
+			name:                    "within-window-no-intake-has-peer",
+			hasIntakeBatch:          false,
 			hasPeerValidation:       true,
 			taskMarkerExists:        false,
 			expectedAggregationTask: nil,
 			expectedTaskMarker:      "",
 		},
 		{
-			name:                    "within-window-has-own-no-peer",
-			hasOwnValidation:        true,
+			name:                    "within-window-has-intake-no-peer",
+			hasIntakeBatch:          true,
 			hasPeerValidation:       false,
 			taskMarkerExists:        false,
 			expectedAggregationTask: nil,
@@ -234,7 +234,7 @@ func TestScheduleAggregationTasks(t *testing.T) {
 		},
 		{
 			name:                    "within-window-no-marker",
-			hasOwnValidation:        true,
+			hasIntakeBatch:          true,
 			hasPeerValidation:       true,
 			taskMarkerExists:        false,
 			expectedAggregationTask: expectedAggregationTask,
@@ -242,7 +242,7 @@ func TestScheduleAggregationTasks(t *testing.T) {
 		},
 		{
 			name:                    "within-window-has-marker",
-			hasOwnValidation:        true,
+			hasIntakeBatch:          true,
 			hasPeerValidation:       true,
 			taskMarkerExists:        true,
 			expectedAggregationTask: nil,
@@ -254,36 +254,24 @@ func TestScheduleAggregationTasks(t *testing.T) {
 		t.Run(testCase.name, func(t *testing.T) {
 			clock := wftime.ClockWithFixedNow(withinWindow)
 
-			intakeBucket := mockBucket{
-				aggregationIDs: []string{"kittens-seen"},
-				batchFiles: []string{
+			intakeBucket := mockBucket{aggregationIDs: []string{"kittens-seen"}}
+			if testCase.hasIntakeBatch {
+				intakeBucket.batchFiles = []string{
 					"kittens-seen/2020/10/31/20/29/b8a5579a-f984-460a-a42d-2813cbf57771.batch",
 					"kittens-seen/2020/10/31/20/29/b8a5579a-f984-460a-a42d-2813cbf57771.batch.avro",
 					"kittens-seen/2020/10/31/20/29/b8a5579a-f984-460a-a42d-2813cbf57771.batch.sig",
-				},
+				}
 			}
 
 			ownValidationBucket := mockBucket{
 				aggregationIDs:    []string{"kittens-seen"},
 				intakeTaskMarkers: []string{"intake-kittens-seen-2020-10-31-20-29-b8a5579a-f984-460a-a42d-2813cbf57771"},
 			}
-
-			if testCase.hasOwnValidation {
-				ownValidationBucket.batchFiles = []string{
-					"kittens-seen/2020/10/31/20/29/b8a5579a-f984-460a-a42d-2813cbf57771.validity_1",
-					"kittens-seen/2020/10/31/20/29/b8a5579a-f984-460a-a42d-2813cbf57771.validity_1.avro",
-					"kittens-seen/2020/10/31/20/29/b8a5579a-f984-460a-a42d-2813cbf57771.validity_1.sig",
-				}
-			}
-
 			if testCase.taskMarkerExists {
 				ownValidationBucket.aggregateTaskMarkers = []string{aggregationMarker}
 			}
 
-			peerValidationBucket := mockBucket{
-				aggregationIDs: []string{"kittens-seen"},
-			}
-
+			peerValidationBucket := mockBucket{aggregationIDs: []string{"kittens-seen"}}
 			if testCase.hasPeerValidation {
 				peerValidationBucket.batchFiles = []string{
 					"kittens-seen/2020/10/31/20/29/b8a5579a-f984-460a-a42d-2813cbf57771.validity_0",
