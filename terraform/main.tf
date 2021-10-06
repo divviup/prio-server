@@ -30,7 +30,6 @@ variable "aws_region" {
 
 variable "aws_profile" {
   type    = string
-  default = "leuswest2"
 }
 
 variable "localities" {
@@ -215,7 +214,6 @@ variable "prometheus_server_persistent_disk_size_gb" {
 variable "victorops_routing_key" {
   type        = string
   description = "VictorOps/Splunk OnCall routing key for prometheus-alertmanager"
-  default     = "bogus-routing-key"
 }
 
 variable "cluster_settings" {
