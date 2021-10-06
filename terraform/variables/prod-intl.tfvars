@@ -1,22 +1,32 @@
 environment     = "prod-intl"
 gcp_region      = "us-west1"
 gcp_project     = "prio-intl-prod"
-localities      = []
+localities      = ["mn-mn"]
 aws_region      = "us-west-2"
 manifest_domain = "isrg-prio.org"
 ingestors = {
   g-enpa = {
     manifest_base_url = "storage.googleapis.com/prio-manifests"
-    localities        = {}
+    localities        = {
+      mn-mn = {
+        intake_worker_count    = 3
+        aggregate_worker_count = 3
+      }
+    }
   }
   apple = {
     manifest_base_url = "exposure-notification.apple.com/manifest"
-    localities        = {}
+    localities        = {
+      mn-mn = {
+        intake_worker_count    = 3
+        aggregate_worker_count = 3
+      }
+    }
   }
 }
 cluster_settings = {
-  initial_node_count = 2
-  min_node_count     = 1
+  initial_node_count = 3
+  min_node_count     = 3
   max_node_count     = 3
   gcp_machine_type   = "e2-standard-2"
   aws_machine_types  = ["t3.large"]
