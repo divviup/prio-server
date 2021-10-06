@@ -7,7 +7,7 @@ manifest_domain = "isrg-prio.org"
 ingestors = {
   g-enpa = {
     manifest_base_url = "storage.googleapis.com/prio-manifests"
-    localities        = {
+    localities = {
       mn-mn = {
         intake_worker_count    = 3
         aggregate_worker_count = 3
@@ -16,7 +16,7 @@ ingestors = {
   }
   apple = {
     manifest_base_url = "exposure-notification.apple.com/manifest"
-    localities        = {
+    localities = {
       mn-mn = {
         intake_worker_count    = 3
         aggregate_worker_count = 3
