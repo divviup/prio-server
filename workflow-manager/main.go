@@ -31,36 +31,44 @@ import (
 // BuildInfo is generated at build time - see the Dockerfile.
 var BuildInfo string
 
-var k8sNS = flag.String("k8s-namespace", "", "Kubernetes namespace")
-var ingestorLabel = flag.String("ingestor-label", "", "Label of ingestion server")
-var isFirst = flag.Bool("is-first", false, "Whether this set of servers is \"first\", aka PHA servers")
-var maxAge = flag.String("intake-max-age", "1h", "Max age (in Go duration format) for intake batches to be worth processing.")
-var ingestorInput = flag.String("ingestor-input", "", "Bucket for input from ingestor (s3:// or gs://) (Required)")
-var ingestorIdentity = flag.String("ingestor-identity", "", "Identity to use with ingestor bucket (Required for S3)")
-var ownValidationInput = flag.String("own-validation-input", "", "Bucket for input of validation batches from self (s3:// or gs://) (required)")
-var ownValidationIdentity = flag.String("own-validation-identity", "", "Identity to use with own validation bucket (Required for S3)")
-var peerValidationInput = flag.String("peer-validation-input", "", "Bucket for input of validation batches from peer (s3:// or gs://) (required)")
-var peerValidationIdentity = flag.String("peer-validation-identity", "", "Identity to use with peer validation bucket (Required for S3)")
-var aggregationPeriod = flag.String("aggregation-period", "3h", "How much time each aggregation covers")
-var gracePeriod = flag.String("grace-period", "1h", "Wait this amount of time after the end of an aggregation timeslice to run the aggregation")
-var pushGateway = flag.String("push-gateway", "", "Set this to the gateway to use with prometheus. If left empty, workflow-manager will not use prometheus.")
-var dryRun = flag.Bool("dry-run", false, "If set, no operations with side effects will be done.")
-var taskQueueKind = flag.String("task-queue-kind", "", "Which task queue kind to use.")
-var intakeTasksTopic = flag.String("intake-tasks-topic", "", "Name of the topic to which intake-batch tasks should be published")
-var aggregateTasksTopic = flag.String("aggregate-tasks-topic", "", "Name of the topic to which aggregate tasks should be published")
-var maxEnqueueWorkers = flag.Int("max-enqueue-workers", 100, "Max number of workers that can be used to enqueue jobs")
+// Flags.
+var (
+	k8sNS                  = flag.String("k8s-namespace", "", "Kubernetes namespace")
+	ingestorLabel          = flag.String("ingestor-label", "", "Label of ingestion server")
+	isFirst                = flag.Bool("is-first", false, "Whether this set of servers is \"first\", aka PHA servers")
+	maxAge                 = flag.Duration("intake-max-age", time.Hour, "Max age (in Go duration format) for intake batches to be worth processing.")
+	ingestorInput          = flag.String("ingestor-input", "", "Bucket for input from ingestor (s3:// or gs://) (Required)")
+	ingestorIdentity       = flag.String("ingestor-identity", "", "Identity to use with ingestor bucket (Required for S3)")
+	ownValidationInput     = flag.String("own-validation-input", "", "Bucket for input of validation batches from self (s3:// or gs://) (required)")
+	ownValidationIdentity  = flag.String("own-validation-identity", "", "Identity to use with own validation bucket (Required for S3)")
+	peerValidationInput    = flag.String("peer-validation-input", "", "Bucket for input of validation batches from peer (s3:// or gs://) (required)")
+	peerValidationIdentity = flag.String("peer-validation-identity", "", "Identity to use with peer validation bucket (Required for S3)")
+	pushGateway            = flag.String("push-gateway", "", "Set this to the gateway to use with prometheus. If left empty, workflow-manager will not use prometheus.")
+	dryRun                 = flag.Bool("dry-run", false, "If set, no operations with side effects will be done.")
+	taskQueueKind          = flag.String("task-queue-kind", "", "Which task queue kind to use.")
+	intakeTasksTopic       = flag.String("intake-tasks-topic", "", "Name of the topic to which intake-batch tasks should be published")
+	aggregateTasksTopic    = flag.String("aggregate-tasks-topic", "", "Name of the topic to which aggregate tasks should be published")
+	maxEnqueueWorkers      = flag.Int("max-enqueue-workers", 100, "Max number of workers that can be used to enqueue jobs")
 
-// Arguments for gcp-pubsub task queue
-var gcpPubSubCreatePubSubTopics = flag.Bool("gcp-pubsub-create-topics", false, "Whether to create the GCP PubSub topics used for intake and aggregation tasks.")
-var gcpProjectID = flag.String("gcp-project-id", "", "Name of the GCP project ID being used for PubSub.")
+	// Aggregation window flags, which determine which aggregation window will be aggregated (if not already aggregated).
+	// Normally, aggregation occurs for the window including the point in time of (now - grace-period).
+	// If aggregation-override-timestamp is specified, the aggregation window containing the override point will be aggregated instead.
+	aggregationPeriod            = flag.Duration("aggregation-period", 3*time.Hour, "How much time each aggregation covers")
+	gracePeriod                  = flag.Duration("grace-period", time.Hour, "Wait this amount of time after the end of an aggregation timeslice to run the aggregation. Relevant only if --aggregation-override-point is unset")
+	aggregationOverrideTimestamp = flag.String("aggregation-override-timestamp", "", "If specified, a point inside the aggregation window to be aggregated, in the format YYYYMMDDHHmm")
 
-// Arguments for aws-sns task queue
-var awsSNSRegion = flag.String("aws-sns-region", "", "AWS region in which to publish to SNS topic")
-var awsSNSIdentity = flag.String("aws-sns-identity", "", "AWS IAM ARN of the role to be assumed to publish to SNS topics")
+	// Arguments for gcp-pubsub task queue
+	gcpPubSubCreatePubSubTopics = flag.Bool("gcp-pubsub-create-topics", false, "Whether to create the GCP PubSub topics used for intake and aggregation tasks.")
+	gcpProjectID                = flag.String("gcp-project-id", "", "Name of the GCP project ID being used for PubSub.")
 
-// Define flags and arguments for other task queue implementations here.
-// Argument names should be prefixed with the corresponding value of
-// task-queue-kind to avoid conflicts.
+	// Arguments for aws-sns task queue
+	awsSNSRegion   = flag.String("aws-sns-region", "", "AWS region in which to publish to SNS topic")
+	awsSNSIdentity = flag.String("aws-sns-identity", "", "AWS IAM ARN of the role to be assumed to publish to SNS topics")
+
+	// Define flags and arguments for other task queue implementations here.
+	// Argument names should be prefixed with the corresponding value of
+	// task-queue-kind to avoid conflicts.
+)
 
 // Metrics gauges. We must use gauges because workflow-manager runs as a
 // cronjob, and so if we used counters, they would be reset to zero with each
@@ -215,22 +223,16 @@ func main() {
 		return
 	}
 
-	maxAgeParsed, err := time.ParseDuration(*maxAge)
-	if err != nil {
-		fail("--max-age: %s", err)
-		return
-	}
-
-	gracePeriodParsed, err := time.ParseDuration(*gracePeriod)
-	if err != nil {
-		fail("--grace-period: %s", err)
-		return
-	}
-
-	aggregationPeriodParsed, err := time.ParseDuration(*aggregationPeriod)
-	if err != nil {
-		fail("--aggregation-time-slice: %s", err)
-		return
+	var aggregationInterval aggregationIntervalFunc
+	if *aggregationOverrideTimestamp == "" {
+		aggregationInterval = standardAggregationWindow(*aggregationPeriod, *gracePeriod)
+	} else {
+		const timeLayout = "200601021504" // YYYYMMDDHHmm, e.g. 202110041600
+		when, err := time.Parse(timeLayout, *aggregationOverrideTimestamp)
+		if err != nil {
+			fail("--aggregation-override-timestamp: couldn't parse %q as time: %v", *aggregationOverrideTimestamp, err)
+		}
+		aggregationInterval = overrideAggregationWindow(when, *aggregationPeriod)
 	}
 
 	if *taskQueueKind == "" || *intakeTasksTopic == "" || *aggregateTasksTopic == "" {
@@ -336,9 +338,8 @@ func main() {
 			peerValidationBucket:    peerValidationBucket,
 			intakeTaskEnqueuer:      intakeTaskEnqueuer,
 			aggregationTaskEnqueuer: aggregationTaskEnqueuer,
-			maxAge:                  maxAgeParsed,
-			aggregationPeriod:       aggregationPeriodParsed,
-			gracePeriod:             gracePeriodParsed,
+			maxAge:                  *maxAge,
+			aggregationInterval:     aggregationInterval,
 		})
 
 		if err != nil {
@@ -361,7 +362,8 @@ type scheduleTasksConfig struct {
 	clock                                                   wftime.Clock
 	intakeBucket, ownValidationBucket, peerValidationBucket storage.Bucket
 	intakeTaskEnqueuer, aggregationTaskEnqueuer             task.Enqueuer
-	maxAge, aggregationPeriod, gracePeriod                  time.Duration
+	maxAge                                                  time.Duration
+	aggregationInterval                                     aggregationIntervalFunc
 }
 
 // scheduleTasks evaluates bucket contents and Kubernetes cluster state to
@@ -411,7 +413,7 @@ func scheduleTasks(config scheduleTasksConfig) error {
 		return err
 	}
 
-	aggInterval := wftime.AggregationInterval(config.clock, config.aggregationPeriod, config.gracePeriod)
+	aggInterval := config.aggregationInterval(config.clock.Now())
 
 	log.Info().Str("aggregation interval", aggInterval.String()).Msgf("looking for batches to aggregate in interval %s", aggInterval)
 
@@ -618,4 +620,18 @@ func enqueueIntakeTasks(
 		Msg("skipped and scheduled intake tasks")
 
 	return nil
+}
+
+type aggregationIntervalFunc func(now time.Time) wftime.Interval
+
+func standardAggregationWindow(aggregationPeriod, gracePeriod time.Duration) aggregationIntervalFunc {
+	return func(now time.Time) wftime.Interval {
+		return wftime.AggregationInterval(now, aggregationPeriod, gracePeriod)
+	}
+}
+
+func overrideAggregationWindow(when time.Time, aggregationPeriod time.Duration) aggregationIntervalFunc {
+	return func(time.Time) wftime.Interval {
+		return wftime.AggregationIntervalIncluding(when, aggregationPeriod)
+	}
 }

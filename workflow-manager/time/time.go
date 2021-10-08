@@ -48,11 +48,20 @@ type Interval struct {
 // AggregationInterval calculates the interval we want to run an aggregation
 // for, if any. That is whatever interval is `gracePeriod` earlier than now and
 // aligned on multiples of `aggregationPeriod` (relative to the zero time).
-func AggregationInterval(clock Clock, aggregationPeriod, gracePeriod time.Duration) Interval {
-	var output Interval
-	output.End = clock.Now().Add(-gracePeriod).Truncate(aggregationPeriod)
-	output.Begin = output.End.Add(-aggregationPeriod)
-	return output
+func AggregationInterval(now time.Time, aggregationPeriod, gracePeriod time.Duration) Interval {
+	return AggregationIntervalIncluding(now.Add(-gracePeriod).Add(-aggregationPeriod), aggregationPeriod)
+}
+
+// AggregationIntervalIncluding calculates an interval of aggregation, given a point of time inside
+// that interval.
+// The start of the returned interval will be the given point in time, truncated to the nearest
+// multiple of the aggregation period (relative to the zero time).
+func AggregationIntervalIncluding(when time.Time, aggregationPeriod time.Duration) Interval {
+	start := when.Truncate(aggregationPeriod)
+	return Interval{
+		Begin: start,
+		End:   start.Add(aggregationPeriod),
+	}
 }
 
 func (i Interval) String() string {
