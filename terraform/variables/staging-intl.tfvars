@@ -36,7 +36,6 @@ use_aws                  = true
 pure_gcp                 = true
 facilitator_version      = "0.6.16"
 workflow_manager_version = "0.6.16"
-pushgateway              = "prometheus-pushgateway.monitoring:9091"
 victorops_routing_key    = "prio-staging"
 
 default_aggregation_period       = "30m"

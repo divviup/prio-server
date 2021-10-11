@@ -29,7 +29,7 @@ variable "aws_region" {
 }
 
 variable "aws_profile" {
-  type    = string
+  type = string
 }
 
 variable "localities" {
@@ -176,7 +176,7 @@ variable "packet_encryption_rotation" {
 
 variable "pushgateway" {
   type        = string
-  default     = ""
+  default     = "prometheus-pushgateway.monitoring:9091"
   description = "The location of a pushgateway in host:port form. Set to prometheus-pushgateway.default:9091 to enable metrics"
 }
 
@@ -213,6 +213,7 @@ variable "prometheus_server_persistent_disk_size_gb" {
 
 variable "victorops_routing_key" {
   type        = string
+  default     = "bogus-routing-key"
   description = "VictorOps/Splunk OnCall routing key for prometheus-alertmanager"
 }
 
