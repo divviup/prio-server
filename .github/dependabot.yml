@@ -4,28 +4,28 @@ updates:
   - package-ecosystem: "gomod"
     directory: "/deploy-tool"
     schedule:
-      interval: "daily"
+      interval: "weekly"
   - package-ecosystem: "cargo"
     directory: "/facilitator"
     schedule:
-      interval: "daily"
+      interval: "weekly"
   - package-ecosystem: "docker"
     directory: "/facilitator"
     schedule:
-      interval: "daily"
+      interval: "weekly"
   - package-ecosystem: "terraform"
     directory: "/terraform"
     schedule:
-      interval: "daily"
+      interval: "weekly"
   - package-ecosystem: "gomod"
     directory: "/workflow-manager"
     schedule:
-      interval: "daily"
+      interval: "weekly"
   - package-ecosystem: "docker"
     directory: "/workflow-manager"
     schedule:
-      interval: "daily"
+      interval: "weekly"
   - package-ecosystem: "gomod"
     directory: "/task-replayer"
     schedule:
-      interval: "daily"
+      interval: "weekly"
