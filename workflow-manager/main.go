@@ -50,9 +50,12 @@ var (
 	aggregateTasksTopic    = flag.String("aggregate-tasks-topic", "", "Name of the topic to which aggregate tasks should be published")
 	maxEnqueueWorkers      = flag.Int("max-enqueue-workers", 100, "Max number of workers that can be used to enqueue jobs")
 
-	// Aggregation window flags, which determine which aggregation window will be aggregated (if not already aggregated).
-	// Normally, aggregation occurs for the window including the point in time of (now - grace-period).
-	// If aggregation-override-timestamp is specified, the aggregation window containing the override point will be aggregated instead.
+	// Aggregation window flags, which determine which aggregation window will
+	// be aggregated (if not already aggregated). Normally, aggregation occurs
+	// for the most recent window that ended at least grace-period in the past.
+	// If aggregation-override-timestamp is specified, the aggregation window
+	// containing the override point will be aggregated instead of the most
+	// recent aggregation window.
 	aggregationPeriod            = flag.Duration("aggregation-period", 3*time.Hour, "How much time each aggregation covers")
 	gracePeriod                  = flag.Duration("grace-period", time.Hour, "Wait this amount of time after the end of an aggregation timeslice to run the aggregation. Relevant only if --aggregation-override-point is unset")
 	aggregationOverrideTimestamp = flag.String("aggregation-override-timestamp", "", "If specified, a point inside the aggregation window to be aggregated, in the format YYYYMMDDHHmm")
@@ -223,16 +226,16 @@ func main() {
 		return
 	}
 
-	var aggregationInterval aggregationIntervalFunc
+	var aggregationInterval wftime.AggregationIntervalFunc
 	if *aggregationOverrideTimestamp == "" {
-		aggregationInterval = standardAggregationWindow(*aggregationPeriod, *gracePeriod)
+		aggregationInterval = wftime.StandardAggregationWindow(*aggregationPeriod, *gracePeriod)
 	} else {
 		const timeLayout = "200601021504" // YYYYMMDDHHmm, e.g. 202110041600
 		when, err := time.Parse(timeLayout, *aggregationOverrideTimestamp)
 		if err != nil {
 			fail("--aggregation-override-timestamp: couldn't parse %q as time: %v", *aggregationOverrideTimestamp, err)
 		}
-		aggregationInterval = overrideAggregationWindow(when, *aggregationPeriod)
+		aggregationInterval = wftime.OverrideAggregationWindow(when, *aggregationPeriod)
 	}
 
 	if *taskQueueKind == "" || *intakeTasksTopic == "" || *aggregateTasksTopic == "" {
@@ -363,7 +366,7 @@ type scheduleTasksConfig struct {
 	intakeBucket, ownValidationBucket, peerValidationBucket storage.Bucket
 	intakeTaskEnqueuer, aggregationTaskEnqueuer             task.Enqueuer
 	maxAge                                                  time.Duration
-	aggregationInterval                                     aggregationIntervalFunc
+	aggregationInterval                                     wftime.AggregationIntervalFunc
 }
 
 // scheduleTasks evaluates bucket contents and Kubernetes cluster state to
@@ -513,10 +516,7 @@ func enqueueAggregationTask(
 	}
 
 	batches := []task.Batch{}
-
-	batchCount := 0
 	for _, batchPath := range readyBatches {
-		batchCount++
 		batches = append(batches, task.Batch{
 			ID:   batchPath.ID,
 			Time: wftime.Timestamp(batchPath.Time),
@@ -562,7 +562,7 @@ func enqueueAggregationTask(
 		}
 
 		aggregationsStarted.WithLabelValues(aggregationID).Inc()
-		numberOfBatchesInAggregation.WithLabelValues(aggregationID).Set(float64(batchCount))
+		numberOfBatchesInAggregation.WithLabelValues(aggregationID).Set(float64(len(batches)))
 	})
 
 	return nil
@@ -620,18 +620,4 @@ func enqueueIntakeTasks(
 		Msg("skipped and scheduled intake tasks")
 
 	return nil
-}
-
-type aggregationIntervalFunc func(now time.Time) wftime.Interval
-
-func standardAggregationWindow(aggregationPeriod, gracePeriod time.Duration) aggregationIntervalFunc {
-	return func(now time.Time) wftime.Interval {
-		return wftime.AggregationInterval(now, aggregationPeriod, gracePeriod)
-	}
-}
-
-func overrideAggregationWindow(when time.Time, aggregationPeriod time.Duration) aggregationIntervalFunc {
-	return func(time.Time) wftime.Interval {
-		return wftime.AggregationIntervalIncluding(when, aggregationPeriod)
-	}
 }

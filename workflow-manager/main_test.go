@@ -123,7 +123,7 @@ func TestScheduleIntakeTasks(t *testing.T) {
 				intakeTaskEnqueuer:      &intakeTaskEnqueuer,
 				aggregationTaskEnqueuer: &aggregateTaskEnqueuer,
 				maxAge:                  maxAge,
-				aggregationInterval:     standardAggregationWindow(aggregationPeriod, gracePeriod),
+				aggregationInterval:     wftime.StandardAggregationWindow(aggregationPeriod, gracePeriod),
 			}); err != nil {
 				t.Errorf("unexpected error %q", err)
 			}
@@ -202,7 +202,7 @@ func TestScheduleAggregationTasks(t *testing.T) {
 		hasOwnValidation        bool
 		hasPeerValidation       bool
 		taskMarkerExists        bool
-		aggregationInterval     aggregationIntervalFunc
+		aggregationInterval     wftime.AggregationIntervalFunc
 		expectedAggregationTask *task.Aggregation
 		expectedTaskMarker      string
 	}{
@@ -212,7 +212,7 @@ func TestScheduleAggregationTasks(t *testing.T) {
 			hasOwnValidation:        false,
 			hasPeerValidation:       false,
 			taskMarkerExists:        false,
-			aggregationInterval:     standardAggregationWindow(aggregationPeriod, gracePeriod),
+			aggregationInterval:     wftime.StandardAggregationWindow(aggregationPeriod, gracePeriod),
 			expectedAggregationTask: nil,
 			expectedTaskMarker:      "",
 		},
@@ -221,7 +221,7 @@ func TestScheduleAggregationTasks(t *testing.T) {
 			hasOwnValidation:        false,
 			hasPeerValidation:       true,
 			taskMarkerExists:        false,
-			aggregationInterval:     standardAggregationWindow(aggregationPeriod, gracePeriod),
+			aggregationInterval:     wftime.StandardAggregationWindow(aggregationPeriod, gracePeriod),
 			expectedAggregationTask: nil,
 			expectedTaskMarker:      "",
 		},
@@ -230,7 +230,7 @@ func TestScheduleAggregationTasks(t *testing.T) {
 			hasOwnValidation:        true,
 			hasPeerValidation:       false,
 			taskMarkerExists:        false,
-			aggregationInterval:     standardAggregationWindow(aggregationPeriod, gracePeriod),
+			aggregationInterval:     wftime.StandardAggregationWindow(aggregationPeriod, gracePeriod),
 			expectedAggregationTask: nil,
 			expectedTaskMarker:      "",
 		},
@@ -239,7 +239,7 @@ func TestScheduleAggregationTasks(t *testing.T) {
 			hasOwnValidation:        true,
 			hasPeerValidation:       true,
 			taskMarkerExists:        false,
-			aggregationInterval:     standardAggregationWindow(aggregationPeriod, gracePeriod),
+			aggregationInterval:     wftime.StandardAggregationWindow(aggregationPeriod, gracePeriod),
 			expectedAggregationTask: expectedAggregationTask,
 			expectedTaskMarker:      aggregationMarker,
 		},
@@ -248,7 +248,7 @@ func TestScheduleAggregationTasks(t *testing.T) {
 			hasOwnValidation:        true,
 			hasPeerValidation:       true,
 			taskMarkerExists:        true,
-			aggregationInterval:     standardAggregationWindow(aggregationPeriod, gracePeriod),
+			aggregationInterval:     wftime.StandardAggregationWindow(aggregationPeriod, gracePeriod),
 			expectedAggregationTask: nil,
 			expectedTaskMarker:      "",
 		},
@@ -259,7 +259,7 @@ func TestScheduleAggregationTasks(t *testing.T) {
 			hasOwnValidation:        true,
 			hasPeerValidation:       true,
 			taskMarkerExists:        false,
-			aggregationInterval:     overrideAggregationWindow(aggregationMidpoint, aggregationPeriod),
+			aggregationInterval:     wftime.OverrideAggregationWindow(aggregationMidpoint, aggregationPeriod),
 			expectedAggregationTask: expectedAggregationTask,
 			expectedTaskMarker:      aggregationMarker,
 		},
@@ -268,7 +268,7 @@ func TestScheduleAggregationTasks(t *testing.T) {
 			hasOwnValidation:        true,
 			hasPeerValidation:       true,
 			taskMarkerExists:        true,
-			aggregationInterval:     overrideAggregationWindow(aggregationMidpoint, aggregationPeriod),
+			aggregationInterval:     wftime.OverrideAggregationWindow(aggregationMidpoint, aggregationPeriod),
 			expectedAggregationTask: nil,
 			expectedTaskMarker:      "",
 		},
