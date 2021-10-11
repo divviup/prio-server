@@ -1,6 +1,5 @@
 use crate::{
     batch::{Batch, BatchReader, BatchWriter},
-    generate_validation_packet,
     idl::{IngestionDataSharePacket, IngestionHeader, Packet, ValidationHeader, ValidationPacket},
     logging::event,
     metrics::IntakeMetricsCollector,
@@ -159,7 +158,7 @@ impl<'a> BatchIntaker<'a> {
                         Err(Error::EofError) => return Ok(()),
                         Err(e) => return Err(e.into()),
                     };
-                    let validation_packet = generate_validation_packet(&mut servers, &packet)?;
+                    let validation_packet = packet.generate_validation_packet(&mut servers)?;
                     validation_packet.write(&mut packet_writer)?;
                     processed_packets += 1;
                     if processed_packets % callback_cadence == 0 {

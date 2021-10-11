@@ -420,8 +420,6 @@ func scheduleTasks(config scheduleTasksConfig) error {
 
 	// Take the intersection of the sets of ingestion batches and peer validations
 	// to get the list of batches we can aggregate.
-	// Go doesn't have sets, so we have to use a map[string]struct{}, with the batch ID being used
-	// as the map key.
 	ingestionBatchIDs := map[string]struct{}{}
 	for _, ingestionBatch := range intakeBatches.Batches {
 		ingestionBatchIDs[ingestionBatch.ID] = struct{}{}

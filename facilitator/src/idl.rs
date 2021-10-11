@@ -1,10 +1,14 @@
 use crate::Error;
+use anyhow::{anyhow, Context, Result};
 use avro_rs::{
     from_value,
     types::{Record, Value},
     Reader, Schema, Writer,
 };
-use prio::{field::Field32, server::VerificationMessage};
+use prio::{
+    field::Field32,
+    server::{Server, ServerError, VerificationMessage},
+};
 use serde::{Deserialize, Serialize};
 use std::{
     convert::TryFrom,
@@ -511,6 +515,44 @@ impl Packet for IngestionDataSharePacket {
         })?;
 
         Ok(())
+    }
+}
+
+impl IngestionDataSharePacket {
+    pub(crate) fn generate_validation_packet(
+        &self,
+        servers: &mut Vec<Server<Field32>>,
+    ) -> Result<ValidationPacket> {
+        let r_pit = Field32::from(
+            u32::try_from(self.r_pit)
+                .with_context(|| format!("illegal r_pit value {}", self.r_pit))?,
+        );
+        // TODO(timg): if this fails for a non-empty subset of the
+        // ingestion packets, do we abort handling of the entire
+        // batch (as implemented currently) or should we record it
+        // as an invalid UUID and emit a validation batch for the
+        // other packets?
+        for server in servers.iter_mut() {
+            let validation_message =
+                match server.generate_verification_message(r_pit, &self.encrypted_payload) {
+                    Ok(m) => m,
+                    Err(ServerError::Encrypt(_)) => {
+                        continue;
+                    }
+                    Err(e) => {
+                        return Err(
+                            anyhow::Error::new(e).context("error generating verification message")
+                        );
+                    }
+                };
+            return Ok(ValidationPacket {
+                uuid: self.uuid,
+                f_r: u32::from(validation_message.f_r) as i64,
+                g_r: u32::from(validation_message.g_r) as i64,
+                h_r: u32::from(validation_message.h_r) as i64,
+            });
+        }
+        return Err(anyhow!("failed to construct validation message for packet {} because all decryption attempts failed (key mismatch?)", self.uuid));
     }
 }
 

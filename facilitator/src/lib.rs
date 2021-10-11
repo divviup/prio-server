@@ -1,11 +1,5 @@
-use crate::idl::{IngestionDataSharePacket, ValidationPacket};
-use anyhow::{anyhow, Context, Result};
-use prio::{
-    field::Field32,
-    server::{Server, ServerError},
-};
+use anyhow::Result;
 use ring::{digest, signature::EcdsaKeyPair};
-use std::convert::TryFrom;
 use std::io::Write;
 
 pub mod aggregation;
@@ -45,47 +39,6 @@ pub enum Error {
     HttpError(#[from] ureq::Error),
 }
 
-pub fn generate_validation_packet(
-    servers: &mut Vec<Server<Field32>>,
-    packet: &IngestionDataSharePacket,
-) -> Result<ValidationPacket> {
-    let r_pit = Field32::from(
-        u32::try_from(packet.r_pit)
-            .with_context(|| format!("illegal r_pit value {}", packet.r_pit))?,
-    );
-
-    // TODO(timg): if this fails for a non-empty subset of the
-    // ingestion packets, do we abort handling of the entire
-    // batch (as implemented currently) or should we record it
-    // as an invalid UUID and emit a validation batch for the
-    // other packets?
-    for server in servers.iter_mut() {
-        let validation_message = match server
-            .generate_verification_message(r_pit, &packet.encrypted_payload)
-        {
-            Ok(m) => m,
-            Err(ServerError::Encrypt(_)) => {
-                continue;
-            }
-            Err(e) => {
-                return Err(anyhow::Error::new(e).context("error generating verification message"));
-            }
-        };
-
-        return Ok(ValidationPacket {
-            uuid: packet.uuid,
-            f_r: u32::from(validation_message.f_r) as i64,
-            g_r: u32::from(validation_message.g_r) as i64,
-            h_r: u32::from(validation_message.h_r) as i64,
-        });
-    }
-
-    return Err(anyhow!(
-        "failed to construct validation message for packet {} because all decryption attempts failed (key mismatch?)",
-        packet.uuid
-    ));
-}
-
 /// A wrapper-writer that computes a SHA256 digest over the content it is provided.
 pub struct DigestWriter<W: Write> {
     writer: W,
@@ -108,11 +61,11 @@ impl<W: Write> DigestWriter<W> {
 
 impl<W: Write> Write for DigestWriter<W> {
     fn write(&mut self, buf: &[u8]) -> Result<usize, std::io::Error> {
-        let rslt = self.writer.write(buf);
-        if let Ok(n) = rslt {
+        let result = self.writer.write(buf);
+        if let Ok(n) = result {
             self.context.update(&buf[..n]);
         }
-        rslt
+        result
     }
 
     fn flush(&mut self) -> Result<(), std::io::Error> {

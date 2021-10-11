@@ -1,6 +1,5 @@
 use crate::{
     batch::{Batch, BatchReader, BatchWriter},
-    generate_validation_packet,
     idl::{
         IngestionDataSharePacket, IngestionHeader, InvalidPacket, Packet, SumPart,
         ValidationHeader, ValidationPacket,
@@ -306,7 +305,7 @@ impl<'a> BatchAggregator<'a> {
                 None => continue,
             };
 
-            let own_validation_packet = generate_validation_packet(servers, &ingestion_packet)?;
+            let own_validation_packet = ingestion_packet.generate_validation_packet(servers)?;
 
             processed_ingestion_packets.insert(ingestion_packet.uuid);
 
