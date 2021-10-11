@@ -50,10 +50,6 @@ variable "peer_share_processor_manifest_base_url" {
   type = string
 }
 
-variable "own_manifest_base_url" {
-  type = string
-}
-
 variable "remote_bucket_writer_gcp_service_account_email" {
   type = string
 }
@@ -382,7 +378,6 @@ module "kubernetes" {
   remote_peer_validation_bucket_identity  = local.remote_validation_bucket_writer
   peer_validation_bucket                  = local.peer_validation_bucket_url
   own_validation_bucket                   = local.own_validation_bucket_url
-  own_manifest_base_url                   = var.own_manifest_base_url
   sum_part_bucket_service_account_email   = var.remote_bucket_writer_gcp_service_account_email
   portal_server_manifest_base_url         = var.portal_server_manifest_base_url
   is_first                                = var.is_first
