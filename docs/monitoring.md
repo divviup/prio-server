@@ -24,7 +24,9 @@ We configure a regional Google Compute Engine disk for `prometheus-server`'s sto
 
 ## Configuration
 
-Most configuration is handled via Terraform, in the `monitoring` module.
+Most configuration is handled via Terraform, in the `monitoring` module. Individual environment configuration will typically set the `victorops_routing_key` variable to an appropriate value (e.g. a preconfigured routing key in Splunk for production/staging environments, most likely a bogus value for development environments) in the environment's `tfvars` file.
+
+Monitoring can be disabled by setting the `pushgateway` variable to the empty string.
 
 ### Alerting rules
 
