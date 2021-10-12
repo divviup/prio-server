@@ -525,7 +525,6 @@ module "data_share_processors" {
   peer_share_processor_manifest_base_url         = each.value.peer_share_processor_manifest_base_url
   remote_bucket_writer_gcp_service_account_email = google_service_account.sum_part_bucket_writer.email
   portal_server_manifest_base_url                = each.value.portal_server_manifest_base_url
-  own_manifest_base_url                          = local.manifest.base_url
   is_first                                       = var.is_first
   intake_max_age                                 = var.intake_max_age
   aggregation_period                             = each.value.aggregation_period

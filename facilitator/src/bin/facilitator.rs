@@ -744,8 +744,6 @@ fn main() -> Result<(), anyhow::Error> {
                 .add_storage_arguments(Entity::Ingestor, InOut::Input)
                 .add_manifest_base_url_argument(Entity::Peer)
                 .add_storage_arguments(Entity::Peer, InOut::Output)
-                .add_manifest_base_url_argument(Entity::Own)
-                .add_storage_arguments(Entity::Own, InOut::Output)
                 .add_use_bogus_packet_file_digest_argument()
                 .add_permit_malformed_batch_argument()
                 .add_gcp_workload_identity_pool_provider_argument()
@@ -813,8 +811,6 @@ fn main() -> Result<(), anyhow::Error> {
                 .add_manifest_base_url_argument(Entity::Ingestor)
                 .add_storage_arguments(Entity::Ingestor, InOut::Input)
                 .add_batch_public_key_arguments(Entity::Ingestor)
-                .add_manifest_base_url_argument(Entity::Own)
-                .add_storage_arguments(Entity::Own, InOut::Input)
                 .add_manifest_base_url_argument(Entity::Peer)
                 .add_storage_arguments(Entity::Peer, InOut::Input)
                 .add_batch_public_key_arguments(Entity::Peer)
@@ -884,8 +880,6 @@ fn main() -> Result<(), anyhow::Error> {
                 .add_storage_arguments(Entity::Ingestor, InOut::Input)
                 .add_manifest_base_url_argument(Entity::Peer)
                 .add_storage_arguments(Entity::Peer, InOut::Output)
-                .add_manifest_base_url_argument(Entity::Own)
-                .add_storage_arguments(Entity::Own, InOut::Output)
                 .add_task_queue_arguments()
                 .add_metrics_scrape_port_argument()
                 .add_use_bogus_packet_file_digest_argument()
@@ -901,8 +895,6 @@ fn main() -> Result<(), anyhow::Error> {
                 .add_manifest_base_url_argument(Entity::Ingestor)
                 .add_storage_arguments(Entity::Ingestor, InOut::Input)
                 .add_batch_public_key_arguments(Entity::Ingestor)
-                .add_manifest_base_url_argument(Entity::Own)
-                .add_storage_arguments(Entity::Own, InOut::Input)
                 .add_manifest_base_url_argument(Entity::Peer)
                 .add_storage_arguments(Entity::Peer, InOut::Input)
                 .add_batch_public_key_arguments(Entity::Peer)
@@ -1343,22 +1335,6 @@ where
         batch_signing_key: batch_signing_key_from_arg(sub_matches)?,
     };
 
-    // We created the bucket to which we write copies of our validation
-    // shares, so it is simply provided by argument.
-    let mut own_validation_transport = SignableTransport {
-        transport: transport_from_args(
-            value_t!(
-                sub_matches.value_of(Entity::Own.suffix("-identity")),
-                Identity
-            )?,
-            Entity::Own,
-            PathOrInOut::InOut(InOut::Output),
-            sub_matches,
-            parent_logger,
-        )?,
-        batch_signing_key: batch_signing_key_from_arg(sub_matches)?,
-    };
-
     let batch_id: Uuid = Uuid::parse_str(batch_id).unwrap();
 
     let date: NaiveDateTime = NaiveDateTime::parse_from_str(date, DATE_FORMAT).unwrap();
@@ -1370,7 +1346,6 @@ where
         &date,
         &mut intake_transport,
         &mut peer_validation_transport,
-        &mut own_validation_transport,
         is_first_from_arg(sub_matches),
         Some("true") == sub_matches.value_of("permit-malformed-batch"),
         parent_logger,
@@ -1499,46 +1474,6 @@ where
 
     let mut intake_transport = intake_transport_from_args(sub_matches, logger)?;
 
-    // We created the bucket to which we wrote copies of our validation
-    // shares, so it is simply provided by argument.
-    let own_validation_transport = transport_from_args(
-        value_t!(
-            sub_matches.value_of(Entity::Own.suffix("-identity")),
-            Identity
-        )?,
-        Entity::Own,
-        PathOrInOut::InOut(InOut::Input),
-        sub_matches,
-        logger,
-    )?;
-
-    // To read our own validation shares, we require our own public keys which
-    // we discover in our own specific manifest. If no manifest is provided, use
-    // the public portion of the provided batch signing private key.
-    let own_public_key_map = match (
-        sub_matches.value_of("own-manifest-base-url"),
-        sub_matches.value_of("batch-signing-private-key"),
-        sub_matches.value_of("batch-signing-private-key-identifier"),
-    ) {
-        (Some(manifest_base_url), _, _) => DataShareProcessorSpecificManifest::from_https(
-            manifest_base_url,
-            instance_name,
-            logger,
-        )?
-        .batch_signing_public_keys()?,
-
-        (_, Some(private_key), Some(private_key_identifier)) => {
-            public_key_map_from_arg(private_key, private_key_identifier)?
-        }
-        _ => {
-            return Err(anyhow!(
-                "batch-signing-private-key and \
-                batch-signing-private-key-identifier are required if \
-                own-manifest-base-url is not provided."
-            ));
-        }
-    };
-
     // We created the bucket that peers wrote validations into, and so
     // it is simply provided via argument.
     let peer_validation_transport = transport_from_args(
@@ -1614,10 +1549,6 @@ where
     let start: NaiveDateTime = NaiveDateTime::parse_from_str(start, DATE_FORMAT).unwrap();
     let end: NaiveDateTime = NaiveDateTime::parse_from_str(end, DATE_FORMAT).unwrap();
 
-    let mut own_validation_transport = VerifiableTransport {
-        transport: own_validation_transport,
-        batch_signing_public_keys: own_public_key_map,
-    };
     let mut peer_validation_transport = VerifiableTransport {
         transport: peer_validation_transport,
         batch_signing_public_keys: peer_share_processor_pub_key_map,
@@ -1644,7 +1575,6 @@ where
         is_first,
         Some("true") == sub_matches.value_of("permit-malformed-batch"),
         &mut intake_transport,
-        &mut own_validation_transport,
         &mut peer_validation_transport,
         &mut aggregation_transport,
         logger,

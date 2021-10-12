@@ -67,10 +67,6 @@ variable "own_validation_bucket" {
   type = string
 }
 
-variable "own_manifest_base_url" {
-  type = string
-}
-
 variable "kubernetes_namespace" {
   type = string
 }
@@ -222,8 +218,6 @@ resource "kubernetes_config_map" "intake_batch_config_map" {
     PEER_IDENTITY                                   = var.remote_peer_validation_bucket_identity.identity
     PEER_MANIFEST_BASE_URL                          = "https://${var.peer_manifest_base_url}"
     PEER_GCP_SA_TO_IMPERSONATE_BEFORE_ASSUMING_ROLE = var.remote_peer_validation_bucket_identity.gcp_sa_to_impersonate_while_assuming_identity
-    OWN_OUTPUT                                      = var.own_validation_bucket
-    OWN_MANIFEST_BASE_URL                           = "https://${var.own_manifest_base_url}"
     RUST_LOG                                        = "info"
     RUST_BACKTRACE                                  = "1"
     PUSHGATEWAY                                     = var.pushgateway
@@ -251,8 +245,6 @@ resource "kubernetes_config_map" "aggregate_config_map" {
     INGESTOR_INPUT                       = var.ingestion_bucket
     INGESTOR_MANIFEST_BASE_URL           = "https://${var.ingestor_manifest_base_url}"
     INSTANCE_NAME                        = var.data_share_processor_name
-    OWN_INPUT                            = var.own_validation_bucket
-    OWN_MANIFEST_BASE_URL                = "https://${var.own_manifest_base_url}"
     PEER_INPUT                           = var.peer_validation_bucket
     PEER_MANIFEST_BASE_URL               = "https://${var.peer_manifest_base_url}"
     PORTAL_IDENTITY                      = var.sum_part_bucket_service_account_email
