@@ -6,11 +6,11 @@ use crate::{
     transport::{SignableTransport, VerifiableAndDecryptableTransport},
     BatchSigningKey, Error, DATE_FORMAT,
 };
-use anyhow::{ensure, Result};
+use anyhow::{ensure, Context, Result};
 use chrono::NaiveDateTime;
 use prio::{
     encrypt::{PrivateKey, PublicKey},
-    field::Field32,
+    field::FieldPriov2,
     server::Server,
 };
 use ring::signature::UnparsedPublicKey;
@@ -122,7 +122,7 @@ impl<'a> BatchIntaker<'a> {
         // is optional. Instead we try all the keys we have available until one
         // works.
         // https://github.com/abetterinternet/prio-server/issues/73
-        let mut servers: Vec<Server<Field32>> = self
+        let mut servers: Vec<Server<FieldPriov2>> = self
             .packet_decryption_keys
             .iter()
             .map(|k| {
@@ -132,8 +132,9 @@ impl<'a> BatchIntaker<'a> {
                     PublicKey::from(k)
                 );
                 Server::new(ingestion_header.bins as usize, self.is_first, k.clone())
+                    .context("failed to construct Prio server")
             })
-            .collect();
+            .collect::<Result<_, _>>()?;
 
         debug!(self.logger, "We have {} servers.", &servers.len());
 
