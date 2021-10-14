@@ -6,7 +6,7 @@ use avro_rs::{
     Reader, Schema, Writer,
 };
 use prio::{
-    field::Field32,
+    field::FieldPriov2,
     server::{Server, ServerError, VerificationMessage},
 };
 use serde::{Deserialize, Serialize};
@@ -521,9 +521,9 @@ impl Packet for IngestionDataSharePacket {
 impl IngestionDataSharePacket {
     pub(crate) fn generate_validation_packet(
         &self,
-        servers: &mut Vec<Server<Field32>>,
+        servers: &mut Vec<Server<FieldPriov2>>,
     ) -> Result<ValidationPacket> {
-        let r_pit = Field32::from(
+        let r_pit = FieldPriov2::from(
             u32::try_from(self.r_pit)
                 .with_context(|| format!("illegal r_pit value {}", self.r_pit))?,
         );
@@ -787,14 +787,14 @@ impl Packet for ValidationPacket {
     }
 }
 
-impl TryFrom<&ValidationPacket> for VerificationMessage<Field32> {
+impl TryFrom<&ValidationPacket> for VerificationMessage<FieldPriov2> {
     type Error = TryFromIntError;
 
     fn try_from(p: &ValidationPacket) -> Result<Self, Self::Error> {
         Ok(VerificationMessage {
-            f_r: Field32::from(u32::try_from(p.f_r)?),
-            g_r: Field32::from(u32::try_from(p.g_r)?),
-            h_r: Field32::from(u32::try_from(p.h_r)?),
+            f_r: FieldPriov2::from(u32::try_from(p.f_r)?),
+            g_r: FieldPriov2::from(u32::try_from(p.g_r)?),
+            h_r: FieldPriov2::from(u32::try_from(p.h_r)?),
         })
     }
 }
@@ -816,10 +816,10 @@ pub struct SumPart {
 }
 
 impl SumPart {
-    pub fn sum(&self) -> Result<Vec<Field32>, TryFromIntError> {
+    pub fn sum(&self) -> Result<Vec<FieldPriov2>, TryFromIntError> {
         self.sum
             .iter()
-            .map(|i| Ok(Field32::from(u32::try_from(*i)?)))
+            .map(|i| Ok(FieldPriov2::from(u32::try_from(*i)?)))
             .collect::<Result<Vec<_>, _>>()
     }
 }
