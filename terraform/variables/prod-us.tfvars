@@ -163,7 +163,6 @@ default_aggregation_period                = "8h"
 default_aggregation_grace_period          = "4h"
 workflow_manager_version                  = "0.6.16"
 facilitator_version                       = "0.6.16"
-pushgateway                               = "prometheus-pushgateway.monitoring:9091"
 prometheus_server_persistent_disk_size_gb = 1000
 victorops_routing_key                     = "prio-prod-us"
 

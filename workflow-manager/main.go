@@ -92,21 +92,6 @@ var (
 		[]string{"aggregation_id"},
 	)
 
-	ownValidationsFound = promauto.NewGaugeVec(
-		prometheus.GaugeOpts{
-			Name: "workflow_manager_own_validations_found",
-			Help: "The number of own validation batches found in the current aggregation interval",
-		},
-		[]string{"aggregation_id"},
-	)
-	incompleteOwnValidationsFound = promauto.NewGaugeVec(
-		prometheus.GaugeOpts{
-			Name: "workflow_manager_incomplete_own_validations_found",
-			Help: "The number of incomplete own validation batches found in the current aggregation interval",
-		},
-		[]string{"aggregation_id"},
-	)
-
 	peerValidationsFound = promauto.NewGaugeVec(
 		prometheus.GaugeOpts{
 			Name: "workflow_manager_peer_validations_found",
@@ -420,24 +405,6 @@ func scheduleTasks(config scheduleTasksConfig) error {
 
 	log.Info().Str("aggregation interval", aggInterval.String()).Msgf("looking for batches to aggregate in interval %s", aggInterval)
 
-	ownValidationFiles, err := config.ownValidationBucket.ListBatchFiles(config.aggregationID, aggInterval)
-	if err != nil {
-		return err
-	}
-
-	ownValidityInfix := fmt.Sprintf("validity_%d", utils.Index(config.isFirst))
-	ownValidationBatches, err := batchpath.ReadyBatches(ownValidationFiles, ownValidityInfix)
-	if err != nil {
-		return err
-	}
-
-	ownValidationsFound.WithLabelValues(config.aggregationID).Set(float64(ownValidationBatches.Batches.Len()))
-	incompleteOwnValidationsFound.WithLabelValues(config.aggregationID).Set(float64(ownValidationBatches.IncompleteBatchCount))
-	log.Info().
-		Int("own validations", ownValidationBatches.Batches.Len()).
-		Int("incomplete own validations", ownValidationBatches.IncompleteBatchCount).
-		Msg("discovered own validations")
-
 	peerValidationFiles, err := config.peerValidationBucket.ListBatchFiles(config.aggregationID, aggInterval)
 	if err != nil {
 		return err
@@ -456,19 +423,15 @@ func scheduleTasks(config scheduleTasksConfig) error {
 		Int("incomplete peer validations", peerValidationBatches.IncompleteBatchCount).
 		Msg("discovered peer validations")
 
-	// Take the intersection of the sets of own validations and peer validations
+	// Take the intersection of the sets of ingestion batches and peer validations
 	// to get the list of batches we can aggregate.
-	// Go doesn't have sets, so we have to use a map[string]bool. We use the
-	// batch ID as the key to the set, because batchPath is not a valid map key
-	// type, and using a *batchPath wouldn't give us the lookup semantics we
-	// want.
-	ownValidationsSet := map[string]bool{}
-	for _, ownValidationBatch := range ownValidationBatches.Batches {
-		ownValidationsSet[ownValidationBatch.ID] = true
+	ingestionBatchIDs := map[string]struct{}{}
+	for _, ingestionBatch := range intakeBatches.Batches {
+		ingestionBatchIDs[ingestionBatch.ID] = struct{}{}
 	}
 	aggregationBatches := batchpath.List{}
 	for _, peerValidationBatch := range peerValidationBatches.Batches {
-		if _, ok := ownValidationsSet[peerValidationBatch.ID]; ok {
+		if _, ok := ingestionBatchIDs[peerValidationBatch.ID]; ok {
 			aggregationBatches = append(aggregationBatches, peerValidationBatch)
 		}
 	}

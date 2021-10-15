@@ -199,7 +199,7 @@ func TestScheduleAggregationTasks(t *testing.T) {
 
 	for _, testCase := range []struct {
 		name                    string
-		hasOwnValidation        bool
+		hasIntakeBatch          bool
 		hasPeerValidation       bool
 		taskMarkerExists        bool
 		aggregationInterval     wftime.AggregationIntervalFunc
@@ -209,7 +209,7 @@ func TestScheduleAggregationTasks(t *testing.T) {
 		// Standard aggregation window tests.
 		{
 			name:                    "standard-within-window-no-own-no-peer",
-			hasOwnValidation:        false,
+			hasIntakeBatch:          false,
 			hasPeerValidation:       false,
 			taskMarkerExists:        false,
 			aggregationInterval:     wftime.StandardAggregationWindow(aggregationPeriod, gracePeriod),
@@ -218,7 +218,7 @@ func TestScheduleAggregationTasks(t *testing.T) {
 		},
 		{
 			name:                    "standard-within-window-no-own-has-peer",
-			hasOwnValidation:        false,
+			hasIntakeBatch:          false,
 			hasPeerValidation:       true,
 			taskMarkerExists:        false,
 			aggregationInterval:     wftime.StandardAggregationWindow(aggregationPeriod, gracePeriod),
@@ -227,7 +227,7 @@ func TestScheduleAggregationTasks(t *testing.T) {
 		},
 		{
 			name:                    "standard-within-window-has-own-no-peer",
-			hasOwnValidation:        true,
+			hasIntakeBatch:          true,
 			hasPeerValidation:       false,
 			taskMarkerExists:        false,
 			aggregationInterval:     wftime.StandardAggregationWindow(aggregationPeriod, gracePeriod),
@@ -236,7 +236,7 @@ func TestScheduleAggregationTasks(t *testing.T) {
 		},
 		{
 			name:                    "standard-within-window-no-marker",
-			hasOwnValidation:        true,
+			hasIntakeBatch:          true,
 			hasPeerValidation:       true,
 			taskMarkerExists:        false,
 			aggregationInterval:     wftime.StandardAggregationWindow(aggregationPeriod, gracePeriod),
@@ -245,7 +245,7 @@ func TestScheduleAggregationTasks(t *testing.T) {
 		},
 		{
 			name:                    "standard-within-window-has-marker",
-			hasOwnValidation:        true,
+			hasIntakeBatch:          true,
 			hasPeerValidation:       true,
 			taskMarkerExists:        true,
 			aggregationInterval:     wftime.StandardAggregationWindow(aggregationPeriod, gracePeriod),
@@ -256,7 +256,7 @@ func TestScheduleAggregationTasks(t *testing.T) {
 		// Override aggregation window tests.
 		{
 			name:                    "override-within-window-no-marker",
-			hasOwnValidation:        true,
+			hasIntakeBatch:          true,
 			hasPeerValidation:       true,
 			taskMarkerExists:        false,
 			aggregationInterval:     wftime.OverrideAggregationWindow(aggregationMidpoint, aggregationPeriod),
@@ -265,7 +265,7 @@ func TestScheduleAggregationTasks(t *testing.T) {
 		},
 		{
 			name:                    "override-within-window-has-marker",
-			hasOwnValidation:        true,
+			hasIntakeBatch:          true,
 			hasPeerValidation:       true,
 			taskMarkerExists:        true,
 			aggregationInterval:     wftime.OverrideAggregationWindow(aggregationMidpoint, aggregationPeriod),
@@ -276,36 +276,24 @@ func TestScheduleAggregationTasks(t *testing.T) {
 		t.Run(testCase.name, func(t *testing.T) {
 			clock := wftime.ClockWithFixedNow(now)
 
-			intakeBucket := mockBucket{
-				aggregationIDs: []string{"kittens-seen"},
-				batchFiles: []string{
+			intakeBucket := mockBucket{aggregationIDs: []string{"kittens-seen"}}
+			if testCase.hasIntakeBatch {
+				intakeBucket.batchFiles = []string{
 					"kittens-seen/2020/10/31/20/29/b8a5579a-f984-460a-a42d-2813cbf57771.batch",
 					"kittens-seen/2020/10/31/20/29/b8a5579a-f984-460a-a42d-2813cbf57771.batch.avro",
 					"kittens-seen/2020/10/31/20/29/b8a5579a-f984-460a-a42d-2813cbf57771.batch.sig",
-				},
+				}
 			}
 
 			ownValidationBucket := mockBucket{
 				aggregationIDs:    []string{"kittens-seen"},
 				intakeTaskMarkers: []string{"intake-kittens-seen-2020-10-31-20-29-b8a5579a-f984-460a-a42d-2813cbf57771"},
 			}
-
-			if testCase.hasOwnValidation {
-				ownValidationBucket.batchFiles = []string{
-					"kittens-seen/2020/10/31/20/29/b8a5579a-f984-460a-a42d-2813cbf57771.validity_1",
-					"kittens-seen/2020/10/31/20/29/b8a5579a-f984-460a-a42d-2813cbf57771.validity_1.avro",
-					"kittens-seen/2020/10/31/20/29/b8a5579a-f984-460a-a42d-2813cbf57771.validity_1.sig",
-				}
-			}
-
 			if testCase.taskMarkerExists {
 				ownValidationBucket.aggregateTaskMarkers = []string{aggregationMarker}
 			}
 
-			peerValidationBucket := mockBucket{
-				aggregationIDs: []string{"kittens-seen"},
-			}
-
+			peerValidationBucket := mockBucket{aggregationIDs: []string{"kittens-seen"}}
 			if testCase.hasPeerValidation {
 				peerValidationBucket.batchFiles = []string{
 					"kittens-seen/2020/10/31/20/29/b8a5579a-f984-460a-a42d-2813cbf57771.validity_0",

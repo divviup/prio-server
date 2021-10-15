@@ -180,24 +180,6 @@ fn aggregation_including_invalid_batch() {
         batch_signing_key: default_facilitator_signing_private_key(),
     };
 
-    // PHA uses this transport to send correctly signed validation batches to
-    // itself
-    let mut pha_own_validation_transport = SignableTransport {
-        transport: Box::new(LocalFileTransport::new(
-            pha_tempdir.path().join("own-validation"),
-        )),
-        batch_signing_key: default_pha_signing_private_key(),
-    };
-
-    // Facilitator uses this transport to send correctly signed validation
-    // batches to itself
-    let mut facilitator_own_validation_transport = SignableTransport {
-        transport: Box::new(LocalFileTransport::new(
-            facilitator_tempdir.path().join("own-validation"),
-        )),
-        batch_signing_key: default_facilitator_signing_private_key(),
-    };
-
     // Perform the intake over the batches, on the PHA and then facilitator,
     // tampering with signatures or batch headers as needed.
     for (index, (uuid, _)) in batch_uuids_and_dates.iter().enumerate() {
@@ -214,7 +196,6 @@ fn aggregation_including_invalid_batch() {
             uuid,
             &date,
             &mut pha_ingest_transport,
-            &mut pha_own_validation_transport,
             pha_peer_validation_transport,
             true,  // is_first
             false, // permissive
@@ -228,7 +209,6 @@ fn aggregation_including_invalid_batch() {
             uuid,
             &date,
             &mut facilitator_ingest_transport,
-            &mut facilitator_own_validation_transport,
             &mut facilitator_to_pha_validation_transport,
             false, // is_first
             false, // permissive
@@ -261,28 +241,12 @@ fn aggregation_including_invalid_batch() {
         default_facilitator_signing_public_key(),
     );
 
-    // PHA uses this transport to read its own validations
-    let mut pha_own_validation_transport = VerifiableTransport {
-        transport: Box::new(LocalFileTransport::new(
-            pha_tempdir.path().join("own-validation"),
-        )),
-        batch_signing_public_keys: pha_pub_keys.clone(),
-    };
-
     // PHA uses this transport to read facilitator's validations
     let mut pha_peer_validation_transport = VerifiableTransport {
         transport: Box::new(LocalFileTransport::new(
             pha_tempdir.path().join("peer-validation"),
         )),
         batch_signing_public_keys: facilitator_pub_keys.clone(),
-    };
-
-    // Facilitator uses this transport to read its own validations
-    let mut facilitator_own_validation_transport = VerifiableTransport {
-        transport: Box::new(LocalFileTransport::new(
-            facilitator_tempdir.path().join("own-validation"),
-        )),
-        batch_signing_public_keys: facilitator_pub_keys,
     };
 
     // Facilitator uses this transport to read PHA's validations
@@ -317,7 +281,6 @@ fn aggregation_including_invalid_batch() {
         true,  // is_first
         false, // permissive
         &mut pha_ingest_transport,
-        &mut pha_own_validation_transport,
         &mut pha_peer_validation_transport,
         &mut pha_aggregation_transport,
         &logger,
@@ -338,7 +301,6 @@ fn aggregation_including_invalid_batch() {
         false, // is_first
         false, // permissive
         &mut facilitator_ingest_transport,
-        &mut facilitator_own_validation_transport,
         &mut facilitator_peer_validation_transport,
         &mut facilitator_aggregation_transport,
         &logger,
@@ -354,9 +316,7 @@ fn aggregation_including_invalid_batch() {
 fn end_to_end_test(drop_nth_pha: Option<usize>, drop_nth_facilitator: Option<usize>) {
     let logger = setup_test_logging();
     let pha_tempdir = TempDir::new().unwrap();
-    let pha_copy_tempdir = TempDir::new().unwrap();
     let facilitator_tempdir = TempDir::new().unwrap();
-    let facilitator_copy_tempdir = TempDir::new().unwrap();
 
     let instance_name = "fake-instance";
     let aggregation_name = "fake-aggregation-1".to_owned();
@@ -456,20 +416,6 @@ fn end_to_end_test(drop_nth_pha: Option<usize>, drop_nth_facilitator: Option<usi
         batch_signing_key: default_facilitator_signing_private_key(),
     };
 
-    let mut pha_own_validate_signable_transport = SignableTransport {
-        transport: Box::new(LocalFileTransport::new(
-            pha_copy_tempdir.path().to_path_buf(),
-        )),
-        batch_signing_key: default_pha_signing_private_key(),
-    };
-
-    let mut facilitator_own_validate_signable_transport = SignableTransport {
-        transport: Box::new(LocalFileTransport::new(
-            facilitator_copy_tempdir.path().to_path_buf(),
-        )),
-        batch_signing_key: default_facilitator_signing_private_key(),
-    };
-
     let mut intake_callback_count = 0;
     let mut batch_intaker = BatchIntaker::new(
         &TRACE_ID,
@@ -478,7 +424,6 @@ fn end_to_end_test(drop_nth_pha: Option<usize>, drop_nth_facilitator: Option<usi
         &date,
         &mut pha_ingest_transport,
         &mut pha_peer_validate_signable_transport,
-        &mut pha_own_validate_signable_transport,
         true,
         false,
         &logger,
@@ -501,7 +446,6 @@ fn end_to_end_test(drop_nth_pha: Option<usize>, drop_nth_facilitator: Option<usi
         &date,
         &mut pha_ingest_transport,
         &mut pha_peer_validate_signable_transport,
-        &mut pha_own_validate_signable_transport,
         true,
         false,
         &logger,
@@ -517,7 +461,6 @@ fn end_to_end_test(drop_nth_pha: Option<usize>, drop_nth_facilitator: Option<usi
         &date,
         &mut facilitator_ingest_transport,
         &mut facilitator_peer_validate_signable_transport,
-        &mut facilitator_own_validate_signable_transport,
         false,
         false,
         &logger,
@@ -533,7 +476,6 @@ fn end_to_end_test(drop_nth_pha: Option<usize>, drop_nth_facilitator: Option<usi
         &date,
         &mut facilitator_ingest_transport,
         &mut facilitator_peer_validate_signable_transport,
-        &mut facilitator_own_validate_signable_transport,
         false,
         false,
         &logger,
@@ -582,7 +524,6 @@ fn end_to_end_test(drop_nth_pha: Option<usize>, drop_nth_facilitator: Option<usi
         true,
         false,
         &mut pha_ingest_transport,
-        &mut pha_validate_verifiable_transport,
         &mut facilitator_validate_verifiable_transport,
         &mut pha_aggregation_transport,
         &logger,
@@ -610,7 +551,6 @@ fn end_to_end_test(drop_nth_pha: Option<usize>, drop_nth_facilitator: Option<usi
         false,
         false,
         &mut facilitator_ingest_transport,
-        &mut facilitator_validate_verifiable_transport,
         &mut pha_validate_verifiable_transport,
         &mut facilitator_aggregation_transport,
         &logger,

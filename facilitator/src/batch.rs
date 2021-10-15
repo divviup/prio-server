@@ -3,7 +3,7 @@ use crate::{
     idl::{BatchSignature, Header, Packet},
     metrics::BatchReaderMetricsCollector,
     transport::{Transport, TransportWriter},
-    DigestWriter, SidecarWriter, DATE_FORMAT,
+    DigestWriter, DATE_FORMAT,
 };
 use anyhow::{anyhow, Context, Result};
 use avro_rs::{Reader, Schema, Writer};
@@ -226,17 +226,14 @@ impl<'a, H: Header, P: Packet> BatchReader<'a, H, P> {
         let mut packet_file_reader = self
             .transport
             .get(self.batch.packet_file_key(), self.trace_id)?;
-        // SidecarWriter takes a Vec of std::io::write so we wrap the Vec we
-        // want to read the file into in a Vec.
-        let entire_packet_file = vec![Vec::new()];
-        let digest_writer = DigestWriter::new();
-        let mut sidecar_writer = SidecarWriter::new(entire_packet_file, digest_writer);
+        let mut entire_packet_file = Vec::new();
+        let mut digest_writer = DigestWriter::new(&mut entire_packet_file);
 
-        std::io::copy(&mut packet_file_reader, &mut sidecar_writer)
+        std::io::copy(&mut packet_file_reader, &mut digest_writer)
             .context("failed to load packet file")?;
 
         // ... then verify the digest over it ...
-        let packet_file_digest = sidecar_writer.sidecar.finish();
+        let packet_file_digest = digest_writer.finish();
         if header.packet_file_digest().as_slice() != packet_file_digest.as_ref() {
             let message = format!(
                 "packet file digest in header {} does not match actual packet file digest {}",
@@ -256,15 +253,8 @@ impl<'a, H: Header, P: Packet> BatchReader<'a, H, P> {
             }
         }
 
-        // pop() should always succeed here because sidecar_writers.writers is
-        // entire_packet_file, above.
-        let packet_file = sidecar_writer
-            .writers
-            .pop()
-            .context("sidecar_writer.writers is empty?")?;
-
         // ... then return a packet reader.
-        Reader::with_schema(&self.packet_schema, Cursor::new(packet_file))
+        Reader::with_schema(&self.packet_schema, Cursor::new(entire_packet_file))
             .context("failed to create Avro reader for packets")
     }
 }
@@ -301,67 +291,19 @@ impl<'a, H: Header, P: Packet> BatchWriter<'a, H, P> {
     /// provided key and write the header into the batch. Returns the signature
     /// on success.
     pub fn put_header(&mut self, header: &H, key: &EcdsaKeyPair) -> Result<Signature> {
-        let mut sidecar_writer = SidecarWriter::new(
-            vec![self.transport.put(self.batch.header_key(), self.trace_id)?],
-            Vec::new(),
-        );
-        header.write(&mut sidecar_writer)?;
-        sidecar_writer.writers[0]
+        let mut transport_writer = self.transport.put(self.batch.header_key(), self.trace_id)?;
+        let mut header_buf = Vec::new();
+        header.write(&mut header_buf)?;
+
+        transport_writer.write_all(&header_buf)?;
+        transport_writer
             .complete_upload()
             .context("failed to complete batch header upload")?;
 
-        let header_signature = key
-            .sign(&SystemRandom::new(), &sidecar_writer.sidecar)
-            .context("failed to sign header file")?;
-        Ok(header_signature)
-    }
-
-    /// This is BatchWriter::packet_file_writer except that it takes a Vec of
-    /// additional batch writers, and any content written to the Writer passed
-    /// to the callback will also be written to those writers.
-    pub fn multi_packet_file_writer<F>(
-        &mut self,
-        mut more_batch_writers: Vec<&mut BatchWriter<H, P>>,
-        operation: F,
-    ) -> Result<Digest>
-    where
-        F: FnOnce(&mut Writer<SidecarWriter<Box<dyn TransportWriter>, DigestWriter>>) -> Result<()>,
-    {
-        let mut transport_writers = vec![self
-            .transport
-            .put(self.batch.packet_file_key(), self.trace_id)?];
-        for batch_writer in &mut more_batch_writers {
-            transport_writers.push(
-                batch_writer
-                    .transport
-                    .put(batch_writer.batch.packet_file_key(), self.trace_id)?,
-            );
-        }
-        let mut writer = Writer::new(
-            &self.packet_schema,
-            SidecarWriter::new(transport_writers, DigestWriter::new()),
-        );
-
-        let result = operation(&mut writer);
-        let mut sidecar_writer = writer
-            .into_inner()
-            .with_context(|| format!("failed to flush Avro writer ({:?})", result))?;
-
-        if let Err(e) = result {
-            for transport_writer in &mut sidecar_writer.writers {
-                transport_writer
-                    .cancel_upload()
-                    .with_context(|| format!("Encountered while handling: {}", e))?;
-            }
-            return Err(e);
-        }
-
-        for transport_writer in &mut sidecar_writer.writers {
-            transport_writer
-                .complete_upload()
-                .context("failed to complete packet file upload")?;
-        }
-        Ok(sidecar_writer.sidecar.finish())
+        // TODO(brandon): per the advice of ring's doc comments, create a single SystemRandom &
+        // reuse it throughout the application rather than creating a new SystemRandom each time.
+        key.sign(&SystemRandom::new(), &header_buf)
+            .context("failed to sign header file")
     }
 
     /// Creates an avro_rs::Writer and provides it to the caller-provided
@@ -372,9 +314,30 @@ impl<'a, H: Header, P: Packet> BatchWriter<'a, H, P> {
     /// content written by the operation.
     pub fn packet_file_writer<F>(&mut self, operation: F) -> Result<Digest>
     where
-        F: FnOnce(&mut Writer<SidecarWriter<Box<dyn TransportWriter>, DigestWriter>>) -> Result<()>,
+        F: FnOnce(&mut Writer<&mut DigestWriter<&mut Box<dyn TransportWriter>>>) -> Result<()>,
     {
-        self.multi_packet_file_writer(vec![], operation)
+        let mut transport_writer = self
+            .transport
+            .put(self.batch.packet_file_key(), self.trace_id)?;
+        let mut digest_writer = DigestWriter::new(&mut transport_writer);
+        let mut writer = Writer::new(&self.packet_schema, &mut digest_writer);
+
+        let result = operation(&mut writer);
+        writer
+            .flush()
+            .with_context(|| format!("failed to flush Avro writer ({:?})", result))?;
+
+        if let Err(e) = result {
+            transport_writer
+                .cancel_upload()
+                .with_context(|| format!("Encountered while handling: {}", e))?;
+            return Err(e);
+        }
+        let digest = digest_writer.finish();
+        transport_writer
+            .complete_upload()
+            .context("failed to complete packet file upload")?;
+        Ok(digest)
     }
 
     /// Constructs a signature structure from the provided buffers and writes it

@@ -1,10 +1,14 @@
 use crate::Error;
+use anyhow::{anyhow, Context, Result};
 use avro_rs::{
     from_value,
     types::{Record, Value},
     Reader, Schema, Writer,
 };
-use prio::{field::Field32, server::VerificationMessage};
+use prio::{
+    field::FieldPriov2,
+    server::{Server, ServerError, VerificationMessage},
+};
 use serde::{Deserialize, Serialize};
 use std::{
     convert::TryFrom,
@@ -514,6 +518,44 @@ impl Packet for IngestionDataSharePacket {
     }
 }
 
+impl IngestionDataSharePacket {
+    pub(crate) fn generate_validation_packet(
+        &self,
+        servers: &mut Vec<Server<FieldPriov2>>,
+    ) -> Result<ValidationPacket> {
+        let r_pit = FieldPriov2::from(
+            u32::try_from(self.r_pit)
+                .with_context(|| format!("illegal r_pit value {}", self.r_pit))?,
+        );
+        // TODO(timg): if this fails for a non-empty subset of the
+        // ingestion packets, do we abort handling of the entire
+        // batch (as implemented currently) or should we record it
+        // as an invalid UUID and emit a validation batch for the
+        // other packets?
+        for server in servers.iter_mut() {
+            let validation_message =
+                match server.generate_verification_message(r_pit, &self.encrypted_payload) {
+                    Ok(m) => m,
+                    Err(ServerError::Encrypt(_)) => {
+                        continue;
+                    }
+                    Err(e) => {
+                        return Err(
+                            anyhow::Error::new(e).context("error generating verification message")
+                        );
+                    }
+                };
+            return Ok(ValidationPacket {
+                uuid: self.uuid,
+                f_r: u32::from(validation_message.f_r) as i64,
+                g_r: u32::from(validation_message.g_r) as i64,
+                h_r: u32::from(validation_message.h_r) as i64,
+            });
+        }
+        return Err(anyhow!("failed to construct validation message for packet {} because all decryption attempts failed (key mismatch?)", self.uuid));
+    }
+}
+
 /// The header on a Prio validation (sometimes referred to as verification)
 /// batch.
 #[derive(Debug, Deserialize, Serialize, PartialEq)]
@@ -745,14 +787,14 @@ impl Packet for ValidationPacket {
     }
 }
 
-impl TryFrom<&ValidationPacket> for VerificationMessage<Field32> {
+impl TryFrom<&ValidationPacket> for VerificationMessage<FieldPriov2> {
     type Error = TryFromIntError;
 
     fn try_from(p: &ValidationPacket) -> Result<Self, Self::Error> {
         Ok(VerificationMessage {
-            f_r: Field32::from(u32::try_from(p.f_r)?),
-            g_r: Field32::from(u32::try_from(p.g_r)?),
-            h_r: Field32::from(u32::try_from(p.h_r)?),
+            f_r: FieldPriov2::from(u32::try_from(p.f_r)?),
+            g_r: FieldPriov2::from(u32::try_from(p.g_r)?),
+            h_r: FieldPriov2::from(u32::try_from(p.h_r)?),
         })
     }
 }
@@ -774,10 +816,10 @@ pub struct SumPart {
 }
 
 impl SumPart {
-    pub fn sum(&self) -> Result<Vec<Field32>, TryFromIntError> {
+    pub fn sum(&self) -> Result<Vec<FieldPriov2>, TryFromIntError> {
         self.sum
             .iter()
-            .map(|i| Ok(Field32::from(u32::try_from(*i)?)))
+            .map(|i| Ok(FieldPriov2::from(u32::try_from(*i)?)))
             .collect::<Result<Vec<_>, _>>()
     }
 }

@@ -29,8 +29,7 @@ variable "aws_region" {
 }
 
 variable "aws_profile" {
-  type    = string
-  default = "leuswest2"
+  type = string
 }
 
 variable "localities" {
@@ -177,7 +176,7 @@ variable "packet_encryption_rotation" {
 
 variable "pushgateway" {
   type        = string
-  default     = ""
+  default     = "prometheus-pushgateway.monitoring:9091"
   description = "The location of a pushgateway in host:port form. Set to prometheus-pushgateway.default:9091 to enable metrics"
 }
 
@@ -214,8 +213,8 @@ variable "prometheus_server_persistent_disk_size_gb" {
 
 variable "victorops_routing_key" {
   type        = string
-  description = "VictorOps/Splunk OnCall routing key for prometheus-alertmanager"
   default     = "bogus-routing-key"
+  description = "VictorOps/Splunk OnCall routing key for prometheus-alertmanager"
 }
 
 variable "cluster_settings" {
@@ -239,7 +238,7 @@ terraform {
   required_providers {
     aws = {
       source  = "hashicorp/aws"
-      version = "~> 3.51.0"
+      version = "~> 3.62.0"
     }
     google = {
       source = "hashicorp/google"
@@ -526,7 +525,6 @@ module "data_share_processors" {
   peer_share_processor_manifest_base_url         = each.value.peer_share_processor_manifest_base_url
   remote_bucket_writer_gcp_service_account_email = google_service_account.sum_part_bucket_writer.email
   portal_server_manifest_base_url                = each.value.portal_server_manifest_base_url
-  own_manifest_base_url                          = local.manifest.base_url
   is_first                                       = var.is_first
   intake_max_age                                 = var.intake_max_age
   aggregation_period                             = each.value.aggregation_period

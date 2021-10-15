@@ -29,7 +29,7 @@ kube-runtime = "0.57.0"
 p256 = "0.9.0"
 pem = "0.8"
 pkix = "0.1.1"
-prio = "0.4.0"
+prio = "0.5.0"
 prometheus = "0.12"
 rand = "0.8"
 regex = "^1.5.4"
@@ -57,6 +57,7 @@ xml-rs = "0.8"
 
 [dev-dependencies]
 assert_matches = "1.5.0"
+hex = "0.4.3"
 mockito = "0.30.0"
 rusoto_mock = { version = "^0.47", default_features = false, features = ["rustls"] }
 serde_test = "1.0"

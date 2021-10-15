@@ -26,8 +26,6 @@ pub mod event {
     pub(crate) const AGGREGATION_NAME: EventKey = "aggregation_name";
     /// The storage path from which ingestion batches are read/written
     pub(crate) const INGESTION_PATH: EventKey = "ingestion_path";
-    /// The storage path from which own validation batches are read/written
-    pub(crate) const OWN_VALIDATION_PATH: EventKey = "own_validation_path";
     /// The storage path from which peer validation batches are read/written
     pub(crate) const PEER_VALIDATION_PATH: EventKey = "peer_validation_path";
     /// The UUID of a packet that something happened to
