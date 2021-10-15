@@ -121,11 +121,19 @@ variable "aggregate_queue" {
   })
 }
 
-variable "intake_worker_count" {
+variable "min_intake_worker_count" {
   type = number
 }
 
-variable "aggregate_worker_count" {
+variable "max_intake_worker_count" {
+  type = number
+}
+
+variable "min_aggregate_worker_count" {
+  type = number
+}
+
+variable "max_aggregate_worker_count" {
   type = number
 }
 
@@ -377,7 +385,7 @@ resource "kubernetes_deployment" "intake_batch" {
     namespace = var.kubernetes_namespace
   }
   spec {
-    replicas = var.intake_worker_count
+    replicas = var.min_intake_worker_count # XXX: can this be removed once autoscaling is implemented?
     selector {
       match_labels = {
         app      = "intake-batch-worker"
@@ -451,6 +459,42 @@ resource "kubernetes_deployment" "intake_batch" {
   }
 }
 
+resource "kubernetes_horizontal_pod_autoscaler" "intake_batch_autoscaler" {
+  metadata {
+    namespace = var.kubernetes_namespace
+    name      = "intake-batch-${var.ingestor}-autoscaler"
+  }
+
+  spec {
+    min_replicas = var.min_intake_worker_count
+    max_replicas = var.max_intake_worker_count
+
+    scale_target_ref {
+      api_version = "apps/v1"
+      kind        = "Deployment"
+      name        = "intake-batch-${var.ingestor}"
+    }
+
+    metric {
+      type = "External"
+      external {
+        metric {
+          name = "pubsub.googleapis.com|subscription|num_undelivered_messages" # XXX: generalize for AWS
+          selector {
+            match_labels = {
+              "resource.labels.subscription_id" = var.intake_queue.subscription
+            }
+          }
+        }
+        target {
+          type  = "Value"
+          value = "1"
+        }
+      }
+    }
+  }
+}
+
 resource "kubernetes_service" "aggregate" {
   wait_for_load_balancer = false
   metadata {
@@ -489,7 +533,7 @@ resource "kubernetes_deployment" "aggregate" {
   }
 
   spec {
-    replicas = var.aggregate_worker_count
+    replicas = var.min_aggregate_worker_count # XXX: can this be removed once autoscaling is implemented?
     selector {
       match_labels = {
         app      = "aggregate-worker"
@@ -558,6 +602,44 @@ resource "kubernetes_deployment" "aggregate" {
     }
   }
 }
+
+resource "kubernetes_horizontal_pod_autoscaler" "aggregate_autoscaler" {
+  metadata {
+    namespace = var.kubernetes_namespace
+    name      = "aggregate-${var.ingestor}-autoscaler"
+  }
+
+  spec {
+    min_replicas = var.min_aggregate_worker_count
+    max_replicas = var.max_aggregate_worker_count
+
+    scale_target_ref {
+      api_version = "apps/v1"
+      kind        = "Deployment"
+      name        = "aggregate-${var.ingestor}"
+    }
+
+    metric {
+      type = "External"
+      external {
+        metric {
+          name = "pubsub.googleapis.com|subscription|num_undelivered_messages" # XXX: generalize for AWS
+          selector {
+            match_labels = {
+              "resource.labels.subscription_id" = var.aggregate_queue.subscription
+            }
+          }
+        }
+        target {
+          type  = "Value"
+          value = "1"
+        }
+      }
+
+    }
+  }
+}
+
 output "gcp_service_account_unique_id" {
   value = module.account_mapping.gcp_service_account_unique_id
 }

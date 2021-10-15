@@ -40,8 +40,14 @@ variable "ingestors" {
   type = map(object({
     manifest_base_url = string
     localities = map(object({
-      intake_worker_count                    = number
-      aggregate_worker_count                 = number
+      intake_worker_count     = optional(number) # Deprecated: set {min,max}_intake_worker_count instead.
+      min_intake_worker_count = optional(number)
+      max_intake_worker_count = optional(number)
+
+      aggregate_worker_count     = optional(number) # Deprecated: set {min,max}_aggregate_worker_count instead.
+      min_aggregate_worker_count = optional(number)
+      max_aggregate_worker_count = optional(number)
+
       peer_share_processor_manifest_base_url = optional(string)
       portal_server_manifest_base_url        = optional(string)
       aggregation_period                     = optional(string)
@@ -420,8 +426,22 @@ locals {
       kubernetes_namespace                    = kubernetes_namespace.namespaces[pair[0]].metadata[0].name
       packet_decryption_key_kubernetes_secret = kubernetes_secret.ingestion_packet_decryption_keys[pair[0]].metadata[0].name
       ingestor_manifest_base_url              = var.ingestors[pair[1]].manifest_base_url
-      intake_worker_count                     = var.ingestors[pair[1]].localities[pair[0]].intake_worker_count
-      aggregate_worker_count                  = var.ingestors[pair[1]].localities[pair[0]].aggregate_worker_count
+      min_intake_worker_count = coalesce(
+        var.ingestors[pair[1]].localities[pair[0]].min_intake_worker_count,
+        var.ingestors[pair[1]].localities[pair[0]].intake_worker_count
+      )
+      max_intake_worker_count = coalesce(
+        var.ingestors[pair[1]].localities[pair[0]].max_intake_worker_count,
+        var.ingestors[pair[1]].localities[pair[0]].intake_worker_count
+      )
+      min_aggregate_worker_count = coalesce(
+        var.ingestors[pair[1]].localities[pair[0]].min_aggregate_worker_count,
+        var.ingestors[pair[1]].localities[pair[0]].aggregate_worker_count
+      )
+      max_aggregate_worker_count = coalesce(
+        var.ingestors[pair[1]].localities[pair[0]].max_aggregate_worker_count,
+        var.ingestors[pair[1]].localities[pair[0]].aggregate_worker_count
+      )
       peer_share_processor_manifest_base_url = coalesce(
         var.ingestors[pair[1]].localities[pair[0]].peer_share_processor_manifest_base_url,
         var.default_peer_share_processor_manifest_base_url
@@ -536,8 +556,10 @@ module "data_share_processors" {
   facilitator_image                              = var.facilitator_image
   facilitator_version                            = var.facilitator_version
   container_registry                             = var.container_registry
-  intake_worker_count                            = each.value.intake_worker_count
-  aggregate_worker_count                         = each.value.aggregate_worker_count
+  min_intake_worker_count                        = each.value.min_intake_worker_count
+  max_intake_worker_count                        = each.value.max_intake_worker_count
+  min_aggregate_worker_count                     = each.value.min_aggregate_worker_count
+  max_aggregate_worker_count                     = each.value.max_aggregate_worker_count
   eks_oidc_provider                              = var.use_aws ? module.eks[0].oidc_provider : { url = "", arn = "" }
   gcp_workload_identity_pool_provider            = local.gcp_workload_identity_pool_provider
 }
@@ -657,6 +679,12 @@ module "portal_server_resources" {
   sum_part_bucket_writer_email = google_service_account.sum_part_bucket_writer.email
 
   depends_on = [module.gke]
+}
+
+module "custom_metrics" {
+  source      = "./modules/custom_metrics"
+  environment = var.environment
+  use_aws = var.use_aws
 }
 
 # The monitoring module is disabled for now because it needs some AWS tweaks

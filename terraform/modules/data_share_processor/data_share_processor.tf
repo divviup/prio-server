@@ -102,11 +102,19 @@ variable "facilitator_version" {
   type = string
 }
 
-variable "intake_worker_count" {
+variable "min_intake_worker_count" {
   type = number
 }
 
-variable "aggregate_worker_count" {
+variable "max_intake_worker_count" {
+  type = number
+}
+
+variable "min_aggregate_worker_count" {
+  type = number
+}
+
+variable "max_aggregate_worker_count" {
   type = number
 }
 
@@ -392,8 +400,10 @@ module "kubernetes" {
   facilitator_version                     = var.facilitator_version
   intake_queue                            = local.intake_queue
   aggregate_queue                         = local.aggregate_queue
-  intake_worker_count                     = var.intake_worker_count
-  aggregate_worker_count                  = var.aggregate_worker_count
+  min_intake_worker_count                 = var.min_intake_worker_count
+  max_intake_worker_count                 = var.max_intake_worker_count
+  min_aggregate_worker_count              = var.min_aggregate_worker_count
+  max_aggregate_worker_count              = var.max_aggregate_worker_count
   use_aws                                 = var.use_aws
   eks_oidc_provider                       = var.eks_oidc_provider
   aws_region                              = var.aws_region
