@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"path"
 	"reflect"
 	"testing"
 	"time"
@@ -54,14 +55,14 @@ func (b *mockBucket) WriteTaskMarker(marker string) error {
 }
 
 func TestScheduleIntakeTasks(t *testing.T) {
-	batchTime, _ := time.Parse("2006/01/02/15/04", "2020/10/31/20/29")
-	within24Hours, _ := time.Parse("2006/01/02/15/04", "2020/10/31/23/29")
-	maxAge, _ := time.ParseDuration("24h")
-	aggregationPeriod, _ := time.ParseDuration("8h")
-	gracePeriod, _ := time.ParseDuration("4h")
+	batchTime := mustParseTime(t, "2020/10/31/20/29")
+	now := mustParseTime(t, "2020/10/31/23/29") // within 24 hours of batchTime
+	maxAge := 24 * time.Hour
+	aggregationPeriod := 8 * time.Hour
+	gracePeriod := 4 * time.Hour
 	intakeMarker := "intake-kittens-seen-2020-10-31-20-29-b8a5579a-f984-460a-a42d-2813cbf57771"
 
-	var testCases = []struct {
+	for _, testCase := range []struct {
 		name               string
 		taskMarkerExists   bool
 		expectedIntakeTask *task.IntakeBatch
@@ -84,11 +85,9 @@ func TestScheduleIntakeTasks(t *testing.T) {
 			expectedIntakeTask: nil,
 			expectedTaskMarker: "",
 		},
-	}
-
-	for _, testCase := range testCases {
+	} {
 		t.Run(testCase.name, func(t *testing.T) {
-			clock := wftime.ClockWithFixedNow(within24Hours)
+			clock := wftime.ClockWithFixedNow(now)
 
 			intakeBucket := mockBucket{
 				aggregationIDs: []string{"kittens-seen"},
@@ -114,7 +113,7 @@ func TestScheduleIntakeTasks(t *testing.T) {
 			intakeTaskEnqueuer := mockEnqueuer{enqueuedTasks: []task.Task{}}
 			aggregateTaskEnqueuer := mockEnqueuer{enqueuedTasks: []task.Task{}}
 
-			err := scheduleTasks(scheduleTasksConfig{
+			if err := scheduleTasks(scheduleTasksConfig{
 				aggregationID:           "kittens-seen",
 				isFirst:                 false,
 				clock:                   clock,
@@ -124,10 +123,8 @@ func TestScheduleIntakeTasks(t *testing.T) {
 				intakeTaskEnqueuer:      &intakeTaskEnqueuer,
 				aggregationTaskEnqueuer: &aggregateTaskEnqueuer,
 				maxAge:                  maxAge,
-				aggregationPeriod:       aggregationPeriod,
-				gracePeriod:             gracePeriod,
-			})
-			if err != nil {
+				aggregationInterval:     wftime.StandardAggregationWindow(aggregationPeriod, gracePeriod),
+			}); err != nil {
 				t.Errorf("unexpected error %q", err)
 			}
 
@@ -164,8 +161,9 @@ func TestScheduleIntakeTasks(t *testing.T) {
 				}
 			} else {
 				foundExpectedMarker := false
+				wantedObject := path.Join("task-markers", testCase.expectedTaskMarker)
 				for _, object := range ownValidationBucket.writtenObjectKeys {
-					if object == "task-markers/"+testCase.expectedTaskMarker {
+					if object == wantedObject {
 						foundExpectedMarker = true
 						break
 					}
@@ -179,80 +177,104 @@ func TestScheduleIntakeTasks(t *testing.T) {
 }
 
 func TestScheduleAggregationTasks(t *testing.T) {
-	batchTime, _ := time.Parse("2006/01/02/15/04", "2020/10/31/20/29")
-	aggregationStart, _ := time.Parse("2006/01/02/15/04", "2020/10/31/16/00")
-	aggregationEnd, _ := time.Parse("2006/01/02/15/04", "2020/11/01/00/00")
-	withinWindow, _ := time.Parse("2006/01/02/15/04", "2020/11/01/04/01")
-	maxAge, _ := time.ParseDuration("24h")
-	aggregationPeriod, _ := time.ParseDuration("8h")
-	gracePeriod, _ := time.ParseDuration("4h")
+	batchTime := mustParseTime(t, "2020/10/31/20/29")
+	aggregationStart := mustParseTime(t, "2020/10/31/16/00")
+	aggregationEnd := mustParseTime(t, "2020/11/01/00/00")
+	aggregationMidpoint := aggregationStart.Add(aggregationEnd.Sub(aggregationStart) / 2)
+	now := mustParseTime(t, "2020/11/01/04/01")
+	maxAge := 24 * time.Hour
+	aggregationPeriod := 8 * time.Hour
+	gracePeriod := 4 * time.Hour
 	aggregationMarker := "aggregate-kittens-seen-2020-10-31-16-00-2020-11-01-00-00"
 	expectedAggregationTask := &task.Aggregation{
 		TraceID:          expectedUuid,
 		AggregationID:    "kittens-seen",
 		AggregationStart: wftime.Timestamp(aggregationStart),
 		AggregationEnd:   wftime.Timestamp(aggregationEnd),
-		Batches: []task.Batch{
-			task.Batch{
-				ID:   "b8a5579a-f984-460a-a42d-2813cbf57771",
-				Time: wftime.Timestamp(batchTime),
-			},
-		},
+		Batches: []task.Batch{{
+			ID:   "b8a5579a-f984-460a-a42d-2813cbf57771",
+			Time: wftime.Timestamp(batchTime),
+		}},
 	}
 
-	var testCases = []struct {
+	for _, testCase := range []struct {
 		name                    string
 		hasIntakeBatch          bool
 		hasPeerValidation       bool
 		taskMarkerExists        bool
+		aggregationInterval     wftime.AggregationIntervalFunc
 		expectedAggregationTask *task.Aggregation
 		expectedTaskMarker      string
 	}{
+		// Standard aggregation window tests.
 		{
-			name:                    "within-window-no-intake-no-peer",
+			name:                    "standard-within-window-no-own-no-peer",
 			hasIntakeBatch:          false,
 			hasPeerValidation:       false,
 			taskMarkerExists:        false,
+			aggregationInterval:     wftime.StandardAggregationWindow(aggregationPeriod, gracePeriod),
 			expectedAggregationTask: nil,
 			expectedTaskMarker:      "",
 		},
 		{
-			name:                    "within-window-no-intake-has-peer",
+			name:                    "standard-within-window-no-own-has-peer",
 			hasIntakeBatch:          false,
 			hasPeerValidation:       true,
 			taskMarkerExists:        false,
+			aggregationInterval:     wftime.StandardAggregationWindow(aggregationPeriod, gracePeriod),
 			expectedAggregationTask: nil,
 			expectedTaskMarker:      "",
 		},
 		{
-			name:                    "within-window-has-intake-no-peer",
+			name:                    "standard-within-window-has-own-no-peer",
 			hasIntakeBatch:          true,
 			hasPeerValidation:       false,
 			taskMarkerExists:        false,
+			aggregationInterval:     wftime.StandardAggregationWindow(aggregationPeriod, gracePeriod),
 			expectedAggregationTask: nil,
 			expectedTaskMarker:      "",
 		},
 		{
-			name:                    "within-window-no-marker",
+			name:                    "standard-within-window-no-marker",
 			hasIntakeBatch:          true,
 			hasPeerValidation:       true,
 			taskMarkerExists:        false,
+			aggregationInterval:     wftime.StandardAggregationWindow(aggregationPeriod, gracePeriod),
 			expectedAggregationTask: expectedAggregationTask,
 			expectedTaskMarker:      aggregationMarker,
 		},
 		{
-			name:                    "within-window-has-marker",
+			name:                    "standard-within-window-has-marker",
 			hasIntakeBatch:          true,
 			hasPeerValidation:       true,
 			taskMarkerExists:        true,
+			aggregationInterval:     wftime.StandardAggregationWindow(aggregationPeriod, gracePeriod),
 			expectedAggregationTask: nil,
 			expectedTaskMarker:      "",
 		},
-	}
 
-	for _, testCase := range testCases {
+		// Override aggregation window tests.
+		{
+			name:                    "override-within-window-no-marker",
+			hasIntakeBatch:          true,
+			hasPeerValidation:       true,
+			taskMarkerExists:        false,
+			aggregationInterval:     wftime.OverrideAggregationWindow(aggregationMidpoint, aggregationPeriod),
+			expectedAggregationTask: expectedAggregationTask,
+			expectedTaskMarker:      aggregationMarker,
+		},
+		{
+			name:                    "override-within-window-has-marker",
+			hasIntakeBatch:          true,
+			hasPeerValidation:       true,
+			taskMarkerExists:        true,
+			aggregationInterval:     wftime.OverrideAggregationWindow(aggregationMidpoint, aggregationPeriod),
+			expectedAggregationTask: nil,
+			expectedTaskMarker:      "",
+		},
+	} {
 		t.Run(testCase.name, func(t *testing.T) {
-			clock := wftime.ClockWithFixedNow(withinWindow)
+			clock := wftime.ClockWithFixedNow(now)
 
 			intakeBucket := mockBucket{aggregationIDs: []string{"kittens-seen"}}
 			if testCase.hasIntakeBatch {
@@ -283,7 +305,7 @@ func TestScheduleAggregationTasks(t *testing.T) {
 			intakeTaskEnqueuer := mockEnqueuer{enqueuedTasks: []task.Task{}}
 			aggregateTaskEnqueuer := mockEnqueuer{enqueuedTasks: []task.Task{}}
 
-			err := scheduleTasks(scheduleTasksConfig{
+			if err := scheduleTasks(scheduleTasksConfig{
 				aggregationID:           "kittens-seen",
 				isFirst:                 false,
 				clock:                   clock,
@@ -293,20 +315,18 @@ func TestScheduleAggregationTasks(t *testing.T) {
 				intakeTaskEnqueuer:      &intakeTaskEnqueuer,
 				aggregationTaskEnqueuer: &aggregateTaskEnqueuer,
 				maxAge:                  maxAge,
-				aggregationPeriod:       aggregationPeriod,
-				gracePeriod:             gracePeriod,
-			})
-			if err != nil {
-				t.Errorf("unexpected error: %q", err)
+				aggregationInterval:     testCase.aggregationInterval,
+			}); err != nil {
+				t.Errorf("Unexpected error: %q", err)
 			}
 
 			if len(intakeTaskEnqueuer.enqueuedTasks) != 0 {
-				t.Errorf("unexpected intake tasks scheduled: %q", intakeTaskEnqueuer.enqueuedTasks)
+				t.Errorf("Unexpected intake tasks scheduled: %q", intakeTaskEnqueuer.enqueuedTasks)
 			}
 
 			if testCase.expectedAggregationTask == nil {
 				if len(aggregateTaskEnqueuer.enqueuedTasks) != 0 {
-					t.Errorf("unexpected aggregation tasks scheduled: %q", aggregateTaskEnqueuer.enqueuedTasks)
+					t.Errorf("Unexpected aggregation tasks scheduled: %q", aggregateTaskEnqueuer.enqueuedTasks)
 				}
 			} else {
 				foundExpectedTask := false
@@ -323,26 +343,35 @@ func TestScheduleAggregationTasks(t *testing.T) {
 					}
 				}
 				if !foundExpectedTask {
-					t.Errorf("did not find expected aggregate task among %q", aggregateTaskEnqueuer.enqueuedTasks)
+					t.Errorf("Did not find expected aggregate task among %q", aggregateTaskEnqueuer.enqueuedTasks)
 				}
 			}
 
 			if testCase.expectedTaskMarker == "" {
 				if len(ownValidationBucket.writtenObjectKeys) != 0 {
-					t.Errorf("unexpected task marker written: %q", ownValidationBucket.writtenObjectKeys)
+					t.Errorf("Unexpected task marker written: %q", ownValidationBucket.writtenObjectKeys)
 				}
 			} else {
 				foundExpectedMarker := false
+				wantedObject := path.Join("task-markers", testCase.expectedTaskMarker)
 				for _, object := range ownValidationBucket.writtenObjectKeys {
-					if object == "task-markers/"+testCase.expectedTaskMarker {
+					if object == wantedObject {
 						foundExpectedMarker = true
 						break
 					}
 				}
 				if !foundExpectedMarker {
-					t.Errorf("did not find expected task marker among %q", ownValidationBucket.writtenObjectKeys)
+					t.Errorf("Did not find expected task marker among %q", ownValidationBucket.writtenObjectKeys)
 				}
 			}
 		})
 	}
+}
+
+func mustParseTime(t *testing.T, value string) time.Time {
+	when, err := time.Parse("2006/01/02/15/04", value)
+	if err != nil {
+		t.Fatalf("Couldn't parse %q as time: %v", value, err)
+	}
+	return when
 }
