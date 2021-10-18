@@ -1,3 +1,9 @@
+##
+## Originally adapted from:
+##  (GCP) https://cloud.google.com/kubernetes-engine/docs/tutorials/autoscaling-metrics#pubsub
+##  (AWS) https://aws.amazon.com/blogs/compute/scaling-kubernetes-deployments-with-amazon-cloudwatch-metrics/
+##
+
 variable "environment" {
   type = string
 }
@@ -5,6 +11,17 @@ variable "environment" {
 variable "use_aws" {
   type    = bool
   default = false
+}
+
+variable "eks_oidc_provider" {
+  type = object({
+    arn = string
+    url = string
+  })
+  default = {
+    arn = ""
+    url = ""
+  }
 }
 
 data "google_project" "project" {}
@@ -16,13 +33,15 @@ resource "kubernetes_namespace" "custom_metrics" {
 }
 
 module "account_mapping" {
-  source                          = "../account_mapping"
-  kubernetes_service_account_name = "custom-metrics-adapter"
-  kubernetes_namespace            = kubernetes_namespace.custom_metrics.metadata[0].name
-  environment                     = var.environment
-  aws_iam_role_name               = var.use_aws ? "${var.environment}-metrics-adapter" : ""
-  gcp_service_account_name        = var.use_aws ? "" : "${var.environment}-metrics-adapter"
-  gcp_project                     = data.google_project.project.project_id
+  source                           = "../account_mapping"
+  kubernetes_service_account_name  = "custom-metrics-adapter"
+  kubernetes_namespace             = kubernetes_namespace.custom_metrics.metadata[0].name
+  environment                      = var.environment
+  aws_iam_role_name                = var.use_aws ? "${var.environment}-metrics-adapter" : ""
+  aws_iam_role_managed_policy_arns = ["arn:aws:iam::aws:policy/CloudWatchReadOnlyAccess"]
+  eks_oidc_provider                = var.eks_oidc_provider
+  gcp_service_account_name         = var.use_aws ? "" : "${var.environment}-metrics-adapter"
+  gcp_project                      = data.google_project.project.project_id
 }
 
 resource "kubernetes_cluster_role_binding" "custom_metrics_adapter_auth_delegator" {
@@ -87,7 +106,7 @@ resource "kubernetes_api_service" "external_metrics" {
       namespace = kubernetes_namespace.custom_metrics.metadata[0].name
       name      = "custom-metrics-adapter"
     }
-    insecure_skip_tls_verify = true # XXX: is this OK???
+    insecure_skip_tls_verify = true
   }
 }
 
@@ -124,7 +143,7 @@ resource "kubernetes_deployment" "gcp_custom_metrics_adapter" {
   metadata {
     namespace = kubernetes_namespace.custom_metrics.metadata[0].name
     name      = "custom-metrics-adapter"
-    labels    = { app = "custom-metrics-adapter" } # XXX: is this label/selector strategy sufficient? GCP and AWS have different implementations (but I think the difference is arbitrary)
+    labels    = { app = "custom-metrics-adapter" }
   }
   spec {
     replicas = 1
@@ -189,7 +208,7 @@ resource "kubernetes_api_service" "custom_metrics_v1beta1" {
       namespace = kubernetes_namespace.custom_metrics.metadata[0].name
       name      = "custom-metrics-adapter"
     }
-    insecure_skip_tls_verify = true # XXX: is this OK???
+    insecure_skip_tls_verify = true
   }
 }
 
@@ -207,7 +226,7 @@ resource "kubernetes_api_service" "custom_metrics_v1beta2" {
       namespace = kubernetes_namespace.custom_metrics.metadata[0].name
       name      = "custom-metrics-adapter"
     }
-    insecure_skip_tls_verify = true # XXX: is this OK???
+    insecure_skip_tls_verify = true
   }
 }
 
@@ -215,6 +234,18 @@ resource "kubernetes_api_service" "custom_metrics_v1beta2" {
 ##
 ## AWS-specific resources
 ##
+resource "kubernetes_cluster_role" "external_metrics_reader" {
+  count = var.use_aws ? 1 : 0 # This cluster role already exists in GKE deployments.
+  metadata {
+    name = "external-metrics-reader"
+  }
+  rule {
+    api_groups = ["external.metrics.k8s.io"]
+    resources  = ["*"]
+    verbs      = ["list", "get", "watch"]
+  }
+}
+
 resource "kubernetes_cluster_role" "aws_metrics_reader" {
   count = var.use_aws ? 1 : 0
   metadata {
@@ -273,6 +304,29 @@ resource "kubernetes_cluster_role_binding" "custom_metrics_adapter_resource_read
   }
 }
 
+resource "kubernetes_manifest" "external_metrics_crd" {
+  count = var.use_aws ? 1 : 0
+  manifest = {
+    apiVersion = "apiextensions.k8s.io/v1beta1"
+    kind       = "CustomResourceDefinition"
+
+    metadata = {
+      name = "externalmetrics.metrics.aws"
+    }
+
+    spec = {
+      group   = "metrics.aws"
+      version = "v1alpha1"
+      names = {
+        kind     = "ExternalMetric"
+        plural   = "externalmetrics"
+        singular = "externalmetric"
+      }
+      scope = "Namespaced"
+    }
+  }
+}
+
 resource "kubernetes_deployment" "aws_custom_metrics_adapter" {
   count = var.use_aws ? 1 : 0
   metadata {
@@ -290,14 +344,14 @@ resource "kubernetes_deployment" "aws_custom_metrics_adapter" {
       }
       spec {
         service_account_name = module.account_mapping.kubernetes_service_account_name
-        security_context { fs_group = 65534 } # XXX: what is 65534?
+        security_context { fs_group = 65534 }
         container {
           name              = "custom-metrics-adapter"
           image             = "chankh/k8s-cloudwatch-adapter:v0.10.0"
           image_pull_policy = "Always"
           command           = ["/adapter", "--cert-dir=/tmp", "--secure-port=6443", "--logtostderr=true", "--v=2"]
           port {
-            container_port = 6443 # XXX: can this just be 443 to simplify service definition?
+            container_port = 6443
             name           = "https"
           }
           port {

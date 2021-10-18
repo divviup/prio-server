@@ -105,6 +105,7 @@ variable "pushgateway" {
 
 variable "intake_queue" {
   type = object({
+    name              = string
     topic_kind        = string
     topic             = string
     subscription_kind = string
@@ -114,6 +115,7 @@ variable "intake_queue" {
 
 variable "aggregate_queue" {
   type = object({
+    name              = string
     topic_kind        = string
     topic             = string
     subscription_kind = string
@@ -385,7 +387,7 @@ resource "kubernetes_deployment" "intake_batch" {
     namespace = var.kubernetes_namespace
   }
   spec {
-    replicas = var.min_intake_worker_count # XXX: can this be removed once autoscaling is implemented?
+    replicas = var.min_intake_worker_count
     selector {
       match_labels = {
         app      = "intake-batch-worker"
@@ -459,6 +461,37 @@ resource "kubernetes_deployment" "intake_batch" {
   }
 }
 
+resource "kubernetes_manifest" "intake_queue_depth_metric" {
+  count = var.use_aws ? 1 : 0
+  manifest = {
+    apiVersion = "metrics.aws/v1alpha1"
+    kind       = "ExternalMetric"
+    metadata = {
+      namespace = var.kubernetes_namespace
+      name      = "${var.ingestor}-intake-queue-depth"
+    }
+    spec = {
+      name = "${var.ingestor}-intake-queue-depth"
+      queries = [{
+        id = "intake_queue_depth"
+        metricStat = {
+          metric = {
+            namespace  = "AWS/SQS"
+            metricName = "ApproximateNumberOfMessagesVisible"
+            dimensions = [{
+              name  = "QueueName"
+              value = var.intake_queue.name
+            }]
+          }
+          period = 60
+          stat   = "Average"
+          unit   = "Count"
+        }
+      }]
+    }
+  }
+}
+
 resource "kubernetes_horizontal_pod_autoscaler" "intake_batch_autoscaler" {
   metadata {
     namespace = var.kubernetes_namespace
@@ -479,9 +512,9 @@ resource "kubernetes_horizontal_pod_autoscaler" "intake_batch_autoscaler" {
       type = "External"
       external {
         metric {
-          name = "pubsub.googleapis.com|subscription|num_undelivered_messages" # XXX: generalize for AWS
+          name = var.use_aws ? "${var.ingestor}-intake-queue-depth" : "pubsub.googleapis.com|subscription|num_undelivered_messages"
           selector {
-            match_labels = {
+            match_labels = var.use_aws ? {} : {
               "resource.labels.subscription_id" = var.intake_queue.subscription
             }
           }
@@ -489,6 +522,28 @@ resource "kubernetes_horizontal_pod_autoscaler" "intake_batch_autoscaler" {
         target {
           type  = "Value"
           value = "1"
+        }
+      }
+    }
+
+    behavior {
+      scale_up {
+        stabilization_window_seconds = 300
+        select_policy                = "Max"
+        policy {
+          period_seconds = 60
+          type           = "Pods"
+          value          = 1
+        }
+      }
+
+      scale_down {
+        stabilization_window_seconds = 300
+        select_policy                = "Max"
+        policy {
+          period_seconds = 60
+          type           = "Pods"
+          value          = 1
         }
       }
     }
@@ -533,7 +588,7 @@ resource "kubernetes_deployment" "aggregate" {
   }
 
   spec {
-    replicas = var.min_aggregate_worker_count # XXX: can this be removed once autoscaling is implemented?
+    replicas = var.min_aggregate_worker_count
     selector {
       match_labels = {
         app      = "aggregate-worker"
@@ -603,6 +658,37 @@ resource "kubernetes_deployment" "aggregate" {
   }
 }
 
+resource "kubernetes_manifest" "aggregate_queue_depth_metric" {
+  count = var.use_aws ? 1 : 0
+  manifest = {
+    apiVersion = "metrics.aws/v1alpha1"
+    kind       = "ExternalMetric"
+    metadata = {
+      namespace = var.kubernetes_namespace
+      name      = "${var.ingestor}-aggregate-queue-depth"
+    }
+    spec = {
+      name = "${var.ingestor}-aggregate-queue-depth"
+      queries = [{
+        id = "aggregate_queue_depth"
+        metricStat = {
+          metric = {
+            namespace  = "AWS/SQS"
+            metricName = "ApproximateNumberOfMessagesVisible"
+            dimensions = [{
+              name  = "QueueName"
+              value = var.aggregate_queue.name
+            }]
+          }
+          period = 60
+          stat   = "Average"
+          unit   = "Count"
+        }
+      }]
+    }
+  }
+}
+
 resource "kubernetes_horizontal_pod_autoscaler" "aggregate_autoscaler" {
   metadata {
     namespace = var.kubernetes_namespace
@@ -623,9 +709,9 @@ resource "kubernetes_horizontal_pod_autoscaler" "aggregate_autoscaler" {
       type = "External"
       external {
         metric {
-          name = "pubsub.googleapis.com|subscription|num_undelivered_messages" # XXX: generalize for AWS
+          name = var.use_aws ? "${var.ingestor}-aggregate-queue-depth" : "pubsub.googleapis.com|subscription|num_undelivered_messages"
           selector {
-            match_labels = {
+            match_labels = var.use_aws ? {} : {
               "resource.labels.subscription_id" = var.aggregate_queue.subscription
             }
           }
@@ -635,7 +721,28 @@ resource "kubernetes_horizontal_pod_autoscaler" "aggregate_autoscaler" {
           value = "1"
         }
       }
+    }
 
+    behavior {
+      scale_up {
+        stabilization_window_seconds = 300
+        select_policy                = "Max"
+        policy {
+          period_seconds = 60
+          type           = "Pods"
+          value          = 1
+        }
+      }
+
+      scale_down {
+        stabilization_window_seconds = 300
+        select_policy                = "Max"
+        policy {
+          period_seconds = 60
+          type           = "Pods"
+          value          = 1
+        }
+      }
     }
   }
 }

@@ -8,6 +8,11 @@ variable "aws_iam_role_name" {
   default = ""
 }
 
+variable "aws_iam_role_managed_policy_arns" {
+  type    = list(string)
+  default = []
+}
+
 variable "eks_oidc_provider" {
   type = object({
     arn = string
@@ -81,7 +86,8 @@ resource "google_service_account" "account" {
 resource "aws_iam_role" "iam_role" {
   count = var.aws_iam_role_name != "" ? 1 : 0
 
-  name = var.aws_iam_role_name
+  name                = var.aws_iam_role_name
+  managed_policy_arns = var.aws_iam_role_managed_policy_arns
 
   assume_role_policy = jsonencode({
     Version = "2012-10-17"

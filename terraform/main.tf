@@ -236,7 +236,7 @@ variable "cluster_settings" {
 terraform {
   backend "gcs" {}
 
-  required_version = ">= 0.14.4"
+  required_version = ">= 0.14.8"
 
   # https://www.terraform.io/docs/language/expressions/type-constraints.html#experimental-optional-object-type-attributes
   experiments = [module_variable_optional_attrs]
@@ -330,6 +330,9 @@ provider "kubernetes" {
   host                   = local.kubernetes_cluster.endpoint
   cluster_ca_certificate = base64decode(local.kubernetes_cluster.certificate_authority_data)
   token                  = local.kubernetes_cluster.token
+  experiments {
+    manifest_resource = true
+  }
 }
 
 provider "helm" {
@@ -682,9 +685,10 @@ module "portal_server_resources" {
 }
 
 module "custom_metrics" {
-  source      = "./modules/custom_metrics"
-  environment = var.environment
-  use_aws = var.use_aws
+  source            = "./modules/custom_metrics"
+  environment       = var.environment
+  use_aws           = var.use_aws
+  eks_oidc_provider = var.use_aws ? module.eks[0].oidc_provider : { url = "", arn = "" }
 }
 
 # The monitoring module is disabled for now because it needs some AWS tweaks
