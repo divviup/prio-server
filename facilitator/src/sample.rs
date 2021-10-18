@@ -10,7 +10,7 @@ use chrono::NaiveDateTime;
 use prio::{
     client::Client,
     encrypt::PublicKey,
-    field::{Field32, FieldElement},
+    field::{FieldElement, FieldPriov2},
 };
 use rand::{thread_rng, Rng};
 use slog::{info, o, Logger};
@@ -46,7 +46,7 @@ impl SampleOutput {
 pub struct ReferenceSum {
     /// The reference sum, covering those packets whose shares appear in both
     /// PHA and facilitator ingestion batches.
-    pub sum: Vec<Field32>,
+    pub sum: Vec<FieldPriov2>,
     /// The number of contributions that went into the reference sum.
     pub contributions: usize,
     /// UUIDs of PHA packets that were dropped
@@ -218,7 +218,7 @@ impl<'a> SampleGenerator<'a> {
         let batch_start_time = self.batch_start_time;
         let batch_end_time = self.batch_end_time;
 
-        let mut reference_sum = vec![Field32::from(0); self.dimension as usize];
+        let mut reference_sum = vec![FieldPriov2::from(0); self.dimension as usize];
         let mut contributions = 0;
         let mut pha_dropped_packets = Vec::new();
         let mut facilitator_dropped_packets = Vec::new();
@@ -236,8 +236,8 @@ impl<'a> SampleGenerator<'a> {
                                 dimension
                             };
 
-                            let data: Vec<Field32> = (0..data_len)
-                                .map(|_| Field32::from(thread_rng.gen_range(0..2)))
+                            let data: Vec<FieldPriov2> = (0..data_len)
+                                .map(|_| FieldPriov2::from(thread_rng.gen_range(0..2)))
                                 .collect();
 
                             // If we are dropping the packet from either output, do
@@ -321,7 +321,7 @@ impl<'a> SampleGenerator<'a> {
                         name: aggregation_name.to_owned(),
                         bins: dimension,
                         epsilon,
-                        prime: Field32::modulus() as i64,
+                        prime: FieldPriov2::modulus() as i64,
                         number_of_servers: 2,
                         hamming_weight: None,
                         batch_start_time,
@@ -343,7 +343,7 @@ impl<'a> SampleGenerator<'a> {
                 name: aggregation_name.to_owned(),
                 bins: dimension,
                 epsilon,
-                prime: Field32::modulus() as i64,
+                prime: FieldPriov2::modulus() as i64,
                 number_of_servers: 2,
                 hamming_weight: None,
                 batch_start_time,
@@ -447,7 +447,7 @@ mod tests {
             assert_eq!(parsed_header.name, "fake-aggregation".to_owned());
             assert_eq!(parsed_header.bins, 10);
             assert_eq!(parsed_header.epsilon, 0.11);
-            assert_eq!(parsed_header.prime, Field32::modulus() as i64);
+            assert_eq!(parsed_header.prime, FieldPriov2::modulus() as i64);
             assert_eq!(parsed_header.number_of_servers, 2);
             assert_eq!(parsed_header.hamming_weight, None);
             assert_eq!(parsed_header.batch_start_time, 100);

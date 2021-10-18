@@ -36,6 +36,24 @@ func (c *Clock) Now() time.Time {
 	return c.now
 }
 
+// AggregationIntervalFunc represents a function that can generate an
+// aggregation window (as an Interval) based on a "now" timestamp.
+type AggregationIntervalFunc func(now time.Time) Interval
+
+// StandardAggregationWindow returns an aggregation interval function which
+// produces the "standard" aggregation window, i.e. the most recent aggregation
+// window which is at least one grace period into the past.
+func StandardAggregationWindow(aggregationPeriod, gracePeriod time.Duration) AggregationIntervalFunc {
+	return func(now time.Time) Interval { return AggregationInterval(now, aggregationPeriod, gracePeriod) }
+}
+
+// OverrideAggregationWindow returns an aggregation interval function which
+// always produces a specific aggregation window, specifically the aggregation
+// window containing the given time.
+func OverrideAggregationWindow(when time.Time, aggregationPeriod time.Duration) AggregationIntervalFunc {
+	return func(time.Time) Interval { return AggregationIntervalIncluding(when, aggregationPeriod) }
+}
+
 // Interval represents a half-open interval of time.
 // It includes `begin` and excludes `end`.
 type Interval struct {
@@ -48,11 +66,20 @@ type Interval struct {
 // AggregationInterval calculates the interval we want to run an aggregation
 // for, if any. That is whatever interval is `gracePeriod` earlier than now and
 // aligned on multiples of `aggregationPeriod` (relative to the zero time).
-func AggregationInterval(clock Clock, aggregationPeriod, gracePeriod time.Duration) Interval {
-	var output Interval
-	output.End = clock.Now().Add(-gracePeriod).Truncate(aggregationPeriod)
-	output.Begin = output.End.Add(-aggregationPeriod)
-	return output
+func AggregationInterval(now time.Time, aggregationPeriod, gracePeriod time.Duration) Interval {
+	return AggregationIntervalIncluding(now.Add(-gracePeriod).Add(-aggregationPeriod), aggregationPeriod)
+}
+
+// AggregationIntervalIncluding calculates an interval of aggregation, given a
+// point of time inside that interval. The start of the returned interval will
+// be the given point in time, truncated to the nearest multiple of the
+// aggregation period (relative to the zero time).
+func AggregationIntervalIncluding(when time.Time, aggregationPeriod time.Duration) Interval {
+	start := when.Truncate(aggregationPeriod)
+	return Interval{
+		Begin: start,
+		End:   start.Add(aggregationPeriod),
+	}
 }
 
 func (i Interval) String() string {
