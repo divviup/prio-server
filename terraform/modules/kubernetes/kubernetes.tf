@@ -387,7 +387,6 @@ resource "kubernetes_deployment" "intake_batch" {
     namespace = var.kubernetes_namespace
   }
   spec {
-    replicas = var.min_intake_worker_count
     selector {
       match_labels = {
         app      = "intake-batch-worker"
@@ -520,8 +519,8 @@ resource "kubernetes_horizontal_pod_autoscaler" "intake_batch_autoscaler" {
           }
         }
         target {
-          type  = "Value"
-          value = "1"
+          type          = "AverageValue"
+          average_value = 1
         }
       }
     }
@@ -588,7 +587,6 @@ resource "kubernetes_deployment" "aggregate" {
   }
 
   spec {
-    replicas = var.min_aggregate_worker_count
     selector {
       match_labels = {
         app      = "aggregate-worker"
@@ -717,8 +715,8 @@ resource "kubernetes_horizontal_pod_autoscaler" "aggregate_autoscaler" {
           }
         }
         target {
-          type  = "Value"
-          value = "1"
+          type          = "AverageValue"
+          average_value = 1
         }
       }
     }

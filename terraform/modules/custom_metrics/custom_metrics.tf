@@ -354,10 +354,6 @@ resource "kubernetes_deployment" "aws_custom_metrics_adapter" {
             container_port = 6443
             name           = "https"
           }
-          port {
-            container_port = 8080
-            name           = "http"
-          }
           volume_mount {
             name       = "temp-vol"
             mount_path = "/tmp"
@@ -384,11 +380,6 @@ resource "kubernetes_service" "aws_custom_metrics_adapter" {
       name        = "https"
       port        = 443
       target_port = 6443
-    }
-    port {
-      name        = "http"
-      port        = 80
-      target_port = 8080
     }
     selector = { app = "custom-metrics-adapter" }
   }
