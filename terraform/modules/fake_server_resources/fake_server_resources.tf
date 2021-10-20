@@ -21,8 +21,6 @@ variable "ingestor_pairs" {
     kubernetes_namespace : string
     packet_decryption_key_kubernetes_secret : string
     ingestor_manifest_base_url : string
-    intake_worker_count : string
-    aggregate_worker_count : string
     peer_share_processor_manifest_base_url : string
   }))
 }

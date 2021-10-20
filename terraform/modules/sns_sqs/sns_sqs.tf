@@ -123,6 +123,7 @@ resource "aws_sqs_queue_policy" "dead_letter" {
 
 output "queue" {
   value = {
+    name              = aws_sqs_queue.task.name
     topic_kind        = "aws-sns"
     topic             = aws_sns_topic.task.arn
     subscription_kind = "aws-sqs"
