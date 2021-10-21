@@ -58,8 +58,8 @@ test_peer_environment = {
 }
 is_first                 = false
 use_aws                  = false
-workflow_manager_version = "0.6.16"
-facilitator_version      = "0.6.16"
+workflow_manager_version = "0.6.17"
+facilitator_version      = "0.6.17"
 victorops_routing_key    = "prio-staging"
 
 default_aggregation_period = "30m"
