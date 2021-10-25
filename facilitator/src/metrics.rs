@@ -92,7 +92,6 @@ impl IntakeMetricsCollector {
 pub struct AggregateMetricsCollector {
     pub aggregate_tasks_started: IntCounter,
     pub aggregate_tasks_finished: IntCounterVec,
-    pub own_validation_batches_reader_metrics: BatchReaderMetricsCollector,
     pub peer_validation_batches_reader_metrics: BatchReaderMetricsCollector,
 }
 
@@ -114,7 +113,6 @@ impl AggregateMetricsCollector {
         Ok(Self {
             aggregate_tasks_started,
             aggregate_tasks_finished,
-            own_validation_batches_reader_metrics: BatchReaderMetricsCollector::new("own")?,
             peer_validation_batches_reader_metrics: BatchReaderMetricsCollector::new("peer")?,
         })
     }
