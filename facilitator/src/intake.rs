@@ -29,6 +29,7 @@ pub struct BatchIntaker<'a> {
     peer_validation_batch_signing_key: &'a BatchSigningKey,
     is_first: bool,
     callback_cadence: u32,
+    aggregation_name: &'a str,
     metrics_collector: Option<&'a IntakeMetricsCollector>,
     use_bogus_packet_file_digest: bool,
     logger: Logger,
@@ -38,7 +39,7 @@ impl<'a> BatchIntaker<'a> {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         trace_id: &'a Uuid,
-        aggregation_name: &str,
+        aggregation_name: &'a str,
         batch_id: &Uuid,
         date: &NaiveDateTime,
         ingestion_transport: &'a mut VerifiableAndDecryptableTransport,
@@ -55,6 +56,7 @@ impl<'a> BatchIntaker<'a> {
             event::INGESTION_PATH => ingestion_transport.transport.transport.path(),
             event::PEER_VALIDATION_PATH => peer_validation_transport.transport.path(),
         ));
+
         Ok(BatchIntaker {
             intake_batch: BatchReader::new(
                 Batch::new_ingestion(aggregation_name, batch_id, date),
@@ -73,6 +75,7 @@ impl<'a> BatchIntaker<'a> {
             peer_validation_batch_signing_key: &peer_validation_transport.batch_signing_key,
             is_first,
             callback_cadence: 1000,
+            aggregation_name,
             metrics_collector: None,
             use_bogus_packet_file_digest: false,
             logger,
@@ -91,6 +94,8 @@ impl<'a> BatchIntaker<'a> {
     /// recorded.
     pub fn set_metrics_collector(&mut self, collector: &'a IntakeMetricsCollector) {
         self.metrics_collector = Some(collector);
+        self.intake_batch
+            .set_metrics_collector(&collector.ingestion_batches_reader_metrics);
     }
 
     /// Sets whether this BatchIntaker will use a bogus value for the packet
@@ -144,6 +149,7 @@ impl<'a> BatchIntaker<'a> {
             self.intake_batch.packet_file_reader(&ingestion_header)?;
 
         let mut processed_packets = 0;
+        let mut processed_bytes = 0;
         // Borrowing distinct parts of a struct works, but not under closures:
         // https://github.com/rust-lang/rust/issues/53488
         // The workaround is to borrow or copy fields outside the closure.
@@ -159,6 +165,9 @@ impl<'a> BatchIntaker<'a> {
                         Err(Error::EofError) => return Ok(()),
                         Err(e) => return Err(e.into()),
                     };
+
+                    processed_bytes += packet.encrypted_payload.len() as u64;
+
                     let validation_packet = packet.generate_validation_packet(&mut servers)?;
                     validation_packet.write(&mut packet_writer)?;
                     processed_packets += 1;
@@ -166,6 +175,23 @@ impl<'a> BatchIntaker<'a> {
                         callback(logger);
                     }
                 })?;
+
+        if let Some(collector) = self.metrics_collector {
+            collector
+                .packets_per_batch
+                .with_label_values(&[self.aggregation_name])
+                .set(processed_packets.into());
+
+            collector
+                .packets_processed
+                .with_label_values(&[self.aggregation_name])
+                .inc_by(processed_packets.into());
+
+            collector
+                .bytes_processed
+                .with_label_values(&[self.aggregation_name])
+                .inc_by(processed_bytes);
+        }
 
         // If the caller requested it, we insert a bogus packet file digest into
         // the own and peer validaton batch headers instead of the real computed

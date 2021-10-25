@@ -1408,7 +1408,10 @@ where
 
     if let Some(collector) = metrics_collector {
         batch_intaker.set_metrics_collector(collector);
-        collector.intake_tasks_started.inc();
+        collector
+            .intake_tasks_started
+            .with_label_values(&[aggregation_id])
+            .inc();
     }
 
     let result = batch_intaker.generate_validation_share(callback);
@@ -1417,11 +1420,11 @@ where
         match result {
             Ok(()) => collector
                 .intake_tasks_finished
-                .with_label_values(&["success"])
+                .with_label_values(&["success", aggregation_id])
                 .inc(),
             Err(_) => collector
                 .intake_tasks_finished
-                .with_label_values(&["error"])
+                .with_label_values(&["error", aggregation_id])
                 .inc(),
         }
     }
@@ -1640,7 +1643,10 @@ where
 
     if let Some(collector) = metrics_collector {
         aggregator.set_metrics_collector(collector);
-        collector.aggregate_tasks_started.inc();
+        collector
+            .aggregate_tasks_started
+            .with_label_values(&[aggregation_id])
+            .inc();
     }
 
     let result = aggregator.generate_sum_part(&parsed_batches, callback);
@@ -1649,11 +1655,11 @@ where
         match result {
             Ok(()) => collector
                 .aggregate_tasks_finished
-                .with_label_values(&["success"])
+                .with_label_values(&["success", aggregation_id])
                 .inc(),
             Err(_) => collector
                 .aggregate_tasks_finished
-                .with_label_values(&["error"])
+                .with_label_values(&["error", aggregation_id])
                 .inc(),
         }
     }
