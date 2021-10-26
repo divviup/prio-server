@@ -60,7 +60,7 @@ fn handle_scrape() -> Result<Vec<u8>> {
 }
 
 /// A group of collectors for intake tasks.
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct IntakeMetricsCollector {
     pub intake_tasks_started: IntCounter,
     pub intake_tasks_finished: IntCounterVec,
@@ -88,7 +88,7 @@ impl IntakeMetricsCollector {
     }
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct AggregateMetricsCollector {
     pub aggregate_tasks_started: IntCounter,
     pub aggregate_tasks_finished: IntCounterVec,
@@ -120,7 +120,7 @@ impl AggregateMetricsCollector {
     }
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct BatchReaderMetricsCollector {
     pub invalid_validation_batches: IntCounterVec,
 }
