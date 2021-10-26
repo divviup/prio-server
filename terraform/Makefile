@@ -106,6 +106,21 @@ apply: prep ## Have terraform do the things. This will cost money.
 		-var-file="$(VARS)"
 	echo "If that succeeded, run 'terraform output --json | (cd ../deploy-tool/ ; go run main.go )'"
 
+.PHONY: plan-bootstrap
+plan-bootstrap: prep ## Show what terraform thinks it will do
+	@terraform plan \
+		-lock=true \
+		-input=false \
+		-refresh=true \
+		-var-file="$(VARS)" \
+		-target=module.manifest_gcp \
+		-target=module.manifest_aws \
+		-target=module.fake_server_resources \
+		-target=module.portal_server_resources \
+		-target=module.gke \
+		-target=module.eks \
+		-target=module.custom_metrics
+
 .PHONY: apply-bootstrap
 apply-bootstrap: prep ## Have terraform bring up the minimal resources needed to bootstrap an env and permit peers to begin deploying
 	@terraform apply \
