@@ -28,11 +28,12 @@ use std::{
     str,
     sync::{Arc, RwLock},
 };
+use tokio::runtime::Handle;
 use ureq::Response;
 use url::Url;
 
 use crate::{
-    aws_credentials::{self, basic_runtime, get_caller_identity_token},
+    aws_credentials::{self, get_caller_identity_token},
     config::{Identity, WorkloadIdentityPoolParameters},
     http::{
         AccessTokenProvider, Method, RequestParameters, RetryingAgent, StaticAccessTokenProvider,
@@ -280,6 +281,7 @@ impl ProvideDefaultAccessToken for ServiceAccountKeyFileDefaultAccessTokenProvid
 struct AwsIamFederationViaWorkloadIdentityPoolDefaultAccessTokenProvider {
     aws_credentials_provider: aws_credentials::Provider,
     workload_identity_pool_provider: String,
+    runtime_handle: Handle,
     logger: Logger,
     agent: RetryingAgent,
 }
@@ -310,7 +312,8 @@ impl ProvideDefaultAccessToken
 
         // First, we must obtain credentials for the AWS IAM role mapped to this
         // facilitator's Kubernetes service account
-        let credentials = basic_runtime()?
+        let credentials = self
+            .runtime_handle
             .block_on(self.aws_credentials_provider.credentials())
             .context("failed to get AWS credentials")?;
 
@@ -446,6 +449,7 @@ impl GcpAccessTokenProvider {
         account_to_impersonate: Identity,
         key_file_reader: Option<Box<dyn Read>>,
         workload_identity_pool_params: Option<WorkloadIdentityPoolParameters>,
+        runtime_handle: &Handle,
         parent_logger: &Logger,
     ) -> Result<Self> {
         let logger = parent_logger.new(o!(
@@ -474,6 +478,7 @@ impl GcpAccessTokenProvider {
                         workload_identity_pool_provider: parameters.workload_identity_pool_provider,
                         logger: logger.clone(),
                         agent: agent.clone(),
+                        runtime_handle: runtime_handle.clone(),
                     },
                 ),
                 (None, None) => Box::new(GkeMetadataServiceDefaultAccessTokenProvider::new(

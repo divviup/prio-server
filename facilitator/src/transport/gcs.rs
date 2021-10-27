@@ -14,6 +14,7 @@ use std::{
     io::{self, Read, Write},
     time::Duration,
 };
+use tokio::runtime::Handle;
 use ureq::AgentBuilder;
 use url::Url;
 use uuid::Uuid;
@@ -63,6 +64,7 @@ impl GcsTransport {
         identity: Identity,
         key_file_reader: Option<Box<dyn Read>>,
         workload_identity_pool_params: Option<WorkloadIdentityPoolParameters>,
+        runtime_handle: &Handle,
         parent_logger: &Logger,
     ) -> Result<Self> {
         let logger = parent_logger.new(o!(
@@ -89,6 +91,7 @@ impl GcsTransport {
                 identity,
                 key_file_reader,
                 workload_identity_pool_params,
+                runtime_handle,
                 &logger,
             )?,
             agent: retrying_agent,

@@ -11,6 +11,7 @@ use slog::{debug, error, info, Logger};
 use std::{
     collections::HashMap, env, fs, fs::File, io::Read, str::FromStr, time::Duration, time::Instant,
 };
+use tokio::runtime::{self, Handle};
 use uuid::Uuid;
 
 use facilitator::{
@@ -925,27 +926,30 @@ fn main() -> Result<(), anyhow::Error> {
         args[0],
         args[1..].join(" "),
     );
+    let runtime = runtime::Builder::new_multi_thread().enable_all().build()?;
 
     let result = match matches.subcommand() {
         // The configuration of the Args above should guarantee that the
         // various parameters are present and valid, so it is safe to use
         // unwrap() here.
         ("generate-ingestion-sample", Some(sub_matches)) => {
-            generate_sample(&Uuid::new_v4(), sub_matches, &root_logger)
+            generate_sample(&Uuid::new_v4(), sub_matches, runtime.handle(), &root_logger)
         }
         ("generate-ingestion-sample-worker", Some(sub_matches)) => {
-            generate_sample_worker(sub_matches, &root_logger)
+            generate_sample_worker(sub_matches, runtime.handle(), &root_logger)
         }
         ("intake-batch", Some(sub_matches)) => {
-            intake_batch_subcommand(&Uuid::new_v4(), sub_matches, &root_logger)
+            intake_batch_subcommand(&Uuid::new_v4(), sub_matches, runtime.handle(), &root_logger)
         }
         ("intake-batch-worker", Some(sub_matches)) => {
-            intake_batch_worker(sub_matches, &root_logger)
+            intake_batch_worker(sub_matches, runtime.handle(), &root_logger)
         }
         ("aggregate", Some(sub_matches)) => {
-            aggregate_subcommand(&Uuid::new_v4(), sub_matches, &root_logger)
+            aggregate_subcommand(&Uuid::new_v4(), sub_matches, runtime.handle(), &root_logger)
         }
-        ("aggregate-worker", Some(sub_matches)) => aggregate_worker(sub_matches, &root_logger),
+        ("aggregate-worker", Some(sub_matches)) => {
+            aggregate_worker(sub_matches, runtime.handle(), &root_logger)
+        }
         ("lint-manifest", Some(sub_matches)) => lint_manifest(sub_matches, &root_logger),
         (_, _) => Ok(()),
     };
@@ -1000,13 +1004,14 @@ fn crypto_self_check(matches: &ArgMatches, logger: &Logger) -> Result<()> {
 
 fn generate_sample_worker(
     sub_matches: &ArgMatches,
+    runtime_handle: &Handle,
     root_logger: &Logger,
 ) -> Result<(), anyhow::Error> {
     let interval = value_t!(sub_matches.value_of("generation-interval"), u64)?;
 
     loop {
         let trace_id = Uuid::new_v4();
-        let result = generate_sample(&trace_id, sub_matches, root_logger);
+        let result = generate_sample(&trace_id, sub_matches, runtime_handle, root_logger);
 
         if let Err(e) = result {
             error!(
@@ -1169,6 +1174,7 @@ fn get_valid_batch_signing_key(
 fn generate_sample(
     trace_id: &Uuid,
     sub_matches: &ArgMatches,
+    runtime_handle: &Handle,
     logger: &Logger,
 ) -> Result<(), anyhow::Error> {
     let kube_namespace = sub_matches.value_of("kube-namespace");
@@ -1208,6 +1214,7 @@ fn generate_sample(
                 peer_identity,
                 Entity::Peer,
                 sub_matches,
+                runtime_handle,
                 logger,
             )?,
             batch_signing_key: own_batch_signing_key,
@@ -1248,6 +1255,7 @@ fn generate_sample(
                 facilitator_identity,
                 Entity::Facilitator,
                 sub_matches,
+                runtime_handle,
                 logger,
             )?,
             batch_signing_key: own_batch_signing_key,
@@ -1288,12 +1296,14 @@ fn intake_batch<F>(
     sub_matches: &ArgMatches,
     metrics_collector: Option<&IntakeMetricsCollector>,
     parent_logger: &Logger,
+    runtime_handle: &Handle,
     callback: F,
 ) -> Result<(), anyhow::Error>
 where
     F: FnMut(&Logger),
 {
-    let mut intake_transport = intake_transport_from_args(sub_matches, parent_logger)?;
+    let mut intake_transport =
+        intake_transport_from_args(sub_matches, runtime_handle, parent_logger)?;
 
     // We need the bucket to which we will write validations for the
     // peer data share processor, which can either be fetched from the
@@ -1330,6 +1340,7 @@ where
             Entity::Peer,
             PathOrInOut::Path(peer_validation_bucket),
             sub_matches,
+            runtime_handle,
             parent_logger,
         )?,
         batch_signing_key: batch_signing_key_from_arg(sub_matches)?,
@@ -1381,6 +1392,7 @@ where
 fn intake_batch_subcommand(
     trace_id: &Uuid,
     sub_matches: &ArgMatches,
+    runtime_handle: &Handle,
     parent_logger: &Logger,
 ) -> Result<(), anyhow::Error> {
     crypto_self_check(sub_matches, parent_logger).context("crypto self check failed")?;
@@ -1392,18 +1404,20 @@ fn intake_batch_subcommand(
         sub_matches,
         None,
         parent_logger,
+        runtime_handle,
         |_| {}, // no-op callback
     )
 }
 
 fn intake_batch_worker(
     sub_matches: &ArgMatches,
+    runtime_handle: &Handle,
     parent_logger: &Logger,
 ) -> Result<(), anyhow::Error> {
     let metrics_collector = IntakeMetricsCollector::new()?;
     let scrape_port = value_t!(sub_matches.value_of("metrics-scrape-port"), u16)?;
-    let _runtime = start_metrics_scrape_endpoint(scrape_port, parent_logger)?;
-    let queue = intake_task_queue_from_args(sub_matches, parent_logger)?;
+    start_metrics_scrape_endpoint(scrape_port, runtime_handle, parent_logger)?;
+    let queue = intake_task_queue_from_args(sub_matches, runtime_handle, parent_logger)?;
 
     crypto_self_check(sub_matches, parent_logger).context("crypto self check failed")?;
 
@@ -1424,6 +1438,7 @@ fn intake_batch_worker(
                 sub_matches,
                 Some(&metrics_collector),
                 parent_logger,
+                runtime_handle,
                 |logger| {
                     if let Err(e) =
                         queue.maybe_extend_task_deadline(&task_handle, &task_start.elapsed())
@@ -1463,6 +1478,7 @@ fn aggregate<F>(
     batches: Vec<(&str, &str)>,
     sub_matches: &ArgMatches,
     metrics_collector: Option<&AggregateMetricsCollector>,
+    runtime_handle: &Handle,
     logger: &Logger,
     callback: F,
 ) -> Result<()>
@@ -1472,7 +1488,7 @@ where
     let instance_name = sub_matches.value_of("instance-name").unwrap();
     let is_first = is_first_from_arg(sub_matches);
 
-    let mut intake_transport = intake_transport_from_args(sub_matches, logger)?;
+    let mut intake_transport = intake_transport_from_args(sub_matches, runtime_handle, logger)?;
 
     // We created the bucket that peers wrote validations into, and so
     // it is simply provided via argument.
@@ -1484,6 +1500,7 @@ where
         Entity::Peer,
         PathOrInOut::InOut(InOut::Input),
         sub_matches,
+        runtime_handle,
         logger,
     )?;
 
@@ -1539,6 +1556,7 @@ where
         Entity::Portal,
         PathOrInOut::Path(portal_bucket),
         sub_matches,
+        runtime_handle,
         logger,
     )?;
 
@@ -1606,6 +1624,7 @@ where
 fn aggregate_subcommand(
     trace_id: &Uuid,
     sub_matches: &ArgMatches,
+    runtime_handle: &Handle,
     parent_logger: &Logger,
 ) -> Result<(), anyhow::Error> {
     crypto_self_check(sub_matches, parent_logger).context("crypto self check failed")?;
@@ -1634,16 +1653,21 @@ fn aggregate_subcommand(
         batch_info,
         sub_matches,
         None,
+        runtime_handle,
         parent_logger,
         |_| {}, // no-op callback
     )
 }
 
-fn aggregate_worker(sub_matches: &ArgMatches, parent_logger: &Logger) -> Result<(), anyhow::Error> {
-    let queue = aggregation_task_queue_from_args(sub_matches, parent_logger)?;
+fn aggregate_worker(
+    sub_matches: &ArgMatches,
+    runtime_handle: &Handle,
+    parent_logger: &Logger,
+) -> Result<(), anyhow::Error> {
+    let queue = aggregation_task_queue_from_args(sub_matches, runtime_handle, parent_logger)?;
     let metrics_collector = AggregateMetricsCollector::new()?;
     let scrape_port = value_t!(sub_matches.value_of("metrics-scrape-port"), u16)?;
-    let _runtime = start_metrics_scrape_endpoint(scrape_port, parent_logger)?;
+    start_metrics_scrape_endpoint(scrape_port, runtime_handle, parent_logger)?;
     crypto_self_check(sub_matches, parent_logger).context("crypto self check failed")?;
 
     loop {
@@ -1671,6 +1695,7 @@ fn aggregate_worker(sub_matches: &ArgMatches, parent_logger: &Logger) -> Result<
                 batches,
                 sub_matches,
                 Some(&metrics_collector),
+                runtime_handle,
                 parent_logger,
                 |logger| {
                     if let Err(e) =
@@ -1821,6 +1846,7 @@ fn batch_signing_key_from_arg(matches: &ArgMatches) -> Result<BatchSigningKey> {
 
 fn intake_transport_from_args(
     matches: &ArgMatches,
+    runtime_handle: &Handle,
     logger: &Logger,
 ) -> Result<VerifiableAndDecryptableTransport> {
     let identity = value_t!(
@@ -1836,6 +1862,7 @@ fn intake_transport_from_args(
         Entity::Ingestor,
         PathOrInOut::InOut(InOut::Input),
         matches,
+        runtime_handle,
         logger,
     )?;
 
@@ -1902,6 +1929,7 @@ fn transport_from_args(
     entity: Entity,
     path_or_in_out: PathOrInOut,
     matches: &ArgMatches,
+    runtime_handle: &Handle,
     logger: &Logger,
 ) -> Result<Box<dyn Transport>> {
     let path = match path_or_in_out {
@@ -1916,7 +1944,7 @@ fn transport_from_args(
         }
     };
 
-    transport_for_path(path, identity, entity, matches, logger)
+    transport_for_path(path, identity, entity, matches, runtime_handle, logger)
 }
 
 fn transport_for_path(
@@ -1924,6 +1952,7 @@ fn transport_for_path(
     identity: Identity,
     entity: Entity,
     matches: &ArgMatches,
+    runtime_handle: &Handle,
     logger: &Logger,
 ) -> Result<Box<dyn Transport>> {
     let use_default_aws_credentials_provider = value_t!(
@@ -1943,11 +1972,13 @@ fn transport_for_path(
                 sa_to_impersonate,
                 use_default_aws_credentials_provider,
                 "s3",
+                runtime_handle,
                 logger,
             )?;
             Ok(Box::new(S3Transport::new(
                 path,
                 credentials_provider,
+                runtime_handle,
                 logger,
             )))
         }
@@ -1966,8 +1997,10 @@ fn transport_for_path(
                 WorkloadIdentityPoolParameters::new(
                     matches.value_of("gcp-workload-identity-pool-provider"),
                     use_default_aws_credentials_provider,
+                    runtime_handle,
                     logger,
                 )?,
+                runtime_handle,
                 logger,
             )?))
         }
@@ -1994,6 +2027,7 @@ fn decode_base64_key(s: &str) -> Result<Vec<u8>> {
 // [1] https://doc.rust-lang.org/book/ch17-02-trait-objects.html#object-safety-is-required-for-trait-objects
 fn intake_task_queue_from_args(
     matches: &ArgMatches,
+    runtime_handle: &Handle,
     logger: &Logger,
 ) -> Result<Box<dyn TaskQueue<IntakeBatchTask>>> {
     let task_queue_kind = TaskQueueKind::from_str(
@@ -2017,6 +2051,7 @@ fn intake_task_queue_from_args(
                 gcp_project_id,
                 queue_name,
                 identity,
+                runtime_handle,
                 logger,
             )?))
         }
@@ -2032,11 +2067,13 @@ fn intake_task_queue_from_args(
                     bool
                 )?,
                 "sqs",
+                runtime_handle,
                 logger,
             )?;
             Ok(Box::new(AwsSqsTaskQueue::new(
                 sqs_region,
                 queue_name,
+                runtime_handle,
                 credentials_provider,
                 logger,
             )?))
@@ -2046,6 +2083,7 @@ fn intake_task_queue_from_args(
 
 fn aggregation_task_queue_from_args(
     matches: &ArgMatches,
+    runtime_handle: &Handle,
     logger: &Logger,
 ) -> Result<Box<dyn TaskQueue<AggregationTask>>> {
     let task_queue_kind = TaskQueueKind::from_str(
@@ -2069,6 +2107,7 @@ fn aggregation_task_queue_from_args(
                 gcp_project_id,
                 queue_name,
                 identity,
+                runtime_handle,
                 logger,
             )?))
         }
@@ -2084,11 +2123,13 @@ fn aggregation_task_queue_from_args(
                     bool
                 )?,
                 "sqs",
+                runtime_handle,
                 logger,
             )?;
             Ok(Box::new(AwsSqsTaskQueue::new(
                 sqs_region,
                 queue_name,
+                runtime_handle,
                 credentials_provider,
                 logger,
             )?))

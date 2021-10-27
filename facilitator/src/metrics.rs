@@ -5,22 +5,22 @@ use prometheus::{
 };
 use slog::{error, info, o, Logger};
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
-use tokio::runtime::Runtime;
+use tokio::runtime::Handle;
 use warp::Filter;
 
 /// Starts listening on an HTTP endpoint so that Prometheus can scrape metrics
-/// from this instance. On success, returns a Runtime value that the caller must
-/// keep live, or the task that handles Prometheus scrapes will not run. Returns
-/// an error if something goes wrong setting up the endpoint.
-pub fn start_metrics_scrape_endpoint(port: u16, parent_logger: &Logger) -> Result<Runtime> {
-    // The default, multi-threaded runtime should suffice for our needs
-    let runtime = Runtime::new().context("failed to create runtime for metrics endpoint")?;
-
-    // scrape_logger will be moved into the closure passed to `runtime.spawn()`
+/// from this instance. Returns an error if something goes wrong setting up the
+/// endpoint.
+pub fn start_metrics_scrape_endpoint(
+    port: u16,
+    runtime_handle: &Handle,
+    parent_logger: &Logger,
+) -> Result<()> {
+    // scrape_logger will be moved into the closure passed to `Handle::spawn()`
     let scrape_logger = parent_logger.new(o!());
 
     // This task will run forever, so we intentionally drop the returned handle
-    runtime.spawn(async move {
+    runtime_handle.spawn(async move {
         // Clone scrape_logger so it can safely be moved into the closure that
         // handles metrics scrapes.
         let scrape_logger_clone = scrape_logger.clone();
@@ -48,7 +48,7 @@ pub fn start_metrics_scrape_endpoint(port: u16, parent_logger: &Logger) -> Resul
             .await;
     });
 
-    Ok(runtime)
+    Ok(())
 }
 
 fn handle_scrape() -> Result<Vec<u8>> {
