@@ -28,7 +28,10 @@ use facilitator::{
         DataShareProcessorGlobalManifest, DataShareProcessorSpecificManifest,
         IngestionServerManifest, PortalServerGlobalManifest,
     },
-    metrics::{start_metrics_scrape_endpoint, AggregateMetricsCollector, IntakeMetricsCollector},
+    metrics::{
+        start_metrics_scrape_endpoint, AggregateMetricsCollector, ApiClientMetricsCollector,
+        IntakeMetricsCollector,
+    },
     sample::{SampleGenerator, SampleOutput},
     task::{AggregationTask, AwsSqsTaskQueue, GcpPubSubTaskQueue, IntakeBatchTask, TaskQueue},
     transport::{
@@ -965,30 +968,45 @@ fn main() -> Result<(), anyhow::Error> {
         args[1..].join(" "),
     );
     let runtime = runtime::Builder::new_multi_thread().enable_all().build()?;
+    let api_metrics = ApiClientMetricsCollector::new()?;
 
     let result = match matches.subcommand() {
         // The configuration of the Args above should guarantee that the
         // various parameters are present and valid, so it is safe to use
         // unwrap() here.
-        ("generate-ingestion-sample", Some(sub_matches)) => {
-            generate_sample(&Uuid::new_v4(), sub_matches, runtime.handle(), &root_logger)
-        }
+        ("generate-ingestion-sample", Some(sub_matches)) => generate_sample(
+            &Uuid::new_v4(),
+            sub_matches,
+            runtime.handle(),
+            &api_metrics,
+            &root_logger,
+        ),
         ("generate-ingestion-sample-worker", Some(sub_matches)) => {
-            generate_sample_worker(sub_matches, runtime.handle(), &root_logger)
+            generate_sample_worker(sub_matches, runtime.handle(), &api_metrics, &root_logger)
         }
-        ("intake-batch", Some(sub_matches)) => {
-            intake_batch_subcommand(&Uuid::new_v4(), sub_matches, runtime.handle(), &root_logger)
-        }
+        ("intake-batch", Some(sub_matches)) => intake_batch_subcommand(
+            &Uuid::new_v4(),
+            sub_matches,
+            runtime.handle(),
+            &api_metrics,
+            &root_logger,
+        ),
         ("intake-batch-worker", Some(sub_matches)) => {
-            intake_batch_worker(sub_matches, runtime.handle(), &root_logger)
+            intake_batch_worker(sub_matches, runtime.handle(), &api_metrics, &root_logger)
         }
-        ("aggregate", Some(sub_matches)) => {
-            aggregate_subcommand(&Uuid::new_v4(), sub_matches, runtime.handle(), &root_logger)
-        }
+        ("aggregate", Some(sub_matches)) => aggregate_subcommand(
+            &Uuid::new_v4(),
+            sub_matches,
+            runtime.handle(),
+            &api_metrics,
+            &root_logger,
+        ),
         ("aggregate-worker", Some(sub_matches)) => {
-            aggregate_worker(sub_matches, runtime.handle(), &root_logger)
+            aggregate_worker(sub_matches, runtime.handle(), &api_metrics, &root_logger)
         }
-        ("lint-manifest", Some(sub_matches)) => lint_manifest(sub_matches, &root_logger),
+        ("lint-manifest", Some(sub_matches)) => {
+            lint_manifest(sub_matches, &root_logger, &api_metrics)
+        }
         (_, _) => Ok(()),
     };
 
@@ -999,13 +1017,18 @@ fn main() -> Result<(), anyhow::Error> {
 /// specific manifests against the corresponding private keys provided. Returns
 /// an error unless each advertised public key matches up with an available
 /// private key.
-fn crypto_self_check(matches: &ArgMatches, logger: &Logger) -> Result<()> {
+fn crypto_self_check(
+    matches: &ArgMatches,
+    logger: &Logger,
+    api_metrics: &ApiClientMetricsCollector,
+) -> Result<()> {
     let instance_name = matches.value_of("instance-name").unwrap();
     let own_manifest = match matches.value_of("own-manifest-base-url") {
         Some(manifest_base_url) => match DataShareProcessorSpecificManifest::from_https(
             manifest_base_url,
             instance_name,
             logger,
+            api_metrics,
         ) {
             Ok(manifest) => manifest,
             // At deploy time, the manifest won't exist yet, and we will get a
@@ -1043,6 +1066,7 @@ fn crypto_self_check(matches: &ArgMatches, logger: &Logger) -> Result<()> {
 fn generate_sample_worker(
     sub_matches: &ArgMatches,
     runtime_handle: &Handle,
+    api_metrics: &ApiClientMetricsCollector,
     root_logger: &Logger,
 ) -> Result<(), anyhow::Error> {
     let termination_instant = termination_instant_from_args(sub_matches)?;
@@ -1050,7 +1074,13 @@ fn generate_sample_worker(
 
     while !should_terminate(termination_instant) {
         let trace_id = Uuid::new_v4();
-        let result = generate_sample(&trace_id, sub_matches, runtime_handle, root_logger);
+        let result = generate_sample(
+            &trace_id,
+            sub_matches,
+            runtime_handle,
+            api_metrics,
+            root_logger,
+        );
 
         if let Err(e) = result {
             error!(
@@ -1069,6 +1099,7 @@ fn get_ecies_public_key(
     ingestor_name: Option<&str>,
     locality_name: Option<&str>,
     logger: &Logger,
+    api_metrics: &ApiClientMetricsCollector,
 ) -> Result<PublicKey> {
     match key_option {
         Some(key) => {
@@ -1090,12 +1121,16 @@ fn get_ecies_public_key(
                     anyhow!("locality-name must be provided with ingestor-manifest-base-url")
                 })?;
                 let peer_name = &format!("{}-{}", locality_name, ingestor_name);
-                let manifest =
-                    DataShareProcessorSpecificManifest::from_https(manifest_url, peer_name, logger)
-                        .context(format!(
-                            "unable to read DataShareProcessorSpecificManifest from {}",
-                            manifest_url
-                        ))?;
+                let manifest = DataShareProcessorSpecificManifest::from_https(
+                    manifest_url,
+                    peer_name,
+                    logger,
+                    api_metrics,
+                )
+                .context(format!(
+                    "unable to read DataShareProcessorSpecificManifest from {}",
+                    manifest_url
+                ))?;
 
                 let (key_identifier, packet_decryption_key) = manifest
                     .packet_encryption_keys()
@@ -1130,6 +1165,7 @@ fn get_ingestion_identity_and_bucket(
     ingestor_name: Option<&str>,
     locality_name: Option<&str>,
     logger: &Logger,
+    api_metrics: &ApiClientMetricsCollector,
 ) -> Result<(Identity, StoragePath)> {
     match bucket {
         Some(bucket) => Ok((identity, StoragePath::from_str(bucket)?)),
@@ -1143,12 +1179,16 @@ fn get_ingestion_identity_and_bucket(
                 anyhow!("If bucket is not provided, manifest_url must be provided")
             })?;
 
-            let manifest =
-                DataShareProcessorSpecificManifest::from_https(manifest_url, peer_name, logger)
-                    .context(format!(
-                        "unable to read DataShareProcessorSpecificManifest from {}",
-                        manifest_url
-                    ))?;
+            let manifest = DataShareProcessorSpecificManifest::from_https(
+                manifest_url,
+                peer_name,
+                logger,
+                api_metrics,
+            )
+            .context(format!(
+                "unable to read DataShareProcessorSpecificManifest from {}",
+                manifest_url
+            ))?;
 
             Ok((
                 manifest.ingestion_identity().to_owned(),
@@ -1163,6 +1203,7 @@ fn get_valid_batch_signing_key(
     ingestor_manifest_url: Option<&str>,
     matches: &ArgMatches,
     logger: &Logger,
+    api_metrics: &ApiClientMetricsCollector,
 ) -> Result<BatchSigningKey> {
     match ingestor_manifest_url {
         Some(own_manifest_url) => {
@@ -1170,11 +1211,12 @@ fn get_valid_batch_signing_key(
                 anyhow!("If manifest URLs are used, kubernetes namespace must be provided")
             })?;
 
-            let manifest = IngestionServerManifest::from_https(own_manifest_url, None, logger)
-                .context(format!(
-                    "unable to get ingestion server manifest from url: {}",
-                    own_manifest_url
-                ))?;
+            let manifest =
+                IngestionServerManifest::from_https(own_manifest_url, None, logger, api_metrics)
+                    .context(format!(
+                        "unable to get ingestion server manifest from url: {}",
+                        own_manifest_url
+                    ))?;
 
             let kubernetes = KubernetesClient::new(String::from(namespace));
             let secrets = kubernetes.get_sorted_secrets("isrg-prio.org/type=batch-signing-key")?;
@@ -1215,6 +1257,7 @@ fn generate_sample(
     trace_id: &Uuid,
     sub_matches: &ArgMatches,
     runtime_handle: &Handle,
+    api_metrics: &ApiClientMetricsCollector,
     logger: &Logger,
 ) -> Result<(), anyhow::Error> {
     let kube_namespace = sub_matches.value_of("kube-namespace");
@@ -1228,6 +1271,7 @@ fn generate_sample(
         ingestor_manifest_base_url,
         sub_matches,
         logger,
+        api_metrics,
     )?;
 
     let (peer_identity, peer_output_path) = get_ingestion_identity_and_bucket(
@@ -1237,6 +1281,7 @@ fn generate_sample(
         ingestor_name,
         locality_name,
         logger,
+        api_metrics,
     )?;
 
     let packet_encryption_public_key = get_ecies_public_key(
@@ -1245,6 +1290,7 @@ fn generate_sample(
         ingestor_name,
         locality_name,
         logger,
+        api_metrics,
     )?;
 
     let mut peer_transport = SampleOutput {
@@ -1255,6 +1301,7 @@ fn generate_sample(
                 Entity::Peer,
                 sub_matches,
                 runtime_handle,
+                api_metrics,
                 logger,
             )?,
             batch_signing_key: own_batch_signing_key,
@@ -1270,6 +1317,7 @@ fn generate_sample(
         ingestor_name,
         locality_name,
         logger,
+        api_metrics,
     )?;
 
     let packet_encryption_public_key = get_ecies_public_key(
@@ -1278,6 +1326,7 @@ fn generate_sample(
         ingestor_name,
         locality_name,
         logger,
+        api_metrics,
     )
     .unwrap();
 
@@ -1286,6 +1335,7 @@ fn generate_sample(
         ingestor_manifest_base_url,
         sub_matches,
         logger,
+        api_metrics,
     )?;
 
     let mut facilitator_transport = SampleOutput {
@@ -1296,6 +1346,7 @@ fn generate_sample(
                 Entity::Facilitator,
                 sub_matches,
                 runtime_handle,
+                api_metrics,
                 logger,
             )?,
             batch_signing_key: own_batch_signing_key,
@@ -1335,6 +1386,7 @@ fn intake_batch<F>(
     date: &str,
     sub_matches: &ArgMatches,
     metrics_collector: Option<&IntakeMetricsCollector>,
+    api_metrics: &ApiClientMetricsCollector,
     parent_logger: &Logger,
     runtime_handle: &Handle,
     callback: F,
@@ -1343,7 +1395,7 @@ where
     F: FnMut(&Logger),
 {
     let mut intake_transport =
-        intake_transport_from_args(sub_matches, runtime_handle, parent_logger)?;
+        intake_transport_from_args(sub_matches, runtime_handle, api_metrics, parent_logger)?;
 
     // We need the bucket to which we will write validations for the
     // peer data share processor, which can either be fetched from the
@@ -1358,6 +1410,7 @@ where
                 base_url,
                 sub_matches.value_of("instance-name").unwrap(),
                 parent_logger,
+                api_metrics,
             )?;
 
             // Allow peer manifest to override `peer-identity` parameter, if it
@@ -1381,6 +1434,7 @@ where
             PathOrInOut::Path(peer_validation_bucket),
             sub_matches,
             runtime_handle,
+            api_metrics,
             parent_logger,
         )?,
         batch_signing_key: batch_signing_key_from_arg(sub_matches)?,
@@ -1436,9 +1490,11 @@ fn intake_batch_subcommand(
     trace_id: &Uuid,
     sub_matches: &ArgMatches,
     runtime_handle: &Handle,
+    api_metrics: &ApiClientMetricsCollector,
     parent_logger: &Logger,
 ) -> Result<(), anyhow::Error> {
-    crypto_self_check(sub_matches, parent_logger).context("crypto self check failed")?;
+    crypto_self_check(sub_matches, parent_logger, api_metrics)
+        .context("crypto self check failed")?;
     intake_batch(
         trace_id,
         sub_matches.value_of("aggregation-id").unwrap(),
@@ -1446,6 +1502,7 @@ fn intake_batch_subcommand(
         sub_matches.value_of("date").unwrap(),
         sub_matches,
         None,
+        api_metrics,
         parent_logger,
         runtime_handle,
         |_| {}, // no-op callback
@@ -1455,15 +1512,18 @@ fn intake_batch_subcommand(
 fn intake_batch_worker(
     sub_matches: &ArgMatches,
     runtime_handle: &Handle,
+    api_metrics: &ApiClientMetricsCollector,
     parent_logger: &Logger,
 ) -> Result<(), anyhow::Error> {
     let termination_instant = termination_instant_from_args(sub_matches)?;
     let metrics_collector = IntakeMetricsCollector::new()?;
     let scrape_port = value_t!(sub_matches.value_of("metrics-scrape-port"), u16)?;
     start_metrics_scrape_endpoint(scrape_port, runtime_handle, parent_logger)?;
-    let queue = intake_task_queue_from_args(sub_matches, runtime_handle, parent_logger)?;
+    let queue =
+        intake_task_queue_from_args(sub_matches, runtime_handle, api_metrics, parent_logger)?;
 
-    crypto_self_check(sub_matches, parent_logger).context("crypto self check failed")?;
+    crypto_self_check(sub_matches, parent_logger, api_metrics)
+        .context("crypto self check failed")?;
 
     while !should_terminate(termination_instant) {
         if let Some(task_handle) = queue.dequeue()? {
@@ -1481,6 +1541,7 @@ fn intake_batch_worker(
                 &task_handle.task.date,
                 sub_matches,
                 Some(&metrics_collector),
+                api_metrics,
                 parent_logger,
                 runtime_handle,
                 |logger| {
@@ -1521,6 +1582,7 @@ fn aggregate<F>(
     batches: Vec<(&str, &str)>,
     sub_matches: &ArgMatches,
     metrics_collector: Option<&AggregateMetricsCollector>,
+    api_metrics: &ApiClientMetricsCollector,
     runtime_handle: &Handle,
     logger: &Logger,
     callback: F,
@@ -1531,7 +1593,8 @@ where
     let instance_name = sub_matches.value_of("instance-name").unwrap();
     let is_first = is_first_from_arg(sub_matches);
 
-    let mut intake_transport = intake_transport_from_args(sub_matches, runtime_handle, logger)?;
+    let mut intake_transport =
+        intake_transport_from_args(sub_matches, runtime_handle, api_metrics, logger)?;
 
     // We created the bucket that peers wrote validations into, and so
     // it is simply provided via argument.
@@ -1544,6 +1607,7 @@ where
         PathOrInOut::InOut(InOut::Input),
         sub_matches,
         runtime_handle,
+        api_metrics,
         logger,
     )?;
 
@@ -1559,6 +1623,7 @@ where
             manifest_base_url,
             instance_name,
             logger,
+            api_metrics,
         )?
         .batch_signing_public_keys()?,
         (Some(public_key), Some(public_key_identifier), _) => {
@@ -1580,7 +1645,7 @@ where
         sub_matches.value_of("portal-output"),
     ) {
         (Some(manifest_base_url), _) => {
-            PortalServerGlobalManifest::from_https(manifest_base_url, logger)?
+            PortalServerGlobalManifest::from_https(manifest_base_url, logger, api_metrics)?
                 .sum_part_bucket(is_first)
                 .to_owned()
         }
@@ -1600,6 +1665,7 @@ where
         PathOrInOut::Path(portal_bucket),
         sub_matches,
         runtime_handle,
+        api_metrics,
         logger,
     )?;
 
@@ -1671,9 +1737,11 @@ fn aggregate_subcommand(
     trace_id: &Uuid,
     sub_matches: &ArgMatches,
     runtime_handle: &Handle,
+    api_metrics: &ApiClientMetricsCollector,
     parent_logger: &Logger,
 ) -> Result<(), anyhow::Error> {
-    crypto_self_check(sub_matches, parent_logger).context("crypto self check failed")?;
+    crypto_self_check(sub_matches, parent_logger, api_metrics)
+        .context("crypto self check failed")?;
 
     let batch_ids: Vec<&str> = sub_matches
         .values_of("batch-id")
@@ -1699,6 +1767,7 @@ fn aggregate_subcommand(
         batch_info,
         sub_matches,
         None,
+        api_metrics,
         runtime_handle,
         parent_logger,
         |_| {}, // no-op callback
@@ -1708,14 +1777,17 @@ fn aggregate_subcommand(
 fn aggregate_worker(
     sub_matches: &ArgMatches,
     runtime_handle: &Handle,
+    api_metrics: &ApiClientMetricsCollector,
     parent_logger: &Logger,
 ) -> Result<(), anyhow::Error> {
     let termination_instant = termination_instant_from_args(sub_matches)?;
-    let queue = aggregation_task_queue_from_args(sub_matches, runtime_handle, parent_logger)?;
+    let queue =
+        aggregation_task_queue_from_args(sub_matches, runtime_handle, api_metrics, parent_logger)?;
     let metrics_collector = AggregateMetricsCollector::new()?;
     let scrape_port = value_t!(sub_matches.value_of("metrics-scrape-port"), u16)?;
     start_metrics_scrape_endpoint(scrape_port, runtime_handle, parent_logger)?;
-    crypto_self_check(sub_matches, parent_logger).context("crypto self check failed")?;
+    crypto_self_check(sub_matches, parent_logger, api_metrics)
+        .context("crypto self check failed")?;
 
     while !should_terminate(termination_instant) {
         if let Some(task_handle) = queue.dequeue()? {
@@ -1742,6 +1814,7 @@ fn aggregate_worker(
                 batches,
                 sub_matches,
                 Some(&metrics_collector),
+                api_metrics,
                 runtime_handle,
                 parent_logger,
                 |logger| {
@@ -1773,7 +1846,11 @@ fn aggregate_worker(
     Ok(())
 }
 
-fn lint_manifest(sub_matches: &ArgMatches, logger: &Logger) -> Result<(), anyhow::Error> {
+fn lint_manifest(
+    sub_matches: &ArgMatches,
+    logger: &Logger,
+    api_metrics: &ApiClientMetricsCollector,
+) -> Result<(), anyhow::Error> {
     let manifest_base_url = sub_matches.value_of("manifest-base-url");
     let manifest_body: Option<String> = match sub_matches.value_of("manifest-path") {
         Some(f) => Some(fs::read_to_string(f)?),
@@ -1800,6 +1877,7 @@ fn lint_manifest(sub_matches: &ArgMatches, logger: &Logger) -> Result<(), anyhow
                     base_url,
                     sub_matches.value_of("instance"),
                     logger,
+                    api_metrics,
                 )?
             } else if let Some(body) = manifest_body {
                 IngestionServerManifest::from_slice(body.as_bytes())?
@@ -1812,7 +1890,7 @@ fn lint_manifest(sub_matches: &ArgMatches, logger: &Logger) -> Result<(), anyhow
         }
         ManifestKind::DataShareProcessorGlobal => {
             let manifest = if let Some(base_url) = manifest_base_url {
-                DataShareProcessorGlobalManifest::from_https(base_url, logger)?
+                DataShareProcessorGlobalManifest::from_https(base_url, logger, api_metrics)?
             } else if let Some(body) = manifest_body {
                 DataShareProcessorGlobalManifest::from_slice(body.as_bytes())?
             } else {
@@ -1827,7 +1905,12 @@ fn lint_manifest(sub_matches: &ArgMatches, logger: &Logger) -> Result<(), anyhow
                 .value_of("instance")
                 .context("instance is required when manifest-kind=data-share-processor-specific")?;
             let manifest = if let Some(base_url) = manifest_base_url {
-                DataShareProcessorSpecificManifest::from_https(base_url, instance, logger)?
+                DataShareProcessorSpecificManifest::from_https(
+                    base_url,
+                    instance,
+                    logger,
+                    api_metrics,
+                )?
             } else if let Some(body) = manifest_body {
                 DataShareProcessorSpecificManifest::from_slice(body.as_bytes())?
             } else {
@@ -1839,7 +1922,7 @@ fn lint_manifest(sub_matches: &ArgMatches, logger: &Logger) -> Result<(), anyhow
         }
         ManifestKind::PortalServerGlobal => {
             let manifest = if let Some(base_url) = manifest_base_url {
-                PortalServerGlobalManifest::from_https(base_url, logger)?
+                PortalServerGlobalManifest::from_https(base_url, logger, api_metrics)?
             } else if let Some(body) = manifest_body {
                 PortalServerGlobalManifest::from_slice(body.as_bytes())?
             } else {
@@ -1897,6 +1980,7 @@ fn batch_signing_key_from_arg(matches: &ArgMatches) -> Result<BatchSigningKey> {
 fn intake_transport_from_args(
     matches: &ArgMatches,
     runtime_handle: &Handle,
+    api_metrics: &ApiClientMetricsCollector,
     logger: &Logger,
 ) -> Result<VerifiableAndDecryptableTransport> {
     let identity = value_t!(
@@ -1913,6 +1997,7 @@ fn intake_transport_from_args(
         PathOrInOut::InOut(InOut::Input),
         matches,
         runtime_handle,
+        api_metrics,
         logger,
     )?;
 
@@ -1931,6 +2016,7 @@ fn intake_transport_from_args(
             manifest_base_url,
             Some(matches.value_of("instance-name").unwrap()),
             logger,
+            api_metrics,
         )?
         .batch_signing_public_keys()?,
         _ => {
@@ -1980,6 +2066,7 @@ fn transport_from_args(
     path_or_in_out: PathOrInOut,
     matches: &ArgMatches,
     runtime_handle: &Handle,
+    api_metrics: &ApiClientMetricsCollector,
     logger: &Logger,
 ) -> Result<Box<dyn Transport>> {
     let path = match path_or_in_out {
@@ -1994,7 +2081,15 @@ fn transport_from_args(
         }
     };
 
-    transport_for_path(path, identity, entity, matches, runtime_handle, logger)
+    transport_for_path(
+        path,
+        identity,
+        entity,
+        matches,
+        runtime_handle,
+        api_metrics,
+        logger,
+    )
 }
 
 fn transport_for_path(
@@ -2003,6 +2098,7 @@ fn transport_for_path(
     entity: Entity,
     matches: &ArgMatches,
     runtime_handle: &Handle,
+    api_metrics: &ApiClientMetricsCollector,
     logger: &Logger,
 ) -> Result<Box<dyn Transport>> {
     let use_default_aws_credentials_provider = value_t!(
@@ -2024,12 +2120,14 @@ fn transport_for_path(
                 "s3",
                 runtime_handle,
                 logger,
+                api_metrics,
             )?;
             Ok(Box::new(S3Transport::new(
                 path,
                 credentials_provider,
                 runtime_handle,
                 logger,
+                api_metrics,
             )))
         }
         StoragePath::GcsPath(path) => {
@@ -2048,10 +2146,12 @@ fn transport_for_path(
                     matches.value_of("gcp-workload-identity-pool-provider"),
                     use_default_aws_credentials_provider,
                     runtime_handle,
+                    api_metrics,
                     logger,
                 )?,
                 runtime_handle,
                 logger,
+                api_metrics,
             )?))
         }
         StoragePath::LocalPath(path) => Ok(Box::new(LocalFileTransport::new(path))),
@@ -2078,6 +2178,7 @@ fn decode_base64_key(s: &str) -> Result<Vec<u8>> {
 fn intake_task_queue_from_args(
     matches: &ArgMatches,
     runtime_handle: &Handle,
+    api_metrics: &ApiClientMetricsCollector,
     logger: &Logger,
 ) -> Result<Box<dyn TaskQueue<IntakeBatchTask>>> {
     let task_queue_kind = TaskQueueKind::from_str(
@@ -2103,6 +2204,7 @@ fn intake_task_queue_from_args(
                 identity,
                 runtime_handle,
                 logger,
+                api_metrics,
             )?))
         }
         TaskQueueKind::AwsSqs => {
@@ -2119,6 +2221,7 @@ fn intake_task_queue_from_args(
                 "sqs",
                 runtime_handle,
                 logger,
+                api_metrics,
             )?;
             Ok(Box::new(AwsSqsTaskQueue::new(
                 sqs_region,
@@ -2126,6 +2229,7 @@ fn intake_task_queue_from_args(
                 runtime_handle,
                 credentials_provider,
                 logger,
+                api_metrics,
             )?))
         }
     }
@@ -2134,6 +2238,7 @@ fn intake_task_queue_from_args(
 fn aggregation_task_queue_from_args(
     matches: &ArgMatches,
     runtime_handle: &Handle,
+    api_metrics: &ApiClientMetricsCollector,
     logger: &Logger,
 ) -> Result<Box<dyn TaskQueue<AggregationTask>>> {
     let task_queue_kind = TaskQueueKind::from_str(
@@ -2159,6 +2264,7 @@ fn aggregation_task_queue_from_args(
                 identity,
                 runtime_handle,
                 logger,
+                api_metrics,
             )?))
         }
         TaskQueueKind::AwsSqs => {
@@ -2175,6 +2281,7 @@ fn aggregation_task_queue_from_args(
                 "sqs",
                 runtime_handle,
                 logger,
+                api_metrics,
             )?;
             Ok(Box::new(AwsSqsTaskQueue::new(
                 sqs_region,
@@ -2182,6 +2289,7 @@ fn aggregation_task_queue_from_args(
                 runtime_handle,
                 credentials_provider,
                 logger,
+                api_metrics,
             )?))
         }
     }

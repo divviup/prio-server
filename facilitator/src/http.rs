@@ -1,11 +1,16 @@
 use anyhow::{Context, Result};
 use dyn_clone::DynClone;
 use slog::Logger;
-use std::{convert::From, default::Default, fmt::Debug, time::Duration};
+use std::{
+    convert::From,
+    default::Default,
+    fmt::Debug,
+    time::{Duration, Instant},
+};
 use ureq::{Agent, AgentBuilder, Request, Response, SerdeValue};
 use url::Url;
 
-use crate::{retries::retry_request, Error};
+use crate::{metrics::ApiClientMetricsCollector, retries::retry_request, Error};
 
 /// Method contains the HTTP methods supported by this crate.
 #[derive(Debug)]
@@ -38,23 +43,36 @@ pub(crate) struct RetryingAgent {
     /// status code in this list or in the 5xx range will be retried with
     /// exponential backoff.
     additional_retryable_http_status_codes: Vec<u16>,
-}
-
-impl Default for RetryingAgent {
-    fn default() -> Self {
-        Self::new(
-            AgentBuilder::new().timeout(Duration::from_secs(10)).build(),
-            vec![],
-        )
-    }
+    service: String,
+    api_metrics: ApiClientMetricsCollector,
 }
 
 impl RetryingAgent {
-    pub fn new(agent: Agent, additional_retryable_http_status_codes: Vec<u16>) -> Self {
+    /// Create a `RetryingAgent` with a customized `ureq::Agent` and a list of
+    /// retryable HTTP status codes.
+    pub fn new_with_agent(
+        agent: Agent,
+        additional_retryable_http_status_codes: Vec<u16>,
+        service: &str,
+        api_metrics: &ApiClientMetricsCollector,
+    ) -> Self {
         Self {
             agent,
             additional_retryable_http_status_codes,
+            service: service.to_string(),
+            api_metrics: api_metrics.clone(),
         }
+    }
+
+    /// Create a `RetryingAgent` without any additional retryable HTTP status
+    /// codes and a `ureq::Agent` suitable for most uses.
+    pub fn new(service: &str, api_metrics: &ApiClientMetricsCollector) -> Self {
+        Self::new_with_agent(
+            AgentBuilder::new().timeout(Duration::from_secs(10)).build(),
+            vec![],
+            service,
+            api_metrics,
+        )
     }
 
     /// Prepares a request for the provided `RequestParameters`. Returns a
@@ -95,11 +113,12 @@ impl RetryingAgent {
         &self,
         logger: &Logger,
         request: &Request,
+        endpoint: &'static str,
         body: &SerdeValue,
     ) -> Result<Response, Error> {
         Ok(retry_request(
             logger,
-            || request.clone().send_json(body.clone()),
+            || self.do_request_with_metrics(endpoint, || request.clone().send_json(body.clone())),
             |ureq_error| self.is_error_retryable(ureq_error),
         )?)
     }
@@ -109,11 +128,12 @@ impl RetryingAgent {
         &self,
         logger: &Logger,
         request: &Request,
+        endpoint: &'static str,
         data: &[u8],
     ) -> Result<Response, Error> {
         Ok(retry_request(
             logger,
-            || request.clone().send_bytes(data),
+            || self.do_request_with_metrics(endpoint, || request.clone().send_bytes(data)),
             |ureq_error| self.is_error_retryable(ureq_error),
         )?)
     }
@@ -123,22 +143,56 @@ impl RetryingAgent {
         &self,
         logger: &Logger,
         request: &Request,
+        endpoint: &'static str,
         data: &[(&str, &str)],
     ) -> Result<Response, Error> {
         Ok(retry_request(
             logger,
-            || request.clone().send_form(data),
+            || self.do_request_with_metrics(endpoint, || request.clone().send_form(data)),
             |ureq_error| self.is_error_retryable(ureq_error),
         )?)
     }
 
     /// Send the provided request with no body.
-    pub(crate) fn call(&self, logger: &Logger, request: &Request) -> Result<Response, Error> {
+    pub(crate) fn call(
+        &self,
+        logger: &Logger,
+        request: &Request,
+        endpoint: &'static str,
+    ) -> Result<Response, Error> {
         Ok(retry_request(
             logger,
-            || request.clone().call(),
+            || self.do_request_with_metrics(endpoint, || request.clone().call()),
             |ureq_error| self.is_error_retryable(ureq_error),
         )?)
+    }
+
+    /// Perform some operation `op`, logging metrics on the request status and
+    /// latency.
+    fn do_request_with_metrics<F>(
+        &self,
+        endpoint: &'static str,
+        mut op: F,
+    ) -> Result<Response, ureq::Error>
+    where
+        F: FnMut() -> Result<Response, ureq::Error>,
+    {
+        let before = Instant::now();
+        let result = op();
+        let latency = before.elapsed().as_millis();
+
+        let http_status_label = match result {
+            Ok(ref r) => r.status().to_string(),
+            Err(ureq::Error::Status(http_status, _)) => http_status.to_string(),
+            Err(_) => "unknown".to_owned(),
+        };
+
+        self.api_metrics
+            .latency
+            .with_label_values(&[&self.service, endpoint, &http_status_label])
+            .observe(latency as f64);
+
+        result
     }
 }
 
@@ -197,8 +251,13 @@ impl Default for RequestParameters<'_> {
 
 /// simple_get_request does a HTTP request to a URL and returns the body as a
 // string.
-pub(crate) fn simple_get_request(url: Url, logger: &Logger) -> Result<String, Error> {
-    let agent = RetryingAgent::default();
+pub(crate) fn simple_get_request(
+    url: Url,
+    logger: &Logger,
+    service: &str,
+    api_metrics: &ApiClientMetricsCollector,
+) -> Result<String, Error> {
+    let agent = RetryingAgent::new(service, api_metrics);
     let request = agent
         .prepare_request(RequestParameters {
             url,
@@ -208,7 +267,7 @@ pub(crate) fn simple_get_request(url: Url, logger: &Logger) -> Result<String, Er
         .context("creating simple_get_request failed")?;
 
     Ok(agent
-        .call(logger, &request)?
+        .call(logger, &request, "simple_get_request")?
         .into_string()
         .context("failed to convert GET response body into string")?)
 }
@@ -221,6 +280,9 @@ mod tests {
 
     #[test]
     fn retryable_error() {
+        let api_metrics =
+            ApiClientMetricsCollector::new_with_metric_name("retryable_error").unwrap();
+
         let http_400 = ureq::Error::Status(400, Response::new(400, "", "").unwrap());
         let http_429 = ureq::Error::Status(429, Response::new(429, "", "").unwrap());
         let http_500 = ureq::Error::Status(500, Response::new(500, "", "").unwrap());
@@ -229,7 +291,7 @@ mod tests {
         // settle for testing different HTTP status codes.
         // https://github.com/algesten/ureq/issues/373
 
-        let mut agent = RetryingAgent::default();
+        let mut agent = RetryingAgent::new("retryable_error", &api_metrics);
         assert!(!agent.is_error_retryable(&http_400));
         assert!(!agent.is_error_retryable(&http_429));
         assert!(agent.is_error_retryable(&http_500));
@@ -246,6 +308,8 @@ mod tests {
     #[test]
     fn authenticated_request() {
         let logger = setup_test_logging();
+        let api_metrics =
+            ApiClientMetricsCollector::new_with_metric_name("authenticated_request").unwrap();
 
         let mocked_get = mock("GET", "/resource")
             .match_header("Authorization", "Bearer fake-token")
@@ -264,10 +328,11 @@ mod tests {
             token_provider: Some(&oauth_token_provider),
         };
 
-        let agent = RetryingAgent::default();
+        let agent = RetryingAgent::new("authenticated_request", &api_metrics);
+
         let request = agent.prepare_request(request_parameters).unwrap();
 
-        let response = agent.call(&logger, &request).unwrap();
+        let response = agent.call(&logger, &request, "fake-endpoint").unwrap();
 
         mocked_get.assert();
 
@@ -278,6 +343,8 @@ mod tests {
     #[test]
     fn unauthenticated_request() {
         let logger = setup_test_logging();
+        let api_metrics =
+            ApiClientMetricsCollector::new_with_metric_name("unauthenticated_request").unwrap();
 
         let mocked_get = mock("GET", "/resource")
             .match_header("Authorization", Matcher::Missing)
@@ -292,10 +359,11 @@ mod tests {
             token_provider: None,
         };
 
-        let agent = RetryingAgent::default();
+        let agent = RetryingAgent::new("unauthenticated_request", &api_metrics);
+
         let request = agent.prepare_request(request_parameters).unwrap();
 
-        let response = agent.call(&logger, &request).unwrap();
+        let response = agent.call(&logger, &request, "fake-endpoint").unwrap();
 
         mocked_get.assert();
 

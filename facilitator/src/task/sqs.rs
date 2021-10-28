@@ -1,6 +1,7 @@
 use crate::{
     aws_credentials::{self, retry_request},
     logging::event,
+    metrics::ApiClientMetricsCollector,
     task::{Task, TaskHandle, TaskQueue},
 };
 use anyhow::{anyhow, Context, Result};
@@ -20,6 +21,7 @@ pub struct AwsSqsTaskQueue<T: Task> {
     runtime_handle: Handle,
     credentials_provider: aws_credentials::Provider,
     logger: Logger,
+    api_metrics: ApiClientMetricsCollector,
     phantom_task: PhantomData<T>,
 }
 
@@ -30,6 +32,7 @@ impl<T: Task> AwsSqsTaskQueue<T> {
         runtime_handle: &Handle,
         credentials_provider: aws_credentials::Provider,
         parent_logger: &Logger,
+        api_metrics: &ApiClientMetricsCollector,
     ) -> Result<Self> {
         let region = Region::from_str(region).context("invalid AWS region")?;
         let logger = parent_logger.new(o!(
@@ -43,8 +46,13 @@ impl<T: Task> AwsSqsTaskQueue<T> {
             runtime_handle: runtime_handle.clone(),
             credentials_provider,
             logger,
+            api_metrics: api_metrics.clone(),
             phantom_task: PhantomData,
         })
+    }
+
+    fn service() -> &'static str {
+        "sqs.amazonaws.com"
     }
 }
 
@@ -56,6 +64,9 @@ impl<T: Task> TaskQueue<T> for AwsSqsTaskQueue<T> {
 
         let response = retry_request(
             &self.logger.new(o!(event::ACTION => "dequeue message")),
+            &self.api_metrics,
+            Self::service(),
+            "ReceiveMessage",
             || {
                 let request = ReceiveMessageRequest {
                     // Dequeue one task at a time
@@ -124,6 +135,9 @@ impl<T: Task> TaskQueue<T> for AwsSqsTaskQueue<T> {
             &self
                 .logger
                 .new(o!(event::ACTION => "delete/acknowledge message")),
+            &self.api_metrics,
+            Self::service(),
+            "DeleteMessage",
             || {
                 let request = DeleteMessageRequest {
                     queue_url: self.queue_url.clone(),
@@ -195,6 +209,9 @@ impl<T: Task> AwsSqsTaskQueue<T> {
             &self
                 .logger
                 .new(o!(event::ACTION => "changing message visibility")),
+            &self.api_metrics,
+            Self::service(),
+            "ChangeMessageVisibility",
             || {
                 let request = ChangeMessageVisibilityRequest {
                     queue_url: self.queue_url.clone(),

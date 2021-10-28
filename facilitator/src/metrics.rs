@@ -1,8 +1,8 @@
 use anyhow::{Context, Result};
 use http::Response;
 use prometheus::{
-    register_int_counter_vec, register_int_gauge_vec, Encoder, IntCounterVec, IntGaugeVec,
-    TextEncoder,
+    register_histogram_vec, register_int_counter_vec, register_int_gauge_vec, Encoder,
+    HistogramVec, IntCounterVec, IntGaugeVec, TextEncoder,
 };
 use slog::{error, info, o, Logger};
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
@@ -206,5 +206,32 @@ impl BatchReaderMetricsCollector {
         Ok(Self {
             invalid_validation_batches,
         })
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct ApiClientMetricsCollector {
+    pub latency: HistogramVec,
+}
+
+impl ApiClientMetricsCollector {
+    pub fn new() -> Result<Self> {
+        Self::new_with_metric_name("")
+    }
+
+    pub(crate) fn new_with_metric_name(name: &'static str) -> Result<Self> {
+        let latency = register_histogram_vec!(
+            format!("facilitator_api_latency_ms{}", name),
+            "Latencies in milliseconds on successful API requests",
+            &["service", "endpoint", "status"],
+            // Buckets cribbed from Boulder's metrics.InternetFacingBuckets
+            vec![
+                100.0, 250.0, 500.0, 1_000.0, 2_500.0, 5_000.0, 7500.0, 10_000.0, 15_000.0,
+                30_000.0, 45_000.0
+            ]
+        )
+        .context("failed to register histogram")?;
+
+        Ok(Self { latency })
     }
 }

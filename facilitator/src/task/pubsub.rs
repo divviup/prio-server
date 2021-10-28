@@ -3,6 +3,7 @@ use crate::{
     gcp_oauth::{AccessScope, GcpAccessTokenProvider},
     http::{Method, RequestParameters, RetryingAgent},
     logging::event,
+    metrics::ApiClientMetricsCollector,
     task::{Task, TaskHandle, TaskQueue},
 };
 use anyhow::{anyhow, Context, Result};
@@ -114,6 +115,7 @@ impl<T: Task> GcpPubSubTaskQueue<T> {
         identity: Identity,
         runtime_handle: &Handle,
         parent_logger: &Logger,
+        api_metrics: &ApiClientMetricsCollector,
     ) -> Result<Self> {
         let logger = parent_logger.new(o!(
             "gcp_project_id" => gcp_project_id.to_owned(),
@@ -127,12 +129,14 @@ impl<T: Task> GcpPubSubTaskQueue<T> {
             // usual to allow for this.
             .timeout(Duration::from_secs(180))
             .build();
-        let retrying_agent = RetryingAgent::new(
+        let retrying_agent = RetryingAgent::new_with_agent(
             ureq_agent,
             // Per Google documentation, 429 Too Many Requests should be retried
             // with exponential backoff
             // https://cloud.google.com/pubsub/docs/reference/error-codes
             vec![429],
+            "pubsub.googleapis.com",
+            api_metrics,
         );
 
         Ok(GcpPubSubTaskQueue {
@@ -152,6 +156,7 @@ impl<T: Task> GcpPubSubTaskQueue<T> {
                 None,
                 runtime_handle,
                 &logger,
+                api_metrics,
             )?,
             phantom_task: PhantomData,
             agent: retrying_agent,
@@ -179,6 +184,7 @@ impl<T: Task> TaskQueue<T> for GcpPubSubTaskQueue<T> {
             .send_json_request(
                 &self.logger,
                 &request,
+                "pull",
                 &ureq::json!({
                     // Dequeue one task at a time
                     "maxMessages": 1
@@ -241,6 +247,7 @@ impl<T: Task> TaskQueue<T> for GcpPubSubTaskQueue<T> {
             .send_json_request(
                 &logger,
                 &request,
+                "acknowledge",
                 &ureq::json!({
                     "ackIds": [handle.acknowledgment_id]
                 }),
@@ -300,6 +307,7 @@ impl<T: Task> GcpPubSubTaskQueue<T> {
             .send_json_request(
                 &logger,
                 &request,
+                "modifyAckDeadline",
                 &ureq::json!({
                     "ackIds": [handle.acknowledgment_id],
                     "ackDeadlineSeconds": ack_deadline.as_secs(),
