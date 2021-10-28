@@ -377,7 +377,7 @@ func scheduleTasks(config scheduleTasksConfig) error {
 	log.Info().
 		Int("ingestion batches", intakeBatches.Batches.Len()).
 		Int("incomplete ingestion batches", intakeBatches.IncompleteBatchCount).
-		Msg("discovered ingestion batches")
+		Msg("discovered ingestion batches in intake window")
 
 	// Make a set of the tasks for which we have marker objects for efficient
 	// lookup later.
@@ -404,6 +404,21 @@ func scheduleTasks(config scheduleTasksConfig) error {
 	aggInterval := config.aggregationInterval(config.clock.Now())
 
 	log.Info().Str("aggregation interval", aggInterval.String()).Msgf("looking for batches to aggregate in interval %s", aggInterval)
+
+	intakeFiles, err = config.intakeBucket.ListBatchFiles(config.aggregationID, aggInterval)
+	if err != nil {
+		return fmt.Errorf("couldn't list intake batches for aggregation task generation: %w", err)
+	}
+
+	intakeBatches, err = batchpath.ReadyBatches(intakeFiles, "batch")
+	if err != nil {
+		return fmt.Errorf("couldn't determine ready intake batches for aggregation task generation: %w", err)
+	}
+
+	log.Info().
+		Int("ingestion batches", intakeBatches.Batches.Len()).
+		Int("incomplete ingestion batches", intakeBatches.IncompleteBatchCount).
+		Msg("discovered ingestion batches in aggregation window")
 
 	peerValidationFiles, err := config.peerValidationBucket.ListBatchFiles(config.aggregationID, aggInterval)
 	if err != nil {
