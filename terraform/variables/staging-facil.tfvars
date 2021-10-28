@@ -62,6 +62,7 @@ workflow_manager_version = "0.6.17"
 facilitator_version      = "0.6.17"
 victorops_routing_key    = "prio-staging"
 
+intake_max_age = "30m"
 default_aggregation_period = "30m"
 
 default_peer_share_processor_manifest_base_url = "storage.googleapis.com/prio-staging-pha-manifests"
