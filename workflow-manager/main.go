@@ -80,13 +80,28 @@ var (
 	ingestionBatchesFound = promauto.NewGaugeVec(
 		prometheus.GaugeOpts{
 			Name: "workflow_manager_ingestions_found",
-			Help: "The number of ingestion batches found in the current aggregation interval",
+			Help: "The number of ingestion batches found in the current intake interval",
 		},
 		[]string{"aggregation_id"},
 	)
 	incompleteIngestionBatchesFound = promauto.NewGaugeVec(
 		prometheus.GaugeOpts{
 			Name: "workflow_manager_incomplete_ingestions_found",
+			Help: "The number of incomplete ingestion batches found in the current intake interval",
+		},
+		[]string{"aggregation_id"},
+	)
+
+	aggregateIngestionBatchesFound = promauto.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Name: "workflow_manager_aggregate_ingestions_found",
+			Help: "The number of ingestion batches found in the current aggregation interval",
+		},
+		[]string{"aggregation_id"},
+	)
+	aggregateIncompleteIngestionBatchesFound = promauto.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Name: "workflow_manager_aggregate_incomplete_ingestions_found",
 			Help: "The number of incomplete ingestion batches found in the current aggregation interval",
 		},
 		[]string{"aggregation_id"},
@@ -415,6 +430,8 @@ func scheduleTasks(config scheduleTasksConfig) error {
 		return fmt.Errorf("couldn't determine ready intake batches for aggregation task generation: %w", err)
 	}
 
+	aggregateIngestionBatchesFound.WithLabelValues(config.aggregationID).Set(float64(intakeBatches.Batches.Len()))
+	aggregateIncompleteIngestionBatchesFound.WithLabelValues(config.aggregationID).Set(float64(intakeBatches.IncompleteBatchCount))
 	log.Info().
 		Int("ingestion batches", intakeBatches.Batches.Len()).
 		Int("incomplete ingestion batches", intakeBatches.IncompleteBatchCount).
