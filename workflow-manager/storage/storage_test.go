@@ -129,11 +129,11 @@ func (m *mockS3Service) PutObject(*s3.PutObjectInput) (*s3.PutObjectOutput, erro
 func TestS3ClientListAggregationIDs(t *testing.T) {
 	mockS3Service := mockS3Service{
 		listOutputs: []s3.ListObjectsV2Output{
-			s3.ListObjectsV2Output{
+			{
 				CommonPrefixes: []*s3.CommonPrefix{
-					&s3.CommonPrefix{Prefix: aws.String("aggregation-id-1/")},
-					&s3.CommonPrefix{Prefix: aws.String("aggregation-id-2/")},
-					&s3.CommonPrefix{Prefix: aws.String("task-markers/")},
+					{Prefix: aws.String("aggregation-id-1/")},
+					{Prefix: aws.String("aggregation-id-2/")},
+					{Prefix: aws.String("task-markers/")},
 				},
 				IsTruncated: aws.Bool(false),
 			},
@@ -165,26 +165,26 @@ func TestS3ClientListBatchFiles(t *testing.T) {
 	mockS3Service := mockS3Service{
 		listOutputs: []s3.ListObjectsV2Output{
 			// Interval is either 3h or 2.5h, which should yield three requests
-			s3.ListObjectsV2Output{
+			{
 				Contents: []*s3.Object{
-					&s3.Object{Key: aws.String("kittens-seen/2020/10/31/20/29/b8a5579a-f984-460a-a42d-2813cbf57771.batch")},
-					&s3.Object{Key: aws.String("kittens-seen/2020/10/31/20/35/0f0317b2-c612-48c2-b08d-d98529d6eae4.batch")},
+					{Key: aws.String("kittens-seen/2020/10/31/20/29/b8a5579a-f984-460a-a42d-2813cbf57771.batch")},
+					{Key: aws.String("kittens-seen/2020/10/31/20/35/0f0317b2-c612-48c2-b08d-d98529d6eae4.batch")},
 				},
 				IsTruncated: aws.Bool(false),
 			},
-			s3.ListObjectsV2Output{
+			{
 				Contents: []*s3.Object{
-					&s3.Object{Key: aws.String("kittens-seen/2020/10/31/21/29/7a1c0fbc-2b7f-4307-8185-9ea88961bb64.batch")},
-					&s3.Object{Key: aws.String("kittens-seen/2020/10/31/21/35/af97ffdd-00fc-4d6a-9790-e5c0de82e7b0.batch")},
+					{Key: aws.String("kittens-seen/2020/10/31/21/29/7a1c0fbc-2b7f-4307-8185-9ea88961bb64.batch")},
+					{Key: aws.String("kittens-seen/2020/10/31/21/35/af97ffdd-00fc-4d6a-9790-e5c0de82e7b0.batch")},
 				},
 				IsTruncated: aws.Bool(false),
 			},
-			s3.ListObjectsV2Output{
+			{
 				Contents: []*s3.Object{
-					&s3.Object{Key: aws.String("kittens-seen/2020/10/31/22/29/dc1dcb80-25a7-4e3f-9ff5-552b7d69e21a.batch")},
+					{Key: aws.String("kittens-seen/2020/10/31/22/29/dc1dcb80-25a7-4e3f-9ff5-552b7d69e21a.batch")},
 					// This last batch is *after* the end of
 					// intervalTwoAndAHalfHours but *within* intervalThreeHours
-					&s3.Object{Key: aws.String("kittens-seen/2020/10/31/22/35/79f0a477-b65c-47c9-a2bf-a3b56c33824a.batch")},
+					{Key: aws.String("kittens-seen/2020/10/31/22/35/79f0a477-b65c-47c9-a2bf-a3b56c33824a.batch")},
 				},
 				IsTruncated: aws.Bool(false),
 			},
@@ -246,11 +246,11 @@ func TestS3ListIntakeTaskMarkers(t *testing.T) {
 
 	mockS3Service := mockS3Service{
 		listOutputs: []s3.ListObjectsV2Output{
-			s3.ListObjectsV2Output{
+			{
 				Contents: []*s3.Object{
-					&s3.Object{Key: aws.String("task-markers/intake-kittens-seen-1")},
-					&s3.Object{Key: aws.String("task-markers/intake-kittens-seen-2")},
-					&s3.Object{Key: aws.String("task-markers/intake-kittens-seen-3")},
+					{Key: aws.String("task-markers/intake-kittens-seen-1")},
+					{Key: aws.String("task-markers/intake-kittens-seen-2")},
+					{Key: aws.String("task-markers/intake-kittens-seen-3")},
 				},
 				IsTruncated: aws.Bool(false),
 			},
@@ -284,11 +284,11 @@ func TestS3ListIntakeTaskMarkers(t *testing.T) {
 func TestS3ListAggregateTaskMarkers(t *testing.T) {
 	mockS3Service := mockS3Service{
 		listOutputs: []s3.ListObjectsV2Output{
-			s3.ListObjectsV2Output{
+			{
 				Contents: []*s3.Object{
-					&s3.Object{Key: aws.String("task-markers/aggregate-kittens-seen-1")},
-					&s3.Object{Key: aws.String("task-markers/aggregate-kittens-seen-2")},
-					&s3.Object{Key: aws.String("task-markers/aggregate-kittens-seen-3")},
+					{Key: aws.String("task-markers/aggregate-kittens-seen-1")},
+					{Key: aws.String("task-markers/aggregate-kittens-seen-2")},
+					{Key: aws.String("task-markers/aggregate-kittens-seen-3")},
 				},
 				IsTruncated: aws.Bool(false),
 			},
