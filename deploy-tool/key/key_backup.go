@@ -14,6 +14,7 @@ import (
 )
 
 const (
+	// #nosec G101
 	secretUIDLabel = "kubernetes_uid"
 )
 

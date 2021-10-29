@@ -71,6 +71,7 @@ func NewKube(namespace string, ingestors []string, batchSigningKeySpec, packetEn
 }
 
 func (k *Kube) ReconcilePacketEncryptionKey() ([]*PrioKey, error) {
+	// #nosec G101
 	secretSelector := "type=packet-decryption-key"
 
 	secrets, err := k.getSortedSecretsWithLabel(secretSelector)
