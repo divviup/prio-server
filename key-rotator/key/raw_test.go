@@ -3,10 +3,15 @@ package key
 import (
 	"crypto/ecdsa"
 	"crypto/elliptic"
+	"crypto/rand"
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"encoding/base64"
+	"encoding/binary"
 	"encoding/pem"
+	"errors"
+	"fmt"
+	"io"
 	"math/big"
 	"testing"
 )
@@ -14,7 +19,7 @@ import (
 func TestP256(t *testing.T) {
 	t.Parallel()
 
-	key, err := NewRaw(P256)
+	key, err := P256.New()
 	if err != nil {
 		t.Fatalf("Couldn't create new key: %v", err)
 	}
@@ -184,4 +189,59 @@ func TestP256(t *testing.T) {
 			t.Fatalf("PKCS #8 private key does not match generated private key")
 		}
 	})
+}
+
+// For in-package testing, create a new "TEST" raw key type; keys are identified by a single int64 value.
+const TEST Type = 0
+
+func init() {
+	typeInfos[TEST] = &typeInfo{
+		name:             "TEST",
+		newRandom:        newRandomTestKey,        // XXX
+		newUninitialized: newUninitializedTestKey, // XXX
+	}
+}
+
+type testKey struct{ pk int64 }
+
+var _ raw = &testKey{}
+
+func newTestKey(pk int64) Raw { return Raw{&testKey{pk}} }
+
+func newRandomTestKey() (raw, error) {
+	var buf [8]byte
+	if _, err := io.ReadFull(rand.Reader, buf[:]); err != nil {
+		return nil, fmt.Errorf("couldn't read from random: %v", err)
+	}
+	return &testKey{(int64)(binary.BigEndian.Uint64(buf[:]))}, nil
+}
+
+func newUninitializedTestKey() raw { return &testKey{} }
+
+func (testKey) keyType() Type { return TEST }
+
+func (k testKey) equal(o raw) bool { return k.pk == o.(*testKey).pk }
+
+func (k testKey) publicAsCSR(csrFQDN string) (string, error) { return "", errors.New("unimplemented") }
+
+func (k testKey) publicAsPKIX() (string, error) { return "", errors.New("unimplemented") }
+
+func (k testKey) asX962Uncompressed() (string, error) { return "", errors.New("unimplemented") }
+
+func (k testKey) asPKCS8() (string, error) { return "", errors.New("unimplemented") }
+
+func (k testKey) MarshalBinary() ([]byte, error) {
+	// Test keys' raw key format is the big-endian encoding of the "private
+	// key" (int64).
+	var buf [8]byte
+	binary.BigEndian.PutUint64(buf[:], uint64(k.pk))
+	return buf[:], nil
+}
+
+func (k *testKey) UnmarshalBinary(data []byte) error {
+	if len(data) != 8 {
+		return fmt.Errorf("wrong serialization length for test key (want 8, got %d)", len(data))
+	}
+	*k = testKey{int64(binary.BigEndian.Uint64(data))}
+	return nil
 }

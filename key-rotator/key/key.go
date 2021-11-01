@@ -30,8 +30,8 @@ func (k Key) Equal(o Key) bool {
 
 // RotationConfig defines the configuration for a key-rotation operation.
 type RotationConfig struct {
-	CreateKeyFunc func() (string, error) // CreateKeyFunc returns newly-generated (private) key material, or returns an error if it can't.
-	CreateMinAge  time.Duration          // CreateMinAge is the minimum age of the youngest key version before a new key version will be created.
+	CreateKeyFunc func() (Raw, error) // CreateKeyFunc returns a newly-generated raw key, or an error if it can't.
+	CreateMinAge  time.Duration       // CreateMinAge is the minimum age of the youngest key version before a new key version will be created.
 
 	PrimaryMinAge time.Duration // PrimaryMinAge is the minimum age of a key version before it may normally be considered "primary".
 
@@ -94,7 +94,7 @@ func (k Key) Rotate(now time.Time, cfg RotationConfig) (Key, error) {
 	kvs := make([]Version, 0, 1+len(k))
 	for _, v := range k {
 		if age(v) < 0 {
-			return Key{}, fmt.Errorf("key version %q has creation time %v, after now (%v)", v.Identifier(), v.CreationTime.Format(time.RFC3339), now.Format(time.RFC3339))
+			return Key{}, fmt.Errorf("found key version with creation time %v, after now (%v)", v.CreationTime.Format(time.RFC3339), now.Format(time.RFC3339))
 		}
 		v.Primary = false
 		kvs = append(kvs, v)
@@ -104,11 +104,11 @@ func (k Key) Rotate(now time.Time, cfg RotationConfig) (Key, error) {
 	// Policy: if no key versions exist, or if the youngest key version is
 	// older than `create_min_age`, create a new key version.
 	if len(kvs) == 0 || age(kvs[len(kvs)-1]) > cfg.CreateMinAge {
-		newKeyMaterial, err := cfg.CreateKeyFunc()
+		newKey, err := cfg.CreateKeyFunc()
 		if err != nil {
-			return Key{}, fmt.Errorf("couldn't create new key material: %w", err)
+			return Key{}, fmt.Errorf("couldn't create new key version: %w", err)
 		}
-		kvs = append(kvs, Version{KeyMaterial: newKeyMaterial, CreationTime: now})
+		kvs = append(kvs, Version{RawKey: newKey, CreationTime: now})
 	}
 
 	// Policy: While there are more than `delete_min_key_count` keys, and the
@@ -144,18 +144,15 @@ func (k Key) Rotate(now time.Time, cfg RotationConfig) (Key, error) {
 // as well as associated metadata. Typically, a Version will be embedded within
 // a Set.
 type Version struct {
-	KeyMaterial  string    `json:"key,omitempty"`
-	CreationTime time.Time `json:"creation_time,omitempty"`
+	RawKey       Raw       `json:"key"`
+	CreationTime time.Time `json:"creation_time"`
 	Primary      bool      `json:"priamry,omitempty"`
 }
-
-// Identifier returns a human-readable string identifier for this key version.
-func (v Version) Identifier() string { return fmt.Sprintf("%020d", v.CreationTime.Unix()) }
 
 // Equal returns true if and only if this Version is equal to the given
 // Version.
 func (v Version) Equal(o Version) bool {
-	return v.KeyMaterial == o.KeyMaterial &&
+	return v.RawKey.Equal(o.RawKey) &&
 		v.CreationTime.Equal(o.CreationTime) &&
 		v.Primary == o.Primary
 }

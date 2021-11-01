@@ -17,16 +17,38 @@ import (
 type Type uint8
 
 const (
+	// P256 represents an ECDSA P-256 key.
 	P256 Type = 1 + iota
 )
 
+type typeInfo struct {
+	name             string              // string name of type
+	newRandom        func() (raw, error) // function returning a newly-initialized random key
+	newUninitialized func() raw          // function returning an uninitialized key of this type, e.g. for use in unmarshalling
+}
+
+var typeInfos = map[Type]*typeInfo{
+	P256: {"P256", newRandomP256, newUninitializedP256},
+}
+
 func (t Type) String() string {
-	switch t {
-	case P256:
-		return "P256"
-	default:
-		return "UNKNOWN"
+	if ti := typeInfos[t]; ti != nil {
+		return ti.name
 	}
+	return "UNKNOWN"
+}
+
+// New creates a new, randomly-initialized key.
+func (t Type) New() (Raw, error) {
+	ti := typeInfos[t]
+	if ti == nil {
+		return Raw{}, fmt.Errorf("unknown key type %v (%d)", t, t)
+	}
+	k, err := ti.newRandom()
+	if err != nil {
+		return Raw{}, fmt.Errorf("couldn't create %v key: %v", t, err)
+	}
+	return Raw{k}, nil
 }
 
 // Raw represents a raw (i.e. unversioned) asymmetric cryptographic key,
@@ -38,15 +60,6 @@ var _ encoding.BinaryMarshaler = Raw{}
 var _ encoding.BinaryUnmarshaler = &Raw{}
 var _ encoding.TextMarshaler = Raw{}
 var _ encoding.TextUnmarshaler = &Raw{}
-
-func NewRaw(typ Type) (Raw, error) {
-	switch typ {
-	case P256:
-		return newP256()
-	default:
-		return Raw{}, fmt.Errorf("unknown key type %v (%d)", typ, typ)
-	}
-}
 
 func (r Raw) MarshalBinary() ([]byte, error) {
 	kBytes, err := r.k.MarshalBinary()
@@ -61,16 +74,14 @@ func (r *Raw) UnmarshalBinary(data []byte) error {
 		return errors.New("empty input")
 	}
 
-	typ := Type(data[0])
-	var k raw
-	switch typ := Type(data[0]); typ {
-	case P256:
-		k = &p256{}
-	default:
-		return fmt.Errorf("unknown key type %v (%d)", typ, typ)
+	t := Type(data[0])
+	ti := typeInfos[t]
+	if ti == nil {
+		return fmt.Errorf("unknown key type %v (%d)", t, t)
 	}
+	k := ti.newUninitialized()
 	if err := k.UnmarshalBinary(data[1:]); err != nil {
-		return fmt.Errorf("couldn't unmarshal %v key: %w", typ, err)
+		return fmt.Errorf("couldn't unmarshal %v key: %w", t, err)
 	}
 	*r = Raw{k}
 	return nil
@@ -94,69 +105,84 @@ func (r *Raw) UnmarshalText(data []byte) error {
 	return r.UnmarshalBinary(binBytes)
 }
 
+func (r Raw) Equal(o Raw) bool {
+	if r.Type() != o.Type() {
+		return false
+	}
+	return r.k.equal(o.k)
+}
+
 // Type returns the type of the raw key.
-func (r Raw) Type() Type { return r.k.Type() }
+func (r Raw) Type() Type { return r.k.keyType() }
 
 // PublicAsCSR returns a PEM-encoding of the ASN.1 DER-encoding of a
 // PKCS#10 (RFC 2986) CSR over the public portion of the key, using the
 // provided FQDN as the common name for the request.
-func (r Raw) PublicAsCSR(csrFQDN string) (string, error) { return r.k.PublicAsCSR(csrFQDN) }
+func (r Raw) PublicAsCSR(csrFQDN string) (string, error) { return r.k.publicAsCSR(csrFQDN) }
 
 // PublicAsPKIX returns a PEM-encoding of the ASN.1 DER-encoding of the
 // public portion of the key in PKIX (RFC 5280) format.
-func (r Raw) PublicAsPKIX() (string, error) { return r.k.PublicAsPKIX() }
+func (r Raw) PublicAsPKIX() (string, error) { return r.k.publicAsPKIX() }
 
 // AsX962Uncompressed returns a base64 encoding of the X9.62 uncompressed
 // encoding of the public portion of the key, concatenated with the secret
 // "D" scalar.
-func (r Raw) AsX962Uncompressed() (string, error) { return r.k.AsX962Uncompressed() }
+func (r Raw) AsX962Uncompressed() (string, error) { return r.k.asX962Uncompressed() }
 
 // AsPKCS8 returns a base64 encoding of the ASN.1 DER-encoding of the key
 // in PKCS#8 (RFC 5208) format.
-func (r Raw) AsPKCS8() (string, error) { return r.k.AsPKCS8() }
+func (r Raw) AsPKCS8() (string, error) { return r.k.asPKCS8() }
 
 // raw represents a raw key of one particular type.
 type raw interface {
 	encoding.BinaryMarshaler
 	encoding.BinaryUnmarshaler
 
-	// Type returns the type of the raw key.
-	Type() Type
+	// keyType returns the type of the raw key.
+	keyType() Type
 
-	// PublicAsCSR returns a PEM-encoding of the ASN.1 DER-encoding of a
+	// equal determines if this raw is equal to the given raw, which can be
+	// assumed to be of the same key type.
+	equal(o raw) bool
+
+	// publicAsCSR returns a PEM-encoding of the ASN.1 DER-encoding of a
 	// PKCS#10 (RFC 2986) CSR over the public portion of the key, using the
 	// provided FQDN as the common name for the request.
-	PublicAsCSR(csrFQDN string) (string, error)
+	publicAsCSR(csrFQDN string) (string, error)
 
-	// PublicAsPKIX returns a PEM-encoding of the ASN.1 DER-encoding of the
+	// publicAsPKIX returns a PEM-encoding of the ASN.1 DER-encoding of the
 	// public portion of the key in PKIX (RFC 5280) format.
-	PublicAsPKIX() (string, error)
+	publicAsPKIX() (string, error)
 
-	// AsX962Uncompressed returns a base64 encoding of the X9.62 uncompressed
+	// asX962Uncompressed returns a base64 encoding of the X9.62 uncompressed
 	// encoding of the public portion of the key, concatenated with the secret
 	// "D" scalar.
-	AsX962Uncompressed() (string, error)
+	asX962Uncompressed() (string, error)
 
-	// AsPKCS8 returns a base64 encoding of the ASN.1 DER-encoding of the key
+	// asPKCS8 returns a base64 encoding of the ASN.1 DER-encoding of the key
 	// in PKCS#8 (RFC 5208) format.
-	AsPKCS8() (string, error)
+	asPKCS8() (string, error)
 }
 
 type p256 struct{ pk *ecdsa.PrivateKey }
 
 var _ raw = &p256{} // verify p256 implements raw
 
-func newP256() (Raw, error) {
+func newRandomP256() (raw, error) {
 	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	if err != nil {
-		return Raw{}, fmt.Errorf("couldn't generate new key: %w", err)
+		return nil, fmt.Errorf("couldn't generate new key: %w", err)
 	}
-	return Raw{&p256{key}}, nil
+	return &p256{key}, nil
 }
 
-func (p256) Type() Type { return P256 }
+func newUninitializedP256() raw { return &p256{} }
 
-func (k p256) PublicAsCSR(csrFQDN string) (string, error) {
+func (p256) keyType() Type { return P256 }
+
+func (k p256) equal(o raw) bool { return k.pk.Equal(o.(*p256).pk) }
+
+func (k p256) publicAsCSR(csrFQDN string) (string, error) {
 	tmpl := &x509.CertificateRequest{
 		SignatureAlgorithm: x509.ECDSAWithSHA256,
 		Subject:            pkix.Name{CommonName: csrFQDN},
@@ -168,7 +194,7 @@ func (k p256) PublicAsCSR(csrFQDN string) (string, error) {
 	return string(pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE REQUEST", Bytes: csrBytes})), nil
 }
 
-func (k p256) PublicAsPKIX() (string, error) {
+func (k p256) publicAsPKIX() (string, error) {
 	pubkeyBytes, err := x509.MarshalPKIXPublicKey(k.pk.Public())
 	if err != nil {
 		return "", fmt.Errorf("couldn't encode as PKIX: %w", err)
@@ -176,11 +202,11 @@ func (k p256) PublicAsPKIX() (string, error) {
 	return string(pem.EncodeToMemory(&pem.Block{Type: "PUBLIC KEY", Bytes: pubkeyBytes})), nil
 }
 
-func (k p256) AsX962Uncompressed() (string, error) {
+func (k p256) asX962Uncompressed() (string, error) {
 	return base64.StdEncoding.EncodeToString(append(elliptic.Marshal(elliptic.P256(), k.pk.X, k.pk.Y), k.pk.D.Bytes()...)), nil
 }
 
-func (k p256) AsPKCS8() (string, error) {
+func (k p256) asPKCS8() (string, error) {
 	keyBytes, err := x509.MarshalPKCS8PrivateKey(k.pk)
 	if err != nil {
 		return "", fmt.Errorf("couldn't encode as PKCS#8: %w", err)

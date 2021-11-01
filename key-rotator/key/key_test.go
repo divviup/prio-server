@@ -2,7 +2,6 @@ package key
 
 import (
 	"errors"
-	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -16,7 +15,7 @@ func TestKeyRotate(t *testing.T) {
 	const now = 100000
 
 	cfg := RotationConfig{
-		CreateKeyFunc: func() (string, error) { return kv(now).KeyMaterial, nil },
+		CreateKeyFunc: func() (Raw, error) { return newTestKey(now), nil },
 		CreateMinAge:  10000 * time.Second,
 
 		PrimaryMinAge: 1000 * time.Second,
@@ -127,7 +126,7 @@ func TestKeyRotate(t *testing.T) {
 		t.Parallel()
 		const wantErrString = "bananas"
 		cfg := cfg
-		cfg.CreateKeyFunc = func() (string, error) { return "", errors.New(wantErrString) }
+		cfg.CreateKeyFunc = func() (Raw, error) { return Raw{}, errors.New(wantErrString) }
 		_, err := Key{}.Rotate(time.Unix(now, 0), cfg)
 		if err == nil || !strings.Contains(err.Error(), wantErrString) {
 			t.Errorf("Wanted error containing %q, got: %v", wantErrString, err)
@@ -138,7 +137,7 @@ func TestKeyRotate(t *testing.T) {
 // kv creates a non-primary key version with the given timestamp and bogus key material.
 func kv(ts int64) Version {
 	return Version{
-		KeyMaterial:  fmt.Sprintf("key %d key material", ts),
+		RawKey:       newTestKey(ts),
 		CreationTime: time.Unix(ts, 0),
 	}
 }
