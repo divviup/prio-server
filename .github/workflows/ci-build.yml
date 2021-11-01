@@ -43,7 +43,7 @@ jobs:
           override: true
           default: true
       - name: Install grcov
-        run: cargo install grcov
+        run: cargo install --locked grcov
       - name: Test
         run: cargo test --all-features --no-fail-fast
         env:
