@@ -133,9 +133,9 @@ func (k Key) Rotate(now time.Time, cfg RotationConfig) (Key, error) {
 	// This is implemented as a binary search which returns the index of the
 	// first key version that is younger than `primary_min_age`. If this index
 	// is 0, all key versions are younger than `primary_min_age`, so we want to
-	// use the oldest key version, i.e. the one in index 0. If this is not
-	// zero, we want to use the next key version older than the one we found,
-	// i.e. the one in the preceding index.
+	// use the oldest key version, i.e. the one in index 0. If this index is
+	// not zero, we want to use the next key version older than the one we
+	// found, i.e. the one in the preceding index.
 	primaryIdx := sort.Search(len(kvs), func(i int) bool { return age(kvs[i]) <= cfg.PrimaryMinAge })
 	if primaryIdx > 0 {
 		primaryIdx--
