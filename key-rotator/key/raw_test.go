@@ -13,23 +13,53 @@ import (
 
 func TestP256(t *testing.T) {
 	t.Parallel()
-	p256 := P256()
 
-	key, err := p256.New()
+	key, err := NewRaw(P256)
 	if err != nil {
 		t.Fatalf("Couldn't create new key: %v", err)
 	}
-	pk, err := parseP256(key)
-	if err != nil {
-		t.Fatalf("Couldn't parse generated key: %v", err)
-	}
+	wantPK := key.k.(*p256).pk // grab *ecdsa.PrivateKey from guts of raw key
 
 	// Check that each of the encodings can be round-tripped back from the
 	// format it is expected to be in.
-	t.Run("PublicKeyAsCSR", func(t *testing.T) {
+	t.Run("binary", func(t *testing.T) {
+		t.Parallel()
+		binaryBytes, err := key.MarshalBinary()
+		if err != nil {
+			t.Fatalf("Couldn't marshal to binary: %v", err)
+		}
+
+		var newKey Raw
+		if err := newKey.UnmarshalBinary(binaryBytes); err != nil {
+			t.Fatalf("Couldn't unmarshal from binary: %v", err)
+		}
+		newPK := newKey.k.(*p256).pk
+		if !newPK.Equal(wantPK) {
+			t.Errorf("Binary-encoded key does not match generated private key")
+		}
+	})
+
+	t.Run("text", func(t *testing.T) {
+		t.Parallel()
+		textBytes, err := key.MarshalText()
+		if err != nil {
+			t.Errorf("Couldn't marshal to text: %v", err)
+		}
+
+		var newKey Raw
+		if err := newKey.UnmarshalText(textBytes); err != nil {
+			t.Fatalf("Couldn't unmarshal from binary: %v", err)
+		}
+		newPK := newKey.k.(*p256).pk
+		if !newPK.Equal(wantPK) {
+			t.Errorf("Text-encoded key does not match generated private key")
+		}
+	})
+
+	t.Run("PublicAsCSR", func(t *testing.T) {
 		t.Parallel()
 		const fqdn = "my.bogus.fqdn"
-		pemCSRBytes, err := p256.PublicKeyAsCSR(key, fqdn)
+		pemCSRBytes, err := key.PublicAsCSR(fqdn)
 		if err != nil {
 			t.Fatalf("Couldn't serialize public key as CSR: %v", err)
 		}
@@ -63,14 +93,14 @@ func TestP256(t *testing.T) {
 		if !ok {
 			t.Fatalf("CSR public key was a %T, want %T", csr.PublicKey, (*ecdsa.PublicKey)(nil))
 		}
-		if !csrPubkey.Equal(pk.Public()) {
+		if !csrPubkey.Equal(wantPK.Public()) {
 			t.Errorf("CSR public key does not match generated public key")
 		}
 	})
 
-	t.Run("PublicKeyAsPKIX", func(t *testing.T) {
+	t.Run("PublicAsPKIX", func(t *testing.T) {
 		t.Parallel()
-		pemPKIXBytes, err := p256.PublicKeyAsPKIX(key)
+		pemPKIXBytes, err := key.PublicAsPKIX()
 		if err != nil {
 			t.Fatalf("Couldn't serialize public key as PKIX: %v", err)
 		}
@@ -97,14 +127,14 @@ func TestP256(t *testing.T) {
 		if !ok {
 			t.Fatalf("PKIX public key was a %T, want %T", pkix, (*ecdsa.PublicKey)(nil))
 		}
-		if !pkixPubkey.Equal(pk.Public()) {
+		if !pkixPubkey.Equal(wantPK.Public()) {
 			t.Errorf("PKIX public key does not match generated public key")
 		}
 	})
 
-	t.Run("PrivateKeyAsX962Uncompressed", func(t *testing.T) {
+	t.Run("AsX962Uncompressed", func(t *testing.T) {
 		t.Parallel()
-		b64X962Bytes, err := p256.PrivateKeyAsX962Uncompressed(key)
+		b64X962Bytes, err := key.AsX962Uncompressed()
 		if err != nil {
 			t.Fatalf("Couldn't serialize private key as X9.62: %v", err)
 		}
@@ -125,14 +155,14 @@ func TestP256(t *testing.T) {
 			},
 			D: d,
 		}
-		if !x962Key.Equal(pk) {
+		if !x962Key.Equal(wantPK) {
 			t.Errorf("X9.62 private key does not match generated private key")
 		}
 	})
 
-	t.Run("PrivateKeyAsPKCS8", func(t *testing.T) {
+	t.Run("AsPKCS8", func(t *testing.T) {
 		t.Parallel()
-		b64PKCS8Bytes, err := p256.PrivateKeyAsPKCS8(key)
+		b64PKCS8Bytes, err := key.AsPKCS8()
 		if err != nil {
 			t.Fatalf("Couldn't serialize private key as PKCS #8: %v", err)
 		}
@@ -150,7 +180,7 @@ func TestP256(t *testing.T) {
 		if !ok {
 			t.Fatalf("PKCS #8 private key was a %T, want %T", pkcs8, (*ecdsa.PrivateKey)(nil))
 		}
-		if !pkcs8Key.Equal(pk) {
+		if !pkcs8Key.Equal(wantPK) {
 			t.Fatalf("PKCS #8 private key does not match generated private key")
 		}
 	})
