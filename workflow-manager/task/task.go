@@ -102,7 +102,7 @@ type Enqueuer interface {
 	// returned.
 	Enqueue(task Task, completion func(error))
 	// Stop blocks until all tasks passed to Enqueue() have been enqueued in the
-	// underlying system, and all completion functions pased to Enqueue() have
+	// underlying system, and all completion functions passed to Enqueue() have
 	// returned, and so it is safe to exit the program without losing any tasks.
 	Stop()
 }
