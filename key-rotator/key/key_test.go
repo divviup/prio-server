@@ -1,6 +1,7 @@
 package key
 
 import (
+	"encoding/json"
 	"errors"
 	"strings"
 	"testing"
@@ -8,6 +9,58 @@ import (
 
 	"github.com/google/go-cmp/cmp"
 )
+
+func TestKeyMarshal(t *testing.T) {
+	t.Parallel()
+
+	mustKey := func(r Raw, err error) Raw {
+		if err != nil {
+			t.Fatalf("Couldn't create key: %v", err)
+		}
+		return r
+	}
+	testKey0 := mustKey(Test.New())
+	testKey1 := mustKey(Test.New())
+	p256Key0 := mustKey(P256.New())
+	p256Key1 := mustKey(P256.New())
+
+	wantKey := Key{
+		Version{
+			RawKey:       testKey0,
+			CreationTime: time.Unix(100000, 0).UTC(),
+		},
+		Version{
+			RawKey:       p256Key0,
+			CreationTime: time.Unix(150000, 0).UTC(),
+		},
+		Version{
+			RawKey:       testKey1,
+			CreationTime: time.Unix(200000, 0).UTC(),
+			Primary:      true,
+		},
+		Version{
+			RawKey:       p256Key1,
+			CreationTime: time.Unix(250000, 0).UTC(),
+		},
+	}
+
+	buf, err := json.Marshal(wantKey)
+	if err != nil {
+		t.Fatalf("Couldn't JSON-marshal key: %v", err)
+	}
+
+	var gotKey Key
+	if err := json.Unmarshal(buf, &gotKey); err != nil {
+		t.Fatalf("Couldn't JSON-unmarshal key: %v", err)
+	}
+
+	diff := cmp.Diff(wantKey, gotKey)
+	if !wantKey.Equal(gotKey) {
+		t.Errorf("gotKey differs from wantKey (-want +got):\n%s", diff)
+	} else if diff != "" {
+		t.Errorf("gotKey is Equal to wantKey, but cmp.Diff disagrees (-want +got):\n%s", diff)
+	}
+}
 
 func TestKeyRotate(t *testing.T) {
 	t.Parallel()

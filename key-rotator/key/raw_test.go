@@ -192,10 +192,10 @@ func TestP256(t *testing.T) {
 }
 
 // For in-package testing, create a new "TEST" raw key type; keys are identified by a single int64 value.
-const TEST Type = 0
+const Test Type = 0
 
 func init() {
-	typeInfos[TEST] = &typeInfo{
+	typeInfos[Test] = &typeInfo{
 		name:             "TEST",
 		newRandom:        newRandomTestKey,        // XXX
 		newUninitialized: newUninitializedTestKey, // XXX
@@ -218,7 +218,7 @@ func newRandomTestKey() (raw, error) {
 
 func newUninitializedTestKey() raw { return &testKey{} }
 
-func (testKey) keyType() Type { return TEST }
+func (testKey) keyType() Type { return Test }
 
 func (k testKey) equal(o raw) bool { return k.pk == o.(*testKey).pk }
 

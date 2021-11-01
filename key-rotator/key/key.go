@@ -19,9 +19,8 @@ func (k Key) Equal(o Key) bool {
 	if len(k) != len(o) {
 		return false
 	}
-	for i, kv := range k {
-		ov := o[i]
-		if !kv.Equal(ov) {
+	for i := range k {
+		if !k[i].Equal(o[i]) {
 			return false
 		}
 	}
@@ -108,7 +107,7 @@ func (k Key) Rotate(now time.Time, cfg RotationConfig) (Key, error) {
 		if err != nil {
 			return Key{}, fmt.Errorf("couldn't create new key version: %w", err)
 		}
-		kvs = append(kvs, Version{RawKey: newKey, CreationTime: now})
+		kvs = append(kvs, Version{RawKey: newKey, CreationTime: now.UTC()})
 	}
 
 	// Policy: While there are more than `delete_min_key_count` keys, and the
@@ -146,7 +145,7 @@ func (k Key) Rotate(now time.Time, cfg RotationConfig) (Key, error) {
 type Version struct {
 	RawKey       Raw       `json:"key"`
 	CreationTime time.Time `json:"creation_time"`
-	Primary      bool      `json:"priamry,omitempty"`
+	Primary      bool      `json:"primary,omitempty"`
 }
 
 // Equal returns true if and only if this Version is equal to the given
