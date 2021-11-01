@@ -1,0 +1,157 @@
+package key
+
+import (
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/x509"
+	"crypto/x509/pkix"
+	"encoding/base64"
+	"encoding/pem"
+	"math/big"
+	"testing"
+)
+
+func TestP256(t *testing.T) {
+	t.Parallel()
+	p256 := P256()
+
+	key, err := p256.New()
+	if err != nil {
+		t.Fatalf("Couldn't create new key: %v", err)
+	}
+	pk, err := parseP256(key)
+	if err != nil {
+		t.Fatalf("Couldn't parse generated key: %v", err)
+	}
+
+	// Check that each of the encodings can be round-tripped back from the
+	// format it is expected to be in.
+	t.Run("PublicKeyAsCSR", func(t *testing.T) {
+		t.Parallel()
+		const fqdn = "my.bogus.fqdn"
+		pemCSRBytes, err := p256.PublicKeyAsCSR(key, fqdn)
+		if err != nil {
+			t.Fatalf("Couldn't serialize public key as CSR: %v", err)
+		}
+
+		pemCSR, rest := pem.Decode([]byte(pemCSRBytes))
+		if pemCSR == nil {
+			t.Fatalf("Couldn't parse as PEM: %q", pemCSR)
+		}
+		if len(rest) > 0 {
+			t.Errorf("Extra bytes in PEM-encoding: %q", string(rest))
+		}
+		if wantCSRType := "CERTIFICATE REQUEST"; pemCSR.Type != wantCSRType {
+			t.Errorf("PEM block got type %q, want type %q", pemCSR, wantCSRType)
+		}
+		if len(pemCSR.Headers) > 0 {
+			t.Errorf("PEM block unexpectedly had headers: %q", pemCSR.Headers)
+		}
+
+		csr, err := x509.ParseCertificateRequest(pemCSR.Bytes)
+		if err != nil {
+			t.Fatalf("Couldn't parse as CSR: %v", err)
+		}
+		if err := csr.CheckSignature(); err != nil {
+			t.Errorf("CSR not properly signed: %v", err)
+		}
+		wantCSRSubject := pkix.Name{CommonName: fqdn}
+		if csr.Subject.String() != wantCSRSubject.String() {
+			t.Errorf("CSR subject got %q, want %q", csr.Subject, wantCSRSubject)
+		}
+		csrPubkey, ok := csr.PublicKey.(*ecdsa.PublicKey)
+		if !ok {
+			t.Fatalf("CSR public key was a %T, want %T", csr.PublicKey, (*ecdsa.PublicKey)(nil))
+		}
+		if !csrPubkey.Equal(pk.Public()) {
+			t.Errorf("CSR public key does not match generated public key")
+		}
+	})
+
+	t.Run("PublicKeyAsPKIX", func(t *testing.T) {
+		t.Parallel()
+		pemPKIXBytes, err := p256.PublicKeyAsPKIX(key)
+		if err != nil {
+			t.Fatalf("Couldn't serialize public key as PKIX: %v", err)
+		}
+
+		pemPKIX, rest := pem.Decode([]byte(pemPKIXBytes))
+		if pemPKIX == nil {
+			t.Fatalf("Couldn't parse as PEM: %q", pemPKIX)
+		}
+		if len(rest) > 0 {
+			t.Errorf("Extra bytes in PEM-encoding: %q", string(rest))
+		}
+		if wantCSRType := "PUBLIC KEY"; pemPKIX.Type != wantCSRType {
+			t.Errorf("PEM block got type %q, want type %q", pemPKIX, wantCSRType)
+		}
+		if len(pemPKIX.Headers) > 0 {
+			t.Errorf("PEM block unexpectedly had headers: %q", pemPKIX.Headers)
+		}
+
+		pkix, err := x509.ParsePKIXPublicKey(pemPKIX.Bytes)
+		if err != nil {
+			t.Fatalf("Couldn't parse as PKIX: %v", err)
+		}
+		pkixPubkey, ok := pkix.(*ecdsa.PublicKey)
+		if !ok {
+			t.Fatalf("PKIX public key was a %T, want %T", pkix, (*ecdsa.PublicKey)(nil))
+		}
+		if !pkixPubkey.Equal(pk.Public()) {
+			t.Errorf("PKIX public key does not match generated public key")
+		}
+	})
+
+	t.Run("PrivateKeyAsX962Uncompressed", func(t *testing.T) {
+		t.Parallel()
+		b64X962Bytes, err := p256.PrivateKeyAsX962Uncompressed(key)
+		if err != nil {
+			t.Fatalf("Couldn't serialize private key as X9.62: %v", err)
+		}
+
+		x962Bytes, err := base64.StdEncoding.DecodeString(b64X962Bytes)
+		if err != nil {
+			t.Fatalf("Couldn't base64-decode: %v", err)
+		}
+
+		const marshalledPubkeyLength = 65
+		x, y := elliptic.Unmarshal(elliptic.P256(), x962Bytes[:marshalledPubkeyLength])
+		d := new(big.Int).SetBytes(x962Bytes[marshalledPubkeyLength:])
+		x962Key := &ecdsa.PrivateKey{
+			PublicKey: ecdsa.PublicKey{
+				Curve: elliptic.P256(),
+				X:     x,
+				Y:     y,
+			},
+			D: d,
+		}
+		if !x962Key.Equal(pk) {
+			t.Errorf("X9.62 private key does not match generated private key")
+		}
+	})
+
+	t.Run("PrivateKeyAsPKCS8", func(t *testing.T) {
+		t.Parallel()
+		b64PKCS8Bytes, err := p256.PrivateKeyAsPKCS8(key)
+		if err != nil {
+			t.Fatalf("Couldn't serialize private key as PKCS #8: %v", err)
+		}
+
+		pkcs8Bytes, err := base64.StdEncoding.DecodeString(b64PKCS8Bytes)
+		if err != nil {
+			t.Fatalf("Couldn't base64-decode: %v", err)
+		}
+
+		pkcs8, err := x509.ParsePKCS8PrivateKey(pkcs8Bytes)
+		if err != nil {
+			t.Fatalf("Couldn't parse as PKCS #8 private key: %v", err)
+		}
+		pkcs8Key, ok := pkcs8.(*ecdsa.PrivateKey)
+		if !ok {
+			t.Fatalf("PKCS #8 private key was a %T, want %T", pkcs8, (*ecdsa.PrivateKey)(nil))
+		}
+		if !pkcs8Key.Equal(pk) {
+			t.Fatalf("PKCS #8 private key does not match generated private key")
+		}
+	})
+}
