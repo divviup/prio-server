@@ -3,7 +3,6 @@ package key
 import (
 	"errors"
 	"fmt"
-	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -35,54 +34,54 @@ func TestKeyRotate(t *testing.T) {
 		// Basic creation tests.
 		{
 			name:    "no creation at boundary",
-			key:     key(pkv(90000)),
-			wantKey: key(pkv(90000)),
+			key:     Key{pkv(90000)},
+			wantKey: Key{pkv(90000)},
 		},
 		{
 			name:    "creation",
-			key:     key(pkv(89999)),
-			wantKey: key(pkv(89999), kv(now)),
+			key:     Key{pkv(89999)},
+			wantKey: Key{pkv(89999), kv(now)},
 		},
 
 		// Basic primary tests.
 		{
 			name:    "no new primary at boundary",
-			key:     key(pkv(90000), kv(99000)),
-			wantKey: key(pkv(90000), kv(99000)),
+			key:     Key{pkv(90000), kv(99000)},
+			wantKey: Key{pkv(90000), kv(99000)},
 		},
 		{
 			name:    "new primary",
-			key:     key(pkv(90000), kv(98999)),
-			wantKey: key(kv(90000), pkv(98999)),
+			key:     Key{pkv(90000), kv(98999)},
+			wantKey: Key{kv(90000), pkv(98999)},
 		},
 
 		// Basic deletion tests.
 		{
 			name:    "no deletion at boundary",
-			key:     key(kv(80000), kv(97000), pkv(98000)),
-			wantKey: key(kv(80000), kv(97000), pkv(98000)),
+			key:     Key{kv(80000), kv(97000), pkv(98000)},
+			wantKey: Key{kv(80000), kv(97000), pkv(98000)},
 		},
 		{
 			name:    "no deletion at min key count",
-			key:     key(kv(79999), pkv(98000)),
-			wantKey: key(kv(79999), pkv(98000)),
+			key:     Key{kv(79999), pkv(98000)},
+			wantKey: Key{kv(79999), pkv(98000)},
 		},
 		{
 			name:    "deletion",
-			key:     key(kv(79999), kv(97000), pkv(98000)),
-			wantKey: key(kv(97000), pkv(98000)),
+			key:     Key{kv(79999), kv(97000), pkv(98000)},
+			wantKey: Key{kv(97000), pkv(98000)},
 		},
 
 		// Miscellaneous tests.
 		{
 			name:    "empty key",
-			key:     key(),
-			wantKey: key(pkv(now)),
+			key:     Key{},
+			wantKey: Key{pkv(now)},
 		},
 		{
-			name:    "creation, new primary, and deletion", // oh my
-			key:     key(pkv(79999), kv(89999)),
-			wantKey: key(pkv(89999), kv(100000)),
+			name:    "creation, new primary, and deletion",
+			key:     Key{pkv(79999), kv(89999)},
+			wantKey: Key{pkv(89999), kv(100000)},
 		},
 	} {
 		test := test
@@ -119,7 +118,7 @@ func TestKeyRotate(t *testing.T) {
 	t.Run("key from the future", func(t *testing.T) {
 		t.Parallel()
 		const wantErrString = "after now"
-		_, err := key(pkv(100001)).Rotate(time.Unix(now, 0), cfg)
+		_, err := Key{pkv(100001)}.Rotate(time.Unix(now, 0), cfg)
 		if err == nil || !strings.Contains(err.Error(), wantErrString) {
 			t.Errorf("Wanted error containing %q, got: %v", wantErrString, err)
 		}
@@ -129,24 +128,11 @@ func TestKeyRotate(t *testing.T) {
 		const wantErrString = "bananas"
 		cfg := cfg
 		cfg.CreateKeyFunc = func() (string, error) { return "", errors.New(wantErrString) }
-		_, err := key().Rotate(time.Unix(now, 0), cfg)
+		_, err := Key{}.Rotate(time.Unix(now, 0), cfg)
 		if err == nil || !strings.Contains(err.Error(), wantErrString) {
 			t.Errorf("Wanted error containing %q, got: %v", wantErrString, err)
 		}
 	})
-}
-
-// key creates a key with the given key versions, with key identifiers based on their timestamps.
-func key(kvs ...Version) Key {
-	k := Key{}
-	for _, kv := range kvs {
-		kid := strconv.FormatInt(kv.CreationTime.Unix(), 10)
-		if _, ok := k[kid]; ok {
-			panic(fmt.Sprintf("key provided duplicate creation time %q", kid))
-		}
-		k[kid] = kv
-	}
-	return k
 }
 
 // kv creates a non-primary key version with the given timestamp and bogus key material.

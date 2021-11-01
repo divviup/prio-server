@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"sort"
-	"strconv"
 	"time"
 )
 
@@ -13,16 +12,16 @@ import (
 // multiple pieces of key material, any of which should be considered for use
 // in decryption or signature verification. A single version will be considered
 // "primary"; this version will be used for encryption or signing.
-type Key map[string]Version
+type Key []Version
 
 // Equal returns true if and only if this Key is equal to the given Key.
 func (k Key) Equal(o Key) bool {
 	if len(k) != len(o) {
 		return false
 	}
-	for kid, kv := range k {
-		ov, ok := o[kid]
-		if !ok || !kv.Equal(ov) {
+	for i, kv := range k {
+		ov := o[i]
+		if !kv.Equal(ov) {
 			return false
 		}
 	}
@@ -86,36 +85,30 @@ func (k Key) Rotate(now time.Time, cfg RotationConfig) (Key, error) {
 		return Key{}, fmt.Errorf("invalid rotation config: %w", err)
 	}
 
-	// Turn the map of key identifier -> version into a list of (identifier,
-	// version) tuples, sorted by creation time. Also, validate that we aren't
-	// trying to rotate a key containing a version from the "future" to
-	// simplify later logic, and go ahead and unmark primary on all key
-	// versions so that we can easily mark a single version primary later.
-	type kidVersion struct {
-		kid string
-		ver Version
-	}
-	age := func(kv kidVersion) time.Duration { return now.Sub(kv.ver.CreationTime) }
-	kvs := make([]kidVersion, 0, 1+len(k))
-	for kid, ver := range k {
-		kv := kidVersion{kid, ver}
-		kv.ver.Primary = false
-		if age(kv) < 0 {
-			return Key{}, fmt.Errorf("key version %q has creation time %v, after now (%v)", kid, ver.CreationTime.Format(time.RFC3339), now.Format(time.RFC3339))
+	// Copy the existing list of key versions, sorting by creation time. Also,
+	// validate that we aren't trying to rotate a key containing a version from
+	// the "future" to simplify later logic, and go ahead and unmark primary on
+	// all key versions so that we can easily mark a single version primary
+	// later.
+	age := func(v Version) time.Duration { return now.Sub(v.CreationTime) }
+	kvs := make([]Version, 0, 1+len(k))
+	for _, v := range k {
+		if age(v) < 0 {
+			return Key{}, fmt.Errorf("key version %q has creation time %v, after now (%v)", v.Identifier(), v.CreationTime.Format(time.RFC3339), now.Format(time.RFC3339))
 		}
-		kvs = append(kvs, kv)
+		v.Primary = false
+		kvs = append(kvs, v)
 	}
-	sort.Slice(kvs, func(i, j int) bool { return kvs[i].ver.CreationTime.Before(kvs[j].ver.CreationTime) })
+	sort.Slice(kvs, func(i, j int) bool { return kvs[i].CreationTime.Before(kvs[j].CreationTime) })
 
 	// Policy: if no key versions exist, or if the youngest key version is
 	// older than `create_min_age`, create a new key version.
 	if len(kvs) == 0 || age(kvs[len(kvs)-1]) > cfg.CreateMinAge {
-		newKid := strconv.FormatInt(now.Unix(), 10)
 		newKeyMaterial, err := cfg.CreateKeyFunc()
 		if err != nil {
 			return Key{}, fmt.Errorf("couldn't create new key material: %w", err)
 		}
-		kvs = append(kvs, kidVersion{newKid, Version{KeyMaterial: newKeyMaterial, CreationTime: now}})
+		kvs = append(kvs, Version{KeyMaterial: newKeyMaterial, CreationTime: now})
 	}
 
 	// Policy: While there are more than `delete_min_key_count` keys, and the
@@ -140,15 +133,11 @@ func (k Key) Rotate(now time.Time, cfg RotationConfig) (Key, error) {
 	if primaryIdx > 0 {
 		primaryIdx--
 	}
-	kvs[primaryIdx].ver.Primary = true
+	kvs[primaryIdx].Primary = true
 
 	// Transform the sorted list of (identifier, version) tuples back into a
 	// Key, and return it.
-	newKey := Key{}
-	for _, kv := range kvs {
-		newKey[kv.kid] = kv.ver
-	}
-	return newKey, nil
+	return Key(kvs), nil
 }
 
 // Version represents a single version of a key, i.e. raw private key material,
@@ -159,6 +148,9 @@ type Version struct {
 	CreationTime time.Time `json:"creation_time,omitempty"`
 	Primary      bool      `json:"priamry,omitempty"`
 }
+
+// Identifier returns a human-readable string identifier for this key version.
+func (v Version) Identifier() string { return fmt.Sprintf("%020d", v.CreationTime.Unix()) }
 
 // Equal returns true if and only if this Version is equal to the given
 // Version.
