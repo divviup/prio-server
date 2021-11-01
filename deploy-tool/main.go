@@ -347,7 +347,9 @@ func createManifests(
 	// manifest already exists, but the us-la-apple manifest doesn't, then we
 	// need to create the latter, but want to reuse the existing us-la packet
 	// encryption key.
-	for dataShareProcessorName, manifestWrapper := range specificManifests {
+	for dataShareProcessorName, manifestWrapperRaw := range specificManifests {
+		// Avoid a common race (which triggers gosec's G601 error).
+		manifestWrapper := manifestWrapperRaw
 		if _, ok := existingManifests[dataShareProcessorName]; !ok {
 			if err := createManifest(
 				k8sSecretsClientGetter,
@@ -443,7 +445,9 @@ func main() {
 		log.Fatalf("%s", err)
 	}
 
-	for _, manifestWrapper := range terraformOutput.SpecificManifests.Value {
+	for _, manifestWrapperRaw := range terraformOutput.SpecificManifests.Value {
+		// Avoid a common race (which triggers gosec's G601 error).
+		manifestWrapper := manifestWrapperRaw
 		if err := backupKeys(k8sClient.CoreV1(), *keyBackupGCPProject, &manifestWrapper); err != nil {
 			log.Fatalf("%s", err)
 		}
