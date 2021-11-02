@@ -23,7 +23,7 @@ func TestP256(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Couldn't create new key: %v", err)
 	}
-	wantPK := key.k.(*p256).pk // grab *ecdsa.PrivateKey from guts of raw key
+	wantPK := key.k.(*p256).privKey // grab *ecdsa.PrivateKey from guts of raw key
 
 	// Check that each of the encodings can be round-tripped back from the
 	// format it is expected to be in.
@@ -38,7 +38,7 @@ func TestP256(t *testing.T) {
 		if err := newKey.UnmarshalBinary(binaryBytes); err != nil {
 			t.Fatalf("Couldn't unmarshal from binary: %v", err)
 		}
-		newPK := newKey.k.(*p256).pk
+		newPK := newKey.k.(*p256).privKey
 		if !newPK.Equal(wantPK) {
 			t.Errorf("Binary-encoded key does not match generated private key")
 		}
@@ -55,7 +55,7 @@ func TestP256(t *testing.T) {
 		if err := newKey.UnmarshalText(textBytes); err != nil {
 			t.Fatalf("Couldn't unmarshal from binary: %v", err)
 		}
-		newPK := newKey.k.(*p256).pk
+		newPK := newKey.k.(*p256).privKey
 		if !newPK.Equal(wantPK) {
 			t.Errorf("Text-encoded key does not match generated private key")
 		}
@@ -197,12 +197,12 @@ const Test Type = 0
 func init() {
 	typeInfos[Test] = &typeInfo{
 		name:             "TEST",
-		newRandom:        newRandomTestKey,        // XXX
-		newUninitialized: newUninitializedTestKey, // XXX
+		newRandom:        newRandomTestKey,
+		newUninitialized: newUninitializedTestKey,
 	}
 }
 
-type testKey struct{ pk int64 }
+type testKey struct{ privKey int64 }
 
 var _ raw = &testKey{}
 
@@ -220,7 +220,7 @@ func newUninitializedTestKey() raw { return &testKey{} }
 
 func (testKey) keyType() Type { return Test }
 
-func (k testKey) equal(o raw) bool { return k.pk == o.(*testKey).pk }
+func (k testKey) equal(o raw) bool { return k.privKey == o.(*testKey).privKey }
 
 func (k testKey) publicAsCSR(csrFQDN string) (string, error) { return "", errors.New("unimplemented") }
 
@@ -234,7 +234,7 @@ func (k testKey) MarshalBinary() ([]byte, error) {
 	// Test keys' raw key format is the big-endian encoding of the "private
 	// key" (int64).
 	var buf [8]byte
-	binary.BigEndian.PutUint64(buf[:], uint64(k.pk))
+	binary.BigEndian.PutUint64(buf[:], uint64(k.privKey))
 	return buf[:], nil
 }
 

@@ -56,6 +56,7 @@ func (t Type) New() (Raw, error) {
 // to serialization of the key.
 type Raw struct{ k raw }
 
+// Verify that Raw satisfies the binary/text (Un)marshaler interfaces.
 var _ encoding.BinaryMarshaler = Raw{}
 var _ encoding.BinaryUnmarshaler = &Raw{}
 var _ encoding.TextMarshaler = Raw{}
@@ -115,9 +116,10 @@ func (r Raw) Equal(o Raw) bool {
 // Type returns the type of the raw key.
 func (r Raw) Type() Type { return r.k.keyType() }
 
-// PublicAsCSR returns a PEM-encoding of the ASN.1 DER-encoding of a
-// PKCS#10 (RFC 2986) CSR over the public portion of the key, using the
-// provided FQDN as the common name for the request.
+// PublicAsCSR returns a PEM-encoding of the ASN.1 DER-encoding of a PKCS#10
+// (RFC 2986) CSR over the public portion of the key, signed using the private
+// portion of the key, using the provided FQDN as the common name for the
+// request.
 func (r Raw) PublicAsCSR(csrFQDN string) (string, error) { return r.k.publicAsCSR(csrFQDN) }
 
 // PublicAsPKIX returns a PEM-encoding of the ASN.1 DER-encoding of the
@@ -146,8 +148,9 @@ type raw interface {
 	equal(o raw) bool
 
 	// publicAsCSR returns a PEM-encoding of the ASN.1 DER-encoding of a
-	// PKCS#10 (RFC 2986) CSR over the public portion of the key, using the
-	// provided FQDN as the common name for the request.
+	// PKCS#10 (RFC 2986) CSR over the public portion of the key, signed using
+	// the private portion of the key, using the provided FQDN as the common
+	// name for the request.
 	publicAsCSR(csrFQDN string) (string, error)
 
 	// publicAsPKIX returns a PEM-encoding of the ASN.1 DER-encoding of the
@@ -164,7 +167,7 @@ type raw interface {
 	asPKCS8() (string, error)
 }
 
-type p256 struct{ pk *ecdsa.PrivateKey }
+type p256 struct{ privKey *ecdsa.PrivateKey }
 
 var _ raw = &p256{} // verify p256 implements raw
 
@@ -180,14 +183,14 @@ func newUninitializedP256() raw { return &p256{} }
 
 func (p256) keyType() Type { return P256 }
 
-func (k p256) equal(o raw) bool { return k.pk.Equal(o.(*p256).pk) }
+func (k p256) equal(o raw) bool { return k.privKey.Equal(o.(*p256).privKey) }
 
 func (k p256) publicAsCSR(csrFQDN string) (string, error) {
 	tmpl := &x509.CertificateRequest{
 		SignatureAlgorithm: x509.ECDSAWithSHA256,
 		Subject:            pkix.Name{CommonName: csrFQDN},
 	}
-	csrBytes, err := x509.CreateCertificateRequest(rand.Reader, tmpl, k.pk)
+	csrBytes, err := x509.CreateCertificateRequest(rand.Reader, tmpl, k.privKey)
 	if err != nil {
 		return "", fmt.Errorf("couldn't create certificate request: %w", err)
 	}
@@ -195,7 +198,7 @@ func (k p256) publicAsCSR(csrFQDN string) (string, error) {
 }
 
 func (k p256) publicAsPKIX() (string, error) {
-	pubkeyBytes, err := x509.MarshalPKIXPublicKey(k.pk.Public())
+	pubkeyBytes, err := x509.MarshalPKIXPublicKey(k.privKey.Public())
 	if err != nil {
 		return "", fmt.Errorf("couldn't encode as PKIX: %w", err)
 	}
@@ -203,11 +206,11 @@ func (k p256) publicAsPKIX() (string, error) {
 }
 
 func (k p256) asX962Uncompressed() (string, error) {
-	return base64.StdEncoding.EncodeToString(append(elliptic.Marshal(elliptic.P256(), k.pk.X, k.pk.Y), k.pk.D.Bytes()...)), nil
+	return base64.StdEncoding.EncodeToString(append(elliptic.Marshal(elliptic.P256(), k.privKey.X, k.privKey.Y), k.privKey.D.Bytes()...)), nil
 }
 
 func (k p256) asPKCS8() (string, error) {
-	keyBytes, err := x509.MarshalPKCS8PrivateKey(k.pk)
+	keyBytes, err := x509.MarshalPKCS8PrivateKey(k.privKey)
 	if err != nil {
 		return "", fmt.Errorf("couldn't encode as PKCS#8: %w", err)
 	}
@@ -217,7 +220,7 @@ func (k p256) asPKCS8() (string, error) {
 func (k p256) MarshalBinary() ([]byte, error) {
 	// P256's raw key format is the ASN.1 DER-encoding of the key as an RFC
 	// 5915 Elliptic Curve Private Key Structure.
-	return x509.MarshalECPrivateKey(k.pk)
+	return x509.MarshalECPrivateKey(k.privKey)
 }
 
 func (k *p256) UnmarshalBinary(data []byte) error {
