@@ -19,27 +19,22 @@ func TestKeyMarshal(t *testing.T) {
 		}
 		return r
 	}
-	testKey0 := mustKey(Test.New())
-	testKey1 := mustKey(Test.New())
-	p256Key0 := mustKey(P256.New())
-	p256Key1 := mustKey(P256.New())
-
 	wantKey := Key{
 		Version{
-			RawKey:       testKey0,
+			RawKey:       mustKey(Test.New()),
 			CreationTime: time.Unix(100000, 0).UTC(),
 		},
 		Version{
-			RawKey:       p256Key0,
+			RawKey:       mustKey(P256.New()),
 			CreationTime: time.Unix(150000, 0).UTC(),
 		},
 		Version{
-			RawKey:       testKey1,
+			RawKey:       mustKey(Test.New()),
 			CreationTime: time.Unix(200000, 0).UTC(),
 			Primary:      true,
 		},
 		Version{
-			RawKey:       p256Key1,
+			RawKey:       mustKey(P256.New()),
 			CreationTime: time.Unix(250000, 0).UTC(),
 		},
 	}

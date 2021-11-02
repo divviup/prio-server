@@ -2,9 +2,11 @@
 package key
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"sort"
+	"strconv"
 	"time"
 )
 
@@ -143,10 +145,14 @@ func (k Key) Rotate(now time.Time, cfg RotationConfig) (Key, error) {
 // as well as associated metadata. Typically, a Version will be embedded within
 // a Set.
 type Version struct {
-	RawKey       Raw       `json:"key"`
-	CreationTime time.Time `json:"creation_time"`
-	Primary      bool      `json:"primary,omitempty"`
+	RawKey       Raw
+	CreationTime time.Time
+	Primary      bool
 }
+
+// Verify expected interfaces are implemented by Version.
+var _ json.Marshaler = Version{}
+var _ json.Unmarshaler = &Version{}
 
 // Equal returns true if and only if this Version is equal to the given
 // Version.
@@ -154,4 +160,35 @@ func (v Version) Equal(o Version) bool {
 	return v.RawKey.Equal(o.RawKey) &&
 		v.CreationTime.Equal(o.CreationTime) &&
 		v.Primary == o.Primary
+}
+
+type jsonVersion struct {
+	RawKey       Raw    `json:"key"`
+	CreationTime string `json:"creation_time"`
+	Primary      bool   `json:"primary,omitempty"`
+}
+
+func (v Version) MarshalJSON() ([]byte, error) {
+	return json.Marshal(jsonVersion{
+		RawKey:       v.RawKey,
+		CreationTime: strconv.FormatInt(v.CreationTime.Unix(), 10),
+		Primary:      v.Primary,
+	})
+}
+
+func (v *Version) UnmarshalJSON(data []byte) error {
+	var jv jsonVersion
+	if err := json.Unmarshal(data, &jv); err != nil {
+		return fmt.Errorf("couldn't unmarshal raw structure: %w", err)
+	}
+	ts, err := strconv.ParseInt(jv.CreationTime, 10, 64)
+	if err != nil {
+		return fmt.Errorf("invalid creation_time: %w", err)
+	}
+	*v = Version{
+		RawKey:       jv.RawKey,
+		CreationTime: time.Unix(ts, 0),
+		Primary:      jv.Primary,
+	}
+	return nil
 }
