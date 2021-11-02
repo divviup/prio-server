@@ -11,6 +11,7 @@ import (
 	"encoding/pem"
 	"errors"
 	"fmt"
+	"math/big"
 )
 
 // Type represents the type of a Raw key.
@@ -218,19 +219,27 @@ func (k p256) asPKCS8() (string, error) {
 }
 
 func (k p256) MarshalBinary() ([]byte, error) {
-	// P256's raw key format is the ASN.1 DER-encoding of the key as an RFC
-	// 5915 Elliptic Curve Private Key Structure.
-	return x509.MarshalECPrivateKey(k.privKey)
+	// P256's raw key format is the X9.62 compressed encoding of the public
+	// portion of the key, concatenated with the secret "D" scalar.
+	return append(elliptic.MarshalCompressed(elliptic.P256(), k.privKey.X, k.privKey.Y), k.privKey.D.Bytes()...), nil
 }
 
 func (k *p256) UnmarshalBinary(data []byte) error {
-	pk, err := x509.ParseECPrivateKey(data)
-	if err != nil {
-		return fmt.Errorf("couldn't parse EC key structure: %w", err)
+	const p256PubkeyCompressedLen = 33 // P256 uses 256-bit = 8-byte points; the length of MarshalCompressed is 1 + point_byte_length.
+
+	x, y := elliptic.UnmarshalCompressed(elliptic.P256(), data[:p256PubkeyCompressedLen])
+	if x == nil {
+		return errors.New("couldn't unmarshal compressed public key")
 	}
-	if pk.Curve != elliptic.P256() {
-		return fmt.Errorf("parsed key was not a P256 key (was %q)", pk.Params().Name)
-	}
-	*k = p256{pk}
+	d := new(big.Int).SetBytes(data[p256PubkeyCompressedLen:])
+
+	*k = p256{&ecdsa.PrivateKey{
+		PublicKey: ecdsa.PublicKey{
+			Curve: elliptic.P256(),
+			X:     x,
+			Y:     y,
+		},
+		D: d,
+	}}
 	return nil
 }
