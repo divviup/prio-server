@@ -146,7 +146,7 @@ func (k Key) Rotate(now time.Time, cfg RotationConfig) (Key, error) {
 type Version struct {
 	KeyMaterial  string    `json:"key,omitempty"`
 	CreationTime time.Time `json:"creation_time,omitempty"`
-	Primary      bool      `json:"priamry,omitempty"`
+	Primary      bool      `json:"primary,omitempty"`
 }
 
 // Identifier returns a human-readable string identifier for this key version.
