@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"cloud.google.com/go/storage"
+	"github.com/abetterinternet/prio-server/key-rotator/manifest"
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/aws/awserr"
 	"github.com/aws/aws-sdk-go/aws/credentials"
@@ -28,10 +29,10 @@ type Writer interface {
 	// WriteDataShareProcessorSpecificManifest writes the provided manifest for
 	// the provided share processor name in the writer's backing storage, or
 	// returns an error on failure.
-	WriteDataShareProcessorSpecificManifest(manifest DataShareProcessorSpecificManifest, dataShareProcessorName string) error
+	WriteDataShareProcessorSpecificManifest(manifest manifest.DataShareProcessorSpecificManifest, dataShareProcessorName string) error
 	// WriteIngestorGlobalManifest writes the provided manifest to the writer's
 	// backing storage, or returns an error on failure.
-	WriteIngestorGlobalManifest(manifest IngestorGlobalManifest) error
+	WriteIngestorGlobalManifest(manifest manifest.IngestorGlobalManifest) error
 }
 
 // Fetcher fetches manifests from some storage
@@ -41,7 +42,7 @@ type Fetcher interface {
 	// well-formed. Returns (nil,  nil) if the  manifest does not exist.
 	// Returns (nil, error) if something went wrong while trying to fetch or
 	// parse the manifest.
-	FetchDataShareProcessorSpecificManifest(dataShareProcessorName string) (*DataShareProcessorSpecificManifest, error)
+	FetchDataShareProcessorSpecificManifest(dataShareProcessorName string) (*manifest.DataShareProcessorSpecificManifest, error)
 	// IngestorGlobalManifestExists returns true if the global manifest exists
 	// and is well-formed. Returns (false, nil) if it does not exist. Returns
 	// (false, error) if something went wrong while trying to fetch or parse the
@@ -91,11 +92,11 @@ func newGCS(manifestBucketLocation, keyPrefix string) (*GCSStorage, error) {
 	return &GCSStorage{client, manifestBucketLocation, keyPrefix}, nil
 }
 
-func (s *GCSStorage) WriteIngestorGlobalManifest(manifest IngestorGlobalManifest) error {
+func (s *GCSStorage) WriteIngestorGlobalManifest(manifest manifest.IngestorGlobalManifest) error {
 	return s.writeManifest(manifest, "global-manifest.json")
 }
 
-func (s *GCSStorage) WriteDataShareProcessorSpecificManifest(manifest DataShareProcessorSpecificManifest, dataShareProcessorName string) error {
+func (s *GCSStorage) WriteDataShareProcessorSpecificManifest(manifest manifest.DataShareProcessorSpecificManifest, dataShareProcessorName string) error {
 	return s.writeManifest(manifest, fmt.Sprintf("%s-manifest.json", dataShareProcessorName))
 }
 
@@ -133,7 +134,7 @@ func (s *GCSStorage) getWriter(key string) *storage.Writer {
 	return ioWriter
 }
 
-func (s *GCSStorage) FetchDataShareProcessorSpecificManifest(dataShareProcessorName string) (*DataShareProcessorSpecificManifest, error) {
+func (s *GCSStorage) FetchDataShareProcessorSpecificManifest(dataShareProcessorName string) (*manifest.DataShareProcessorSpecificManifest, error) {
 	reader, err := s.getReader(fmt.Sprintf("%s-manifest.json", dataShareProcessorName))
 	if err != nil {
 		return nil, err
@@ -143,7 +144,7 @@ func (s *GCSStorage) FetchDataShareProcessorSpecificManifest(dataShareProcessorN
 		return nil, nil
 	}
 
-	var manifest DataShareProcessorSpecificManifest
+	var manifest manifest.DataShareProcessorSpecificManifest
 	if err := json.NewDecoder(reader).Decode(&manifest); err != nil {
 		jsonErr := fmt.Errorf("error parsing manifest: %w", err)
 
@@ -171,7 +172,7 @@ func (s *GCSStorage) IngestorGlobalManifestExists() (bool, error) {
 		return false, nil
 	}
 
-	var manifest IngestorGlobalManifest
+	var manifest manifest.IngestorGlobalManifest
 	if err := json.NewDecoder(reader).Decode(&manifest); err != nil {
 		jsonErr := fmt.Errorf("error parsing manifest: %w", err)
 
@@ -234,11 +235,11 @@ func newS3(manifestBucket, keyPrefix, region, profile string) (*S3Storage, error
 	}, nil
 }
 
-func (s *S3Storage) WriteIngestorGlobalManifest(manifest IngestorGlobalManifest) error {
+func (s *S3Storage) WriteIngestorGlobalManifest(manifest manifest.IngestorGlobalManifest) error {
 	return s.writeManifest(manifest, "global-manifest.json")
 }
 
-func (s *S3Storage) WriteDataShareProcessorSpecificManifest(manifest DataShareProcessorSpecificManifest, dataShareProcessorName string) error {
+func (s *S3Storage) WriteDataShareProcessorSpecificManifest(manifest manifest.DataShareProcessorSpecificManifest, dataShareProcessorName string) error {
 	return s.writeManifest(manifest, fmt.Sprintf("%s-manifest.json", dataShareProcessorName))
 }
 
@@ -266,7 +267,7 @@ func (s *S3Storage) writeManifest(manifest interface{}, key string) error {
 	return nil
 }
 
-func (s *S3Storage) FetchDataShareProcessorSpecificManifest(dataShareProcessorName string) (*DataShareProcessorSpecificManifest, error) {
+func (s *S3Storage) FetchDataShareProcessorSpecificManifest(dataShareProcessorName string) (*manifest.DataShareProcessorSpecificManifest, error) {
 	reader, err := s.getReader(fmt.Sprintf("%s-manifest.json", dataShareProcessorName))
 	if err != nil {
 		return nil, err
@@ -276,7 +277,7 @@ func (s *S3Storage) FetchDataShareProcessorSpecificManifest(dataShareProcessorNa
 		return nil, nil
 	}
 
-	var manifest DataShareProcessorSpecificManifest
+	var manifest manifest.DataShareProcessorSpecificManifest
 	if err := json.NewDecoder(reader).Decode(&manifest); err != nil {
 		jsonErr := fmt.Errorf("error parsing manifest: %w", err)
 
@@ -300,7 +301,7 @@ func (s *S3Storage) IngestorGlobalManifestExists() (bool, error) {
 		return false, nil
 	}
 
-	var manifest IngestorGlobalManifest
+	var manifest manifest.IngestorGlobalManifest
 	if err := json.NewDecoder(reader).Decode(&manifest); err != nil {
 		jsonErr := fmt.Errorf("error parsing manifest: %w", err)
 

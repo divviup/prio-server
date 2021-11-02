@@ -12,7 +12,7 @@ import (
 	k8sapplyconfigurations "k8s.io/client-go/applyconfigurations/core/v1"
 	k8stypedcorev1 "k8s.io/client-go/kubernetes/typed/core/v1"
 
-	"github.com/abetterinternet/prio-server/manifest-updater/manifest"
+	"github.com/abetterinternet/prio-server/key-rotator/manifest"
 )
 
 type FakeKubernetesSecretsClientGetter struct {

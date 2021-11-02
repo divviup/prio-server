@@ -3,7 +3,7 @@ package cmd
 import (
 	"fmt"
 
-	"github.com/abetterinternet/prio-server/manifest-updater/manifest"
+	"github.com/abetterinternet/prio-server/key-rotator/manifest"
 	"github.com/abetterinternet/prio-server/manifest-updater/secrets"
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
