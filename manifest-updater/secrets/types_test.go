@@ -14,7 +14,7 @@ func TestPrioKeyMarshallAndUnmarshall(t *testing.T) {
 	p256Key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 
 	if err != nil {
-		t.Errorf("error generating key: %w", err)
+		t.Errorf("error generating key: %s", err)
 	}
 
 	key := PrioKey{key: p256Key}
