@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"path"
@@ -19,6 +20,104 @@ import (
 	"github.com/rs/zerolog/log"
 )
 
+// ingestorGlobalManifestDataShareProcessorName is the special data share
+// processor name used to denote the ingestor global manifest.
+const ingestorGlobalManifestDataShareProcessorName = "global"
+
+// Manifest represents a store of manifests, with functionality to read & write
+// manifests from the store.
+type Manifest struct {
+	ds datastore
+}
+
+var _ Storage = Manifest{}
+
+// WriteDataShareProcessorSpecificManifest writes the provided manifest for
+// the provided share processor name in the writer's backing storage, or
+// returns an error on failure.
+func (m Manifest) WriteDataShareProcessorSpecificManifest(manifest manifest.DataShareProcessorSpecificManifest, dataShareProcessorName string) error {
+	manifestBytes, err := json.Marshal(manifest)
+	if err != nil {
+		return fmt.Errorf("couldn't marshal manifest as JSON: %w", err)
+	}
+	key := m.keyFor(dataShareProcessorName)
+	if err := m.ds.put(context.TODO(), key, manifestBytes); err != nil {
+		return fmt.Errorf("couldn't put manifest to %q: %w", key, err)
+	}
+	return nil
+}
+
+// WriteIngestorGlobalManifest writes the provided manifest to the writer's
+// backing storage, or returns an error on failure.
+func (m Manifest) WriteIngestorGlobalManifest(manifest manifest.IngestorGlobalManifest) error {
+	manifestBytes, err := json.Marshal(manifest)
+	if err != nil {
+		return fmt.Errorf("couldn't marshal manifest as JSON: %w", err)
+	}
+	key := m.keyFor(ingestorGlobalManifestDataShareProcessorName)
+	if err := m.ds.put(context.TODO(), key, manifestBytes); err != nil {
+		return fmt.Errorf("couldn't put manifest to %q: %w", key, err)
+	}
+	return nil
+}
+
+// WriteDataShareProcessorSpecificManifest writes the provided manifest for
+// the provided share processor name in the writer's backing storage, or
+// returns an error on failure.
+func (m Manifest) FetchDataShareProcessorSpecificManifest(dataShareProcessorName string) (*manifest.DataShareProcessorSpecificManifest, error) {
+	key := m.keyFor(dataShareProcessorName)
+	manifestBytes, err := m.ds.get(context.TODO(), key)
+	if err != nil {
+		return nil, fmt.Errorf("couldn't get manifest from %q: %w", key, err)
+	}
+	var manifest manifest.DataShareProcessorSpecificManifest
+	if err := json.Unmarshal(manifestBytes, &manifest); err != nil {
+		return nil, fmt.Errorf("couldn't unmarshal manifest from JSON: %w", err)
+	}
+	return &manifest, nil
+}
+
+// IngestorGlobalManifestExists returns true if the global manifest exists
+// and is well-formed. Returns (false, nil) if it does not exist. Returns
+// (false, error) if something went wrong while trying to fetch or parse the
+// manifest.
+func (m Manifest) IngestorGlobalManifestExists() (bool, error) {
+	key := m.keyFor(ingestorGlobalManifestDataShareProcessorName)
+	manifestBytes, err := m.ds.get(context.TODO(), key)
+	if errors.Is(err, errObjectNotExist) {
+		return false, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("couldn't get manifest from %q: %w", key, err)
+	}
+	var manifest manifest.IngestorGlobalManifest
+	if err := json.Unmarshal(manifestBytes, &manifest); err != nil {
+		return false, fmt.Errorf("couldn't unmarshal manifest from JSON: %w", err)
+	}
+	return true, nil
+}
+
+func (m Manifest) keyFor(dataShareProcessorName string) string {
+	return fmt.Sprintf("%s-manifest.json", dataShareProcessorName)
+}
+
+// datastore represents a given key/value object store backing a Manifest. It
+// includes functionality for getting & putting individual objects by key,
+// specialized for small objects (i.e. no streaming support).
+type datastore interface {
+	// get gets the content of a given key, or returns an error if it can't.
+	// If the key does not exist, an error wrapping errObjectNotExist is
+	// returned.
+	get(ctx context.Context, key string) ([]byte, error)
+
+	// put puts the given content to the given key, or returns an error if it
+	// can't.
+	put(ctx context.Context, key string, data []byte) error
+}
+
+// errObjectNotExist is an error representing that an object could not be retrieved from the datastore.
+var errObjectNotExist = errors.New("object does not exist")
+
 type Storage interface {
 	Writer
 	Fetcher
@@ -30,6 +129,7 @@ type Writer interface {
 	// the provided share processor name in the writer's backing storage, or
 	// returns an error on failure.
 	WriteDataShareProcessorSpecificManifest(manifest manifest.DataShareProcessorSpecificManifest, dataShareProcessorName string) error
+
 	// WriteIngestorGlobalManifest writes the provided manifest to the writer's
 	// backing storage, or returns an error on failure.
 	WriteIngestorGlobalManifest(manifest manifest.IngestorGlobalManifest) error
@@ -43,6 +143,7 @@ type Fetcher interface {
 	// Returns (nil, error) if something went wrong while trying to fetch or
 	// parse the manifest.
 	FetchDataShareProcessorSpecificManifest(dataShareProcessorName string) (*manifest.DataShareProcessorSpecificManifest, error)
+
 	// IngestorGlobalManifestExists returns true if the global manifest exists
 	// and is well-formed. Returns (false, nil) if it does not exist. Returns
 	// (false, error) if something went wrong while trying to fetch or parse the
