@@ -23,6 +23,10 @@ import (
 // processor name used to denote the ingestor global manifest.
 const ingestorGlobalManifestDataShareProcessorName = "global"
 
+// ErrObjectNotExist is an error representing that an object could not be
+// retrieved from a datastore.
+var ErrObjectNotExist = errors.New("object does not exist")
+
 // Manifest represents a store of manifests, with functionality to read & write
 // manifests from the store.
 type Manifest struct {
@@ -119,13 +123,11 @@ func (m Manifest) PutIngestorGlobalManifest(ctx context.Context, manifest manife
 
 // GetDataShareProcessorSpecificManifest gets the specific manifest for the
 // specified data share processor and returns it, if it exists and is
-// well-formed. Returns (nil, nil) if the manifest does not exist.
+// well-formed. If the manifest does not exist, an error wrapping
+// ErrObjectNotExist will be returned.
 func (m Manifest) GetDataShareProcessorSpecificManifest(ctx context.Context, dataShareProcessorName string) (*manifest.DataShareProcessorSpecificManifest, error) {
 	key := m.keyFor(dataShareProcessorName)
 	manifestBytes, err := m.ds.get(ctx, key)
-	if errors.Is(err, errObjectNotExist) {
-		return nil, nil
-	}
 	if err != nil {
 		return nil, fmt.Errorf("couldn't get manifest from %q: %w", key, err)
 	}
@@ -137,13 +139,11 @@ func (m Manifest) GetDataShareProcessorSpecificManifest(ctx context.Context, dat
 }
 
 // GetIngestorGlobalManifest gets the ingestor global manifest, if it exists
-// and is well-formed. Returns (nil, nil) if it does not exist.
+// and is well-formed. If the manifest does not exist, an error wrapping
+// ErrObjectNotExist will be returned.
 func (m Manifest) GetIngestorGlobalManifest(ctx context.Context) (*manifest.IngestorGlobalManifest, error) {
 	key := m.keyFor(ingestorGlobalManifestDataShareProcessorName)
 	manifestBytes, err := m.ds.get(ctx, key)
-	if errors.Is(err, errObjectNotExist) {
-		return nil, nil
-	}
 	if err != nil {
 		return nil, fmt.Errorf("couldn't get manifest from %q: %w", key, err)
 	}
@@ -163,7 +163,7 @@ func (m Manifest) keyFor(dataShareProcessorName string) string {
 // specialized for small objects (i.e. no streaming support).
 type datastore interface {
 	// get gets the content of a given key, or returns an error if it can't.
-	// If the key does not exist, an error wrapping errObjectNotExist is
+	// If the key does not exist, an error wrapping ErrObjectNotExist is
 	// returned.
 	get(ctx context.Context, key string) ([]byte, error)
 
@@ -171,9 +171,6 @@ type datastore interface {
 	// can't.
 	put(ctx context.Context, key string, data []byte) error
 }
-
-// errObjectNotExist is an error representing that an object could not be retrieved from the datastore.
-var errObjectNotExist = errors.New("object does not exist")
 
 type gcsDatastore struct {
 	gcs    *storage.Client
@@ -186,7 +183,7 @@ func (ds gcsDatastore) get(ctx context.Context, key string) ([]byte, error) {
 	r, err := ds.gcs.Bucket(ds.bucket).Object(key).NewReader(ctx)
 	if err != nil {
 		if err == storage.ErrObjectNotExist {
-			err = errObjectNotExist
+			err = ErrObjectNotExist
 		}
 		return nil, fmt.Errorf("couldn't retrieve gs://%s/%s: %w", ds.bucket, key, err)
 	}
@@ -236,7 +233,7 @@ func (ds s3Datastore) get(ctx context.Context, key string) ([]byte, error) {
 	})
 	if err != nil {
 		if awsErr, ok := err.(awserr.Error); ok && awsErr.Code() == s3.ErrCodeNoSuchKey {
-			err = errObjectNotExist
+			err = ErrObjectNotExist
 		}
 		return nil, fmt.Errorf("couldn't retrieve s3://%s/%s: %w", ds.bucket, key, err)
 	}

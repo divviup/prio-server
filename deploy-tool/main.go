@@ -9,6 +9,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"encoding/pem"
+	"errors"
 	"flag"
 	"fmt"
 	"log"
@@ -85,11 +86,13 @@ type ManifestStorage interface {
 
 	// GetDataShareProcessorSpecificManifest gets the specific manifest for the
 	// specified data share processor and returns it, if it exists and is
-	// well-formed. Returns (nil, nil) if the manifest does not exist.
+	// well-formed. If the manifest does not exist, an error wrapping
+	// storage.ErrObjectNotExist will be returned.
 	GetDataShareProcessorSpecificManifest(ctx context.Context, dataShareProcessorName string) (*manifest.DataShareProcessorSpecificManifest, error)
 
 	// GetIngestorGlobalManifest gets the ingestor global manifest, if it
-	// exists and is well-formed. Returns (nil, nil) if it does not exist.
+	// exists and is well-formed. If the manifest does not exist, an error
+	// wrapping storage.ErrObjectNotExist will be returned.
 	GetIngestorGlobalManifest(ctx context.Context) (*manifest.IngestorGlobalManifest, error)
 }
 
@@ -355,12 +358,11 @@ func createManifests(
 	packetEncryptionKeyCSRs := manifest.PacketEncryptionKeyCSRs{}
 	for dataShareProcessorName := range specificManifests {
 		manifest, err := manifestStorage.GetDataShareProcessorSpecificManifest(ctx, dataShareProcessorName)
+		if errors.Is(err, storage.ErrObjectNotExist) {
+			continue
+		}
 		if err != nil {
 			return err
-		}
-
-		if manifest == nil {
-			continue
 		}
 
 		existingManifests[dataShareProcessorName] = struct{}{}
@@ -460,11 +462,13 @@ func main() {
 		if err != nil {
 			log.Fatalf("%s", err)
 		}
-		globalManifest, err := globalManifestStorage.GetIngestorGlobalManifest(ctx)
+		_, err = globalManifestStorage.GetIngestorGlobalManifest(ctx)
 		if err != nil {
-			log.Fatalf("%s", err)
-		} else if globalManifest != nil {
-			log.Println("global ingestor manifest exists - skipping creation")
+			if errors.Is(err, storage.ErrObjectNotExist) {
+				log.Println("global ingestor manifest exists - skipping creation")
+			} else {
+				log.Fatalf("%s", err)
+			}
 		} else if err := setupTestEnvironment(
 			ctx,
 			k8sClient.CoreV1(),

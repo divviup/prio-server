@@ -14,6 +14,7 @@ import (
 	k8stypedcorev1 "k8s.io/client-go/kubernetes/typed/core/v1"
 
 	"github.com/abetterinternet/prio-server/key-rotator/manifest"
+	"github.com/abetterinternet/prio-server/key-rotator/storage"
 )
 
 var ctx = context.Background()
@@ -121,7 +122,7 @@ func (s *FakeManifestStorage) GetDataShareProcessorSpecificManifest(_ context.Co
 	if manifest, ok := s.existingManifests[dataShareProcessorName]; ok {
 		return &manifest, nil
 	}
-	return nil, nil
+	return nil, storage.ErrObjectNotExist
 }
 
 func (s *FakeManifestStorage) GetIngestorGlobalManifest(context.Context) (*manifest.IngestorGlobalManifest, error) {
