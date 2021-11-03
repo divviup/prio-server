@@ -119,6 +119,98 @@ type datastore interface {
 // errObjectNotExist is an error representing that an object could not be retrieved from the datastore.
 var errObjectNotExist = errors.New("object does not exist")
 
+type gcsDatastore struct {
+	gcs    *storage.Client
+	bucket string
+}
+
+var _ datastore = gcsDatastore{} // verify gcsDatastore satsifies datastore.
+
+func (ds gcsDatastore) get(ctx context.Context, key string) ([]byte, error) {
+	r, err := ds.gcs.Bucket(ds.bucket).Object(key).NewReader(ctx)
+	if err != nil {
+		if err == storage.ErrObjectNotExist {
+			err = errObjectNotExist
+		}
+		return nil, fmt.Errorf("couldn't retrieve gs://%s/%s: %w", ds.bucket, key, err)
+	}
+	defer r.Close() // errchecked Close is below
+	objBytes, err := io.ReadAll(r)
+	if err != nil {
+		return nil, fmt.Errorf("couldn't read gs://%s/%s: %w", ds.bucket, key, err)
+	}
+	if err := r.Close(); err != nil {
+		return nil, fmt.Errorf("couldn't close gs://%s/%s: %w", ds.bucket, key, err)
+	}
+	return objBytes, nil
+}
+
+func (ds gcsDatastore) put(ctx context.Context, key string, data []byte) error {
+	// Canceling a write requires canceling the context, rather than calling
+	// Close(). We therefore create a context we can cancel without affecting
+	// anything else to ensure we don't leave a pending write around in case of
+	// failure.
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
+	w := ds.gcs.Bucket(ds.bucket).Object(key).NewWriter(ctx)
+	w.CacheControl = "no-cache"
+	w.ContentType = "application/json; charset=UTF-8"
+
+	if _, err := w.Write(data); err != nil {
+		return fmt.Errorf("couldn't write gs://%s/%s: %w", ds.bucket, key, err)
+	}
+	if err := w.Close(); err != nil {
+		return fmt.Errorf("couldn't close gs://%s/%s: %w", ds.bucket, key, err)
+	}
+	return nil
+}
+
+type s3Datastore struct {
+	s3     *s3.S3
+	bucket string
+}
+
+var _ datastore = s3Datastore{} // verify s3Datastore satisfies datastore.
+
+func (ds s3Datastore) get(ctx context.Context, key string) ([]byte, error) {
+	objOut, err := ds.s3.GetObjectWithContext(ctx, &s3.GetObjectInput{
+		Bucket: aws.String(ds.bucket),
+		Key:    aws.String(key),
+	})
+	if err != nil {
+		if awsErr, ok := err.(awserr.Error); ok && awsErr.Code() == s3.ErrCodeNoSuchKey {
+			err = errObjectNotExist
+		}
+		return nil, fmt.Errorf("couldn't retrieve s3://%s/%s: %w", ds.bucket, key, err)
+	}
+	r := objOut.Body
+	defer r.Close() // errchecked Close is below
+	objBytes, err := io.ReadAll(r)
+	if err != nil {
+		return nil, fmt.Errorf("couldn't read s3://%s/%s: %w", ds.bucket, key, err)
+	}
+	if err := r.Close(); err != nil {
+		return nil, fmt.Errorf("couldn't close s3://%s/%s: %w", ds.bucket, key, err)
+	}
+	return objBytes, nil
+
+}
+
+func (ds s3Datastore) put(ctx context.Context, key string, data []byte) error {
+	if _, err := ds.s3.PutObjectWithContext(ctx, &s3.PutObjectInput{
+		ACL:          aws.String(s3.BucketCannedACLPublicRead),
+		Body:         bytes.NewReader(data),
+		Bucket:       aws.String(ds.bucket),
+		Key:          aws.String(key),
+		CacheControl: aws.String("no-cache"),
+		ContentType:  aws.String("application/json; charset=UTF-8"),
+	}); err != nil {
+		return fmt.Errorf("couldn't write s3://%s/%s: %w", ds.bucket, key, err)
+	}
+	return nil
+}
+
 type Storage interface {
 	Writer
 	Fetcher
