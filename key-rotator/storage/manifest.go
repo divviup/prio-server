@@ -27,7 +27,8 @@ const ingestorGlobalManifestDataShareProcessorName = "global"
 // Manifest represents a store of manifests, with functionality to read & write
 // manifests from the store.
 type Manifest struct {
-	ds datastore
+	ds        datastore
+	keyPrefix string
 }
 
 var _ Storage = Manifest{}
@@ -98,7 +99,7 @@ func (m Manifest) IngestorGlobalManifestExists() (bool, error) {
 }
 
 func (m Manifest) keyFor(dataShareProcessorName string) string {
-	return fmt.Sprintf("%s-manifest.json", dataShareProcessorName)
+	return path.Join(m.keyPrefix, fmt.Sprintf("%s-manifest.json", dataShareProcessorName))
 }
 
 // datastore represents a given key/value object store backing a Manifest. It

@@ -3,6 +3,7 @@ package storage
 import (
 	"context"
 	"encoding/json"
+	"path"
 	"strings"
 	"testing"
 
@@ -36,112 +37,122 @@ func TestManifest(t *testing.T) {
 		t.Fatalf("Couldn't marshal global manifest to JSON: %v", err)
 	}
 
-	t.Run("WriteDataShareProcessorSpecificManifest", func(t *testing.T) {
-		t.Parallel()
-		ds := newMemDatastore()
-		m := Manifest{ds}
-		wantObjs := map[string][]byte{"dsp-manifest.json": dspManifestBytes}
-		if err := m.WriteDataShareProcessorSpecificManifest(dspManifest, dspName); err != nil {
-			t.Fatalf("Unexpected error from WriteDataShareProcessorSpecificManifest: %v", err)
-		}
-		if diff := cmp.Diff(wantObjs, ds.objs); diff != "" {
-			t.Errorf("Unexpected objects in datastore (-want +got):\n%s", diff)
-		}
-	})
-
-	t.Run("WriteIngestorGlobalManifest", func(t *testing.T) {
-		t.Parallel()
-		ds := newMemDatastore()
-		m := Manifest{ds}
-		wantObjs := map[string][]byte{"global-manifest.json": globalManifestBytes}
-		if err := m.WriteIngestorGlobalManifest(globalManifest); err != nil {
-			t.Fatalf("Unexpected error from WriteIngestorGlobalManifest: %v", err)
-		}
-		if diff := cmp.Diff(wantObjs, ds.objs); diff != "" {
-			t.Errorf("Unexpected objects in datastore (-want +got):\n%s", diff)
-		}
-	})
-
-	t.Run("FetchDataShareProcessorSpecificManifest", func(t *testing.T) {
-		t.Parallel()
-		t.Run("valid manifest", func(t *testing.T) {
+	for _, test := range []struct {
+		name      string
+		keyPrefix string
+	}{
+		{"no key prefix", ""},
+		{"key prefix", "some/key/prefix"},
+		{"directory-like key prefix", "some/dir/key/prefix/"},
+	} {
+		test := test
+		t.Run("WriteDataShareProcessorSpecificManifest", func(t *testing.T) {
 			t.Parallel()
-			ds := newMemDatastore()
-			m := Manifest{ds}
-			ds.objs["dsp-manifest.json"] = dspManifestBytes
-			gotManifest, err := m.FetchDataShareProcessorSpecificManifest(dspName)
-			if err != nil {
-				t.Fatalf("Unexpected error from FetchDataShareProcessorSpecificManifest: %v", err)
+			m, objs := newManifest(test.keyPrefix)
+			wantObjs := map[string][]byte{path.Join(test.keyPrefix, "dsp-manifest.json"): dspManifestBytes}
+			if err := m.WriteDataShareProcessorSpecificManifest(dspManifest, dspName); err != nil {
+				t.Fatalf("Unexpected error from WriteDataShareProcessorSpecificManifest: %v", err)
 			}
-			if diff := cmp.Diff(&dspManifest, gotManifest); diff != "" {
-				t.Errorf("Unexpected manifest (-want +got):\n%s", diff)
+			if diff := cmp.Diff(wantObjs, objs); diff != "" {
+				t.Errorf("Unexpected objects in datastore (-want +got):\n%s", diff)
 			}
 		})
 
-		t.Run("invalid manifest", func(t *testing.T) {
+		t.Run("WriteIngestorGlobalManifest", func(t *testing.T) {
 			t.Parallel()
-			ds := newMemDatastore()
-			m := Manifest{ds}
-			ds.objs["dsp-manifest.json"] = []byte("bogus non-json data")
-			_, err := m.FetchDataShareProcessorSpecificManifest(dspName)
-			const wantErrStr = "couldn't unmarshal"
-			if err == nil || !strings.Contains(err.Error(), wantErrStr) {
-				t.Errorf("Wanted error containing %q, got: %v", wantErrStr, err)
+			m, objs := newManifest(test.keyPrefix)
+			wantObjs := map[string][]byte{path.Join(test.keyPrefix, "global-manifest.json"): globalManifestBytes}
+			if err := m.WriteIngestorGlobalManifest(globalManifest); err != nil {
+				t.Fatalf("Unexpected error from WriteIngestorGlobalManifest: %v", err)
 			}
-		})
-	})
-
-	t.Run("IngestorGlobalManifestExists", func(t *testing.T) {
-		t.Parallel()
-		t.Run("valid manifest", func(t *testing.T) {
-			t.Parallel()
-			ds := newMemDatastore()
-			m := Manifest{ds}
-			ds.objs["global-manifest.json"] = globalManifestBytes
-			const wantExists = true
-			gotExists, err := m.IngestorGlobalManifestExists()
-			if err != nil {
-				t.Fatalf("Unexpected error from IngestorGlobalManifestExists: %v", err)
-			}
-			if wantExists != gotExists {
-				t.Errorf("IngestorGlobalManifestExists() = %v, want %v", gotExists, wantExists)
+			if diff := cmp.Diff(wantObjs, objs); diff != "" {
+				t.Errorf("Unexpected objects in datastore (-want +got):\n%s", diff)
 			}
 		})
 
-		t.Run("no manifest", func(t *testing.T) {
+		t.Run("FetchDataShareProcessorSpecificManifest", func(t *testing.T) {
 			t.Parallel()
-			ds := newMemDatastore()
-			m := Manifest{ds}
-			const wantExists = false
-			gotExists, err := m.IngestorGlobalManifestExists()
-			if err != nil {
-				t.Fatalf("Unexpected error from IngestorGlobalManifestExists: %v", err)
-			}
-			if wantExists != gotExists {
-				t.Errorf("IngestorGlobalManifestExists() = %v, want %v", gotExists, wantExists)
-			}
+			t.Run("valid manifest", func(t *testing.T) {
+				t.Parallel()
+				m, objs := newManifest(test.keyPrefix)
+				objs[path.Join(test.keyPrefix, "dsp-manifest.json")] = dspManifestBytes
+				gotManifest, err := m.FetchDataShareProcessorSpecificManifest(dspName)
+				if err != nil {
+					t.Fatalf("Unexpected error from FetchDataShareProcessorSpecificManifest: %v", err)
+				}
+				if diff := cmp.Diff(&dspManifest, gotManifest); diff != "" {
+					t.Errorf("Unexpected manifest (-want +got):\n%s", diff)
+				}
+			})
+
+			t.Run("invalid manifest", func(t *testing.T) {
+				t.Parallel()
+				m, objs := newManifest(test.keyPrefix)
+				objs[path.Join(test.keyPrefix, "dsp-manifest.json")] = []byte("bogus non-json data")
+				_, err := m.FetchDataShareProcessorSpecificManifest(dspName)
+				const wantErrStr = "couldn't unmarshal"
+				if err == nil || !strings.Contains(err.Error(), wantErrStr) {
+					t.Errorf("Wanted error containing %q, got: %v", wantErrStr, err)
+				}
+			})
 		})
 
-		t.Run("invalid manifest", func(t *testing.T) {
+		t.Run("IngestorGlobalManifestExists", func(t *testing.T) {
 			t.Parallel()
-			ds := newMemDatastore()
-			m := Manifest{ds}
-			ds.objs["global-manifest.json"] = []byte("bogus non-json data")
-			_, err := m.IngestorGlobalManifestExists()
-			const wantErrStr = "couldn't unmarshal"
-			if err == nil || !strings.Contains(err.Error(), wantErrStr) {
-				t.Errorf("Unexpected error from IngestorGlobalManifestExists: %v", err)
-			}
+			t.Run("valid manifest", func(t *testing.T) {
+				t.Parallel()
+				m, objs := newManifest(test.keyPrefix)
+				objs[path.Join(test.keyPrefix, "global-manifest.json")] = globalManifestBytes
+				const wantExists = true
+				gotExists, err := m.IngestorGlobalManifestExists()
+				if err != nil {
+					t.Fatalf("Unexpected error from IngestorGlobalManifestExists: %v", err)
+				}
+				if wantExists != gotExists {
+					t.Errorf("IngestorGlobalManifestExists() = %v, want %v", gotExists, wantExists)
+				}
+			})
+
+			t.Run("no manifest", func(t *testing.T) {
+				t.Parallel()
+				m, _ := newManifest(test.keyPrefix)
+				const wantExists = false
+				gotExists, err := m.IngestorGlobalManifestExists()
+				if err != nil {
+					t.Fatalf("Unexpected error from IngestorGlobalManifestExists: %v", err)
+				}
+				if wantExists != gotExists {
+					t.Errorf("IngestorGlobalManifestExists() = %v, want %v", gotExists, wantExists)
+				}
+			})
+
+			t.Run("invalid manifest", func(t *testing.T) {
+				t.Parallel()
+				m, objs := newManifest(test.keyPrefix)
+				objs[path.Join(test.keyPrefix, "global-manifest.json")] = []byte("bogus non-json data")
+				_, err := m.IngestorGlobalManifestExists()
+				const wantErrStr = "couldn't unmarshal"
+				if err == nil || !strings.Contains(err.Error(), wantErrStr) {
+					t.Errorf("Unexpected error from IngestorGlobalManifestExists: %v", err)
+				}
+			})
 		})
-	})
+	}
+}
+
+// newManifest returns a new Manifest, backed by a map that is also returned.
+// Operations on the Manifest will modify the map, and modifications to the map
+// will be reflected by the Manifest.
+func newManifest(keyPrefix string) (_ Manifest, objs map[string][]byte) {
+	objs = map[string][]byte{}
+	ds := memDS{objs}
+	return Manifest{ds, keyPrefix}, objs
 }
 
 // memDS is an in-memory implementation of datastore, suitable for testing.
 type memDS struct{ objs map[string][]byte }
 
-func newMemDatastore() memDS { return memDS{map[string][]byte{}} }
-
-var _ datastore = memDS{}
+var _ datastore = memDS{} // verify memDS satisfies datastore interface
 
 func (ds memDS) put(_ context.Context, key string, data []byte) error {
 	d := make([]byte, len(data))
