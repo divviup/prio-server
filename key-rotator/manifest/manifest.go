@@ -1,5 +1,12 @@
 package manifest
 
+import (
+	"fmt"
+	"time"
+
+	"github.com/abetterinternet/prio-server/key-rotator/key"
+)
+
 // DataShareProcessorSpecificManifest represents the manifest file advertised by
 // a data share processor. See the design document for the full specification.
 // https://docs.google.com/document/d/1MdfM3QT63ISU70l63bwzTrxr93Z7Tv7EDjLfammzo6Q/edit#heading=h.3j8dgxqo5h68
@@ -28,6 +35,68 @@ type DataShareProcessorSpecificManifest struct {
 	// private key that the data share processor which owns the manifest uses to
 	// decrypt ingestion share packets.
 	PacketEncryptionKeyCSRs PacketEncryptionKeyCSRs `json:"packet-encryption-keys"`
+}
+
+// UpdateKeysConfig configures an UpdateKeys operation.
+type UpdateKeysConfig struct {
+	BatchSigningKey         key.Key // the key used for batch signing operations
+	BatchSigningKeyIDPrefix string  // the key ID prefix to use for batch signing keys
+
+	PacketEncryptionKey         key.Key // the key used for packet encryption operations
+	PacketEncryptionKeyIDPrefix string  // the key ID prefix to use for packet encryption keys
+	PacketEncryptionKeyCSRFQDN  string  // the FQDN to specify for packet encryption key CSRs
+}
+
+func (m DataShareProcessorSpecificManifest) UpdateKeys(cfg UpdateKeysConfig) (DataShareProcessorSpecificManifest, error) {
+	// Copy the current manifest, clearing any existing batch signing/packet encryption keys.
+	newM := m
+	newM.BatchSigningPublicKeys, newM.PacketEncryptionKeyCSRs = BatchSigningPublicKeys{}, PacketEncryptionKeyCSRs{}
+
+	// Update batch signing key.
+	for _, v := range cfg.BatchSigningKey {
+		kid := cfg.BatchSigningKeyIDPrefix
+		if !v.CreationTime.IsZero() {
+			kid = fmt.Sprintf("%s-%d", cfg.BatchSigningKeyIDPrefix, v.CreationTime.Unix())
+		}
+
+		var newBSPK BatchSigningPublicKey
+		if bspk, ok := m.BatchSigningPublicKeys[kid]; ok {
+			newBSPK = bspk
+		} else {
+			pkix, err := v.RawKey.PublicAsPKIX()
+			if err != nil {
+				return DataShareProcessorSpecificManifest{}, fmt.Errorf("couldn't create PKIX-encoding for batch signing key version created at %v (%d): %w", v.CreationTime.Format(time.RFC3339), v.CreationTime.Unix(), err)
+			}
+			newBSPK = BatchSigningPublicKey{PublicKey: pkix}
+		}
+		newM.BatchSigningPublicKeys[kid] = newBSPK
+	}
+
+	// Update packet encryption key.
+	for _, v := range cfg.PacketEncryptionKey {
+		if !v.Primary {
+			continue
+		}
+
+		kid := cfg.PacketEncryptionKeyIDPrefix
+		if !v.CreationTime.IsZero() {
+			kid = fmt.Sprintf("%s-%d", cfg.PacketEncryptionKeyIDPrefix, v.CreationTime.Unix())
+		}
+
+		var newPEC PacketEncryptionCertificate
+		if pec, ok := m.PacketEncryptionKeyCSRs[kid]; ok {
+			newPEC = pec
+		} else {
+			csr, err := v.RawKey.PublicAsCSR(cfg.PacketEncryptionKeyCSRFQDN)
+			if err != nil {
+				return DataShareProcessorSpecificManifest{}, fmt.Errorf("couldn't create CSR for packet encryption key version created at %v (%d): %w", v.CreationTime.Format(time.RFC3339), v.CreationTime.Unix(), err)
+			}
+			newPEC = PacketEncryptionCertificate{CertificateSigningRequest: csr}
+		}
+		newM.PacketEncryptionKeyCSRs[kid] = newPEC
+	}
+
+	return newM, nil
 }
 
 // IngestorGlobalManifest represents the global manifest file for an ingestor.
@@ -63,7 +132,7 @@ type BatchSigningPublicKey struct {
 	// PKIX SubjectPublicKeyInfo structure. It must be an ECDSA P256 key.
 	PublicKey string `json:"public-key"`
 	// Expiration is the ISO 8601 encoded UTC date at which this key expires.
-	Expiration string `json:"expiration"`
+	Expiration string `json:"expiration,omitempty"`
 }
 
 // PacketEncryptionCertificate represents a certificate containing a public key
