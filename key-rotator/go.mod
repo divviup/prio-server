@@ -6,7 +6,6 @@ require (
 	cloud.google.com/go/storage v1.18.2
 	github.com/aws/aws-sdk-go v1.41.16
 	github.com/google/go-cmp v0.5.6
-	github.com/rs/zerolog v1.26.0
 )
 
 require (
