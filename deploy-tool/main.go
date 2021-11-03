@@ -50,18 +50,24 @@ type SpecificManifestWrapper struct {
 // defined in terraform/main.tf, though it only need describe the output
 // variables this program is interested in.
 type TerraformOutput struct {
-	ManifestBucket struct {
-		Value storage.Bucket
-	} `json:"manifest_bucket"`
+	ManifestBucket    struct{ Value Bucket } `json:"manifest_bucket"`
 	SpecificManifests struct {
 		Value map[string]SpecificManifestWrapper
 	} `json:"specific_manifests"`
-	HasTestEnvironment struct {
-		Value bool
-	} `json:"has_test_environment"`
-	SingletonIngestor struct {
-		Value *SingletonIngestor
-	} `json:"singleton_ingestor"`
+	HasTestEnvironment struct{ Value bool }               `json:"has_test_environment"`
+	SingletonIngestor  struct{ Value *SingletonIngestor } `json:"singleton_ingestor"`
+}
+
+// Bucket specifies the cloud storage bucket where manifests are stored
+type Bucket struct {
+	// URL is the URL of the bucket, with the scheme "gs" for GCS buckets or
+	// "s3" for S3 buckets; e.g., "gs://bucket-name" or "s3://bucket-name"
+	URL string `json:"bucket_url"`
+	// AWSRegion is the region the bucket is in, if it is an S3 bucket
+	AWSRegion string `json:"aws_region,omitempty"`
+	// AWSProfile is the AWS CLI config profile that should be used to
+	// authenticate to AWS, if the bucket is an S3 bucket
+	AWSProfile string `json:"aws_profile,omitempty"`
 }
 
 // GlobalIngestor defines the structure for the global fake ingestor (apple-like
@@ -438,18 +444,18 @@ func main() {
 		log.Fatalf("%s", err)
 	}
 
-	manifestStorage, err := storage.NewManifest(&terraformOutput.ManifestBucket.Value)
+	manifestStorage, err := storage.NewManifest(terraformOutput.ManifestBucket.Value.URL,
+		storage.WithAWSRegion(terraformOutput.ManifestBucket.Value.AWSRegion),
+		storage.WithAWSProfile(terraformOutput.ManifestBucket.Value.AWSProfile))
 	if err != nil {
 		log.Fatalf("%s", err)
 	}
 
 	if terraformOutput.HasTestEnvironment.Value && terraformOutput.SingletonIngestor.Value != nil {
-		globalManifestStorage, err := storage.NewManifest(&storage.Bucket{
-			URL:        terraformOutput.ManifestBucket.Value.URL,
-			KeyPrefix:  "singleton-ingestor",
-			AWSRegion:  terraformOutput.ManifestBucket.Value.AWSRegion,
-			AWSProfile: terraformOutput.ManifestBucket.Value.AWSProfile,
-		})
+		globalManifestStorage, err := storage.NewManifest(terraformOutput.ManifestBucket.Value.URL,
+			storage.WithKeyPrefix("singleton-ingestor"),
+			storage.WithAWSRegion(terraformOutput.ManifestBucket.Value.AWSRegion),
+			storage.WithAWSProfile(terraformOutput.ManifestBucket.Value.AWSProfile))
 		if err != nil {
 			log.Fatalf("%s", err)
 		}

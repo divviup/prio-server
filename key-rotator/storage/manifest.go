@@ -30,32 +30,62 @@ type Manifest struct {
 	keyPrefix string
 }
 
-// NewManifest creates a new Manifest based on the given bucket parameters.
-func NewManifest(bucket *Bucket) (Manifest, error) {
+// NewManifest creates a new Manifest based on the given bucket parameters. It
+// will use the given bucket for storage, which should be in the format
+// "gs://bucket_name" (to use GCS) or "s3://bucket_name" (to use S3).
+func NewManifest(bucket string, opts ...ManifestOption) (Manifest, error) {
+	var os manifestOpts
+	for _, o := range opts {
+		o(&os)
+	}
+
 	var ds datastore
 	switch {
-	case strings.HasPrefix(bucket.URL, "gs://"):
-		bkt := strings.TrimPrefix(bucket.URL, "gs://")
+	case strings.HasPrefix(bucket, "gs://"):
+		bucket = strings.TrimPrefix(bucket, "gs://")
 		gcs, err := storage.NewClient(context.TODO())
 		if err != nil {
 			return Manifest{}, fmt.Errorf("couldn't create GCS storage client: %w", err)
 		}
-		ds = gcsDatastore{gcs, bkt}
+		ds = gcsDatastore{gcs, bucket}
 
-	case strings.HasPrefix(bucket.URL, "s3://"):
-		bkt := strings.TrimPrefix(bucket.URL, "s3://")
+	case strings.HasPrefix(bucket, "s3://"):
+		bucket = strings.TrimPrefix(bucket, "s3://")
 		sess, err := session.NewSession()
 		if err != nil {
 			return Manifest{}, fmt.Errorf("couldn't create AWS session: %w", err)
 		}
-		config := aws.NewConfig().WithRegion(bucket.AWSRegion).WithCredentials(credentials.NewSharedCredentials("", bucket.AWSProfile))
+		config := aws.NewConfig().WithRegion(os.awsRegion).WithCredentials(credentials.NewSharedCredentials("", os.awsProfile))
 		s3 := s3.New(sess, config)
-		ds = s3Datastore{s3, bkt}
+		ds = s3Datastore{s3, bucket}
 
 	default:
-		return Manifest{}, fmt.Errorf("bad bucket URL %q", bucket.URL)
+		return Manifest{}, fmt.Errorf("bad bucket URL %q", bucket)
 	}
-	return Manifest{ds, bucket.KeyPrefix}, nil
+	return Manifest{ds, os.keyPrefix}, nil
+}
+
+type manifestOpts struct{ keyPrefix, awsRegion, awsProfile string }
+
+// ManifestOption represents an option that can be passed to NewManifest.
+type ManifestOption func(*manifestOpts)
+
+// WithKeyPrefix returns a manifest option that sets a key prefix, which will
+// be applied to all keys read or written from the underlying datastore.
+func WithKeyPrefix(keyPrefix string) ManifestOption {
+	return func(opts *manifestOpts) { opts.keyPrefix = keyPrefix }
+}
+
+// WithAWSProfile returns a manifest option that sets the AWS profile to use.
+// Applies only to Manifests backed by S3.
+func WithAWSProfile(awsProfile string) ManifestOption {
+	return func(opts *manifestOpts) { opts.awsProfile = awsProfile }
+}
+
+// WithAWSRegion returns a manifest option that sets the AWS region to use.
+// Applies only to Manifests backed by S3.
+func WithAWSRegion(awsRegion string) ManifestOption {
+	return func(opts *manifestOpts) { opts.awsRegion = awsRegion }
 }
 
 // WriteDataShareProcessorSpecificManifest writes the provided manifest for
@@ -237,18 +267,4 @@ func (ds s3Datastore) put(ctx context.Context, key string, data []byte) error {
 		return fmt.Errorf("couldn't write s3://%s/%s: %w", ds.bucket, key, err)
 	}
 	return nil
-}
-
-// Bucket specifies the cloud storage bucket where manifests are stored
-type Bucket struct {
-	// URL is the URL of the bucket, with the scheme "gs" for GCS buckets or
-	// "s3" for S3 buckets; e.g., "gs://bucket-name" or "s3://bucket-name"
-	URL string `json:"bucket_url"`
-	// KeyPrefix is a key prefix applied to every key read or written.
-	KeyPrefix string
-	// AWSRegion is the region the bucket is in, if it is an S3 bucket
-	AWSRegion string `json:"aws_region,omitempty"`
-	// AWSProfile is the AWS CLI config profile that should be used to
-	// authenticate to AWS, if the bucket is an S3 bucket
-	AWSProfile string `json:"aws_profile,omitempty"`
 }
