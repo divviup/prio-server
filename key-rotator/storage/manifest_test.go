@@ -84,7 +84,7 @@ func TestManifest(t *testing.T) {
 					if err != nil {
 						t.Fatalf("Unexpected error from GetDataShareProcessorSpecificManifest: %v", err)
 					}
-					if diff := cmp.Diff(&dspManifest, gotManifest); diff != "" {
+					if diff := cmp.Diff(dspManifest, gotManifest); diff != "" {
 						t.Errorf("Unexpected manifest (-want +got):\n%s", diff)
 					}
 				})
@@ -119,7 +119,7 @@ func TestManifest(t *testing.T) {
 					if err != nil {
 						t.Fatalf("Unexpected error from GetIngestorGlobalManifest: %v", err)
 					}
-					if diff := cmp.Diff(&globalManifest, gotManifest); diff != "" {
+					if diff := cmp.Diff(globalManifest, gotManifest); diff != "" {
 						t.Errorf("Unexpected manifest (-want +got):\n%s", diff)
 					}
 				})

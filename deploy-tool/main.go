@@ -88,12 +88,12 @@ type ManifestStorage interface {
 	// specified data share processor and returns it, if it exists and is
 	// well-formed. If the manifest does not exist, an error wrapping
 	// storage.ErrObjectNotExist will be returned.
-	GetDataShareProcessorSpecificManifest(ctx context.Context, dataShareProcessorName string) (*manifest.DataShareProcessorSpecificManifest, error)
+	GetDataShareProcessorSpecificManifest(ctx context.Context, dataShareProcessorName string) (manifest.DataShareProcessorSpecificManifest, error)
 
 	// GetIngestorGlobalManifest gets the ingestor global manifest, if it
 	// exists and is well-formed. If the manifest does not exist, an error
 	// wrapping storage.ErrObjectNotExist will be returned.
-	GetIngestorGlobalManifest(ctx context.Context) (*manifest.IngestorGlobalManifest, error)
+	GetIngestorGlobalManifest(ctx context.Context) (manifest.IngestorGlobalManifest, error)
 }
 
 type ManifestWriter interface {

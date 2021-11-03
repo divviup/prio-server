@@ -125,33 +125,33 @@ func (m Manifest) PutIngestorGlobalManifest(ctx context.Context, manifest manife
 // specified data share processor and returns it, if it exists and is
 // well-formed. If the manifest does not exist, an error wrapping
 // ErrObjectNotExist will be returned.
-func (m Manifest) GetDataShareProcessorSpecificManifest(ctx context.Context, dataShareProcessorName string) (*manifest.DataShareProcessorSpecificManifest, error) {
+func (m Manifest) GetDataShareProcessorSpecificManifest(ctx context.Context, dataShareProcessorName string) (manifest.DataShareProcessorSpecificManifest, error) {
 	key := m.keyFor(dataShareProcessorName)
 	manifestBytes, err := m.ds.get(ctx, key)
 	if err != nil {
-		return nil, fmt.Errorf("couldn't get manifest from %q: %w", key, err)
+		return manifest.DataShareProcessorSpecificManifest{}, fmt.Errorf("couldn't get manifest from %q: %w", key, err)
 	}
-	var manifest manifest.DataShareProcessorSpecificManifest
-	if err := json.Unmarshal(manifestBytes, &manifest); err != nil {
-		return nil, fmt.Errorf("couldn't unmarshal manifest from JSON: %w", err)
+	var dspsm manifest.DataShareProcessorSpecificManifest
+	if err := json.Unmarshal(manifestBytes, &dspsm); err != nil {
+		return manifest.DataShareProcessorSpecificManifest{}, fmt.Errorf("couldn't unmarshal manifest from JSON: %w", err)
 	}
-	return &manifest, nil
+	return dspsm, nil
 }
 
 // GetIngestorGlobalManifest gets the ingestor global manifest, if it exists
 // and is well-formed. If the manifest does not exist, an error wrapping
 // ErrObjectNotExist will be returned.
-func (m Manifest) GetIngestorGlobalManifest(ctx context.Context) (*manifest.IngestorGlobalManifest, error) {
+func (m Manifest) GetIngestorGlobalManifest(ctx context.Context) (manifest.IngestorGlobalManifest, error) {
 	key := m.keyFor(ingestorGlobalManifestDataShareProcessorName)
 	manifestBytes, err := m.ds.get(ctx, key)
 	if err != nil {
-		return nil, fmt.Errorf("couldn't get manifest from %q: %w", key, err)
+		return manifest.IngestorGlobalManifest{}, fmt.Errorf("couldn't get manifest from %q: %w", key, err)
 	}
-	var manifest manifest.IngestorGlobalManifest
-	if err := json.Unmarshal(manifestBytes, &manifest); err != nil {
-		return nil, fmt.Errorf("couldn't unmarshal manifest from JSON: %w", err)
+	var igm manifest.IngestorGlobalManifest
+	if err := json.Unmarshal(manifestBytes, &igm); err != nil {
+		return manifest.IngestorGlobalManifest{}, fmt.Errorf("couldn't unmarshal manifest from JSON: %w", err)
 	}
-	return &manifest, nil
+	return igm, nil
 }
 
 func (m Manifest) keyFor(dataShareProcessorName string) string {

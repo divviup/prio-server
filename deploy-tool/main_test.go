@@ -118,15 +118,15 @@ type FakeManifestStorage struct {
 	writtenManifests  map[string]manifest.DataShareProcessorSpecificManifest
 }
 
-func (s *FakeManifestStorage) GetDataShareProcessorSpecificManifest(_ context.Context, dataShareProcessorName string) (*manifest.DataShareProcessorSpecificManifest, error) {
+func (s *FakeManifestStorage) GetDataShareProcessorSpecificManifest(_ context.Context, dataShareProcessorName string) (manifest.DataShareProcessorSpecificManifest, error) {
 	if manifest, ok := s.existingManifests[dataShareProcessorName]; ok {
-		return &manifest, nil
+		return manifest, nil
 	}
-	return nil, storage.ErrObjectNotExist
+	return manifest.DataShareProcessorSpecificManifest{}, storage.ErrObjectNotExist
 }
 
-func (s *FakeManifestStorage) GetIngestorGlobalManifest(context.Context) (*manifest.IngestorGlobalManifest, error) {
-	return nil, errors.New("unimplemented")
+func (s *FakeManifestStorage) GetIngestorGlobalManifest(context.Context) (manifest.IngestorGlobalManifest, error) {
+	return manifest.IngestorGlobalManifest{}, errors.New("unimplemented")
 }
 
 func (s *FakeManifestStorage) PutDataShareProcessorSpecificManifest(
