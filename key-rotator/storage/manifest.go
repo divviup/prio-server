@@ -30,17 +30,15 @@ type Manifest struct {
 	keyPrefix string
 }
 
-var _ Storage = Manifest{}
-
-// NewStorage creates a new Storage based on the given bucket parameters.
-func NewStorage(bucket *Bucket) (Storage, error) {
+// NewManifest creates a new Manifest based on the given bucket parameters.
+func NewManifest(bucket *Bucket) (Manifest, error) {
 	var ds datastore
 	switch {
 	case strings.HasPrefix(bucket.URL, "gs://"):
 		bkt := strings.TrimPrefix(bucket.URL, "gs://")
 		gcs, err := storage.NewClient(context.TODO())
 		if err != nil {
-			return nil, fmt.Errorf("couldn't create GCS storage client: %w", err)
+			return Manifest{}, fmt.Errorf("couldn't create GCS storage client: %w", err)
 		}
 		ds = gcsDatastore{gcs, bkt}
 
@@ -48,14 +46,14 @@ func NewStorage(bucket *Bucket) (Storage, error) {
 		bkt := strings.TrimPrefix(bucket.URL, "s3://")
 		sess, err := session.NewSession()
 		if err != nil {
-			return nil, fmt.Errorf("couldn't create AWS session: %w", err)
+			return Manifest{}, fmt.Errorf("couldn't create AWS session: %w", err)
 		}
 		config := aws.NewConfig().WithRegion(bucket.AWSRegion).WithCredentials(credentials.NewSharedCredentials("", bucket.AWSProfile))
 		s3 := s3.New(sess, config)
 		ds = s3Datastore{s3, bkt}
 
 	default:
-		return nil, fmt.Errorf("bad bucket URL %q", bucket.URL)
+		return Manifest{}, fmt.Errorf("bad bucket URL %q", bucket.URL)
 	}
 	return Manifest{ds, bucket.KeyPrefix}, nil
 }
@@ -239,39 +237,6 @@ func (ds s3Datastore) put(ctx context.Context, key string, data []byte) error {
 		return fmt.Errorf("couldn't write s3://%s/%s: %w", ds.bucket, key, err)
 	}
 	return nil
-}
-
-type Storage interface {
-	Writer
-	Fetcher
-}
-
-// Writer writes manifests to some storage
-type Writer interface {
-	// WriteDataShareProcessorSpecificManifest writes the provided manifest for
-	// the provided share processor name in the writer's backing storage, or
-	// returns an error on failure.
-	WriteDataShareProcessorSpecificManifest(manifest manifest.DataShareProcessorSpecificManifest, dataShareProcessorName string) error
-
-	// WriteIngestorGlobalManifest writes the provided manifest to the writer's
-	// backing storage, or returns an error on failure.
-	WriteIngestorGlobalManifest(manifest manifest.IngestorGlobalManifest) error
-}
-
-// Fetcher fetches manifests from some storage
-type Fetcher interface {
-	// FetchDataShareProcessorSpecificManifest fetches the specific manifest for
-	// the specified data share processor and returns it, if it exists and is
-	// well-formed. Returns (nil,  nil) if the  manifest does not exist.
-	// Returns (nil, error) if something went wrong while trying to fetch or
-	// parse the manifest.
-	FetchDataShareProcessorSpecificManifest(dataShareProcessorName string) (*manifest.DataShareProcessorSpecificManifest, error)
-
-	// IngestorGlobalManifestExists returns true if the global manifest exists
-	// and is well-formed. Returns (false, nil) if it does not exist. Returns
-	// (false, error) if something went wrong while trying to fetch or parse the
-	// manifest.
-	IngestorGlobalManifestExists() (bool, error)
 }
 
 // Bucket specifies the cloud storage bucket where manifests are stored

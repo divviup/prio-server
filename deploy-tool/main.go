@@ -74,6 +74,35 @@ type SingletonIngestor struct {
 	BatchSigningKeyName       string `json:"batch_signing_key_name"`
 }
 
+type ManifestStorage interface {
+	ManifestWriter
+
+	// FetchDataShareProcessorSpecificManifest fetches the specific manifest for
+	// the specified data share processor and returns it, if it exists and is
+	// well-formed. Returns (nil,  nil) if the  manifest does not exist.
+	// Returns (nil, error) if something went wrong while trying to fetch or
+	// parse the manifest.
+	FetchDataShareProcessorSpecificManifest(dataShareProcessorName string) (*manifest.DataShareProcessorSpecificManifest, error)
+
+	// IngestorGlobalManifestExists returns true if the global manifest exists
+	// and is well-formed. Returns (false, nil) if it does not exist. Returns
+	// (false, error) if something went wrong while trying to fetch or parse the
+	// manifest.
+	IngestorGlobalManifestExists() (bool, error)
+}
+
+// ManifestWriter writes manifests to some storage
+type ManifestWriter interface {
+	// WriteDataShareProcessorSpecificManifest writes the provided manifest for
+	// the provided share processor name in the writer's backing storage, or
+	// returns an error on failure.
+	WriteDataShareProcessorSpecificManifest(manifest manifest.DataShareProcessorSpecificManifest, dataShareProcessorName string) error
+
+	// WriteIngestorGlobalManifest writes the provided manifest to the writer's
+	// backing storage, or returns an error on failure.
+	WriteIngestorGlobalManifest(manifest manifest.IngestorGlobalManifest) error
+}
+
 type privateKeyMarshaler func(*ecdsa.PrivateKey) ([]byte, error)
 
 // marshalX962UncompressedPrivateKey encodes a P-256 private key into the format
@@ -130,7 +159,7 @@ func generateAndDeployKeyPair(
 func setupTestEnvironment(
 	k8sSecretsClientGetter k8scorev1.SecretsGetter,
 	ingestor *SingletonIngestor,
-	manifestWriter storage.Writer,
+	manifestWriter ManifestWriter,
 ) error {
 	batchSigningPublicKey, err := createBatchSigningPublicKey(
 		k8sSecretsClientGetter.Secrets(ingestor.TesterKubernetesNamespace),
@@ -191,7 +220,7 @@ func createManifest(
 	k8sSecretsClientGetter k8scorev1.SecretsGetter,
 	dataShareProcessorName string,
 	manifestWrapper *SpecificManifestWrapper,
-	manifestWriter storage.Writer,
+	manifestWriter ManifestWriter,
 	packetEncryptionKeyCSRs manifest.PacketEncryptionKeyCSRs,
 ) error {
 	k8sSecretsClient := k8sSecretsClientGetter.Secrets(manifestWrapper.KubernetesNamespace)
@@ -311,7 +340,7 @@ func backupKeys(
 func createManifests(
 	k8sSecretsClientGetter k8scorev1.SecretsGetter,
 	specificManifests map[string]SpecificManifestWrapper,
-	manifestStorage storage.Storage,
+	manifestStorage ManifestStorage,
 ) error {
 	// Iterate over all specific manifests described by TF output so we can
 	// record any packet encryption key CSRs that have already been created. We
@@ -409,13 +438,13 @@ func main() {
 		log.Fatalf("%s", err)
 	}
 
-	manifestStorage, err := storage.NewStorage(&terraformOutput.ManifestBucket.Value)
+	manifestStorage, err := storage.NewManifest(&terraformOutput.ManifestBucket.Value)
 	if err != nil {
 		log.Fatalf("%s", err)
 	}
 
 	if terraformOutput.HasTestEnvironment.Value && terraformOutput.SingletonIngestor.Value != nil {
-		globalManifestStorage, err := storage.NewStorage(&storage.Bucket{
+		globalManifestStorage, err := storage.NewManifest(&storage.Bucket{
 			URL:        terraformOutput.ManifestBucket.Value.URL,
 			KeyPrefix:  "singleton-ingestor",
 			AWSRegion:  terraformOutput.ManifestBucket.Value.AWSRegion,
