@@ -142,7 +142,7 @@ jobs:
       uses: docker/build-push-action@v2
       with:
         file: ./manifest-updater/Dockerfile
-        context: ./manifest-updater
+        context: ./
 
   manifest-updater-test:
     runs-on: ubuntu-latest
