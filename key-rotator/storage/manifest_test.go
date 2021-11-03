@@ -46,11 +46,11 @@ func TestManifest(t *testing.T) {
 		{"directory-like key prefix", "some/dir/key/prefix/"},
 	} {
 		test := test
-		t.Run("WriteDataShareProcessorSpecificManifest", func(t *testing.T) {
+		t.Run("PutDataShareProcessorSpecificManifest", func(t *testing.T) {
 			t.Parallel()
 			m, objs := newManifest(test.keyPrefix)
 			wantObjs := map[string][]byte{path.Join(test.keyPrefix, "dsp-manifest.json"): dspManifestBytes}
-			if err := m.WriteDataShareProcessorSpecificManifest(dspManifest, dspName); err != nil {
+			if err := m.PutDataShareProcessorSpecificManifest(dspName, dspManifest); err != nil {
 				t.Fatalf("Unexpected error from WriteDataShareProcessorSpecificManifest: %v", err)
 			}
 			if diff := cmp.Diff(wantObjs, objs); diff != "" {
@@ -62,7 +62,7 @@ func TestManifest(t *testing.T) {
 			t.Parallel()
 			m, objs := newManifest(test.keyPrefix)
 			wantObjs := map[string][]byte{path.Join(test.keyPrefix, "global-manifest.json"): globalManifestBytes}
-			if err := m.WriteIngestorGlobalManifest(globalManifest); err != nil {
+			if err := m.PutIngestorGlobalManifest(globalManifest); err != nil {
 				t.Fatalf("Unexpected error from WriteIngestorGlobalManifest: %v", err)
 			}
 			if diff := cmp.Diff(wantObjs, objs); diff != "" {
@@ -70,18 +70,30 @@ func TestManifest(t *testing.T) {
 			}
 		})
 
-		t.Run("FetchDataShareProcessorSpecificManifest", func(t *testing.T) {
+		t.Run("GetDataShareProcessorSpecificManifest", func(t *testing.T) {
 			t.Parallel()
 			t.Run("valid manifest", func(t *testing.T) {
 				t.Parallel()
 				m, objs := newManifest(test.keyPrefix)
 				objs[path.Join(test.keyPrefix, "dsp-manifest.json")] = dspManifestBytes
-				gotManifest, err := m.FetchDataShareProcessorSpecificManifest(dspName)
+				gotManifest, err := m.GetDataShareProcessorSpecificManifest(dspName)
 				if err != nil {
-					t.Fatalf("Unexpected error from FetchDataShareProcessorSpecificManifest: %v", err)
+					t.Fatalf("Unexpected error from GetDataShareProcessorSpecificManifest: %v", err)
 				}
 				if diff := cmp.Diff(&dspManifest, gotManifest); diff != "" {
 					t.Errorf("Unexpected manifest (-want +got):\n%s", diff)
+				}
+			})
+
+			t.Run("no manifest", func(t *testing.T) {
+				t.Parallel()
+				m, _ := newManifest(test.keyPrefix)
+				gotManifest, err := m.GetDataShareProcessorSpecificManifest(dspName)
+				if err != nil {
+					t.Fatalf("Unexpected error from GetDataShareProcessorSpecificManifest: %v", err)
+				}
+				if gotManifest != nil {
+					t.Errorf("Unexpected manifest: %v", gotManifest)
 				}
 			})
 
@@ -89,7 +101,7 @@ func TestManifest(t *testing.T) {
 				t.Parallel()
 				m, objs := newManifest(test.keyPrefix)
 				objs[path.Join(test.keyPrefix, "dsp-manifest.json")] = []byte("bogus non-json data")
-				_, err := m.FetchDataShareProcessorSpecificManifest(dspName)
+				_, err := m.GetDataShareProcessorSpecificManifest(dspName)
 				const wantErrStr = "couldn't unmarshal"
 				if err == nil || !strings.Contains(err.Error(), wantErrStr) {
 					t.Errorf("Wanted error containing %q, got: %v", wantErrStr, err)
@@ -97,32 +109,30 @@ func TestManifest(t *testing.T) {
 			})
 		})
 
-		t.Run("IngestorGlobalManifestExists", func(t *testing.T) {
+		t.Run("GetIngestorGlobalManifest", func(t *testing.T) {
 			t.Parallel()
 			t.Run("valid manifest", func(t *testing.T) {
 				t.Parallel()
 				m, objs := newManifest(test.keyPrefix)
 				objs[path.Join(test.keyPrefix, "global-manifest.json")] = globalManifestBytes
-				const wantExists = true
-				gotExists, err := m.IngestorGlobalManifestExists()
+				gotManifest, err := m.GetIngestorGlobalManifest()
 				if err != nil {
-					t.Fatalf("Unexpected error from IngestorGlobalManifestExists: %v", err)
+					t.Fatalf("Unexpected error from GetIngestorGlobalManifest: %v", err)
 				}
-				if wantExists != gotExists {
-					t.Errorf("IngestorGlobalManifestExists() = %v, want %v", gotExists, wantExists)
+				if diff := cmp.Diff(&globalManifest, gotManifest); diff != "" {
+					t.Errorf("Unexpected manifest (-want +got):\n%s", diff)
 				}
 			})
 
 			t.Run("no manifest", func(t *testing.T) {
 				t.Parallel()
 				m, _ := newManifest(test.keyPrefix)
-				const wantExists = false
-				gotExists, err := m.IngestorGlobalManifestExists()
+				gotManifest, err := m.GetIngestorGlobalManifest()
 				if err != nil {
-					t.Fatalf("Unexpected error from IngestorGlobalManifestExists: %v", err)
+					t.Fatalf("Unexpected error from GetIngestorGlobalManifest: %v", err)
 				}
-				if wantExists != gotExists {
-					t.Errorf("IngestorGlobalManifestExists() = %v, want %v", gotExists, wantExists)
+				if gotManifest != nil {
+					t.Errorf("Unexpected manifest: %v", gotManifest)
 				}
 			})
 
@@ -130,10 +140,10 @@ func TestManifest(t *testing.T) {
 				t.Parallel()
 				m, objs := newManifest(test.keyPrefix)
 				objs[path.Join(test.keyPrefix, "global-manifest.json")] = []byte("bogus non-json data")
-				_, err := m.IngestorGlobalManifestExists()
+				_, err := m.GetIngestorGlobalManifest()
 				const wantErrStr = "couldn't unmarshal"
 				if err == nil || !strings.Contains(err.Error(), wantErrStr) {
-					t.Errorf("Unexpected error from IngestorGlobalManifestExists: %v", err)
+					t.Errorf("Unexpected error from GetIngestorGlobalManifest: %v", err)
 				}
 			})
 		})

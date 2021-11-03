@@ -83,30 +83,25 @@ type SingletonIngestor struct {
 type ManifestStorage interface {
 	ManifestWriter
 
-	// FetchDataShareProcessorSpecificManifest fetches the specific manifest for
-	// the specified data share processor and returns it, if it exists and is
-	// well-formed. Returns (nil,  nil) if the  manifest does not exist.
-	// Returns (nil, error) if something went wrong while trying to fetch or
-	// parse the manifest.
-	FetchDataShareProcessorSpecificManifest(dataShareProcessorName string) (*manifest.DataShareProcessorSpecificManifest, error)
+	// GetDataShareProcessorSpecificManifest gets the specific manifest for the
+	// specified data share processor and returns it, if it exists and is
+	// well-formed. Returns (nil, nil) if the manifest does not exist.
+	GetDataShareProcessorSpecificManifest(dataShareProcessorName string) (*manifest.DataShareProcessorSpecificManifest, error)
 
-	// IngestorGlobalManifestExists returns true if the global manifest exists
-	// and is well-formed. Returns (false, nil) if it does not exist. Returns
-	// (false, error) if something went wrong while trying to fetch or parse the
-	// manifest.
-	IngestorGlobalManifestExists() (bool, error)
+	// GetIngestorGlobalManifest gets the ingestor global manifest, if it
+	// exists and is well-formed. Returns (nil, nil) if it does not exist.
+	GetIngestorGlobalManifest() (*manifest.IngestorGlobalManifest, error)
 }
 
-// ManifestWriter writes manifests to some storage
 type ManifestWriter interface {
-	// WriteDataShareProcessorSpecificManifest writes the provided manifest for
+	// PutDataShareProcessorSpecificManifest writes the provided manifest for
 	// the provided share processor name in the writer's backing storage, or
 	// returns an error on failure.
-	WriteDataShareProcessorSpecificManifest(manifest manifest.DataShareProcessorSpecificManifest, dataShareProcessorName string) error
+	PutDataShareProcessorSpecificManifest(dataShareProcessorName string, manifest manifest.DataShareProcessorSpecificManifest) error
 
-	// WriteIngestorGlobalManifest writes the provided manifest to the writer's
+	// PutIngestorGlobalManifest writes the provided manifest to the writer's
 	// backing storage, or returns an error on failure.
-	WriteIngestorGlobalManifest(manifest manifest.IngestorGlobalManifest) error
+	PutIngestorGlobalManifest(manifest manifest.IngestorGlobalManifest) error
 }
 
 type privateKeyMarshaler func(*ecdsa.PrivateKey) ([]byte, error)
@@ -188,7 +183,7 @@ func setupTestEnvironment(
 		},
 	}
 
-	return manifestWriter.WriteIngestorGlobalManifest(globalManifest)
+	return manifestWriter.PutIngestorGlobalManifest(globalManifest)
 }
 
 func createBatchSigningPublicKey(
@@ -288,7 +283,7 @@ func createManifest(
 	}
 
 	// Put the specific manifests into the manifest bucket.
-	if err := manifestWriter.WriteDataShareProcessorSpecificManifest(manifestWrapper.SpecificManifest, dataShareProcessorName); err != nil {
+	if err := manifestWriter.PutDataShareProcessorSpecificManifest(dataShareProcessorName, manifestWrapper.SpecificManifest); err != nil {
 		return fmt.Errorf("could not write data share specific manifest: %s", err)
 	}
 
@@ -356,7 +351,7 @@ func createManifests(
 	existingManifests := map[string]struct{}{}
 	packetEncryptionKeyCSRs := manifest.PacketEncryptionKeyCSRs{}
 	for dataShareProcessorName := range specificManifests {
-		manifest, err := manifestStorage.FetchDataShareProcessorSpecificManifest(dataShareProcessorName)
+		manifest, err := manifestStorage.GetDataShareProcessorSpecificManifest(dataShareProcessorName)
 		if err != nil {
 			return err
 		}
@@ -459,10 +454,10 @@ func main() {
 		if err != nil {
 			log.Fatalf("%s", err)
 		}
-		manifestExists, err := globalManifestStorage.IngestorGlobalManifestExists()
+		globalManifest, err := globalManifestStorage.GetIngestorGlobalManifest()
 		if err != nil {
 			log.Fatalf("%s", err)
-		} else if manifestExists {
+		} else if globalManifest != nil {
 			log.Println("global ingestor manifest exists - skipping creation")
 		} else if err := setupTestEnvironment(
 			k8sClient.CoreV1(),

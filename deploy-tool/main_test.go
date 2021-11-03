@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"reflect"
 	"testing"
 
@@ -114,29 +115,29 @@ type FakeManifestStorage struct {
 	writtenManifests  map[string]manifest.DataShareProcessorSpecificManifest
 }
 
-func (s *FakeManifestStorage) FetchDataShareProcessorSpecificManifest(dataShareProcessorName string) (*manifest.DataShareProcessorSpecificManifest, error) {
+func (s *FakeManifestStorage) GetDataShareProcessorSpecificManifest(dataShareProcessorName string) (*manifest.DataShareProcessorSpecificManifest, error) {
 	if manifest, ok := s.existingManifests[dataShareProcessorName]; ok {
 		return &manifest, nil
 	}
 	return nil, nil
 }
 
-func (s *FakeManifestStorage) IngestorGlobalManifestExists() (bool, error) {
-	return false, nil
+func (s *FakeManifestStorage) GetIngestorGlobalManifest() (*manifest.IngestorGlobalManifest, error) {
+	return nil, errors.New("unimplemented")
 }
 
-func (s *FakeManifestStorage) WriteDataShareProcessorSpecificManifest(
-	manifest manifest.DataShareProcessorSpecificManifest,
+func (s *FakeManifestStorage) PutDataShareProcessorSpecificManifest(
 	dataShareProcessorName string,
+	manifest manifest.DataShareProcessorSpecificManifest,
 ) error {
 	s.writtenManifests[dataShareProcessorName] = manifest
 	return nil
 }
 
-func (s *FakeManifestStorage) WriteIngestorGlobalManifest(
+func (s *FakeManifestStorage) PutIngestorGlobalManifest(
 	manifest manifest.IngestorGlobalManifest,
 ) error {
-	return nil
+	return errors.New("unimplemented")
 }
 
 func TestCreateManifests(t *testing.T) {

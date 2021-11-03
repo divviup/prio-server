@@ -88,10 +88,10 @@ func WithAWSRegion(awsRegion string) ManifestOption {
 	return func(opts *manifestOpts) { opts.awsRegion = awsRegion }
 }
 
-// WriteDataShareProcessorSpecificManifest writes the provided manifest for
-// the provided share processor name in the writer's backing storage, or
-// returns an error on failure.
-func (m Manifest) WriteDataShareProcessorSpecificManifest(manifest manifest.DataShareProcessorSpecificManifest, dataShareProcessorName string) error {
+// PutDataShareProcessorSpecificManifest writes the provided manifest for the
+// provided share processor name in the writer's backing storage, or returns an
+// error on failure.
+func (m Manifest) PutDataShareProcessorSpecificManifest(dataShareProcessorName string, manifest manifest.DataShareProcessorSpecificManifest) error {
 	manifestBytes, err := json.Marshal(manifest)
 	if err != nil {
 		return fmt.Errorf("couldn't marshal manifest as JSON: %w", err)
@@ -103,9 +103,9 @@ func (m Manifest) WriteDataShareProcessorSpecificManifest(manifest manifest.Data
 	return nil
 }
 
-// WriteIngestorGlobalManifest writes the provided manifest to the writer's
+// PutIngestorGlobalManifest writes the provided manifest to the writer's
 // backing storage, or returns an error on failure.
-func (m Manifest) WriteIngestorGlobalManifest(manifest manifest.IngestorGlobalManifest) error {
+func (m Manifest) PutIngestorGlobalManifest(manifest manifest.IngestorGlobalManifest) error {
 	manifestBytes, err := json.Marshal(manifest)
 	if err != nil {
 		return fmt.Errorf("couldn't marshal manifest as JSON: %w", err)
@@ -117,10 +117,10 @@ func (m Manifest) WriteIngestorGlobalManifest(manifest manifest.IngestorGlobalMa
 	return nil
 }
 
-// FetchDataShareProcessorSpecificManifest fetches the specific manifest for
-// the specified data share processor and returns it, if it exists and is
+// GetDataShareProcessorSpecificManifest gets the specific manifest for the
+// specified data share processor and returns it, if it exists and is
 // well-formed. Returns (nil, nil) if the manifest does not exist.
-func (m Manifest) FetchDataShareProcessorSpecificManifest(dataShareProcessorName string) (*manifest.DataShareProcessorSpecificManifest, error) {
+func (m Manifest) GetDataShareProcessorSpecificManifest(dataShareProcessorName string) (*manifest.DataShareProcessorSpecificManifest, error) {
 	key := m.keyFor(dataShareProcessorName)
 	manifestBytes, err := m.ds.get(context.TODO(), key)
 	if errors.Is(err, errObjectNotExist) {
@@ -136,24 +136,22 @@ func (m Manifest) FetchDataShareProcessorSpecificManifest(dataShareProcessorName
 	return &manifest, nil
 }
 
-// IngestorGlobalManifestExists returns true if the global manifest exists
-// and is well-formed. Returns (false, nil) if it does not exist. Returns
-// (false, error) if something went wrong while trying to fetch or parse the
-// manifest.
-func (m Manifest) IngestorGlobalManifestExists() (bool, error) {
+// GetIngestorGlobalManifest gets the ingestor global manifest, if it exists
+// and is well-formed. Returns (nil, nil) if it does not exist.
+func (m Manifest) GetIngestorGlobalManifest() (*manifest.IngestorGlobalManifest, error) {
 	key := m.keyFor(ingestorGlobalManifestDataShareProcessorName)
 	manifestBytes, err := m.ds.get(context.TODO(), key)
 	if errors.Is(err, errObjectNotExist) {
-		return false, nil
+		return nil, nil
 	}
 	if err != nil {
-		return false, fmt.Errorf("couldn't get manifest from %q: %w", key, err)
+		return nil, fmt.Errorf("couldn't get manifest from %q: %w", key, err)
 	}
 	var manifest manifest.IngestorGlobalManifest
 	if err := json.Unmarshal(manifestBytes, &manifest); err != nil {
-		return false, fmt.Errorf("couldn't unmarshal manifest from JSON: %w", err)
+		return nil, fmt.Errorf("couldn't unmarshal manifest from JSON: %w", err)
 	}
-	return true, nil
+	return &manifest, nil
 }
 
 func (m Manifest) keyFor(dataShareProcessorName string) string {
