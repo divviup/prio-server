@@ -16,6 +16,8 @@ import (
 	"github.com/abetterinternet/prio-server/key-rotator/manifest"
 )
 
+var ctx = context.Background()
+
 type FakeKubernetesSecretsClientGetter struct {
 	secrets map[string]k8scorev1.Secret
 }
@@ -115,18 +117,19 @@ type FakeManifestStorage struct {
 	writtenManifests  map[string]manifest.DataShareProcessorSpecificManifest
 }
 
-func (s *FakeManifestStorage) GetDataShareProcessorSpecificManifest(dataShareProcessorName string) (*manifest.DataShareProcessorSpecificManifest, error) {
+func (s *FakeManifestStorage) GetDataShareProcessorSpecificManifest(_ context.Context, dataShareProcessorName string) (*manifest.DataShareProcessorSpecificManifest, error) {
 	if manifest, ok := s.existingManifests[dataShareProcessorName]; ok {
 		return &manifest, nil
 	}
 	return nil, nil
 }
 
-func (s *FakeManifestStorage) GetIngestorGlobalManifest() (*manifest.IngestorGlobalManifest, error) {
+func (s *FakeManifestStorage) GetIngestorGlobalManifest(context.Context) (*manifest.IngestorGlobalManifest, error) {
 	return nil, errors.New("unimplemented")
 }
 
 func (s *FakeManifestStorage) PutDataShareProcessorSpecificManifest(
+	_ context.Context,
 	dataShareProcessorName string,
 	manifest manifest.DataShareProcessorSpecificManifest,
 ) error {
@@ -135,6 +138,7 @@ func (s *FakeManifestStorage) PutDataShareProcessorSpecificManifest(
 }
 
 func (s *FakeManifestStorage) PutIngestorGlobalManifest(
+	_ context.Context,
 	manifest manifest.IngestorGlobalManifest,
 ) error {
 	return errors.New("unimplemented")
@@ -242,7 +246,7 @@ func TestCreateManifests(t *testing.T) {
 		secrets: map[string]k8scorev1.Secret{},
 	}
 
-	if err := createManifests(&secretsClientGetter, specificManifests, &manifestStorage); err != nil {
+	if err := createManifests(ctx, &secretsClientGetter, specificManifests, &manifestStorage); err != nil {
 		t.Errorf("unexpected error %s", err)
 	}
 
@@ -378,7 +382,7 @@ func TestCreateManifestsExistingDuplicatePacketEncryptionKeyCsrs(t *testing.T) {
 		secrets: map[string]k8scorev1.Secret{},
 	}
 
-	if err := createManifests(&secretsClientGetter, specificManifests, &manifestStorage); err == nil {
+	if err := createManifests(ctx, &secretsClientGetter, specificManifests, &manifestStorage); err == nil {
 		t.Error("manifest creation should fail when existing posted manifests contain two different CSRs for the same packet encryption key name")
 	}
 }

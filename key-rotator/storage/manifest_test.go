@@ -11,6 +11,8 @@ import (
 	"github.com/google/go-cmp/cmp"
 )
 
+var ctx = context.Background()
+
 func TestManifest(t *testing.T) {
 	t.Parallel()
 
@@ -50,20 +52,20 @@ func TestManifest(t *testing.T) {
 			t.Parallel()
 			m, objs := newManifest(test.keyPrefix)
 			wantObjs := map[string][]byte{path.Join(test.keyPrefix, "dsp-manifest.json"): dspManifestBytes}
-			if err := m.PutDataShareProcessorSpecificManifest(dspName, dspManifest); err != nil {
-				t.Fatalf("Unexpected error from WriteDataShareProcessorSpecificManifest: %v", err)
+			if err := m.PutDataShareProcessorSpecificManifest(ctx, dspName, dspManifest); err != nil {
+				t.Fatalf("Unexpected error from PutDataShareProcessorSpecificManifest: %v", err)
 			}
 			if diff := cmp.Diff(wantObjs, objs); diff != "" {
 				t.Errorf("Unexpected objects in datastore (-want +got):\n%s", diff)
 			}
 		})
 
-		t.Run("WriteIngestorGlobalManifest", func(t *testing.T) {
+		t.Run("PutIngestorGlobalManifest", func(t *testing.T) {
 			t.Parallel()
 			m, objs := newManifest(test.keyPrefix)
 			wantObjs := map[string][]byte{path.Join(test.keyPrefix, "global-manifest.json"): globalManifestBytes}
-			if err := m.PutIngestorGlobalManifest(globalManifest); err != nil {
-				t.Fatalf("Unexpected error from WriteIngestorGlobalManifest: %v", err)
+			if err := m.PutIngestorGlobalManifest(ctx, globalManifest); err != nil {
+				t.Fatalf("Unexpected error from PutIngestorGlobalManifest: %v", err)
 			}
 			if diff := cmp.Diff(wantObjs, objs); diff != "" {
 				t.Errorf("Unexpected objects in datastore (-want +got):\n%s", diff)
@@ -76,7 +78,7 @@ func TestManifest(t *testing.T) {
 				t.Parallel()
 				m, objs := newManifest(test.keyPrefix)
 				objs[path.Join(test.keyPrefix, "dsp-manifest.json")] = dspManifestBytes
-				gotManifest, err := m.GetDataShareProcessorSpecificManifest(dspName)
+				gotManifest, err := m.GetDataShareProcessorSpecificManifest(ctx, dspName)
 				if err != nil {
 					t.Fatalf("Unexpected error from GetDataShareProcessorSpecificManifest: %v", err)
 				}
@@ -88,7 +90,7 @@ func TestManifest(t *testing.T) {
 			t.Run("no manifest", func(t *testing.T) {
 				t.Parallel()
 				m, _ := newManifest(test.keyPrefix)
-				gotManifest, err := m.GetDataShareProcessorSpecificManifest(dspName)
+				gotManifest, err := m.GetDataShareProcessorSpecificManifest(ctx, dspName)
 				if err != nil {
 					t.Fatalf("Unexpected error from GetDataShareProcessorSpecificManifest: %v", err)
 				}
@@ -101,7 +103,7 @@ func TestManifest(t *testing.T) {
 				t.Parallel()
 				m, objs := newManifest(test.keyPrefix)
 				objs[path.Join(test.keyPrefix, "dsp-manifest.json")] = []byte("bogus non-json data")
-				_, err := m.GetDataShareProcessorSpecificManifest(dspName)
+				_, err := m.GetDataShareProcessorSpecificManifest(ctx, dspName)
 				const wantErrStr = "couldn't unmarshal"
 				if err == nil || !strings.Contains(err.Error(), wantErrStr) {
 					t.Errorf("Wanted error containing %q, got: %v", wantErrStr, err)
@@ -115,7 +117,7 @@ func TestManifest(t *testing.T) {
 				t.Parallel()
 				m, objs := newManifest(test.keyPrefix)
 				objs[path.Join(test.keyPrefix, "global-manifest.json")] = globalManifestBytes
-				gotManifest, err := m.GetIngestorGlobalManifest()
+				gotManifest, err := m.GetIngestorGlobalManifest(ctx)
 				if err != nil {
 					t.Fatalf("Unexpected error from GetIngestorGlobalManifest: %v", err)
 				}
@@ -127,7 +129,7 @@ func TestManifest(t *testing.T) {
 			t.Run("no manifest", func(t *testing.T) {
 				t.Parallel()
 				m, _ := newManifest(test.keyPrefix)
-				gotManifest, err := m.GetIngestorGlobalManifest()
+				gotManifest, err := m.GetIngestorGlobalManifest(ctx)
 				if err != nil {
 					t.Fatalf("Unexpected error from GetIngestorGlobalManifest: %v", err)
 				}
@@ -140,7 +142,7 @@ func TestManifest(t *testing.T) {
 				t.Parallel()
 				m, objs := newManifest(test.keyPrefix)
 				objs[path.Join(test.keyPrefix, "global-manifest.json")] = []byte("bogus non-json data")
-				_, err := m.GetIngestorGlobalManifest()
+				_, err := m.GetIngestorGlobalManifest(ctx)
 				const wantErrStr = "couldn't unmarshal"
 				if err == nil || !strings.Contains(err.Error(), wantErrStr) {
 					t.Errorf("Unexpected error from GetIngestorGlobalManifest: %v", err)

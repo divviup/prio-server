@@ -33,7 +33,7 @@ type Manifest struct {
 // NewManifest creates a new Manifest based on the given bucket parameters. It
 // will use the given bucket for storage, which should be in the format
 // "gs://bucket_name" (to use GCS) or "s3://bucket_name" (to use S3).
-func NewManifest(bucket string, opts ...ManifestOption) (Manifest, error) {
+func NewManifest(ctx context.Context, bucket string, opts ...ManifestOption) (Manifest, error) {
 	var os manifestOpts
 	for _, o := range opts {
 		o(&os)
@@ -43,7 +43,7 @@ func NewManifest(bucket string, opts ...ManifestOption) (Manifest, error) {
 	switch {
 	case strings.HasPrefix(bucket, "gs://"):
 		bucket = strings.TrimPrefix(bucket, "gs://")
-		gcs, err := storage.NewClient(context.TODO())
+		gcs, err := storage.NewClient(ctx)
 		if err != nil {
 			return Manifest{}, fmt.Errorf("couldn't create GCS storage client: %w", err)
 		}
@@ -91,13 +91,13 @@ func WithAWSRegion(awsRegion string) ManifestOption {
 // PutDataShareProcessorSpecificManifest writes the provided manifest for the
 // provided share processor name in the writer's backing storage, or returns an
 // error on failure.
-func (m Manifest) PutDataShareProcessorSpecificManifest(dataShareProcessorName string, manifest manifest.DataShareProcessorSpecificManifest) error {
+func (m Manifest) PutDataShareProcessorSpecificManifest(ctx context.Context, dataShareProcessorName string, manifest manifest.DataShareProcessorSpecificManifest) error {
 	manifestBytes, err := json.Marshal(manifest)
 	if err != nil {
 		return fmt.Errorf("couldn't marshal manifest as JSON: %w", err)
 	}
 	key := m.keyFor(dataShareProcessorName)
-	if err := m.ds.put(context.TODO(), key, manifestBytes); err != nil {
+	if err := m.ds.put(ctx, key, manifestBytes); err != nil {
 		return fmt.Errorf("couldn't put manifest to %q: %w", key, err)
 	}
 	return nil
@@ -105,13 +105,13 @@ func (m Manifest) PutDataShareProcessorSpecificManifest(dataShareProcessorName s
 
 // PutIngestorGlobalManifest writes the provided manifest to the writer's
 // backing storage, or returns an error on failure.
-func (m Manifest) PutIngestorGlobalManifest(manifest manifest.IngestorGlobalManifest) error {
+func (m Manifest) PutIngestorGlobalManifest(ctx context.Context, manifest manifest.IngestorGlobalManifest) error {
 	manifestBytes, err := json.Marshal(manifest)
 	if err != nil {
 		return fmt.Errorf("couldn't marshal manifest as JSON: %w", err)
 	}
 	key := m.keyFor(ingestorGlobalManifestDataShareProcessorName)
-	if err := m.ds.put(context.TODO(), key, manifestBytes); err != nil {
+	if err := m.ds.put(ctx, key, manifestBytes); err != nil {
 		return fmt.Errorf("couldn't put manifest to %q: %w", key, err)
 	}
 	return nil
@@ -120,9 +120,9 @@ func (m Manifest) PutIngestorGlobalManifest(manifest manifest.IngestorGlobalMani
 // GetDataShareProcessorSpecificManifest gets the specific manifest for the
 // specified data share processor and returns it, if it exists and is
 // well-formed. Returns (nil, nil) if the manifest does not exist.
-func (m Manifest) GetDataShareProcessorSpecificManifest(dataShareProcessorName string) (*manifest.DataShareProcessorSpecificManifest, error) {
+func (m Manifest) GetDataShareProcessorSpecificManifest(ctx context.Context, dataShareProcessorName string) (*manifest.DataShareProcessorSpecificManifest, error) {
 	key := m.keyFor(dataShareProcessorName)
-	manifestBytes, err := m.ds.get(context.TODO(), key)
+	manifestBytes, err := m.ds.get(ctx, key)
 	if errors.Is(err, errObjectNotExist) {
 		return nil, nil
 	}
@@ -138,9 +138,9 @@ func (m Manifest) GetDataShareProcessorSpecificManifest(dataShareProcessorName s
 
 // GetIngestorGlobalManifest gets the ingestor global manifest, if it exists
 // and is well-formed. Returns (nil, nil) if it does not exist.
-func (m Manifest) GetIngestorGlobalManifest() (*manifest.IngestorGlobalManifest, error) {
+func (m Manifest) GetIngestorGlobalManifest(ctx context.Context) (*manifest.IngestorGlobalManifest, error) {
 	key := m.keyFor(ingestorGlobalManifestDataShareProcessorName)
-	manifestBytes, err := m.ds.get(context.TODO(), key)
+	manifestBytes, err := m.ds.get(ctx, key)
 	if errors.Is(err, errObjectNotExist) {
 		return nil, nil
 	}

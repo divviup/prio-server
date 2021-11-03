@@ -86,22 +86,22 @@ type ManifestStorage interface {
 	// GetDataShareProcessorSpecificManifest gets the specific manifest for the
 	// specified data share processor and returns it, if it exists and is
 	// well-formed. Returns (nil, nil) if the manifest does not exist.
-	GetDataShareProcessorSpecificManifest(dataShareProcessorName string) (*manifest.DataShareProcessorSpecificManifest, error)
+	GetDataShareProcessorSpecificManifest(ctx context.Context, dataShareProcessorName string) (*manifest.DataShareProcessorSpecificManifest, error)
 
 	// GetIngestorGlobalManifest gets the ingestor global manifest, if it
 	// exists and is well-formed. Returns (nil, nil) if it does not exist.
-	GetIngestorGlobalManifest() (*manifest.IngestorGlobalManifest, error)
+	GetIngestorGlobalManifest(ctx context.Context) (*manifest.IngestorGlobalManifest, error)
 }
 
 type ManifestWriter interface {
 	// PutDataShareProcessorSpecificManifest writes the provided manifest for
 	// the provided share processor name in the writer's backing storage, or
 	// returns an error on failure.
-	PutDataShareProcessorSpecificManifest(dataShareProcessorName string, manifest manifest.DataShareProcessorSpecificManifest) error
+	PutDataShareProcessorSpecificManifest(ctx context.Context, dataShareProcessorName string, manifest manifest.DataShareProcessorSpecificManifest) error
 
 	// PutIngestorGlobalManifest writes the provided manifest to the writer's
 	// backing storage, or returns an error on failure.
-	PutIngestorGlobalManifest(manifest manifest.IngestorGlobalManifest) error
+	PutIngestorGlobalManifest(ctx context.Context, manifest manifest.IngestorGlobalManifest) error
 }
 
 type privateKeyMarshaler func(*ecdsa.PrivateKey) ([]byte, error)
@@ -158,6 +158,7 @@ func generateAndDeployKeyPair(
 }
 
 func setupTestEnvironment(
+	ctx context.Context,
 	k8sSecretsClientGetter k8scorev1.SecretsGetter,
 	ingestor *SingletonIngestor,
 	manifestWriter ManifestWriter,
@@ -183,7 +184,7 @@ func setupTestEnvironment(
 		},
 	}
 
-	return manifestWriter.PutIngestorGlobalManifest(globalManifest)
+	return manifestWriter.PutIngestorGlobalManifest(ctx, globalManifest)
 }
 
 func createBatchSigningPublicKey(
@@ -218,6 +219,7 @@ func createBatchSigningPublicKey(
 }
 
 func createManifest(
+	ctx context.Context,
 	k8sSecretsClientGetter k8scorev1.SecretsGetter,
 	dataShareProcessorName string,
 	manifestWrapper *SpecificManifestWrapper,
@@ -283,7 +285,7 @@ func createManifest(
 	}
 
 	// Put the specific manifests into the manifest bucket.
-	if err := manifestWriter.PutDataShareProcessorSpecificManifest(dataShareProcessorName, manifestWrapper.SpecificManifest); err != nil {
+	if err := manifestWriter.PutDataShareProcessorSpecificManifest(ctx, dataShareProcessorName, manifestWrapper.SpecificManifest); err != nil {
 		return fmt.Errorf("could not write data share specific manifest: %s", err)
 	}
 
@@ -339,6 +341,7 @@ func backupKeys(
 }
 
 func createManifests(
+	ctx context.Context,
 	k8sSecretsClientGetter k8scorev1.SecretsGetter,
 	specificManifests map[string]SpecificManifestWrapper,
 	manifestStorage ManifestStorage,
@@ -351,7 +354,7 @@ func createManifests(
 	existingManifests := map[string]struct{}{}
 	packetEncryptionKeyCSRs := manifest.PacketEncryptionKeyCSRs{}
 	for dataShareProcessorName := range specificManifests {
-		manifest, err := manifestStorage.GetDataShareProcessorSpecificManifest(dataShareProcessorName)
+		manifest, err := manifestStorage.GetDataShareProcessorSpecificManifest(ctx, dataShareProcessorName)
 		if err != nil {
 			return err
 		}
@@ -383,6 +386,7 @@ func createManifests(
 		manifestWrapper := manifestWrapperRaw
 		if _, ok := existingManifests[dataShareProcessorName]; !ok {
 			if err := createManifest(
+				ctx,
 				k8sSecretsClientGetter,
 				dataShareProcessorName,
 				&manifestWrapper,
@@ -419,6 +423,8 @@ var keyBackupGCPProject = flag.String("key-backup-gcp-project", "", "GCP project
 func main() {
 	flag.Parse()
 
+	ctx := context.Background()
+
 	if *kubeConfigPath == "" {
 		currentUser, err := user.Current()
 		if err != nil {
@@ -439,7 +445,7 @@ func main() {
 		log.Fatalf("%s", err)
 	}
 
-	manifestStorage, err := storage.NewManifest(terraformOutput.ManifestBucket.Value.URL,
+	manifestStorage, err := storage.NewManifest(ctx, terraformOutput.ManifestBucket.Value.URL,
 		storage.WithAWSRegion(terraformOutput.ManifestBucket.Value.AWSRegion),
 		storage.WithAWSProfile(terraformOutput.ManifestBucket.Value.AWSProfile))
 	if err != nil {
@@ -447,19 +453,20 @@ func main() {
 	}
 
 	if terraformOutput.HasTestEnvironment.Value && terraformOutput.SingletonIngestor.Value != nil {
-		globalManifestStorage, err := storage.NewManifest(terraformOutput.ManifestBucket.Value.URL,
+		globalManifestStorage, err := storage.NewManifest(ctx, terraformOutput.ManifestBucket.Value.URL,
 			storage.WithKeyPrefix("singleton-ingestor"),
 			storage.WithAWSRegion(terraformOutput.ManifestBucket.Value.AWSRegion),
 			storage.WithAWSProfile(terraformOutput.ManifestBucket.Value.AWSProfile))
 		if err != nil {
 			log.Fatalf("%s", err)
 		}
-		globalManifest, err := globalManifestStorage.GetIngestorGlobalManifest()
+		globalManifest, err := globalManifestStorage.GetIngestorGlobalManifest(ctx)
 		if err != nil {
 			log.Fatalf("%s", err)
 		} else if globalManifest != nil {
 			log.Println("global ingestor manifest exists - skipping creation")
 		} else if err := setupTestEnvironment(
+			ctx,
 			k8sClient.CoreV1(),
 			terraformOutput.SingletonIngestor.Value,
 			globalManifestStorage,
@@ -469,6 +476,7 @@ func main() {
 	}
 
 	if err := createManifests(
+		ctx,
 		k8sClient.CoreV1(),
 		terraformOutput.SpecificManifests.Value,
 		manifestStorage,
