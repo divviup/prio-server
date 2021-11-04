@@ -220,6 +220,17 @@ jobs:
         working-directory: deploy-tool
         version: "v1.43.0"
         args: "--config ../.golangci.yml --timeout 10m"
+  
+  key-rotator-golangci-lint:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v2
+    - name: Run golangci-lint on key-rotator
+      uses: golangci/golangci-lint-action@v2.5.2
+      with:
+        working-directory: key-rotator
+        version: "v1.43.0"
+        args: "--config ../.golangci.yml --timeout 10m"
 
   manifest-updater-golangci-lint:
     runs-on: ubuntu-latest
