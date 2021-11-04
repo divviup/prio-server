@@ -114,7 +114,7 @@ jobs:
     - name: Setup go
       uses: actions/setup-go@v1
       with:
-        go-version: 1.15
+        go-version: 1.17
     - name: Get kubebuilder
       run: |
         wget https://github.com/kubernetes-sigs/kubebuilder/releases/download/v2.3.1/kubebuilder_2.3.1_linux_amd64.tar.gz
@@ -142,7 +142,7 @@ jobs:
       uses: docker/build-push-action@v2
       with:
         file: ./manifest-updater/Dockerfile
-        context: ./manifest-updater
+        context: ./
 
   manifest-updater-test:
     runs-on: ubuntu-latest
@@ -154,7 +154,7 @@ jobs:
     - name: Setup go
       uses: actions/setup-go@v1
       with:
-        go-version: 1.15
+        go-version: 1.17
     - name: Test
       run: go test -race --coverprofile=cover.out --covermode=atomic ./...
     - name: Upload test coverage
@@ -176,7 +176,7 @@ jobs:
     - name: Setup go
       uses: actions/setup-go@v1
       with:
-        go-version: 1.15
+        go-version: 1.17
     - name: Test
       run: go test -race --coverprofile=cover.out --covermode=atomic ./...
     - name: Upload test coverage
@@ -218,6 +218,17 @@ jobs:
       uses: golangci/golangci-lint-action@v2.5.2
       with:
         working-directory: deploy-tool
+        version: "v1.43.0"
+        args: "--config ../.golangci.yml --timeout 10m"
+  
+  key-rotator-golangci-lint:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v2
+    - name: Run golangci-lint on key-rotator
+      uses: golangci/golangci-lint-action@v2.5.2
+      with:
+        working-directory: key-rotator
         version: "v1.43.0"
         args: "--config ../.golangci.yml --timeout 10m"
 

@@ -24,7 +24,8 @@ import (
 	"k8s.io/client-go/tools/clientcmd"
 
 	"github.com/abetterinternet/prio-server/deploy-tool/key"
-	"github.com/abetterinternet/prio-server/manifest-updater/manifest"
+	"github.com/abetterinternet/prio-server/key-rotator/manifest"
+	manifest_storage "github.com/abetterinternet/prio-server/manifest-updater/manifest"
 )
 
 // This tool consumes the output of `terraform apply`, generating keys and then
@@ -50,7 +51,7 @@ type SpecificManifestWrapper struct {
 // variables this program is interested in.
 type TerraformOutput struct {
 	ManifestBucket struct {
-		Value manifest.Bucket
+		Value manifest_storage.Bucket
 	} `json:"manifest_bucket"`
 	SpecificManifests struct {
 		Value map[string]SpecificManifestWrapper
@@ -129,7 +130,7 @@ func generateAndDeployKeyPair(
 func setupTestEnvironment(
 	k8sSecretsClientGetter k8scorev1.SecretsGetter,
 	ingestor *SingletonIngestor,
-	manifestWriter manifest.Writer,
+	manifestWriter manifest_storage.Writer,
 ) error {
 	batchSigningPublicKey, err := createBatchSigningPublicKey(
 		k8sSecretsClientGetter.Secrets(ingestor.TesterKubernetesNamespace),
@@ -190,7 +191,7 @@ func createManifest(
 	k8sSecretsClientGetter k8scorev1.SecretsGetter,
 	dataShareProcessorName string,
 	manifestWrapper *SpecificManifestWrapper,
-	manifestWriter manifest.Writer,
+	manifestWriter manifest_storage.Writer,
 	packetEncryptionKeyCSRs manifest.PacketEncryptionKeyCSRs,
 ) error {
 	k8sSecretsClient := k8sSecretsClientGetter.Secrets(manifestWrapper.KubernetesNamespace)
@@ -310,7 +311,7 @@ func backupKeys(
 func createManifests(
 	k8sSecretsClientGetter k8scorev1.SecretsGetter,
 	specificManifests map[string]SpecificManifestWrapper,
-	manifestStorage manifest.Storage,
+	manifestStorage manifest_storage.Storage,
 ) error {
 	// Iterate over all specific manifests described by TF output so we can
 	// record any packet encryption key CSRs that have already been created. We
@@ -408,13 +409,13 @@ func main() {
 		log.Fatalf("%s", err)
 	}
 
-	manifestStorage, err := manifest.NewStorage(&terraformOutput.ManifestBucket.Value)
+	manifestStorage, err := manifest_storage.NewStorage(&terraformOutput.ManifestBucket.Value)
 	if err != nil {
 		log.Fatalf("%s", err)
 	}
 
 	if terraformOutput.HasTestEnvironment.Value && terraformOutput.SingletonIngestor.Value != nil {
-		globalManifestStorage, err := manifest.NewStorage(&manifest.Bucket{
+		globalManifestStorage, err := manifest_storage.NewStorage(&manifest_storage.Bucket{
 			URL:        terraformOutput.ManifestBucket.Value.URL,
 			KeyPrefix:  "singleton-ingestor",
 			AWSRegion:  terraformOutput.ManifestBucket.Value.AWSRegion,
