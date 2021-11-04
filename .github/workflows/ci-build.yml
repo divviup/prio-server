@@ -209,3 +209,58 @@ jobs:
         file: "key-rotator/cover.out"
         flags: key_rotator_tests
         name: key-rotator tests
+
+  deploy-tool-golangci-lint:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v2
+    - name: Run golangci-lint on deploy-tool
+      uses: golangci/golangci-lint-action@v2.5.2
+      with:
+        working-directory: deploy-tool
+        version: "v1.43.0"
+        args: "--config ../.golangci.yml --timeout 10m"
+
+  manifest-updater-golangci-lint:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v2
+    - name: Run golangci-lint on manifest-updater
+      uses: golangci/golangci-lint-action@v2.5.2
+      with:
+        working-directory: manifest-updater
+        version: "v1.43.0"
+        args: "--config ../.golangci.yml --timeout 10m"
+
+  workflow-manager-golangci-lint:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v2
+    - name: Run golangci-lint on workflow-manager
+      uses: golangci/golangci-lint-action@v2.5.2
+      with:
+        working-directory: workflow-manager
+        version: "v1.43.0"
+        args: "--config ../.golangci.yml --timeout 10m"
+
+  deploy-operator-golangci-lint:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v2
+    - name: Run golangci-lint on deploy-operator
+      uses: golangci/golangci-lint-action@v2.5.2
+      with:
+        working-directory: deploy-operator
+        version: "v1.43.0"
+        args: "--config ../.golangci.yml --timeout 10m"
+
+  task-replayer-golangci-lint:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v2
+    - name: Run golangci-lint on task-replayer
+      uses: golangci/golangci-lint-action@v2.5.2
+      with:
+        working-directory: task-replayer
+        version: "v1.43.0"
+        args: "--config ../.golangci.yml --timeout 10m"
