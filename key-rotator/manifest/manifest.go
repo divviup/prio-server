@@ -132,7 +132,7 @@ type BatchSigningPublicKey struct {
 	// PKIX SubjectPublicKeyInfo structure. It must be an ECDSA P256 key.
 	PublicKey string `json:"public-key"`
 	// Expiration is the ISO 8601 encoded UTC date at which this key expires.
-	Expiration string `json:"expiration,omitempty"`
+	Expiration string `json:"expiration"`
 }
 
 // PacketEncryptionCertificate represents a certificate containing a public key
