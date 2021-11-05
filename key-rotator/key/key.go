@@ -31,8 +31,8 @@ func (k Key) Equal(o Key) bool {
 
 // RotationConfig defines the configuration for a key-rotation operation.
 type RotationConfig struct {
-	CreateKeyFunc func() (Raw, error) // CreateKeyFunc returns a newly-generated raw key, or an error if it can't.
-	CreateMinAge  time.Duration       // CreateMinAge is the minimum age of the youngest key version before a new key version will be created.
+	CreateKeyFunc func() (Material, error) // CreateKeyFunc returns newly-generated key material, or an error if it can't.
+	CreateMinAge  time.Duration            // CreateMinAge is the minimum age of the youngest key version before a new key version will be created.
 
 	PrimaryMinAge time.Duration // PrimaryMinAge is the minimum age of a key version before it may normally be considered "primary".
 
@@ -105,11 +105,11 @@ func (k Key) Rotate(now time.Time, cfg RotationConfig) (Key, error) {
 	// Policy: if no key versions exist, or if the youngest key version is
 	// older than `create_min_age`, create a new key version.
 	if len(kvs) == 0 || age(kvs[len(kvs)-1]) > cfg.CreateMinAge {
-		newKey, err := cfg.CreateKeyFunc()
+		m, err := cfg.CreateKeyFunc()
 		if err != nil {
 			return Key{}, fmt.Errorf("couldn't create new key version: %w", err)
 		}
-		kvs = append(kvs, Version{RawKey: newKey, CreationTime: now.UTC()})
+		kvs = append(kvs, Version{KeyMaterial: m, CreationTime: now.UTC()})
 	}
 
 	// Policy: While there are more than `delete_min_key_count` keys, and the
@@ -145,7 +145,7 @@ func (k Key) Rotate(now time.Time, cfg RotationConfig) (Key, error) {
 // as well as associated metadata. Typically, a Version will be embedded within
 // a Set.
 type Version struct {
-	RawKey       Raw
+	KeyMaterial  Material
 	CreationTime time.Time
 	Primary      bool
 }
@@ -157,20 +157,20 @@ var _ json.Unmarshaler = &Version{}
 // Equal returns true if and only if this Version is equal to the given
 // Version.
 func (v Version) Equal(o Version) bool {
-	return v.RawKey.Equal(o.RawKey) &&
+	return v.KeyMaterial.Equal(o.KeyMaterial) &&
 		v.CreationTime.Equal(o.CreationTime) &&
 		v.Primary == o.Primary
 }
 
 type jsonVersion struct {
-	RawKey       Raw    `json:"key"`
-	CreationTime string `json:"creation_time"`
-	Primary      bool   `json:"primary,omitempty"`
+	KeyMaterial  Material `json:"key"`
+	CreationTime string   `json:"creation_time"`
+	Primary      bool     `json:"primary,omitempty"`
 }
 
 func (v Version) MarshalJSON() ([]byte, error) {
 	return json.Marshal(jsonVersion{
-		RawKey:       v.RawKey,
+		KeyMaterial:  v.KeyMaterial,
 		CreationTime: strconv.FormatInt(v.CreationTime.Unix(), 10),
 		Primary:      v.Primary,
 	})
@@ -186,7 +186,7 @@ func (v *Version) UnmarshalJSON(data []byte) error {
 		return fmt.Errorf("invalid creation_time: %w", err)
 	}
 	*v = Version{
-		RawKey:       jv.RawKey,
+		KeyMaterial:  jv.KeyMaterial,
 		CreationTime: time.Unix(ts, 0),
 		Primary:      jv.Primary,
 	}

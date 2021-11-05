@@ -13,7 +13,7 @@ import (
 func TestKeyMarshal(t *testing.T) {
 	t.Parallel()
 
-	mustKey := func(r Raw, err error) Raw {
+	mustKey := func(r Material, err error) Material {
 		if err != nil {
 			t.Fatalf("Couldn't create key: %v", err)
 		}
@@ -21,20 +21,20 @@ func TestKeyMarshal(t *testing.T) {
 	}
 	wantKey := Key{
 		Version{
-			RawKey:       mustKey(Test.New()),
+			KeyMaterial:  mustKey(Test.New()),
 			CreationTime: time.Unix(100000, 0).UTC(),
 		},
 		Version{
-			RawKey:       mustKey(P256.New()),
+			KeyMaterial:  mustKey(P256.New()),
 			CreationTime: time.Unix(150000, 0).UTC(),
 		},
 		Version{
-			RawKey:       mustKey(Test.New()),
+			KeyMaterial:  mustKey(Test.New()),
 			CreationTime: time.Unix(200000, 0).UTC(),
 			Primary:      true,
 		},
 		Version{
-			RawKey:       mustKey(P256.New()),
+			KeyMaterial:  mustKey(P256.New()),
 			CreationTime: time.Unix(250000, 0).UTC(),
 		},
 	}
@@ -63,7 +63,7 @@ func TestKeyRotate(t *testing.T) {
 	const now = 100000
 
 	cfg := RotationConfig{
-		CreateKeyFunc: func() (Raw, error) { return newTestKey(now), nil },
+		CreateKeyFunc: func() (Material, error) { return newTestKey(now), nil },
 		CreateMinAge:  10000 * time.Second,
 
 		PrimaryMinAge: 1000 * time.Second,
@@ -135,7 +135,7 @@ func TestKeyRotate(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			t.Parallel()
 
-			// Check that we get the wanted key from Rotate.
+			// Check that we get the desired key from Rotate.
 			gotKey, err := test.key.Rotate(time.Unix(now, 0), cfg)
 			if err != nil {
 				t.Fatalf("Unexpected error from Rotate: %v", err)
@@ -174,7 +174,7 @@ func TestKeyRotate(t *testing.T) {
 		t.Parallel()
 		const wantErrString = "bananas"
 		cfg := cfg
-		cfg.CreateKeyFunc = func() (Raw, error) { return Raw{}, errors.New(wantErrString) }
+		cfg.CreateKeyFunc = func() (Material, error) { return Material{}, errors.New(wantErrString) }
 		_, err := Key{}.Rotate(time.Unix(now, 0), cfg)
 		if err == nil || !strings.Contains(err.Error(), wantErrString) {
 			t.Errorf("Wanted error containing %q, got: %v", wantErrString, err)
@@ -185,7 +185,7 @@ func TestKeyRotate(t *testing.T) {
 // kv creates a non-primary key version with the given timestamp and bogus key material.
 func kv(ts int64) Version {
 	return Version{
-		RawKey:       newTestKey(ts),
+		KeyMaterial:  newTestKey(ts),
 		CreationTime: time.Unix(ts, 0),
 	}
 }

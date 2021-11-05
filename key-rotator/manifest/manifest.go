@@ -63,7 +63,7 @@ func (m DataShareProcessorSpecificManifest) UpdateKeys(cfg UpdateKeysConfig) (Da
 		if bspk, ok := m.BatchSigningPublicKeys[kid]; ok {
 			newBSPK = bspk
 		} else {
-			pkix, err := v.RawKey.PublicAsPKIX()
+			pkix, err := v.KeyMaterial.PublicAsPKIX()
 			if err != nil {
 				return DataShareProcessorSpecificManifest{}, fmt.Errorf("couldn't create PKIX-encoding for batch signing key version created at %v (%d): %w", v.CreationTime.Format(time.RFC3339), v.CreationTime.Unix(), err)
 			}
@@ -87,7 +87,7 @@ func (m DataShareProcessorSpecificManifest) UpdateKeys(cfg UpdateKeysConfig) (Da
 		if pec, ok := m.PacketEncryptionKeyCSRs[kid]; ok {
 			newPEC = pec
 		} else {
-			csr, err := v.RawKey.PublicAsCSR(cfg.PacketEncryptionKeyCSRFQDN)
+			csr, err := v.KeyMaterial.PublicAsCSR(cfg.PacketEncryptionKeyCSRFQDN)
 			if err != nil {
 				return DataShareProcessorSpecificManifest{}, fmt.Errorf("couldn't create CSR for packet encryption key version created at %v (%d): %w", v.CreationTime.Format(time.RFC3339), v.CreationTime.Unix(), err)
 			}
