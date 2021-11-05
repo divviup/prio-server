@@ -17,6 +17,7 @@ import (
 	"github.com/aws/aws-sdk-go/aws/credentials"
 	"github.com/aws/aws-sdk-go/aws/session"
 	"github.com/aws/aws-sdk-go/service/s3"
+	"github.com/rs/zerolog/log"
 )
 
 // ErrObjectNotExist is an error representing that an object did not exist.
@@ -215,6 +216,12 @@ func (kv gcsKVStore) get(ctx context.Context, key string) (_ []byte, retErr erro
 }
 
 func (kv gcsKVStore) put(ctx context.Context, key string, data []byte) error {
+	log.Info().
+		Str("storage", "GCS").
+		Str("bucket", kv.bucket).
+		Str("key", key).
+		Msgf("Writing manifest to gs://%s/%s", kv.bucket, key)
+
 	// Canceling a write requires canceling the context, rather than calling
 	// Close(). We therefore create a context we can cancel without affecting
 	// anything else to ensure we don't leave a pending write around in case of
@@ -269,16 +276,22 @@ func (kv s3KVStore) get(ctx context.Context, key string) (_ []byte, retErr error
 
 }
 
-func (ds s3KVStore) put(ctx context.Context, key string, data []byte) error {
-	if _, err := ds.s3.PutObjectWithContext(ctx, &s3.PutObjectInput{
+func (kv s3KVStore) put(ctx context.Context, key string, data []byte) error {
+	log.Info().
+		Str("storage", "S3").
+		Str("bucket", kv.bucket).
+		Str("key", key).
+		Msgf("Writing manifest to s3://%s/%s", kv.bucket, key)
+
+	if _, err := kv.s3.PutObjectWithContext(ctx, &s3.PutObjectInput{
 		ACL:          aws.String(s3.BucketCannedACLPublicRead),
 		Body:         bytes.NewReader(data),
-		Bucket:       aws.String(ds.bucket),
+		Bucket:       aws.String(kv.bucket),
 		Key:          aws.String(key),
 		CacheControl: aws.String("no-cache"),
 		ContentType:  aws.String("application/json; charset=UTF-8"),
 	}); err != nil {
-		return fmt.Errorf("couldn't write s3://%s/%s: %w", ds.bucket, key, err)
+		return fmt.Errorf("couldn't write s3://%s/%s: %w", kv.bucket, key, err)
 	}
 	return nil
 }
