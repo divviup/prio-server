@@ -43,8 +43,8 @@ func TestUpdateKeys(t *testing.T) {
 		// Generic tests.
 		{
 			name:                "no keys at start (new environment rollout)",
-			batchSigningKey:     key.Key{kv(10, k0), pkv(15, k1), kv(20, k2)},
-			packetEncryptionKey: key.Key{kv(10, k3), kv(15, k4), pkv(20, k5)},
+			batchSigningKey:     k(kv(10, k0), pkv(15, k1), kv(20, k2)),
+			packetEncryptionKey: k(kv(10, k3), kv(15, k4), pkv(20, k5)),
 			wantBSKs: map[string]key.Material{
 				"bsk-10": k0,
 				"bsk-15": k1,
@@ -60,8 +60,8 @@ func TestUpdateKeys(t *testing.T) {
 			name:                "keys already populated, old key material kept",
 			initialBSKs:         map[string]key.Material{"bsk-10": k0},
 			initialPEKs:         map[string]key.Material{"pek-10": k1},
-			batchSigningKey:     key.Key{pkv(10, k2)},
-			packetEncryptionKey: key.Key{pkv(10, k3)},
+			batchSigningKey:     k(pkv(10, k2)),
+			packetEncryptionKey: k(pkv(10, k3)),
 			wantBSKs:            map[string]key.Material{"bsk-10": k0},
 			wantPEKs:            map[string]key.Material{"pek-10": k1},
 		},
@@ -70,49 +70,49 @@ func TestUpdateKeys(t *testing.T) {
 		{
 			name:            "BSK: before first rotation (0 timestamp)",
 			initialBSKs:     map[string]key.Material{"bsk": k0},
-			batchSigningKey: key.Key{noTimePKV(k0)},
+			batchSigningKey: k(noTimePKV(k0)),
 			wantBSKs:        map[string]key.Material{"bsk": k0},
 		},
 		{
 			name:            "BSK: first new key (0 timestamp)",
 			initialBSKs:     map[string]key.Material{"bsk": k0},
-			batchSigningKey: key.Key{noTimePKV(k0), kv(10, k1)},
+			batchSigningKey: k(noTimePKV(k0), kv(10, k1)),
 			wantBSKs:        map[string]key.Material{"bsk": k0, "bsk-10": k1},
 		},
 		{
 			name:            "BSK: first primary-key change (0 timestamp)",
 			initialBSKs:     map[string]key.Material{"bsk": k0, "bsk-10": k1},
-			batchSigningKey: key.Key{noTimeKV(k0), pkv(10, k1)},
+			batchSigningKey: k(noTimeKV(k0), pkv(10, k1)),
 			wantBSKs:        map[string]key.Material{"bsk": k0, "bsk-10": k1},
 		},
 		{
 			name:            "BSK: first key removal (0 timestamp)",
 			initialBSKs:     map[string]key.Material{"bsk": k0, "bsk-10": k1},
-			batchSigningKey: key.Key{pkv(10, k1)},
+			batchSigningKey: k(pkv(10, k1)),
 			wantBSKs:        map[string]key.Material{"bsk-10": k1},
 		},
 		{
 			name:            "BSK: stable state (before rotation)",
 			initialBSKs:     map[string]key.Material{"bsk-10": k0, "bsk-20": k1},
-			batchSigningKey: key.Key{kv(10, k0), pkv(20, k1)},
+			batchSigningKey: k(kv(10, k0), pkv(20, k1)),
 			wantBSKs:        map[string]key.Material{"bsk-10": k0, "bsk-20": k1},
 		},
 		{
 			name:            "BSK: new key",
 			initialBSKs:     map[string]key.Material{"bsk-10": k0, "bsk-20": k1},
-			batchSigningKey: key.Key{kv(10, k0), pkv(20, k1), kv(30, k2)},
+			batchSigningKey: k(kv(10, k0), pkv(20, k1), kv(30, k2)),
 			wantBSKs:        map[string]key.Material{"bsk-10": k0, "bsk-20": k1, "bsk-30": k2},
 		},
 		{
 			name:            "BSK: rotation",
 			initialBSKs:     map[string]key.Material{"bsk-10": k0, "bsk-20": k1, "bsk-30": k2},
-			batchSigningKey: key.Key{kv(10, k0), kv(20, k1), pkv(30, k2)},
+			batchSigningKey: k(kv(10, k0), kv(20, k1), pkv(30, k2)),
 			wantBSKs:        map[string]key.Material{"bsk-10": k0, "bsk-20": k1, "bsk-30": k2},
 		},
 		{
 			name:            "BSK: removal",
 			initialBSKs:     map[string]key.Material{"bsk-10": k0, "bsk-20": k1, "bsk-30": k2},
-			batchSigningKey: key.Key{kv(20, k1), pkv(30, k2)},
+			batchSigningKey: k(kv(20, k1), pkv(30, k2)),
 			wantBSKs:        map[string]key.Material{"bsk-20": k1, "bsk-30": k2},
 		},
 
@@ -120,49 +120,49 @@ func TestUpdateKeys(t *testing.T) {
 		{
 			name:                "PEK: before first rotation (0 timestamp)",
 			initialPEKs:         map[string]key.Material{"pek": k0},
-			packetEncryptionKey: key.Key{noTimePKV(k0)},
+			packetEncryptionKey: k(noTimePKV(k0)),
 			wantPEKs:            map[string]key.Material{"pek": k0},
 		},
 		{
 			name:                "PEK: first new key (0 timestamp)",
 			initialPEKs:         map[string]key.Material{"pek": k0},
-			packetEncryptionKey: key.Key{noTimePKV(k0), kv(10, k1)},
+			packetEncryptionKey: k(noTimePKV(k0), kv(10, k1)),
 			wantPEKs:            map[string]key.Material{"pek": k0},
 		},
 		{
 			name:                "PEK: first primary-key change (0 timestamp)",
 			initialPEKs:         map[string]key.Material{"pek": k0},
-			packetEncryptionKey: key.Key{noTimeKV(k0), pkv(10, k1)},
+			packetEncryptionKey: k(noTimeKV(k0), pkv(10, k1)),
 			wantPEKs:            map[string]key.Material{"pek-10": k1},
 		},
 		{
 			name:                "PEK: first key removal (0 timestamp)",
 			initialPEKs:         map[string]key.Material{"pek-10": k1},
-			packetEncryptionKey: key.Key{pkv(10, k1)},
+			packetEncryptionKey: k(pkv(10, k1)),
 			wantPEKs:            map[string]key.Material{"pek-10": k1},
 		},
 		{
 			name:                "PEK: stable state (before rotation)",
 			initialPEKs:         map[string]key.Material{"pek-20": k1},
-			packetEncryptionKey: key.Key{kv(10, k0), pkv(20, k1)},
+			packetEncryptionKey: k(kv(10, k0), pkv(20, k1)),
 			wantPEKs:            map[string]key.Material{"pek-20": k1},
 		},
 		{
 			name:                "PEK: new key",
 			initialPEKs:         map[string]key.Material{"pek-20": k1},
-			packetEncryptionKey: key.Key{kv(10, k0), pkv(20, k1), kv(30, k2)},
+			packetEncryptionKey: k(kv(10, k0), pkv(20, k1), kv(30, k2)),
 			wantPEKs:            map[string]key.Material{"pek-20": k1},
 		},
 		{
 			name:                "PEK: rotation",
 			initialPEKs:         map[string]key.Material{"pek-20": k1},
-			packetEncryptionKey: key.Key{kv(10, k0), kv(20, k1), pkv(30, k2)},
+			packetEncryptionKey: k(kv(10, k0), kv(20, k1), pkv(30, k2)),
 			wantPEKs:            map[string]key.Material{"pek-30": k2},
 		},
 		{
 			name:                "PEK: removal",
 			initialBSKs:         map[string]key.Material{"pek-30": k2},
-			packetEncryptionKey: key.Key{kv(20, k1), pkv(30, k2)},
+			packetEncryptionKey: k(kv(20, k1), pkv(30, k2)),
 			wantPEKs:            map[string]key.Material{"pek-30": k2},
 		},
 	} {
@@ -259,6 +259,15 @@ func mustP256() key.Material {
 	k, err := key.P256.New()
 	if err != nil {
 		panic(fmt.Sprintf("Couldn't create new P256 key: %v", err))
+	}
+	return k
+}
+
+// k creates a new key or dies trying.
+func k(vs ...key.Version) key.Key {
+	k, err := key.FromVersions(vs...)
+	if err != nil {
+		panic(fmt.Sprintf("Couldn't create key from versions: %v", err))
 	}
 	return k
 }

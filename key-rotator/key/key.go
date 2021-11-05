@@ -14,19 +14,43 @@ import (
 // multiple pieces of key material, any of which should be considered for use
 // in decryption or signature verification. A single version will be considered
 // "primary"; this version will be used for encryption or signing.
-type Key []Version
+type Key struct{ v []Version }
+
+// Verify expected interfaces are implemented by Key.
+var _ json.Marshaler = Version{}
+var _ json.Unmarshaler = &Version{}
+
+// FromVersions creates a new key comprised of the given key versions.
+func FromVersions(versions ...Version) (Key, error) {
+	vs := make([]Version, len(versions))
+	copy(vs, versions)
+	return Key{vs}, nil
+}
 
 // Equal returns true if and only if this Key is equal to the given Key.
 func (k Key) Equal(o Key) bool {
-	if len(k) != len(o) {
+	if len(k.v) != len(o.v) {
 		return false
 	}
-	for i := range k {
-		if !k[i].Equal(o[i]) {
+	for i := range k.v {
+		if !k.v[i].Equal(o.v[i]) {
 			return false
 		}
 	}
 	return true
+}
+
+// VisitVersions visits the versions contained within this key in an
+// unspecified order, calling the provided function on each version. If the
+// provided function returns an error, VisitVersions returns that error
+// unchanged. Otherwise, VisitVersions will never return an error.
+func (k Key) VisitVersions(f func(Version) error) error {
+	for _, v := range k.v {
+		if err := f(v); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // RotationConfig defines the configuration for a key-rotation operation.
@@ -92,8 +116,8 @@ func (k Key) Rotate(now time.Time, cfg RotationConfig) (Key, error) {
 	// all key versions so that we can easily mark a single version primary
 	// later.
 	age := func(v Version) time.Duration { return now.Sub(v.CreationTime) }
-	kvs := make([]Version, 0, 1+len(k))
-	for _, v := range k {
+	kvs := make([]Version, 0, 1+len(k.v))
+	for _, v := range k.v {
 		if age(v) < 0 {
 			return Key{}, fmt.Errorf("found key version with creation time %v, after now (%v)", v.CreationTime.Format(time.RFC3339), now.Format(time.RFC3339))
 		}
@@ -138,7 +162,18 @@ func (k Key) Rotate(now time.Time, cfg RotationConfig) (Key, error) {
 
 	// Transform the sorted list of (identifier, version) tuples back into a
 	// Key, and return it.
-	return Key(kvs), nil
+	return Key{kvs}, nil
+}
+
+func (k Key) MarshalJSON() ([]byte, error) { return json.Marshal(k.v) }
+
+func (k *Key) UnmarshalJSON(data []byte) error {
+	var vs []Version
+	if err := json.Unmarshal(data, &vs); err != nil {
+		return fmt.Errorf("couldn't unmarshal JSON: %w", err)
+	}
+	*k = Key{vs}
+	return nil
 }
 
 // Version represents a single version of a key, i.e. raw private key material,
