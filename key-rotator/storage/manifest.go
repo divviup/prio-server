@@ -177,7 +177,7 @@ type gcsDatastore struct {
 	bucket string
 }
 
-var _ datastore = gcsDatastore{} // verify gcsDatastore satsifies datastore.
+var _ datastore = gcsDatastore{} // verify gcsDatastore satisfies datastore.
 
 func (ds gcsDatastore) get(ctx context.Context, key string) ([]byte, error) {
 	r, err := ds.gcs.Bucket(ds.bucket).Object(key).NewReader(ctx)
