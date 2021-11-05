@@ -81,32 +81,6 @@ type SingletonIngestor struct {
 	BatchSigningKeyName       string `json:"batch_signing_key_name"`
 }
 
-type ManifestStorage interface {
-	ManifestWriter
-
-	// GetDataShareProcessorSpecificManifest gets the specific manifest for the
-	// specified data share processor and returns it, if it exists and is
-	// well-formed. If the manifest does not exist, an error wrapping
-	// storage.ErrObjectNotExist will be returned.
-	GetDataShareProcessorSpecificManifest(ctx context.Context, dataShareProcessorName string) (manifest.DataShareProcessorSpecificManifest, error)
-
-	// GetIngestorGlobalManifest gets the ingestor global manifest, if it
-	// exists and is well-formed. If the manifest does not exist, an error
-	// wrapping storage.ErrObjectNotExist will be returned.
-	GetIngestorGlobalManifest(ctx context.Context) (manifest.IngestorGlobalManifest, error)
-}
-
-type ManifestWriter interface {
-	// PutDataShareProcessorSpecificManifest writes the provided manifest for
-	// the provided share processor name in the writer's backing storage, or
-	// returns an error on failure.
-	PutDataShareProcessorSpecificManifest(ctx context.Context, dataShareProcessorName string, manifest manifest.DataShareProcessorSpecificManifest) error
-
-	// PutIngestorGlobalManifest writes the provided manifest to the writer's
-	// backing storage, or returns an error on failure.
-	PutIngestorGlobalManifest(ctx context.Context, manifest manifest.IngestorGlobalManifest) error
-}
-
 type privateKeyMarshaler func(*ecdsa.PrivateKey) ([]byte, error)
 
 // marshalX962UncompressedPrivateKey encodes a P-256 private key into the format
@@ -164,7 +138,7 @@ func setupTestEnvironment(
 	ctx context.Context,
 	k8sSecretsClientGetter k8scorev1.SecretsGetter,
 	ingestor *SingletonIngestor,
-	manifestWriter ManifestWriter,
+	manifestWriter storage.Manifest,
 ) error {
 	batchSigningPublicKey, err := createBatchSigningPublicKey(
 		k8sSecretsClientGetter.Secrets(ingestor.TesterKubernetesNamespace),
@@ -226,7 +200,7 @@ func createManifest(
 	k8sSecretsClientGetter k8scorev1.SecretsGetter,
 	dataShareProcessorName string,
 	manifestWrapper *SpecificManifestWrapper,
-	manifestWriter ManifestWriter,
+	manifestWriter storage.Manifest,
 	packetEncryptionKeyCSRs manifest.PacketEncryptionKeyCSRs,
 ) error {
 	k8sSecretsClient := k8sSecretsClientGetter.Secrets(manifestWrapper.KubernetesNamespace)
@@ -347,7 +321,7 @@ func createManifests(
 	ctx context.Context,
 	k8sSecretsClientGetter k8scorev1.SecretsGetter,
 	specificManifests map[string]SpecificManifestWrapper,
-	manifestStorage ManifestStorage,
+	manifestStorage storage.Manifest,
 ) error {
 	// Iterate over all specific manifests described by TF output so we can
 	// record any packet encryption key CSRs that have already been created. We
