@@ -10,14 +10,13 @@ import (
 	"testing"
 	"time"
 
-	"github.com/abetterinternet/prio-server/key-rotator/key"
 	"github.com/google/go-cmp/cmp"
 	k8sapi "k8s.io/api/core/v1"
 	k8smeta "k8s.io/apimachinery/pkg/apis/meta/v1"
 	k8s "k8s.io/client-go/kubernetes/typed/core/v1"
-)
 
-var ctx = context.Background()
+	"github.com/abetterinternet/prio-server/key-rotator/key"
+)
 
 func TestKubernetesKey(t *testing.T) {
 	t.Parallel()
