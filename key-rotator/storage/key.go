@@ -13,6 +13,7 @@ import (
 	"math/big"
 	"time"
 
+	"github.com/rs/zerolog/log"
 	k8smeta "k8s.io/apimachinery/pkg/apis/meta/v1"
 	k8s "k8s.io/client-go/kubernetes/typed/core/v1"
 
@@ -65,6 +66,11 @@ func (k k8sKey) PutPacketEncryptionKey(ctx context.Context, locality string, key
 }
 
 func (k k8sKey) putKey(ctx context.Context, secretName string, key key.Key, serializeLiveVersions func(key.Key) ([]byte, error)) error {
+	log.Info().
+		Str("storage", "kubernetes").
+		Str("secret", secretName).
+		Msgf("Writing key to secret %q", secretName)
+
 	// Serialize key_versions & secret_key data.
 	keyVersionsBytes, err := json.Marshal(key)
 	if err != nil {
