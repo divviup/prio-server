@@ -58,16 +58,17 @@ const (
 var _ Key = k8sKey{} // verify k8skey satisfies Key
 
 func (k k8sKey) PutBatchSigningKey(ctx context.Context, locality, ingestor string, key key.Key) error {
-	return k.putKey(ctx, k.batchSigningKeyName(locality, ingestor), key, serializeBatchSigningSecretKey)
+	return k.putKey(ctx, "batch-signing", k.batchSigningKeyName(locality, ingestor), key, serializeBatchSigningSecretKey)
 }
 
 func (k k8sKey) PutPacketEncryptionKey(ctx context.Context, locality string, key key.Key) error {
-	return k.putKey(ctx, k.packetEncryptionKeyName(locality), key, serializePacketEncryptionSecretKey)
+	return k.putKey(ctx, "packet-encryption", k.packetEncryptionKeyName(locality), key, serializePacketEncryptionSecretKey)
 }
 
-func (k k8sKey) putKey(ctx context.Context, secretName string, key key.Key, serializeLiveVersions func(key.Key) ([]byte, error)) error {
+func (k k8sKey) putKey(ctx context.Context, secretKind, secretName string, key key.Key, serializeLiveVersions func(key.Key) ([]byte, error)) error {
 	log.Info().
 		Str("storage", "kubernetes").
+		Str("kind", secretKind).
 		Str("secret", secretName).
 		Msgf("Writing key to secret %q", secretName)
 
