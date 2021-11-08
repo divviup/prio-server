@@ -172,6 +172,15 @@ type p256 struct{ privKey *ecdsa.PrivateKey }
 
 var _ material = &p256{} // verify p256 implements material
 
+// P256From returns a new Material of type P256 based on the given P256 private
+// key.
+func P256MaterialFrom(key *ecdsa.PrivateKey) (Material, error) {
+	if key.Curve != elliptic.P256() {
+		return Material{}, fmt.Errorf("key was %s rather than P256", key.Curve.Params().Name)
+	}
+	return Material{&p256{key}}, nil
+}
+
 func newRandomP256() (material, error) {
 	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	if err != nil {
