@@ -198,17 +198,6 @@ jobs:
         version: "v1.43.0"
         args: "--config ../.golangci.yml --timeout 10m"
 
-  manifest-updater-golangci-lint:
-    runs-on: ubuntu-latest
-    steps:
-    - uses: actions/checkout@v2
-    - name: Run golangci-lint on manifest-updater
-      uses: golangci/golangci-lint-action@v2.5.2
-      with:
-        working-directory: manifest-updater
-        version: "v1.43.0"
-        args: "--config ../.golangci.yml --timeout 10m"
-
   workflow-manager-golangci-lint:
     runs-on: ubuntu-latest
     steps:
