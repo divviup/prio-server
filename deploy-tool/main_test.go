@@ -13,7 +13,10 @@ import (
 	k8stypedcorev1 "k8s.io/client-go/kubernetes/typed/core/v1"
 
 	"github.com/abetterinternet/prio-server/key-rotator/manifest"
+	storagetest "github.com/abetterinternet/prio-server/key-rotator/storage/test"
 )
+
+var ctx = context.Background()
 
 type FakeKubernetesSecretsClientGetter struct {
 	secrets map[string]k8scorev1.Secret
@@ -108,37 +111,6 @@ func (c *FakeKubernetesSecretsClient) Apply(
 ) (result *k8scorev1.Secret, err error) {
 	return nil, nil
 }
-
-type FakeManifestStorage struct {
-	existingManifests map[string]manifest.DataShareProcessorSpecificManifest
-	writtenManifests  map[string]manifest.DataShareProcessorSpecificManifest
-}
-
-func (s *FakeManifestStorage) FetchDataShareProcessorSpecificManifest(dataShareProcessorName string) (*manifest.DataShareProcessorSpecificManifest, error) {
-	if manifest, ok := s.existingManifests[dataShareProcessorName]; ok {
-		return &manifest, nil
-	}
-	return nil, nil
-}
-
-func (s *FakeManifestStorage) IngestorGlobalManifestExists() (bool, error) {
-	return false, nil
-}
-
-func (s *FakeManifestStorage) WriteDataShareProcessorSpecificManifest(
-	manifest manifest.DataShareProcessorSpecificManifest,
-	dataShareProcessorName string,
-) error {
-	s.writtenManifests[dataShareProcessorName] = manifest
-	return nil
-}
-
-func (s *FakeManifestStorage) WriteIngestorGlobalManifest(
-	manifest manifest.IngestorGlobalManifest,
-) error {
-	return nil
-}
-
 func TestCreateManifests(t *testing.T) {
 	// Manifests described by Terraform output
 	specificManifests := map[string]SpecificManifestWrapper{
@@ -215,38 +187,38 @@ func TestCreateManifests(t *testing.T) {
 		},
 	}
 
-	manifestStorage := FakeManifestStorage{
-		existingManifests: map[string]manifest.DataShareProcessorSpecificManifest{
-			"manifest-already-posted": {
-				Format:               1,
-				IngestionBucket:      "gs://irrelevant",
-				PeerValidationBucket: "gs://irrelevant",
-				BatchSigningPublicKeys: map[string]manifest.BatchSigningPublicKey{
-					"packet-encryption-key-exists-ingestor-1-batch-signing-key": {
-						Expiration: "2021-09-21T22:49:45Z",
-						PublicKey:  "fake-public-key",
-					},
-				},
-				PacketEncryptionKeyCSRs: map[string]manifest.PacketEncryptionCertificate{
-					"packet-encryption-key-exists-packet-encryption-key": {
-						CertificateSigningRequest: "fake-csr",
-					},
-				},
+	manifestAlreadyPosted := manifest.DataShareProcessorSpecificManifest{
+		Format:               1,
+		IngestionBucket:      "gs://irrelevant",
+		PeerValidationBucket: "gs://irrelevant",
+		BatchSigningPublicKeys: map[string]manifest.BatchSigningPublicKey{
+			"packet-encryption-key-exists-ingestor-1-batch-signing-key": {
+				Expiration: "2021-09-21T22:49:45Z",
+				PublicKey:  "fake-public-key",
 			},
 		},
-		writtenManifests: map[string]manifest.DataShareProcessorSpecificManifest{},
+		PacketEncryptionKeyCSRs: map[string]manifest.PacketEncryptionCertificate{
+			"packet-encryption-key-exists-packet-encryption-key": {
+				CertificateSigningRequest: "fake-csr",
+			},
+		},
+	}
+
+	manifestStorage := storagetest.NewManifest()
+	if err := manifestStorage.PutDataShareProcessorSpecificManifest(ctx, "manifest-already-posted", manifestAlreadyPosted); err != nil {
+		t.Fatalf("Couldn't write preexisting manifest: %v", err)
 	}
 
 	secretsClientGetter := FakeKubernetesSecretsClientGetter{
 		secrets: map[string]k8scorev1.Secret{},
 	}
 
-	if err := createManifests(&secretsClientGetter, specificManifests, &manifestStorage); err != nil {
+	if err := createManifests(ctx, &secretsClientGetter, specificManifests, manifestStorage); err != nil {
 		t.Errorf("unexpected error %s", err)
 	}
 
-	if _, ok := manifestStorage.writtenManifests["manifest-already-posted"]; ok {
-		t.Error("no manifest should be uploaded if manifest already existed")
+	if gotPutCount := manifestStorage.GetDataShareProcessorSpecificManifestPutCount("manifest-already-posted"); gotPutCount != 1 {
+		t.Errorf("no manifest should be uploaded if manifest already existed (put count = %d, want %d)", gotPutCount, 1)
 	}
 	if _, ok := secretsClientGetter.secrets["packet-encryption-key-exists-ingestor-1-batch-signing-key"]; ok {
 		t.Error("batch signing key should not be created if manifest already existed")
@@ -255,22 +227,22 @@ func TestCreateManifests(t *testing.T) {
 		t.Error("packet encryption key should not be created if it already existed")
 	}
 
-	manifest, ok := manifestStorage.writtenManifests["manifest-not-posted-encryption-key-exists"]
-	if !ok {
-		t.Error("manifest should be uploaded if it does not already exist")
+	manifest, err := manifestStorage.GetDataShareProcessorSpecificManifest(ctx, "manifest-not-posted-encryption-key-exists")
+	if err != nil {
+		t.Fatalf("Couldn't retrieve manifest for manifest-not-posted-encryption-key-exists: %v", err)
 	}
-	if !reflect.DeepEqual(manifest.PacketEncryptionKeyCSRs, manifestStorage.existingManifests["manifest-already-posted"].PacketEncryptionKeyCSRs) {
+	if !reflect.DeepEqual(manifest.PacketEncryptionKeyCSRs, manifestAlreadyPosted.PacketEncryptionKeyCSRs) {
 		t.Error("CSRs in manifest should match existing packet encryption key")
 	}
 	if _, ok := secretsClientGetter.secrets["packet-encryption-key-exists-ingestor-2-batch-signing-key"]; !ok {
 		t.Error("batch signing key should be created if manifest did not exist")
 	}
 
-	manifest, ok = manifestStorage.writtenManifests["manifest-not-posted-encryption-key-does-not-exist"]
-	if !ok {
-		t.Error("manifest should be uploaded if it does not already exist")
+	manifest, err = manifestStorage.GetDataShareProcessorSpecificManifest(ctx, "manifest-not-posted-encryption-key-does-not-exist")
+	if err != nil {
+		t.Fatalf("Couldn't retrieve manifest for manifest-not-posted-encryption-key-does-not-exist: %v", err)
 	}
-	if reflect.DeepEqual(manifest.PacketEncryptionKeyCSRs, manifestStorage.existingManifests["manifest-already-posted"].PacketEncryptionKeyCSRs) {
+	if reflect.DeepEqual(manifest.PacketEncryptionKeyCSRs, manifestAlreadyPosted) {
 		t.Error("new CSR should be generated for new packet encryption key")
 	}
 	if _, ok := secretsClientGetter.secrets["packet-encryption-key-does-not-exist-ingestor-1-batch-signing-key"]; !ok {
@@ -334,50 +306,53 @@ func TestCreateManifestsExistingDuplicatePacketEncryptionKeyCsrs(t *testing.T) {
 		},
 	}
 
-	manifestStorage := FakeManifestStorage{
-		existingManifests: map[string]manifest.DataShareProcessorSpecificManifest{
-			"manifest-already-posted-1": {
-				Format:               1,
-				IngestionBucket:      "gs://irrelevant",
-				PeerValidationBucket: "gs://irrelevant",
-				BatchSigningPublicKeys: map[string]manifest.BatchSigningPublicKey{
-					"packet-encryption-key-exists-ingestor-1-batch-signing-key": {
-						Expiration: "2021-09-21T22:49:45Z",
-						PublicKey:  "fake-public-key",
-					},
-				},
-				PacketEncryptionKeyCSRs: map[string]manifest.PacketEncryptionCertificate{
-					"packet-encryption-key-exists-packet-encryption-key": {
-						CertificateSigningRequest: "fake-csr-1",
-					},
-				},
-			},
-			"manifest-already-posted-2": {
-				Format:               1,
-				IngestionBucket:      "gs://irrelevant",
-				PeerValidationBucket: "gs://irrelevant",
-				BatchSigningPublicKeys: map[string]manifest.BatchSigningPublicKey{
-					"packet-encryption-key-exists-ingestor-1-batch-signing-key": {
-						Expiration: "2021-09-21T22:49:45Z",
-						PublicKey:  "fake-public-key",
-					},
-				},
-				// Same key name as above but contents differ
-				PacketEncryptionKeyCSRs: map[string]manifest.PacketEncryptionCertificate{
-					"packet-encryption-key-exists-packet-encryption-key": {
-						CertificateSigningRequest: "fake-csr-2",
-					},
-				},
+	manifestAlreadyPosted1 := manifest.DataShareProcessorSpecificManifest{
+		Format:               1,
+		IngestionBucket:      "gs://irrelevant",
+		PeerValidationBucket: "gs://irrelevant",
+		BatchSigningPublicKeys: map[string]manifest.BatchSigningPublicKey{
+			"packet-encryption-key-exists-ingestor-1-batch-signing-key": {
+				Expiration: "2021-09-21T22:49:45Z",
+				PublicKey:  "fake-public-key",
 			},
 		},
-		writtenManifests: map[string]manifest.DataShareProcessorSpecificManifest{},
+		PacketEncryptionKeyCSRs: map[string]manifest.PacketEncryptionCertificate{
+			"packet-encryption-key-exists-packet-encryption-key": {
+				CertificateSigningRequest: "fake-csr-1",
+			},
+		},
+	}
+	manifestAlreadyPosted2 := manifest.DataShareProcessorSpecificManifest{
+		Format:               1,
+		IngestionBucket:      "gs://irrelevant",
+		PeerValidationBucket: "gs://irrelevant",
+		BatchSigningPublicKeys: map[string]manifest.BatchSigningPublicKey{
+			"packet-encryption-key-exists-ingestor-1-batch-signing-key": {
+				Expiration: "2021-09-21T22:49:45Z",
+				PublicKey:  "fake-public-key",
+			},
+		},
+		// Same key name as above but contents differ
+		PacketEncryptionKeyCSRs: map[string]manifest.PacketEncryptionCertificate{
+			"packet-encryption-key-exists-packet-encryption-key": {
+				CertificateSigningRequest: "fake-csr-2",
+			},
+		},
+	}
+
+	manifestStorage := storagetest.NewManifest()
+	if err := manifestStorage.PutDataShareProcessorSpecificManifest(ctx, "manifest-already-posted-1", manifestAlreadyPosted1); err != nil {
+		t.Fatalf("Couldn't write first preexisting manifest: %v", err)
+	}
+	if err := manifestStorage.PutDataShareProcessorSpecificManifest(ctx, "manifest-already-posted-2", manifestAlreadyPosted2); err != nil {
+		t.Fatalf("Couldn't write preexisting manifest: %v", err)
 	}
 
 	secretsClientGetter := FakeKubernetesSecretsClientGetter{
 		secrets: map[string]k8scorev1.Secret{},
 	}
 
-	if err := createManifests(&secretsClientGetter, specificManifests, &manifestStorage); err == nil {
+	if err := createManifests(ctx, &secretsClientGetter, specificManifests, manifestStorage); err == nil {
 		t.Error("manifest creation should fail when existing posted manifests contain two different CSRs for the same packet encryption key name")
 	}
 }
