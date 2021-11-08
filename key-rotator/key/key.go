@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"sort"
-	"strconv"
 	"time"
 )
 
@@ -199,14 +198,14 @@ func (v Version) Equal(o Version) bool {
 
 type jsonVersion struct {
 	KeyMaterial  Material `json:"key"`
-	CreationTime string   `json:"creation_time"`
+	CreationTime int64    `json:"creation_time,string"`
 	Primary      bool     `json:"primary,omitempty"`
 }
 
 func (v Version) MarshalJSON() ([]byte, error) {
 	return json.Marshal(jsonVersion{
 		KeyMaterial:  v.KeyMaterial,
-		CreationTime: strconv.FormatInt(v.CreationTime.Unix(), 10),
+		CreationTime: v.CreationTime.Unix(),
 		Primary:      v.Primary,
 	})
 }
@@ -216,13 +215,9 @@ func (v *Version) UnmarshalJSON(data []byte) error {
 	if err := json.Unmarshal(data, &jv); err != nil {
 		return fmt.Errorf("couldn't unmarshal raw structure: %w", err)
 	}
-	ts, err := strconv.ParseInt(jv.CreationTime, 10, 64)
-	if err != nil {
-		return fmt.Errorf("invalid creation_time: %w", err)
-	}
 	*v = Version{
 		KeyMaterial:  jv.KeyMaterial,
-		CreationTime: time.Unix(ts, 0),
+		CreationTime: time.Unix(jv.CreationTime, 0),
 		Primary:      jv.Primary,
 	}
 	return nil
