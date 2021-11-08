@@ -52,25 +52,25 @@ func TestManifest(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			t.Run("PutDataShareProcessorSpecificManifest", func(t *testing.T) {
 				t.Parallel()
-				m, objs := newManifest(test.keyPrefix)
-				wantObjs := map[string][]byte{path.Join(test.keyPrefix, "dsp-manifest.json"): dspManifestBytes}
+				m, kvs := newKVStoreManifest(test.keyPrefix)
+				wantKVs := map[string][]byte{path.Join(test.keyPrefix, "dsp-manifest.json"): dspManifestBytes}
 				if err := m.PutDataShareProcessorSpecificManifest(ctx, dspName, dspManifest); err != nil {
 					t.Fatalf("Unexpected error from PutDataShareProcessorSpecificManifest: %v", err)
 				}
-				if diff := cmp.Diff(wantObjs, objs); diff != "" {
-					t.Errorf("Unexpected objects in datastore (-want +got):\n%s", diff)
+				if diff := cmp.Diff(wantKVs, kvs); diff != "" {
+					t.Errorf("Unexpected datastore content (-want +got):\n%s", diff)
 				}
 			})
 
 			t.Run("PutIngestorGlobalManifest", func(t *testing.T) {
 				t.Parallel()
-				m, objs := newManifest(test.keyPrefix)
-				wantObjs := map[string][]byte{path.Join(test.keyPrefix, "global-manifest.json"): globalManifestBytes}
+				m, kvs := newKVStoreManifest(test.keyPrefix)
+				wantKVs := map[string][]byte{path.Join(test.keyPrefix, "global-manifest.json"): globalManifestBytes}
 				if err := m.PutIngestorGlobalManifest(ctx, globalManifest); err != nil {
 					t.Fatalf("Unexpected error from PutIngestorGlobalManifest: %v", err)
 				}
-				if diff := cmp.Diff(wantObjs, objs); diff != "" {
-					t.Errorf("Unexpected objects in datastore (-want +got):\n%s", diff)
+				if diff := cmp.Diff(wantKVs, kvs); diff != "" {
+					t.Errorf("Unexpected datastore content (-want +got):\n%s", diff)
 				}
 			})
 
@@ -78,8 +78,8 @@ func TestManifest(t *testing.T) {
 				t.Parallel()
 				t.Run("valid manifest", func(t *testing.T) {
 					t.Parallel()
-					m, objs := newManifest(test.keyPrefix)
-					objs[path.Join(test.keyPrefix, "dsp-manifest.json")] = dspManifestBytes
+					m, kvs := newKVStoreManifest(test.keyPrefix)
+					kvs[path.Join(test.keyPrefix, "dsp-manifest.json")] = dspManifestBytes
 					gotManifest, err := m.GetDataShareProcessorSpecificManifest(ctx, dspName)
 					if err != nil {
 						t.Fatalf("Unexpected error from GetDataShareProcessorSpecificManifest: %v", err)
@@ -91,7 +91,7 @@ func TestManifest(t *testing.T) {
 
 				t.Run("no manifest", func(t *testing.T) {
 					t.Parallel()
-					m, _ := newManifest(test.keyPrefix)
+					m, _ := newKVStoreManifest(test.keyPrefix)
 					if _, err := m.GetDataShareProcessorSpecificManifest(ctx, dspName); !errors.Is(err, ErrObjectNotExist) {
 						t.Errorf("Unexpected error from GetDataShareProcessorSpecificManifest: %v", err)
 					}
@@ -99,8 +99,8 @@ func TestManifest(t *testing.T) {
 
 				t.Run("invalid manifest", func(t *testing.T) {
 					t.Parallel()
-					m, objs := newManifest(test.keyPrefix)
-					objs[path.Join(test.keyPrefix, "dsp-manifest.json")] = []byte("bogus non-json data")
+					m, kvs := newKVStoreManifest(test.keyPrefix)
+					kvs[path.Join(test.keyPrefix, "dsp-manifest.json")] = []byte("bogus non-json data")
 					_, err := m.GetDataShareProcessorSpecificManifest(ctx, dspName)
 					const wantErrStr = "couldn't unmarshal"
 					if err == nil || !strings.Contains(err.Error(), wantErrStr) {
@@ -113,8 +113,8 @@ func TestManifest(t *testing.T) {
 				t.Parallel()
 				t.Run("valid manifest", func(t *testing.T) {
 					t.Parallel()
-					m, objs := newManifest(test.keyPrefix)
-					objs[path.Join(test.keyPrefix, "global-manifest.json")] = globalManifestBytes
+					m, kvs := newKVStoreManifest(test.keyPrefix)
+					kvs[path.Join(test.keyPrefix, "global-manifest.json")] = globalManifestBytes
 					gotManifest, err := m.GetIngestorGlobalManifest(ctx)
 					if err != nil {
 						t.Fatalf("Unexpected error from GetIngestorGlobalManifest: %v", err)
@@ -126,7 +126,7 @@ func TestManifest(t *testing.T) {
 
 				t.Run("no manifest", func(t *testing.T) {
 					t.Parallel()
-					m, _ := newManifest(test.keyPrefix)
+					m, _ := newKVStoreManifest(test.keyPrefix)
 					if _, err := m.GetIngestorGlobalManifest(ctx); !errors.Is(err, ErrObjectNotExist) {
 						t.Errorf("Unexpected error from GetIngestorGlobalManifest: %v", err)
 					}
@@ -134,8 +134,8 @@ func TestManifest(t *testing.T) {
 
 				t.Run("invalid manifest", func(t *testing.T) {
 					t.Parallel()
-					m, objs := newManifest(test.keyPrefix)
-					objs[path.Join(test.keyPrefix, "global-manifest.json")] = []byte("bogus non-json data")
+					m, kvs := newKVStoreManifest(test.keyPrefix)
+					kvs[path.Join(test.keyPrefix, "global-manifest.json")] = []byte("bogus non-json data")
 					_, err := m.GetIngestorGlobalManifest(ctx)
 					const wantErrStr = "couldn't unmarshal"
 					if err == nil || !strings.Contains(err.Error(), wantErrStr) {
@@ -147,33 +147,32 @@ func TestManifest(t *testing.T) {
 	}
 }
 
-// newManifest returns a new Manifest, backed by a map that is also returned.
-// Operations on the Manifest will modify the map, and modifications to the map
-// will be reflected by the Manifest.
-func newManifest(keyPrefix string) (_ Manifest, objs map[string][]byte) {
-	objs = map[string][]byte{}
-	ds := memDS{objs}
-	return Manifest{ds, keyPrefix}, objs
+// newKVStoreManifest returns a new kvStoreManifest, backed by an in-memory map from keys to
+// values that is also returned. Operations on the manifest will modify the
+// map, and modifications to the map will be reflected by the manifest.
+func newKVStoreManifest(keyPrefix string) (_ kvStoreManifest, kvs map[string][]byte) {
+	kvs = map[string][]byte{}
+	return kvStoreManifest{memKV{kvs}, keyPrefix}, kvs
 }
 
-// memDS is an in-memory implementation of datastore, suitable for testing.
-type memDS struct{ objs map[string][]byte }
+// memKV is an in-memory implementation of kvStore, suitable for testing.
+type memKV struct{ kvs map[string][]byte }
 
-var _ datastore = memDS{} // verify memDS satisfies datastore interface
+var _ kvStore = memKV{} // verify memDS satisfies kvStore interface
 
-func (ds memDS) put(_ context.Context, key string, data []byte) error {
-	d := make([]byte, len(data))
-	copy(d, data)
-	ds.objs[key] = d
+func (kv memKV) put(_ context.Context, key string, data []byte) error {
+	v := make([]byte, len(data))
+	copy(v, data)
+	kv.kvs[key] = v
 	return nil
 }
 
-func (ds memDS) get(_ context.Context, key string) ([]byte, error) {
-	d, ok := ds.objs[key]
+func (kv memKV) get(_ context.Context, key string) ([]byte, error) {
+	v, ok := kv.kvs[key]
 	if !ok {
 		return nil, ErrObjectNotExist
 	}
-	data := make([]byte, len(d))
-	copy(data, d)
+	data := make([]byte, len(v))
+	copy(data, v)
 	return data, nil
 }

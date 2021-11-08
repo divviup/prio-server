@@ -1,7 +1,7 @@
 environment     = "prod-intl"
 gcp_region      = "us-west1"
 gcp_project     = "prio-intl-prod"
-localities      = ["mn-mn"]
+localities      = ["mn-mn", "mx-coa", "mx-jal", "mx-pue", "mx-yuc"]
 aws_region      = "us-west-2"
 manifest_domain = "isrg-prio.org"
 ingestors = {
@@ -9,6 +9,22 @@ ingestors = {
     manifest_base_url = "storage.googleapis.com/prio-manifests"
     localities = {
       mn-mn = {
+        intake_worker_count    = 3
+        aggregate_worker_count = 3
+      }
+      mx-coa = {
+        intake_worker_count    = 3
+        aggregate_worker_count = 3
+      }
+      mx-jal = {
+        intake_worker_count    = 3
+        aggregate_worker_count = 3
+      }
+      mx-pue = {
+        intake_worker_count    = 3
+        aggregate_worker_count = 3
+      }
+      mx-yuc = {
         intake_worker_count    = 3
         aggregate_worker_count = 3
       }
@@ -21,13 +37,29 @@ ingestors = {
         intake_worker_count    = 3
         aggregate_worker_count = 3
       }
+      mx-coa = {
+        intake_worker_count    = 3
+        aggregate_worker_count = 3
+      }
+      mx-jal = {
+        intake_worker_count    = 3
+        aggregate_worker_count = 3
+      }
+      mx-pue = {
+        intake_worker_count    = 3
+        aggregate_worker_count = 3
+      }
+      mx-yuc = {
+        intake_worker_count    = 3
+        aggregate_worker_count = 3
+      }
     }
   }
 }
 cluster_settings = {
-  initial_node_count = 3
+  initial_node_count = 6
   min_node_count     = 3
-  max_node_count     = 3
+  max_node_count     = 6
   gcp_machine_type   = "e2-standard-2"
   aws_machine_types  = ["t3.large"]
 }
