@@ -9,6 +9,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"encoding/pem"
+	"errors"
 	"flag"
 	"fmt"
 	"log"
@@ -25,7 +26,7 @@ import (
 
 	"github.com/abetterinternet/prio-server/deploy-tool/key"
 	"github.com/abetterinternet/prio-server/key-rotator/manifest"
-	manifest_storage "github.com/abetterinternet/prio-server/manifest-updater/manifest"
+	"github.com/abetterinternet/prio-server/key-rotator/storage"
 )
 
 // This tool consumes the output of `terraform apply`, generating keys and then
@@ -50,18 +51,24 @@ type SpecificManifestWrapper struct {
 // defined in terraform/main.tf, though it only need describe the output
 // variables this program is interested in.
 type TerraformOutput struct {
-	ManifestBucket struct {
-		Value manifest_storage.Bucket
-	} `json:"manifest_bucket"`
+	ManifestBucket    struct{ Value Bucket } `json:"manifest_bucket"`
 	SpecificManifests struct {
 		Value map[string]SpecificManifestWrapper
 	} `json:"specific_manifests"`
-	HasTestEnvironment struct {
-		Value bool
-	} `json:"has_test_environment"`
-	SingletonIngestor struct {
-		Value *SingletonIngestor
-	} `json:"singleton_ingestor"`
+	HasTestEnvironment struct{ Value bool }               `json:"has_test_environment"`
+	SingletonIngestor  struct{ Value *SingletonIngestor } `json:"singleton_ingestor"`
+}
+
+// Bucket specifies the cloud storage bucket where manifests are stored
+type Bucket struct {
+	// URL is the URL of the bucket, with the scheme "gs" for GCS buckets or
+	// "s3" for S3 buckets; e.g., "gs://bucket-name" or "s3://bucket-name"
+	URL string `json:"bucket_url"`
+	// AWSRegion is the region the bucket is in, if it is an S3 bucket
+	AWSRegion string `json:"aws_region,omitempty"`
+	// AWSProfile is the AWS CLI config profile that should be used to
+	// authenticate to AWS, if the bucket is an S3 bucket
+	AWSProfile string `json:"aws_profile,omitempty"`
 }
 
 // GlobalIngestor defines the structure for the global fake ingestor (apple-like
@@ -128,9 +135,10 @@ func generateAndDeployKeyPair(
 }
 
 func setupTestEnvironment(
+	ctx context.Context,
 	k8sSecretsClientGetter k8scorev1.SecretsGetter,
 	ingestor *SingletonIngestor,
-	manifestWriter manifest_storage.Writer,
+	manifestWriter storage.Manifest,
 ) error {
 	batchSigningPublicKey, err := createBatchSigningPublicKey(
 		k8sSecretsClientGetter.Secrets(ingestor.TesterKubernetesNamespace),
@@ -153,7 +161,7 @@ func setupTestEnvironment(
 		},
 	}
 
-	return manifestWriter.WriteIngestorGlobalManifest(globalManifest)
+	return manifestWriter.PutIngestorGlobalManifest(ctx, globalManifest)
 }
 
 func createBatchSigningPublicKey(
@@ -188,10 +196,11 @@ func createBatchSigningPublicKey(
 }
 
 func createManifest(
+	ctx context.Context,
 	k8sSecretsClientGetter k8scorev1.SecretsGetter,
 	dataShareProcessorName string,
 	manifestWrapper *SpecificManifestWrapper,
-	manifestWriter manifest_storage.Writer,
+	manifestWriter storage.Manifest,
 	packetEncryptionKeyCSRs manifest.PacketEncryptionKeyCSRs,
 ) error {
 	k8sSecretsClient := k8sSecretsClientGetter.Secrets(manifestWrapper.KubernetesNamespace)
@@ -253,7 +262,7 @@ func createManifest(
 	}
 
 	// Put the specific manifests into the manifest bucket.
-	if err := manifestWriter.WriteDataShareProcessorSpecificManifest(manifestWrapper.SpecificManifest, dataShareProcessorName); err != nil {
+	if err := manifestWriter.PutDataShareProcessorSpecificManifest(ctx, dataShareProcessorName, manifestWrapper.SpecificManifest); err != nil {
 		return fmt.Errorf("could not write data share specific manifest: %s", err)
 	}
 
@@ -309,9 +318,10 @@ func backupKeys(
 }
 
 func createManifests(
+	ctx context.Context,
 	k8sSecretsClientGetter k8scorev1.SecretsGetter,
 	specificManifests map[string]SpecificManifestWrapper,
-	manifestStorage manifest_storage.Storage,
+	manifestStorage storage.Manifest,
 ) error {
 	// Iterate over all specific manifests described by TF output so we can
 	// record any packet encryption key CSRs that have already been created. We
@@ -321,13 +331,12 @@ func createManifests(
 	existingManifests := map[string]struct{}{}
 	packetEncryptionKeyCSRs := manifest.PacketEncryptionKeyCSRs{}
 	for dataShareProcessorName := range specificManifests {
-		manifest, err := manifestStorage.FetchDataShareProcessorSpecificManifest(dataShareProcessorName)
+		manifest, err := manifestStorage.GetDataShareProcessorSpecificManifest(ctx, dataShareProcessorName)
+		if errors.Is(err, storage.ErrObjectNotExist) {
+			continue
+		}
 		if err != nil {
 			return err
-		}
-
-		if manifest == nil {
-			continue
 		}
 
 		existingManifests[dataShareProcessorName] = struct{}{}
@@ -353,6 +362,7 @@ func createManifests(
 		manifestWrapper := manifestWrapperRaw
 		if _, ok := existingManifests[dataShareProcessorName]; !ok {
 			if err := createManifest(
+				ctx,
 				k8sSecretsClientGetter,
 				dataShareProcessorName,
 				&manifestWrapper,
@@ -389,6 +399,8 @@ var keyBackupGCPProject = flag.String("key-backup-gcp-project", "", "GCP project
 func main() {
 	flag.Parse()
 
+	ctx := context.Background()
+
 	if *kubeConfigPath == "" {
 		currentUser, err := user.Current()
 		if err != nil {
@@ -409,27 +421,30 @@ func main() {
 		log.Fatalf("%s", err)
 	}
 
-	manifestStorage, err := manifest_storage.NewStorage(&terraformOutput.ManifestBucket.Value)
+	manifestStorage, err := storage.NewManifest(ctx, terraformOutput.ManifestBucket.Value.URL,
+		storage.WithAWSRegion(terraformOutput.ManifestBucket.Value.AWSRegion),
+		storage.WithAWSProfile(terraformOutput.ManifestBucket.Value.AWSProfile))
 	if err != nil {
 		log.Fatalf("%s", err)
 	}
 
 	if terraformOutput.HasTestEnvironment.Value && terraformOutput.SingletonIngestor.Value != nil {
-		globalManifestStorage, err := manifest_storage.NewStorage(&manifest_storage.Bucket{
-			URL:        terraformOutput.ManifestBucket.Value.URL,
-			KeyPrefix:  "singleton-ingestor",
-			AWSRegion:  terraformOutput.ManifestBucket.Value.AWSRegion,
-			AWSProfile: terraformOutput.ManifestBucket.Value.AWSProfile,
-		})
+		globalManifestStorage, err := storage.NewManifest(ctx, terraformOutput.ManifestBucket.Value.URL,
+			storage.WithKeyPrefix("singleton-ingestor"),
+			storage.WithAWSRegion(terraformOutput.ManifestBucket.Value.AWSRegion),
+			storage.WithAWSProfile(terraformOutput.ManifestBucket.Value.AWSProfile))
 		if err != nil {
 			log.Fatalf("%s", err)
 		}
-		manifestExists, err := globalManifestStorage.IngestorGlobalManifestExists()
+		_, err = globalManifestStorage.GetIngestorGlobalManifest(ctx)
 		if err != nil {
-			log.Fatalf("%s", err)
-		} else if manifestExists {
-			log.Println("global ingestor manifest exists - skipping creation")
+			if errors.Is(err, storage.ErrObjectNotExist) {
+				log.Println("global ingestor manifest exists - skipping creation")
+			} else {
+				log.Fatalf("%s", err)
+			}
 		} else if err := setupTestEnvironment(
+			ctx,
 			k8sClient.CoreV1(),
 			terraformOutput.SingletonIngestor.Value,
 			globalManifestStorage,
@@ -439,6 +454,7 @@ func main() {
 	}
 
 	if err := createManifests(
+		ctx,
 		k8sClient.CoreV1(),
 		terraformOutput.SpecificManifests.Value,
 		manifestStorage,
