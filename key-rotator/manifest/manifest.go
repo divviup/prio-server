@@ -53,7 +53,7 @@ func (m DataShareProcessorSpecificManifest) UpdateKeys(cfg UpdateKeysConfig) (Da
 	newM.BatchSigningPublicKeys, newM.PacketEncryptionKeyCSRs = BatchSigningPublicKeys{}, PacketEncryptionKeyCSRs{}
 
 	// Update batch signing key.
-	for _, v := range cfg.BatchSigningKey {
+	if err := cfg.BatchSigningKey.VisitVersions(func(v key.Version) error {
 		kid := cfg.BatchSigningKeyIDPrefix
 		if !v.CreationTime.IsZero() {
 			kid = fmt.Sprintf("%s-%d", cfg.BatchSigningKeyIDPrefix, v.CreationTime.Unix())
@@ -63,19 +63,22 @@ func (m DataShareProcessorSpecificManifest) UpdateKeys(cfg UpdateKeysConfig) (Da
 		if bspk, ok := m.BatchSigningPublicKeys[kid]; ok {
 			newBSPK = bspk
 		} else {
-			pkix, err := v.RawKey.PublicAsPKIX()
+			pkix, err := v.KeyMaterial.PublicAsPKIX()
 			if err != nil {
-				return DataShareProcessorSpecificManifest{}, fmt.Errorf("couldn't create PKIX-encoding for batch signing key version created at %v (%d): %w", v.CreationTime.Format(time.RFC3339), v.CreationTime.Unix(), err)
+				return fmt.Errorf("couldn't create PKIX-encoding for batch signing key version created at %v (%d): %w", v.CreationTime.Format(time.RFC3339), v.CreationTime.Unix(), err)
 			}
 			newBSPK = BatchSigningPublicKey{PublicKey: pkix}
 		}
 		newM.BatchSigningPublicKeys[kid] = newBSPK
+		return nil
+	}); err != nil {
+		return DataShareProcessorSpecificManifest{}, err
 	}
 
 	// Update packet encryption key.
-	for _, v := range cfg.PacketEncryptionKey {
+	if err := cfg.PacketEncryptionKey.VisitVersions(func(v key.Version) error {
 		if !v.Primary {
-			continue
+			return nil
 		}
 
 		kid := cfg.PacketEncryptionKeyIDPrefix
@@ -87,13 +90,16 @@ func (m DataShareProcessorSpecificManifest) UpdateKeys(cfg UpdateKeysConfig) (Da
 		if pec, ok := m.PacketEncryptionKeyCSRs[kid]; ok {
 			newPEC = pec
 		} else {
-			csr, err := v.RawKey.PublicAsCSR(cfg.PacketEncryptionKeyCSRFQDN)
+			csr, err := v.KeyMaterial.PublicAsCSR(cfg.PacketEncryptionKeyCSRFQDN)
 			if err != nil {
-				return DataShareProcessorSpecificManifest{}, fmt.Errorf("couldn't create CSR for packet encryption key version created at %v (%d): %w", v.CreationTime.Format(time.RFC3339), v.CreationTime.Unix(), err)
+				return fmt.Errorf("couldn't create CSR for packet encryption key version created at %v (%d): %w", v.CreationTime.Format(time.RFC3339), v.CreationTime.Unix(), err)
 			}
 			newPEC = PacketEncryptionCertificate{CertificateSigningRequest: csr}
 		}
 		newM.PacketEncryptionKeyCSRs[kid] = newPEC
+		return nil
+	}); err != nil {
+		return DataShareProcessorSpecificManifest{}, err
 	}
 
 	return newM, nil

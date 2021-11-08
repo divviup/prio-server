@@ -23,7 +23,7 @@ func TestP256(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Couldn't create new key: %v", err)
 	}
-	wantPK := key.k.(*p256).privKey // grab *ecdsa.PrivateKey from guts of raw key
+	wantPK := key.m.(*p256).privKey // grab *ecdsa.PrivateKey from guts of raw key
 
 	// Check that each of the encodings can be round-tripped back from the
 	// format it is expected to be in.
@@ -34,11 +34,11 @@ func TestP256(t *testing.T) {
 			t.Fatalf("Couldn't marshal to binary: %v", err)
 		}
 
-		var newKey Raw
+		var newKey Material
 		if err := newKey.UnmarshalBinary(binaryBytes); err != nil {
 			t.Fatalf("Couldn't unmarshal from binary: %v", err)
 		}
-		newPK := newKey.k.(*p256).privKey
+		newPK := newKey.m.(*p256).privKey
 		if !newPK.Equal(wantPK) {
 			t.Errorf("Binary-encoded key does not match generated private key")
 		}
@@ -51,11 +51,11 @@ func TestP256(t *testing.T) {
 			t.Errorf("Couldn't marshal to text: %v", err)
 		}
 
-		var newKey Raw
+		var newKey Material
 		if err := newKey.UnmarshalText(textBytes); err != nil {
-			t.Fatalf("Couldn't unmarshal from binary: %v", err)
+			t.Fatalf("Couldn't unmarshal from text: %v", err)
 		}
-		newPK := newKey.k.(*p256).privKey
+		newPK := newKey.m.(*p256).privKey
 		if !newPK.Equal(wantPK) {
 			t.Errorf("Text-encoded key does not match generated private key")
 		}
@@ -191,7 +191,9 @@ func TestP256(t *testing.T) {
 	})
 }
 
-// For in-package testing, create a new "TEST" raw key type; keys are identified by a single int64 value.
+// For in-package testing, create a new "TEST" raw key material type; keys are
+// a single int64 value, which can be chosen by the test logic by calling
+// newTestKey(int64).
 const Test Type = 0
 
 func init() {
@@ -204,11 +206,11 @@ func init() {
 
 type testKey struct{ privKey int64 }
 
-var _ raw = &testKey{}
+var _ material = &testKey{} // verify *testKey satisfies material
 
-func newTestKey(pk int64) Raw { return Raw{&testKey{pk}} }
+func newTestKey(pk int64) Material { return Material{&testKey{pk}} }
 
-func newRandomTestKey() (raw, error) {
+func newRandomTestKey() (material, error) {
 	var buf [8]byte
 	if _, err := io.ReadFull(rand.Reader, buf[:]); err != nil {
 		return nil, fmt.Errorf("couldn't read from random: %v", err)
@@ -216,11 +218,11 @@ func newRandomTestKey() (raw, error) {
 	return &testKey{(int64)(binary.BigEndian.Uint64(buf[:]))}, nil
 }
 
-func newUninitializedTestKey() raw { return &testKey{} }
+func newUninitializedTestKey() material { return &testKey{} }
 
 func (testKey) keyType() Type { return Test }
 
-func (k testKey) equal(o raw) bool { return k.privKey == o.(*testKey).privKey }
+func (k testKey) equal(o material) bool { return k.privKey == o.(*testKey).privKey }
 
 func (k testKey) publicAsCSR(csrFQDN string) (string, error) { return "", errors.New("unimplemented") }
 
