@@ -37,6 +37,16 @@ type DataShareProcessorSpecificManifest struct {
 	PacketEncryptionKeyCSRs PacketEncryptionKeyCSRs `json:"packet-encryption-keys"`
 }
 
+func (m DataShareProcessorSpecificManifest) Equal(o DataShareProcessorSpecificManifest) bool {
+	return m.Format == o.Format &&
+		m.IngestionIdentity == o.IngestionIdentity &&
+		m.IngestionBucket == o.IngestionBucket &&
+		m.PeerValidationIdentity == o.PeerValidationIdentity &&
+		m.PeerValidationBucket == o.PeerValidationBucket &&
+		m.BatchSigningPublicKeys.Equal(o.BatchSigningPublicKeys) &&
+		m.PacketEncryptionKeyCSRs.Equal(o.PacketEncryptionKeyCSRs)
+}
+
 // UpdateKeysConfig configures an UpdateKeys operation.
 type UpdateKeysConfig struct {
 	BatchSigningKey         key.Key // the key used for batch signing operations
@@ -129,8 +139,35 @@ type ServerIdentity struct {
 	GCPServiceAccountEmail string `json:"gcp-service-account-email"`
 }
 
-type BatchSigningPublicKeys = map[string]BatchSigningPublicKey
-type PacketEncryptionKeyCSRs = map[string]PacketEncryptionCertificate
+type BatchSigningPublicKeys map[string]BatchSigningPublicKey
+
+func (b BatchSigningPublicKeys) Equal(o BatchSigningPublicKeys) bool {
+	if len(b) != len(o) {
+		return false
+	}
+	for k, bv := range b {
+		ov, ok := o[k]
+		if !ok || bv != ov {
+			return false
+		}
+	}
+	return true
+}
+
+type PacketEncryptionKeyCSRs map[string]PacketEncryptionCertificate
+
+func (p PacketEncryptionKeyCSRs) Equal(o PacketEncryptionKeyCSRs) bool {
+	if len(p) != len(o) {
+		return false
+	}
+	for k, pv := range p {
+		ov, ok := o[k]
+		if !ok || pv != ov {
+			return false
+		}
+	}
+	return true
+}
 
 // BatchSigningPublicKey represents a public key used for batch signing.
 type BatchSigningPublicKey struct {
