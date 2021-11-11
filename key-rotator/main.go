@@ -206,7 +206,8 @@ type rotateKeysConfig struct {
 func rotateKeys(ctx context.Context, cfg rotateKeysConfig) error {
 	// Retrieve keys & manifests.
 	log.Info().Msgf("Reading keys & manifests")
-	oldPacketEncryptionKey, oldBatchSigningKeyByIngestor, oldManifestByIngestor, err := readKeysAndManifests(ctx, cfg.keyStore, cfg.manifestStore, cfg.locality, cfg.ingestors)
+	oldPacketEncryptionKey, oldBatchSigningKeyByIngestor, oldManifestByIngestor, err :=
+		readKeysAndManifests(ctx, cfg.keyStore, cfg.manifestStore, cfg.locality, cfg.ingestors)
 	if err != nil {
 		return fmt.Errorf("couldn't get keys & manifests: %w", err)
 	}
@@ -221,7 +222,8 @@ func rotateKeys(ctx context.Context, cfg rotateKeysConfig) error {
 	for ingestor, oldKey := range oldBatchSigningKeyByIngestor {
 		newKey, err := oldKey.Rotate(cfg.now, cfg.batchRotationCFG)
 		if err != nil {
-			return fmt.Errorf("couldn't rotate batch signing key for (%q, %q): %w", cfg.locality, ingestor, err)
+			return fmt.Errorf("couldn't rotate batch signing key for (%q, %q): %w",
+				cfg.locality, ingestor, err)
 		}
 		newBatchSigningKeyByIngestor[ingestor] = newKey
 	}
@@ -230,15 +232,18 @@ func rotateKeys(ctx context.Context, cfg rotateKeysConfig) error {
 	newManifestByIngestor := map[string]manifest.DataShareProcessorSpecificManifest{}
 	for ingestor, oldManifest := range oldManifestByIngestor {
 		newManifest, err := oldManifest.UpdateKeys(manifest.UpdateKeysConfig{
-			BatchSigningKey:         newBatchSigningKeyByIngestor[ingestor],
-			BatchSigningKeyIDPrefix: fmt.Sprintf("%s-%s-%s-batch-signing-key", cfg.prioEnvironment, cfg.locality, ingestor),
+			BatchSigningKey: newBatchSigningKeyByIngestor[ingestor],
+			BatchSigningKeyIDPrefix: fmt.Sprintf(
+				"%s-%s-%s-batch-signing-key", cfg.prioEnvironment, cfg.locality, ingestor),
 
-			PacketEncryptionKey:         newPacketEncryptionKey,
-			PacketEncryptionKeyIDPrefix: fmt.Sprintf("%s-%s-ingestion-packet-decryption-key", cfg.prioEnvironment, cfg.locality),
-			PacketEncryptionKeyCSRFQDN:  cfg.csrFQDN,
+			PacketEncryptionKey: newPacketEncryptionKey,
+			PacketEncryptionKeyIDPrefix: fmt.Sprintf(
+				"%s-%s-ingestion-packet-decryption-key", cfg.prioEnvironment, cfg.locality),
+			PacketEncryptionKeyCSRFQDN: cfg.csrFQDN,
 		})
 		if err != nil {
-			return fmt.Errorf("couldn't update manifest for (%q, %q): %w", cfg.locality, ingestor, err)
+			return fmt.Errorf("couldn't update manifest for (%q, %q): %w",
+				cfg.locality, ingestor, err)
 		}
 		newManifestByIngestor[ingestor] = newManifest
 	}
@@ -249,17 +254,25 @@ func rotateKeys(ctx context.Context, cfg rotateKeysConfig) error {
 	// written the associated private key to a secret (which would then be
 	// lost).
 	log.Info().Msgf("Writing keys")
-	if err := writeKeys(ctx, cfg.keyStore, cfg.locality, oldPacketEncryptionKey, oldBatchSigningKeyByIngestor, newPacketEncryptionKey, newBatchSigningKeyByIngestor); err != nil {
+	if err := writeKeys(
+		ctx, cfg.keyStore, cfg.locality,
+		oldPacketEncryptionKey, oldBatchSigningKeyByIngestor,
+		newPacketEncryptionKey, newBatchSigningKeyByIngestor); err != nil {
 		return fmt.Errorf("couldn't write keys: %w", err)
 	}
 	log.Info().Msgf("Writing manifests")
-	if err := writeManifests(ctx, cfg.manifestStore, cfg.locality, oldManifestByIngestor, newManifestByIngestor); err != nil {
+	if err := writeManifests(
+		ctx, cfg.manifestStore, cfg.locality, oldManifestByIngestor, newManifestByIngestor); err != nil {
 		return fmt.Errorf("couldn't write manifests: %w", err)
 	}
 	return nil
 }
 
-func readKeysAndManifests(ctx context.Context, keyStore storage.Key, manifestStore storage.Manifest, locality string, ingestors []string) (packetEncryptionKey key.Key, batchSigningKeyByIngestor map[string]key.Key, manifestByIngestor map[string]manifest.DataShareProcessorSpecificManifest, _ error) {
+func readKeysAndManifests(
+	ctx context.Context, keyStore storage.Key,
+	manifestStore storage.Manifest, locality string, ingestors []string,
+) (packetEncryptionKey key.Key, batchSigningKeyByIngestor map[string]key.Key,
+	manifestByIngestor map[string]manifest.DataShareProcessorSpecificManifest, _ error) {
 	eg, ctx := errgroup.WithContext(ctx)
 	var mu sync.Mutex                                                             // protects packetEncryptionKey, batchSigningKeyByIngestor, manifestByIngestor
 	batchSigningKeyByIngestor = map[string]key.Key{}                              // ingestor -> batch signing key
@@ -284,7 +297,8 @@ func readKeysAndManifests(ctx context.Context, keyStore storage.Key, manifestSto
 		eg.Go(func() error {
 			key, err := keyStore.GetBatchSigningKey(ctx, locality, ingestor)
 			if err != nil {
-				return fmt.Errorf("couldn't get batch signing for (%q, %q): %w", locality, ingestor, err)
+				return fmt.Errorf("couldn't get batch signing for (%q, %q): %w",
+					locality, ingestor, err)
 			}
 			mu.Lock()
 			defer mu.Unlock()
@@ -312,7 +326,9 @@ func readKeysAndManifests(ctx context.Context, keyStore storage.Key, manifestSto
 	return packetEncryptionKey, batchSigningKeyByIngestor, manifestByIngestor, nil
 }
 
-func writeKeys(ctx context.Context, keyStore storage.Key, locality string, oldPacketEncryptionKey key.Key, oldBatchSigningKeyByIngestor map[string]key.Key, newPacketEncryptionKey key.Key, newBatchSigningKeyByIngestor map[string]key.Key) error {
+func writeKeys(ctx context.Context, keyStore storage.Key, locality string,
+	oldPacketEncryptionKey key.Key, oldBatchSigningKeyByIngestor map[string]key.Key,
+	newPacketEncryptionKey key.Key, newBatchSigningKeyByIngestor map[string]key.Key) error {
 	eg, ctx := errgroup.WithContext(ctx)
 
 	// Write packet encryption key.
@@ -343,7 +359,9 @@ func writeKeys(ctx context.Context, keyStore storage.Key, locality string, oldPa
 	return eg.Wait()
 }
 
-func writeManifests(ctx context.Context, manifestStore storage.Manifest, locality string, oldManifestByIngestor, newManifestByIngestor map[string]manifest.DataShareProcessorSpecificManifest) error {
+func writeManifests(
+	ctx context.Context, manifestStore storage.Manifest, locality string,
+	oldManifestByIngestor, newManifestByIngestor map[string]manifest.DataShareProcessorSpecificManifest) error {
 	eg, ctx := errgroup.WithContext(ctx)
 
 	for ingestor, oldManifest := range oldManifestByIngestor {
