@@ -65,8 +65,8 @@ func (m DataShareProcessorSpecificManifest) UpdateKeys(cfg UpdateKeysConfig) (Da
 	// Update batch signing key.
 	if err := cfg.BatchSigningKey.VisitVersions(func(v key.Version) error {
 		kid := cfg.BatchSigningKeyIDPrefix
-		if !v.CreationTime.IsZero() {
-			kid = fmt.Sprintf("%s-%d", cfg.BatchSigningKeyIDPrefix, v.CreationTime.Unix())
+		if ts := v.CreationTime.Unix(); ts != 0 {
+			kid = fmt.Sprintf("%s-%d", cfg.BatchSigningKeyIDPrefix, ts)
 		}
 
 		var newBSPK BatchSigningPublicKey
@@ -92,8 +92,8 @@ func (m DataShareProcessorSpecificManifest) UpdateKeys(cfg UpdateKeysConfig) (Da
 		}
 
 		kid := cfg.PacketEncryptionKeyIDPrefix
-		if !v.CreationTime.IsZero() {
-			kid = fmt.Sprintf("%s-%d", cfg.PacketEncryptionKeyIDPrefix, v.CreationTime.Unix())
+		if ts := v.CreationTime.Unix(); ts != 0 {
+			kid = fmt.Sprintf("%s-%d", cfg.PacketEncryptionKeyIDPrefix, ts)
 		}
 
 		var newPEC PacketEncryptionCertificate

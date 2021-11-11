@@ -287,7 +287,12 @@ func pkv(ts int64, k key.Material) key.Version {
 	return kv
 }
 
-func noTimeKV(k key.Material) key.Version { return key.Version{KeyMaterial: k} }
+func noTimeKV(k key.Material) key.Version {
+	return key.Version{
+		KeyMaterial:  k,
+		CreationTime: time.Unix(0, 0),
+	}
+}
 
 func noTimePKV(k key.Material) key.Version {
 	kv := noTimeKV(k)
