@@ -62,8 +62,8 @@ func TestRotateKeys(t *testing.T) {
 		{
 			name: "stable state",
 			preBSKVersions: map[LI][]int64{
-				{"asgard", "ingestor-1"}: {99600, 99000},
-				{"asgard", "ingestor-2"}: {99400, 99100},
+				li("asgard", "ingestor-1"): {99600, 99000},
+				li("asgard", "ingestor-2"): {99400, 99100},
 			},
 			prePEKVersions: map[string][]int64{
 				"asgard": {99500},
@@ -80,8 +80,8 @@ func TestRotateKeys(t *testing.T) {
 			},
 
 			postBSKVersions: map[LI][]int64{
-				{"asgard", "ingestor-1"}: {99600, 99000},
-				{"asgard", "ingestor-2"}: {99400, 99100},
+				li("asgard", "ingestor-1"): {99600, 99000},
+				li("asgard", "ingestor-2"): {99400, 99100},
 			},
 			postPEKVersions: map[string][]int64{
 				"asgard": {99500},
@@ -101,8 +101,8 @@ func TestRotateKeys(t *testing.T) {
 		{
 			name: "first rotation for pre-rotation environment",
 			preBSKVersions: map[LI][]int64{
-				{"asgard", "ingestor-1"}: {0},
-				{"asgard", "ingestor-2"}: {0},
+				li("asgard", "ingestor-1"): {0},
+				li("asgard", "ingestor-2"): {0},
 			},
 			prePEKVersions: map[string][]int64{
 				"asgard": {0},
@@ -119,8 +119,8 @@ func TestRotateKeys(t *testing.T) {
 			},
 
 			postBSKVersions: map[LI][]int64{
-				{"asgard", "ingestor-1"}: {100000, 0},
-				{"asgard", "ingestor-2"}: {100000, 0},
+				li("asgard", "ingestor-1"): {100000, 0},
+				li("asgard", "ingestor-2"): {100000, 0},
 			},
 			postPEKVersions: map[string][]int64{
 				"asgard": {100000, 0},
@@ -140,8 +140,8 @@ func TestRotateKeys(t *testing.T) {
 		{
 			name: "first rotation for newly turned-up environment",
 			preBSKVersions: map[LI][]int64{
-				{"asgard", "ingestor-1"}: {},
-				{"asgard", "ingestor-2"}: {},
+				li("asgard", "ingestor-1"): {},
+				li("asgard", "ingestor-2"): {},
 			},
 			prePEKVersions: map[string][]int64{
 				"asgard": {},
@@ -158,8 +158,8 @@ func TestRotateKeys(t *testing.T) {
 			},
 
 			postBSKVersions: map[LI][]int64{
-				{"asgard", "ingestor-1"}: {100000},
-				{"asgard", "ingestor-2"}: {100000},
+				li("asgard", "ingestor-1"): {100000},
+				li("asgard", "ingestor-2"): {100000},
 			},
 			postPEKVersions: map[string][]int64{
 				"asgard": {100000},
@@ -179,8 +179,8 @@ func TestRotateKeys(t *testing.T) {
 		{
 			name: "normal key rotation",
 			preBSKVersions: map[LI][]int64{
-				{"asgard", "ingestor-1"}: {50000},
-				{"asgard", "ingestor-2"}: {51000},
+				li("asgard", "ingestor-1"): {50000},
+				li("asgard", "ingestor-2"): {51000},
 			},
 			prePEKVersions: map[string][]int64{
 				"asgard": {52000},
@@ -197,8 +197,8 @@ func TestRotateKeys(t *testing.T) {
 			},
 
 			postBSKVersions: map[LI][]int64{
-				{"asgard", "ingestor-1"}: {50000, 100000},
-				{"asgard", "ingestor-2"}: {51000, 100000},
+				li("asgard", "ingestor-1"): {50000, 100000},
+				li("asgard", "ingestor-2"): {51000, 100000},
 			},
 			postPEKVersions: map[string][]int64{
 				"asgard": {100000, 52000},
@@ -408,7 +408,7 @@ func manifestStore(t *testing.T, manifestInfos map[string]manifestInfo) *storage
 		}
 		peks := manifest.PacketEncryptionKeyCSRs{}
 		for _, pekVer := range info.packetEncryptionKeyVersions {
-			peks[pekVer] = manifest.PacketEncryptionCertificate{CertificateSigningRequest: fmt.Sprintf("CSR for packet encryption key verison %q", pekVer)}
+			peks[pekVer] = manifest.PacketEncryptionCertificate{CertificateSigningRequest: fmt.Sprintf("CSR for packet encryption key version %q", pekVer)}
 		}
 		ms[dsp] = manifest.DataShareProcessorSpecificManifest{
 			Format:                  1,
@@ -468,7 +468,7 @@ func strsToSet(vals []string) map[string]struct{} {
 // versions.
 func keyToVersionMap(k key.Key) map[int64]key.Version {
 	rslt := map[int64]key.Version{}
-	k.VisitVersions(func(v key.Version) error {
+	_ = k.VisitVersions(func(v key.Version) error {
 		rslt[v.CreationTime.Unix()] = v
 		return nil
 	})
@@ -493,6 +493,7 @@ func dupLIToKeyMap(m map[LI]key.Key) map[LI]key.Key {
 	return rslt
 }
 
+// dupStrToManifestMap duplicates a map of strings to manifests.
 func dupStrToManifestMap(m map[string]manifest.DataShareProcessorSpecificManifest) map[string]manifest.DataShareProcessorSpecificManifest {
 	rslt := map[string]manifest.DataShareProcessorSpecificManifest{}
 	for k, v := range m {
@@ -500,3 +501,5 @@ func dupStrToManifestMap(m map[string]manifest.DataShareProcessorSpecificManifes
 	}
 	return rslt
 }
+
+func li(locality, ingestor string) LI { return LI{Locality: locality, Ingestor: ingestor} }
