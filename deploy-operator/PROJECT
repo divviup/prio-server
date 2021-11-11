@@ -1,7 +1,0 @@
-domain: isrg-prio.org
-repo: github.com/abetterinternet/prio-server/deploy-operator
-resources:
-- group: prio
-  kind: Locality
-  version: v1
-version: "2"
