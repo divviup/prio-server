@@ -550,7 +550,7 @@ func strsToSet(vals []string) map[string]struct{} {
 // versions.
 func keyToVersionMap(k key.Key) map[int64]key.Version {
 	rslt := map[int64]key.Version{}
-	_ = k.VisitVersions(func(v key.Version) error {
+	_ = k.Versions(func(v key.Version) error {
 		rslt[v.CreationTime.Unix()] = v
 		return nil
 	})

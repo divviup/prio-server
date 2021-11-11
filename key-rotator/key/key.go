@@ -39,17 +39,32 @@ func (k Key) Equal(o Key) bool {
 	return true
 }
 
-// VisitVersions visits the versions contained within this key in an
-// unspecified order, calling the provided function on each version. If the
-// provided function returns an error, VisitVersions returns that error
-// unchanged. Otherwise, VisitVersions will never return an error.
-func (k Key) VisitVersions(f func(Version) error) error {
+// IsEmpty returns true if and only if this is the empty key, i.e. the key with
+// no versions.
+func (k Key) IsEmpty() bool { return len(k.v) == 0 }
+
+// Versions visits the versions contained within this key in an unspecified
+// order, calling the provided function on each version. If the provided
+// function returns an error, Versions returns that error unchanged. Otherwise,
+// Versions will never return an error.
+func (k Key) Versions(f func(Version) error) error {
 	for _, v := range k.v {
 		if err := f(v); err != nil {
 			return err
 		}
 	}
 	return nil
+}
+
+// Primary returns the primary version of the key. It panics if the key is the
+// empty key.
+func (k Key) Primary() Version {
+	for _, v := range k.v {
+		if v.Primary {
+			return v
+		}
+	}
+	panic("no primary version")
 }
 
 // RotationConfig defines the configuration for a key-rotation operation.

@@ -40,7 +40,6 @@ func TestUpdateKeys(t *testing.T) {
 		wantBSKs map[string]key.Material
 		wantPEKs map[string]key.Material
 	}{
-		// Generic tests.
 		{
 			name:                "no keys at start (new environment rollout)",
 			batchSigningKey:     k(kv(10, k0), pkv(15, k1), kv(20, k2)),
@@ -66,108 +65,85 @@ func TestUpdateKeys(t *testing.T) {
 			wantPEKs:            map[string]key.Material{"pek-10": k1},
 		},
 
-		// BSK tests.
+		// the following tests verify how manifest updates behave against a
+		// simulated rotation of keys
 		{
-			name:            "BSK: before first rotation (0 timestamp)",
-			initialBSKs:     map[string]key.Material{"bsk": k0},
-			batchSigningKey: k(noTimePKV(k0)),
-			wantBSKs:        map[string]key.Material{"bsk": k0},
-		},
-		{
-			name:            "BSK: first new key (0 timestamp)",
-			initialBSKs:     map[string]key.Material{"bsk": k0},
-			batchSigningKey: k(noTimePKV(k0), kv(10, k1)),
-			wantBSKs:        map[string]key.Material{"bsk": k0, "bsk-10": k1},
-		},
-		{
-			name:            "BSK: first primary-key change (0 timestamp)",
-			initialBSKs:     map[string]key.Material{"bsk": k0, "bsk-10": k1},
-			batchSigningKey: k(noTimeKV(k0), pkv(10, k1)),
-			wantBSKs:        map[string]key.Material{"bsk": k0, "bsk-10": k1},
-		},
-		{
-			name:            "BSK: first key removal (0 timestamp)",
-			initialBSKs:     map[string]key.Material{"bsk": k0, "bsk-10": k1},
-			batchSigningKey: k(pkv(10, k1)),
-			wantBSKs:        map[string]key.Material{"bsk-10": k1},
-		},
-		{
-			name:            "BSK: stable state (before rotation)",
-			initialBSKs:     map[string]key.Material{"bsk-10": k0, "bsk-20": k1},
-			batchSigningKey: k(kv(10, k0), pkv(20, k1)),
-			wantBSKs:        map[string]key.Material{"bsk-10": k0, "bsk-20": k1},
-		},
-		{
-			name:            "BSK: new key",
-			initialBSKs:     map[string]key.Material{"bsk-10": k0, "bsk-20": k1},
-			batchSigningKey: k(kv(10, k0), pkv(20, k1), kv(30, k2)),
-			wantBSKs:        map[string]key.Material{"bsk-10": k0, "bsk-20": k1, "bsk-30": k2},
-		},
-		{
-			name:            "BSK: rotation",
-			initialBSKs:     map[string]key.Material{"bsk-10": k0, "bsk-20": k1, "bsk-30": k2},
-			batchSigningKey: k(kv(10, k0), kv(20, k1), pkv(30, k2)),
-			wantBSKs:        map[string]key.Material{"bsk-10": k0, "bsk-20": k1, "bsk-30": k2},
-		},
-		{
-			name:            "BSK: removal",
-			initialBSKs:     map[string]key.Material{"bsk-10": k0, "bsk-20": k1, "bsk-30": k2},
-			batchSigningKey: k(kv(20, k1), pkv(30, k2)),
-			wantBSKs:        map[string]key.Material{"bsk-20": k1, "bsk-30": k2},
-		},
-
-		// PEK tests.
-		{
-			name:                "PEK: before first rotation (0 timestamp)",
+			name:                "before first rotation (0 timestamp)",
+			initialBSKs:         map[string]key.Material{"bsk": k0},
 			initialPEKs:         map[string]key.Material{"pek": k0},
+			batchSigningKey:     k(noTimePKV(k0)),
 			packetEncryptionKey: k(noTimePKV(k0)),
+			wantBSKs:            map[string]key.Material{"bsk": k0},
 			wantPEKs:            map[string]key.Material{"pek": k0},
 		},
 		{
-			name:                "PEK: first new key (0 timestamp)",
+			name:                "first new key (0 timestamp)",
+			initialBSKs:         map[string]key.Material{"bsk": k0},
 			initialPEKs:         map[string]key.Material{"pek": k0},
+			batchSigningKey:     k(noTimePKV(k0), kv(10, k1)),
 			packetEncryptionKey: k(noTimePKV(k0), kv(10, k1)),
+			wantBSKs:            map[string]key.Material{"bsk": k0, "bsk-10": k1},
 			wantPEKs:            map[string]key.Material{"pek": k0},
 		},
 		{
-			name:                "PEK: first primary-key change (0 timestamp)",
+			name:                "first primary-key change (0 timestamp)",
+			initialBSKs:         map[string]key.Material{"bsk": k0, "bsk-10": k1},
 			initialPEKs:         map[string]key.Material{"pek": k0},
+			batchSigningKey:     k(noTimeKV(k0), pkv(10, k1)),
 			packetEncryptionKey: k(noTimeKV(k0), pkv(10, k1)),
+			wantBSKs:            map[string]key.Material{"bsk": k0, "bsk-10": k1},
 			wantPEKs:            map[string]key.Material{"pek-10": k1},
 		},
 		{
-			name:                "PEK: first key removal (0 timestamp)",
+			name:                "first key removal (0 timestamp)",
+			initialBSKs:         map[string]key.Material{"bsk": k0, "bsk-10": k1},
 			initialPEKs:         map[string]key.Material{"pek-10": k1},
 			packetEncryptionKey: k(pkv(10, k1)),
+			batchSigningKey:     k(pkv(10, k1)),
+			wantBSKs:            map[string]key.Material{"bsk-10": k1},
 			wantPEKs:            map[string]key.Material{"pek-10": k1},
 		},
 		{
-			name:                "PEK: stable state (before rotation)",
+			name:                "stable state (before rotation)",
+			initialBSKs:         map[string]key.Material{"bsk-10": k0, "bsk-20": k1},
 			initialPEKs:         map[string]key.Material{"pek-20": k1},
+			batchSigningKey:     k(kv(10, k0), pkv(20, k1)),
 			packetEncryptionKey: k(kv(10, k0), pkv(20, k1)),
+			wantBSKs:            map[string]key.Material{"bsk-10": k0, "bsk-20": k1},
 			wantPEKs:            map[string]key.Material{"pek-20": k1},
 		},
 		{
-			name:                "PEK: new key",
+			name:                "new key",
+			initialBSKs:         map[string]key.Material{"bsk-10": k0, "bsk-20": k1},
 			initialPEKs:         map[string]key.Material{"pek-20": k1},
+			batchSigningKey:     k(kv(10, k0), pkv(20, k1), kv(30, k2)),
 			packetEncryptionKey: k(kv(10, k0), pkv(20, k1), kv(30, k2)),
+			wantBSKs:            map[string]key.Material{"bsk-10": k0, "bsk-20": k1, "bsk-30": k2},
 			wantPEKs:            map[string]key.Material{"pek-20": k1},
 		},
 		{
-			name:                "PEK: rotation",
+			name:                "rotation",
+			initialBSKs:         map[string]key.Material{"bsk-10": k0, "bsk-20": k1, "bsk-30": k2},
 			initialPEKs:         map[string]key.Material{"pek-20": k1},
+			batchSigningKey:     k(kv(10, k0), kv(20, k1), pkv(30, k2)),
 			packetEncryptionKey: k(kv(10, k0), kv(20, k1), pkv(30, k2)),
+			wantBSKs:            map[string]key.Material{"bsk-10": k0, "bsk-20": k1, "bsk-30": k2},
 			wantPEKs:            map[string]key.Material{"pek-30": k2},
 		},
 		{
-			name:                "PEK: removal",
-			initialBSKs:         map[string]key.Material{"pek-30": k2},
+			name:                "removal",
+			initialBSKs:         map[string]key.Material{"bsk-10": k0, "bsk-20": k1, "bsk-30": k2},
+			initialPEKs:         map[string]key.Material{"pek-30": k2},
+			batchSigningKey:     k(kv(20, k1), pkv(30, k2)),
 			packetEncryptionKey: k(kv(20, k1), pkv(30, k2)),
+			wantBSKs:            map[string]key.Material{"bsk-20": k1, "bsk-30": k2},
 			wantPEKs:            map[string]key.Material{"pek-30": k2},
 		},
 	} {
 		test := test
 		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+
 			// Construct a manifest according to `initialBSKs` & `initialPEKs`.
 			// Specify non-key fields so that we can check that they are carried through UpdateKeys unmodified.
 			m := DataShareProcessorSpecificManifest{
