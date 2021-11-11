@@ -229,6 +229,11 @@ func rotateKeys(ctx context.Context, cfg rotateKeysConfig) error {
 	}
 
 	// Update manifests.
+	// We evaluate all manifests for update, not just manifests whose "input"
+	// keys were modified by the rotation step, to account for the possibility
+	// that a previous run managed to rotate & write some keys but then failed
+	// at updating manifests. By re-evaluating manifests for update we will
+	// re-attempt writing updated manifests on subsequent runs.
 	newManifestByIngestor := map[string]manifest.DataShareProcessorSpecificManifest{}
 	for ingestor, oldManifest := range oldManifestByIngestor {
 		newManifest, err := oldManifest.UpdateKeys(manifest.UpdateKeysConfig{
@@ -262,7 +267,8 @@ func rotateKeys(ctx context.Context, cfg rotateKeysConfig) error {
 	}
 	log.Info().Msgf("Writing manifests")
 	if err := writeManifests(
-		ctx, cfg.manifestStore, cfg.locality, oldManifestByIngestor, newManifestByIngestor); err != nil {
+		ctx, cfg.manifestStore, cfg.locality,
+		oldManifestByIngestor, newManifestByIngestor); err != nil {
 		return fmt.Errorf("couldn't write manifests: %w", err)
 	}
 	return nil

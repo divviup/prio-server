@@ -214,6 +214,88 @@ func TestRotateKeys(t *testing.T) {
 				},
 			},
 		},
+
+		{
+			// this test starts as if "normal key rotation" ran previously, but
+			// failed to write back the PEK & manifests
+			name: "failure on previous run: key write failure",
+			preBSKVersions: map[LI][]int64{
+				li("asgard", "ingestor-1"): {50000, 100000},
+				li("asgard", "ingestor-2"): {51000, 100000},
+			},
+			prePEKVersions: map[string][]int64{
+				"asgard": {52000},
+			},
+			preManifestInfo: map[string]manifestInfo{
+				"asgard-ingestor-1": {
+					batchSigningKeyVersions:     []string{"prio-env-asgard-ingestor-1-batch-signing-key-50000"},
+					packetEncryptionKeyVersions: []string{"prio-env-asgard-packet-decryption-key-52000"},
+				},
+				"asgard-ingestor-2": {
+					batchSigningKeyVersions:     []string{"prio-env-asgard-ingestor-2-batch-signing-key-51000"},
+					packetEncryptionKeyVersions: []string{"prio-env-asgard-packet-decryption-key-52000"},
+				},
+			},
+
+			postBSKVersions: map[LI][]int64{
+				li("asgard", "ingestor-1"): {50000, 100000},
+				li("asgard", "ingestor-2"): {51000, 100000},
+			},
+			postPEKVersions: map[string][]int64{
+				"asgard": {100000, 52000},
+			},
+			postManifestInfo: map[string]manifestInfo{
+				"asgard-ingestor-1": {
+					batchSigningKeyVersions:     []string{"prio-env-asgard-ingestor-1-batch-signing-key-50000", "prio-env-asgard-ingestor-1-batch-signing-key-100000"},
+					packetEncryptionKeyVersions: []string{"prio-env-asgard-ingestion-packet-decryption-key-100000"},
+				},
+				"asgard-ingestor-2": {
+					batchSigningKeyVersions:     []string{"prio-env-asgard-ingestor-2-batch-signing-key-51000", "prio-env-asgard-ingestor-2-batch-signing-key-100000"},
+					packetEncryptionKeyVersions: []string{"prio-env-asgard-ingestion-packet-decryption-key-100000"},
+				},
+			},
+		},
+
+		{
+			// this test starts as if "normal key rotation" ran previously, but
+			// failed to write back the asgard-ingestor-2 manifest
+			name: "failure on previous run: manifest write failure",
+			preBSKVersions: map[LI][]int64{
+				li("asgard", "ingestor-1"): {50000, 100000},
+				li("asgard", "ingestor-2"): {51000, 100000},
+			},
+			prePEKVersions: map[string][]int64{
+				"asgard": {100000, 52000},
+			},
+			preManifestInfo: map[string]manifestInfo{
+				"asgard-ingestor-1": {
+					batchSigningKeyVersions:     []string{"prio-env-asgard-ingestor-1-batch-signing-key-50000", "prio-env-asgard-ingestor-1-batch-signing-key-100000"},
+					packetEncryptionKeyVersions: []string{"prio-env-asgard-ingestion-packet-decryption-key-100000"},
+				},
+				"asgard-ingestor-2": {
+					batchSigningKeyVersions:     []string{"prio-env-asgard-ingestor-2-batch-signing-key-51000"},
+					packetEncryptionKeyVersions: []string{"prio-env-asgard-packet-decryption-key-52000"},
+				},
+			},
+
+			postBSKVersions: map[LI][]int64{
+				li("asgard", "ingestor-1"): {50000, 100000},
+				li("asgard", "ingestor-2"): {51000, 100000},
+			},
+			postPEKVersions: map[string][]int64{
+				"asgard": {100000, 52000},
+			},
+			postManifestInfo: map[string]manifestInfo{
+				"asgard-ingestor-1": {
+					batchSigningKeyVersions:     []string{"prio-env-asgard-ingestor-1-batch-signing-key-50000", "prio-env-asgard-ingestor-1-batch-signing-key-100000"},
+					packetEncryptionKeyVersions: []string{"prio-env-asgard-ingestion-packet-decryption-key-100000"},
+				},
+				"asgard-ingestor-2": {
+					batchSigningKeyVersions:     []string{"prio-env-asgard-ingestor-2-batch-signing-key-51000", "prio-env-asgard-ingestor-2-batch-signing-key-100000"},
+					packetEncryptionKeyVersions: []string{"prio-env-asgard-ingestion-packet-decryption-key-100000"},
+				},
+			},
+		},
 	} {
 		test := test
 		t.Run(test.name, func(t *testing.T) {
