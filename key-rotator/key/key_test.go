@@ -83,9 +83,8 @@ func TestKeyRotate(t *testing.T) {
 
 	const now = 100000
 
-	cfg := RotationConfig{
-		CreateKeyFunc: func() (Material, error) { return newTestKey(now), nil },
-		CreateMinAge:  10000 * time.Second,
+	baseCFG := RotationConfig{
+		CreateMinAge: 10000 * time.Second,
 
 		PrimaryMinAge: 1000 * time.Second,
 
@@ -98,6 +97,7 @@ func TestKeyRotate(t *testing.T) {
 		name    string
 		key     Key
 		wantKey Key
+		cfg     RotationConfig // falls back to baseCFG if unspecified
 	}{
 		// Basic creation tests.
 		{
@@ -114,13 +114,13 @@ func TestKeyRotate(t *testing.T) {
 		// Basic primary tests.
 		{
 			name:    "no new primary at boundary",
-			key:     k(pkv(90000), kv(99000)),
-			wantKey: k(pkv(90000), kv(99000)),
+			key:     k(pkv(90000), kv(99001)),
+			wantKey: k(pkv(90000), kv(99001)),
 		},
 		{
 			name:    "new primary",
-			key:     k(pkv(90000), kv(98999)),
-			wantKey: k(kv(90000), pkv(98999)),
+			key:     k(pkv(90000), kv(99000)),
+			wantKey: k(kv(90000), pkv(99000)),
 		},
 
 		// Basic deletion tests.
@@ -151,12 +151,30 @@ func TestKeyRotate(t *testing.T) {
 			key:     k(pkv(79999), kv(89999)),
 			wantKey: k(pkv(89999), kv(100000)),
 		},
+		{
+			name:    "zero minimum primary age allows key to become primary immediately",
+			key:     k(pkv(0)),
+			wantKey: k(kv(0), pkv(100000)),
+			cfg: RotationConfig{
+				CreateMinAge: 10000 * time.Second,
+
+				PrimaryMinAge: 0,
+
+				DeleteMinAge:      20000 * time.Second,
+				DeleteMinKeyCount: 2,
+			},
+		},
 	} {
 		test := test
 		t.Run(test.name, func(t *testing.T) {
 			t.Parallel()
 
 			// Check that we get the desired key from Rotate.
+			cfg := test.cfg
+			if cfg.CreateMinAge == 0 && cfg.PrimaryMinAge == 0 && cfg.DeleteMinAge == 0 && cfg.DeleteMinKeyCount == 0 {
+				cfg = baseCFG
+			}
+			cfg.CreateKeyFunc = func() (Material, error) { return newTestKey(now), nil }
 			gotKey, err := test.key.Rotate(time.Unix(now, 0), cfg)
 			if err != nil {
 				t.Fatalf("Unexpected error from Rotate: %v", err)
@@ -186,6 +204,8 @@ func TestKeyRotate(t *testing.T) {
 	t.Run("key from the future", func(t *testing.T) {
 		t.Parallel()
 		const wantErrString = "after now"
+		cfg := baseCFG
+		cfg.CreateKeyFunc = func() (Material, error) { return newTestKey(now), nil }
 		_, err := k(pkv(100001)).Rotate(time.Unix(now, 0), cfg)
 		if err == nil || !strings.Contains(err.Error(), wantErrString) {
 			t.Errorf("Wanted error containing %q, got: %v", wantErrString, err)
@@ -194,7 +214,7 @@ func TestKeyRotate(t *testing.T) {
 	t.Run("key creation function returns error", func(t *testing.T) {
 		t.Parallel()
 		const wantErrString = "bananas"
-		cfg := cfg
+		cfg := baseCFG
 		cfg.CreateKeyFunc = func() (Material, error) { return Material{}, errors.New(wantErrString) }
 		_, err := Key{}.Rotate(time.Unix(now, 0), cfg)
 		if err == nil || !strings.Contains(err.Error(), wantErrString) {
