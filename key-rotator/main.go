@@ -41,7 +41,7 @@ var (
 	packetEncryptionKeyCreateMinAge   = flag.Duration("packet-encryption-key-create-min-age", 9*30*24*time.Hour, "How frequently to create a new packet encryption key version")              // default: 9 months
 	packetEncryptionKeyPrimaryMinAge  = flag.Duration("packet-encryption-key-primary-min-age", 0, "How old a packet encryption key version must be before it can become primary")             // default: 0
 	packetEncryptionKeyDeleteMinAge   = flag.Duration("packet-encryption-key-delete-min-age", 13*30*24*time.Hour, "How old a packet encryption key version must be before it can be deleted") // default: 13 months
-	packetEncryptionKeyDeleteMinCount = flag.Int("packet-encryption-key-delete-min-count", 1, "The minimum number of packet encryption key versions left undeleted after rotation")
+	packetEncryptionKeyDeleteMinCount = flag.Int("packet-encryption-key-delete-min-count", 2, "The minimum number of packet encryption key versions left undeleted after rotation")
 
 	// Other flags.
 	dryRun     = flag.Bool("dry-run", true, "If set, do not actually write any keys or manifests back (only report what would have changed)")
