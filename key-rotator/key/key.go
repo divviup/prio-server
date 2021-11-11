@@ -144,8 +144,8 @@ func (k Key) Rotate(now time.Time, cfg RotationConfig) (Key, error) {
 
 	// Policy: determine & mark the current primary key version (unmarking any
 	// versions that were previously marked primary):
-	//  * If there is a key version older than `primary_min_age`, select the
-	//    youngest such key version.
+	//  * If there is a key version not younger than `primary_min_age`, select
+	//    the youngest such key version.
 	//  * Otherwise, select the oldest key version.
 	// This is implemented as a binary search which returns the index of the
 	// first key version that is younger than `primary_min_age`. If this index
@@ -153,7 +153,7 @@ func (k Key) Rotate(now time.Time, cfg RotationConfig) (Key, error) {
 	// use the oldest key version, i.e. the one in index 0. If this index is
 	// not zero, we want to use the next key version older than the one we
 	// found, i.e. the one in the preceding index.
-	primaryIdx := sort.Search(len(kvs), func(i int) bool { return age(kvs[i]) <= cfg.PrimaryMinAge })
+	primaryIdx := sort.Search(len(kvs), func(i int) bool { return age(kvs[i]) < cfg.PrimaryMinAge })
 	if primaryIdx > 0 {
 		primaryIdx--
 	}
