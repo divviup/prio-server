@@ -129,6 +129,11 @@ func (cfg RotationConfig) Validate() error {
 		return errors.New("DeleteMinKeys must be non-negative")
 	}
 
+	// Other conditions.
+	if !(cfg.PrimaryMinAge <= cfg.CreateMinAge && cfg.CreateMinAge <= cfg.DeleteMinAge) {
+		return errors.New("config must satisfy PrimaryMinAge <= CreateMinAge <= DeleteMinAge")
+	}
+
 	return nil
 }
 
@@ -145,9 +150,7 @@ func (cfg RotationConfig) Validate() error {
 //      the youngest such key version as primary.
 //    * Otherwise, select the oldest key version as primary.
 //
-// The returned key is guaranteed to include at least one version. If the
-// RotationConfig is such that all key versions would be deleted, an error is
-// returned.
+// The returned key is guaranteed to include at least one version.
 func (k Key) Rotate(now time.Time, cfg RotationConfig) (Key, error) {
 	// Validate parameters.
 	if err := cfg.Validate(); err != nil {

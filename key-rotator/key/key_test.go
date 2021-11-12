@@ -269,7 +269,7 @@ func TestKeyRotate(t *testing.T) {
 	})
 	t.Run("key rotation results in empty key", func(t *testing.T) {
 		t.Parallel()
-		const wantErrString = "key must contain at least one version"
+		const wantErrString = "must satisfy PrimaryMinAge <= CreateMinAge <= DeleteMinAge"
 		cfg := RotationConfig{
 			CreateKeyFunc: func() (Material, error) { return newTestKey(now), nil },
 			CreateMinAge:  100000 * time.Second,
