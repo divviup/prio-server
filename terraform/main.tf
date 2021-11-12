@@ -156,30 +156,6 @@ is provided by the locality configuration.
 DESCRIPTION
 }
 
-variable "batch_signing_key_expiration" {
-  type        = number
-  default     = 390
-  description = "This value is used to generate batch signing keys with the specified expiration"
-}
-
-variable "batch_signing_key_rotation" {
-  type        = number
-  default     = 300
-  description = "This value is used to specify the rotation interval of the batch signing key"
-}
-
-variable "packet_encryption_key_expiration" {
-  type        = number
-  default     = 90
-  description = "This value is used to generate packet encryption keys with the specified expiration"
-}
-
-variable "packet_encryption_rotation" {
-  type        = number
-  default     = 50
-  description = "This value is used to specify the rotation interval of the packet encryption key"
-}
-
 variable "pushgateway" {
   type        = string
   default     = "prometheus-pushgateway.monitoring:9091"
@@ -510,24 +486,6 @@ locals {
     token                      = module.gke[0].token
     kubectl_command            = "gcloud container clusters get-credentials ${module.gke[0].cluster_name} --region ${var.gcp_region} --project ${var.gcp_project}"
   }
-}
-
-# Call the locality_kubernetes module for each locality/namespace
-module "locality_kubernetes" {
-  for_each             = kubernetes_namespace.namespaces
-  source               = "./modules/locality_kubernetes"
-  environment          = var.environment
-  use_aws              = var.use_aws
-  gcp_project          = var.gcp_project
-  manifest_bucket      = local.manifest.bucket
-  kubernetes_namespace = each.value.metadata[0].name
-  ingestors            = keys(var.ingestors)
-  eks_oidc_provider    = var.use_aws ? module.eks[0].oidc_provider : { url = "", arn = "" }
-
-  batch_signing_key_expiration     = var.batch_signing_key_expiration
-  batch_signing_key_rotation       = var.batch_signing_key_rotation
-  packet_encryption_key_expiration = var.packet_encryption_key_expiration
-  packet_encryption_rotation       = var.packet_encryption_rotation
 }
 
 module "data_share_processors" {

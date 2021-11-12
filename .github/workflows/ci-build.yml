@@ -92,46 +92,6 @@ jobs:
       with:
         file: ./facilitator/Dockerfile
 
-  deploy-operator-docker:
-    runs-on: ubuntu-latest
-    steps:
-    - uses: actions/checkout@v2
-    - name: Set up Docker build
-      uses: docker/setup-buildx-action@v1
-    - name: build
-      uses: docker/build-push-action@v2
-      with:
-        file: ./deploy-operator/Dockerfile
-        context: ./deploy-operator
-
-  deploy-operator-test:
-    runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: deploy-operator
-    steps:
-    - uses: actions/checkout@v2
-    - name: Setup go
-      uses: actions/setup-go@v1
-      with:
-        go-version: 1.17
-    - name: Get kubebuilder
-      run: |
-        wget https://github.com/kubernetes-sigs/kubebuilder/releases/download/v2.3.1/kubebuilder_2.3.1_linux_amd64.tar.gz
-        tar -zxvf kubebuilder*.tar.gz
-        sudo mkdir -p /usr/local
-        sudo mv kubebuilder_2.3.1_linux_amd64 /usr/local/kubebuilder
-    - name: Test
-      run: go test ./... -race -coverprofile cover.out
-    - name: Upload test coverage
-      if: success()
-      uses: codecov/codecov-action@v1
-      with:
-        fail_ci_if_error: false
-        file: "deploy-operator/cover.out"
-        flags: deploy_operator_tests
-        name: deploy-operator tests
-
   workflow-manager-test:
     runs-on: ubuntu-latest
     defaults:
@@ -206,17 +166,6 @@ jobs:
       uses: golangci/golangci-lint-action@v2.5.2
       with:
         working-directory: workflow-manager
-        version: "v1.43.0"
-        args: "--config ../.golangci.yml --timeout 10m"
-
-  deploy-operator-golangci-lint:
-    runs-on: ubuntu-latest
-    steps:
-    - uses: actions/checkout@v2
-    - name: Run golangci-lint on deploy-operator
-      uses: golangci/golangci-lint-action@v2.5.2
-      with:
-        working-directory: deploy-operator
         version: "v1.43.0"
         args: "--config ../.golangci.yml --timeout 10m"
 
