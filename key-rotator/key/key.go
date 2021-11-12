@@ -15,7 +15,7 @@ import (
 // "primary": this version will be used for encryption or signing.
 type Key struct {
 	// structure of v: if v is not empty, the first element is the primary version.
-	// note well: all new, non-empty key values should be created via `fromVersionSlice`.
+	// note well: all new, non-empty Key values should be created via `fromVersionSlice`.
 	v []Version
 }
 
@@ -47,7 +47,7 @@ func fromVersionSlice(vs []Version) (Key, error) {
 	// oldest), to get a canonical ordering that is also a fairly reasonable
 	// default ordering for decryption/signature-verification attempts.
 	nonPrimaryVs := vs[1:]
-	sort.Slice(nonPrimaryVs, func(i, j int) bool { return nonPrimaryVs[j].CreationTime.Before(nonPrimaryVs[i].CreationTime) })
+	sort.Slice(nonPrimaryVs, func(i, j int) bool { return nonPrimaryVs[j].CreationTimestamp < nonPrimaryVs[i].CreationTimestamp })
 	return Key{vs}, nil
 }
 
@@ -144,15 +144,16 @@ func (k Key) Rotate(now time.Time, cfg RotationConfig) (Key, error) {
 	// Copy the existing list of key versions, sorting by creation time (oldest
 	// to youngest). Also, validate that we aren't trying to rotate a key
 	// containing a version from the "future" to simplify later logic.
-	age := func(v Version) time.Duration { return now.Sub(v.CreationTime) }
+	nowTS := now.Unix()
+	age := func(v Version) time.Duration { return time.Second * time.Duration(nowTS-v.CreationTimestamp) }
 	kvs := make([]Version, 0, 1+len(k.v))
 	for _, v := range k.v {
 		if age(v) < 0 {
-			return Key{}, fmt.Errorf("found key version with creation time %v, after now (%v)", v.CreationTime.Format(time.RFC3339), now.Format(time.RFC3339))
+			return Key{}, fmt.Errorf("found key version with creation timestamp %d, after now (%d)", v.CreationTimestamp, nowTS)
 		}
 		kvs = append(kvs, v)
 	}
-	sort.Slice(kvs, func(i, j int) bool { return kvs[i].CreationTime.Before(kvs[j].CreationTime) })
+	sort.Slice(kvs, func(i, j int) bool { return kvs[i].CreationTimestamp < kvs[j].CreationTimestamp })
 
 	// Policy: if no key versions exist, or if the youngest key version is
 	// older than `create_min_age`, create a new key version.
@@ -161,7 +162,7 @@ func (k Key) Rotate(now time.Time, cfg RotationConfig) (Key, error) {
 		if err != nil {
 			return Key{}, fmt.Errorf("couldn't create new key version: %w", err)
 		}
-		kvs = append(kvs, Version{KeyMaterial: m, CreationTime: now.UTC()})
+		kvs = append(kvs, Version{KeyMaterial: m, CreationTimestamp: nowTS})
 	}
 
 	// Policy: While there are more than `delete_min_key_count` keys, and the
@@ -194,9 +195,9 @@ func (k Key) MarshalJSON() ([]byte, error) {
 	jvs := make([]jsonVersion, len(k.v))
 	for i, v := range k.v {
 		jvs[i] = jsonVersion{
-			KeyMaterial:  v.KeyMaterial,
-			CreationTime: v.CreationTime.Unix(),
-			Primary:      i == 0,
+			KeyMaterial:       v.KeyMaterial,
+			CreationTimestamp: v.CreationTimestamp,
+			Primary:           i == 0,
 		}
 	}
 	return json.Marshal(jvs)
@@ -212,8 +213,8 @@ func (k *Key) UnmarshalJSON(data []byte) error {
 	vs := make([]Version, len(jvs))
 	for i, jv := range jvs {
 		vs[i] = Version{
-			KeyMaterial:  jv.KeyMaterial,
-			CreationTime: time.Unix(jv.CreationTime, 0),
+			KeyMaterial:       jv.KeyMaterial,
+			CreationTimestamp: jv.CreationTimestamp,
 		}
 		if jv.Primary {
 			vs[0], vs[i] = vs[i], vs[0]
@@ -238,21 +239,21 @@ func (k *Key) UnmarshalJSON(data []byte) error {
 // as well as associated metadata. Typically, a Version will be embedded within
 // a Key.
 type Version struct {
-	KeyMaterial  Material
-	CreationTime time.Time
+	KeyMaterial       Material
+	CreationTimestamp int64 // Unix seconds timestamp
 }
 
 // Equal returns true if and only if this Version is equal to the given
 // Version.
 func (v Version) Equal(o Version) bool {
 	return v.KeyMaterial.Equal(o.KeyMaterial) &&
-		v.CreationTime.Equal(o.CreationTime)
+		v.CreationTimestamp == o.CreationTimestamp
 }
 
 // jsonVersion represents a single version of a key, as would be marshalled to
 // JSON.
 type jsonVersion struct {
-	KeyMaterial  Material `json:"key"`
-	CreationTime int64    `json:"creation_time,string"`
-	Primary      bool     `json:"primary,omitempty"`
+	KeyMaterial       Material `json:"key"`
+	CreationTimestamp int64    `json:"creation_time,string"`
+	Primary           bool     `json:"primary,omitempty"`
 }

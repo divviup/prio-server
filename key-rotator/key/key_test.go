@@ -24,20 +24,20 @@ func TestKeyMarshal(t *testing.T) {
 		}
 		wantKey, err := FromVersions(
 			Version{
-				KeyMaterial:  mustKey(Test.New()),
-				CreationTime: time.Unix(200000, 0).UTC(),
+				KeyMaterial:       mustKey(Test.New()),
+				CreationTimestamp: 200000,
 			},
 			Version{
-				KeyMaterial:  mustKey(Test.New()),
-				CreationTime: time.Unix(100000, 0).UTC(),
+				KeyMaterial:       mustKey(Test.New()),
+				CreationTimestamp: 100000,
 			},
 			Version{
-				KeyMaterial:  mustKey(P256.New()),
-				CreationTime: time.Unix(150000, 0).UTC(),
+				KeyMaterial:       mustKey(P256.New()),
+				CreationTimestamp: 150000,
 			},
 			Version{
-				KeyMaterial:  mustKey(P256.New()),
-				CreationTime: time.Unix(250000, 0).UTC(),
+				KeyMaterial:       mustKey(P256.New()),
+				CreationTimestamp: 250000,
 			},
 		)
 		if err != nil {
@@ -263,10 +263,10 @@ func TestKeyRotate(t *testing.T) {
 // bogus key material. pkvTS is the primary key version timestamp, vtss are the
 // non-primary version timestamps.
 func k(pkvTS int64, vtss ...int64) Key {
-	pkv := Version{KeyMaterial: newTestKey(pkvTS), CreationTime: time.Unix(pkvTS, 0)}
+	pkv := Version{KeyMaterial: newTestKey(pkvTS), CreationTimestamp: pkvTS}
 	vs := []Version{}
 	for _, vts := range vtss {
-		vs = append(vs, Version{KeyMaterial: newTestKey(vts), CreationTime: time.Unix(vts, 0)})
+		vs = append(vs, Version{KeyMaterial: newTestKey(vts), CreationTimestamp: vts})
 	}
 	k, err := FromVersions(pkv, vs...)
 	if err != nil {

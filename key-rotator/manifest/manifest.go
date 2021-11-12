@@ -2,7 +2,6 @@ package manifest
 
 import (
 	"fmt"
-	"time"
 
 	"github.com/abetterinternet/prio-server/key-rotator/key"
 )
@@ -65,7 +64,7 @@ func (m DataShareProcessorSpecificManifest) UpdateKeys(cfg UpdateKeysConfig) (Da
 	// Update batch signing key.
 	if err := cfg.BatchSigningKey.Versions(func(v key.Version) error {
 		kid := cfg.BatchSigningKeyIDPrefix
-		if ts := v.CreationTime.Unix(); ts != 0 {
+		if ts := v.CreationTimestamp; ts != 0 {
 			kid = fmt.Sprintf("%s-%d", cfg.BatchSigningKeyIDPrefix, ts)
 		}
 
@@ -75,7 +74,7 @@ func (m DataShareProcessorSpecificManifest) UpdateKeys(cfg UpdateKeysConfig) (Da
 		} else {
 			pkix, err := v.KeyMaterial.PublicAsPKIX()
 			if err != nil {
-				return fmt.Errorf("couldn't create PKIX-encoding for batch signing key version created at %v (%d): %w", v.CreationTime.Format(time.RFC3339), v.CreationTime.Unix(), err)
+				return fmt.Errorf("couldn't create PKIX-encoding for batch signing key version with creation timestamp %d: %w", v.CreationTimestamp, err)
 			}
 			newBSPK = BatchSigningPublicKey{PublicKey: pkix}
 		}
@@ -88,7 +87,7 @@ func (m DataShareProcessorSpecificManifest) UpdateKeys(cfg UpdateKeysConfig) (Da
 	// Update packet encryption key.
 	primaryPEKVersion := cfg.PacketEncryptionKey.Primary()
 	kid := cfg.PacketEncryptionKeyIDPrefix
-	if ts := primaryPEKVersion.CreationTime.Unix(); ts != 0 {
+	if ts := primaryPEKVersion.CreationTimestamp; ts != 0 {
 		kid = fmt.Sprintf("%s-%d", cfg.PacketEncryptionKeyIDPrefix, ts)
 	}
 
@@ -98,7 +97,7 @@ func (m DataShareProcessorSpecificManifest) UpdateKeys(cfg UpdateKeysConfig) (Da
 	} else {
 		csr, err := primaryPEKVersion.KeyMaterial.PublicAsCSR(cfg.PacketEncryptionKeyCSRFQDN)
 		if err != nil {
-			return DataShareProcessorSpecificManifest{}, fmt.Errorf("couldn't create CSR for packet encryption key version created at %v (%d): %w", primaryPEKVersion.CreationTime.Format(time.RFC3339), primaryPEKVersion.CreationTime.Unix(), err)
+			return DataShareProcessorSpecificManifest{}, fmt.Errorf("couldn't create CSR for packet encryption key version with creation timestamp %d: %w", primaryPEKVersion.CreationTimestamp, err)
 		}
 		newPEC = PacketEncryptionCertificate{CertificateSigningRequest: csr}
 	}

@@ -6,7 +6,6 @@ import (
 	"encoding/pem"
 	"fmt"
 	"testing"
-	"time"
 
 	"github.com/abetterinternet/prio-server/key-rotator/key"
 	"github.com/google/go-cmp/cmp"
@@ -252,8 +251,8 @@ func k(pkv key.Version, vs ...key.Version) key.Key {
 // kv creates a key version with the given timestamp and raw key.
 func kv(ts int64, k key.Material) key.Version {
 	return key.Version{
-		KeyMaterial:  k,
-		CreationTime: time.Unix(ts, 0),
+		KeyMaterial:       k,
+		CreationTimestamp: ts,
 	}
 }
 

@@ -519,8 +519,8 @@ func keyFromTimestamps(t *testing.T, verTSs []int64) key.Key {
 			t.Fatalf("Couldn't create new P256 key material: %v", err)
 		}
 		vs = append(vs, key.Version{
-			KeyMaterial:  m,
-			CreationTime: time.Unix(ts, 0),
+			KeyMaterial:       m,
+			CreationTimestamp: ts,
 		})
 	}
 	k, err := key.FromVersions(vs[0], vs[1:]...)
@@ -553,7 +553,7 @@ func strsToSet(vals []string) map[string]struct{} {
 func keyToVersionMap(k key.Key) map[int64]key.Version {
 	rslt := map[int64]key.Version{}
 	_ = k.Versions(func(v key.Version) error {
-		rslt[v.CreationTime.Unix()] = v
+		rslt[v.CreationTimestamp] = v
 		return nil
 	})
 	return rslt

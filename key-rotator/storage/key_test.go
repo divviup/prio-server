@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"math/big"
 	"testing"
-	"time"
 
 	"github.com/google/go-cmp/cmp"
 	k8sapi "k8s.io/api/core/v1"
@@ -232,8 +231,8 @@ func k(pkv key.Version, vs ...key.Version) key.Key {
 // kv creates a non-primary key version with the given timestamp and raw key.
 func kv(ts int64, k key.Material) key.Version {
 	return key.Version{
-		KeyMaterial:  k,
-		CreationTime: time.Unix(ts, 0),
+		KeyMaterial:       k,
+		CreationTimestamp: ts,
 	}
 }
 

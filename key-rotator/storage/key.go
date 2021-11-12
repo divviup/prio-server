@@ -11,7 +11,6 @@ import (
 	"errors"
 	"fmt"
 	"math/big"
-	"time"
 
 	"github.com/rs/zerolog/log"
 	k8smeta "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -131,7 +130,7 @@ func (k k8sKey) getKey(ctx context.Context, secretName string, parseSecretKey fu
 		if err != nil {
 			return key.Key{}, fmt.Errorf("couldn't interpret secret %q secret key as key: %w", secretName, err)
 		}
-		secretKey, err := key.FromVersions(key.Version{KeyMaterial: keyMaterial, CreationTime: time.Unix(0, 0)})
+		secretKey, err := key.FromVersions(key.Version{KeyMaterial: keyMaterial, CreationTimestamp: 0})
 		if err != nil {
 			return key.Key{}, fmt.Errorf("couldn't create key: %w", err)
 		}
