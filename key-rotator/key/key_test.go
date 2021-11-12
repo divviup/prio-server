@@ -100,6 +100,16 @@ func TestKeyMarshal(t *testing.T) {
 				serializedKey: `[{"key":"ACrYJ2YS9Oem","creation_time":"200000","primary":true},{"key":"ACdcLaKY8VsN","creation_time":"100000","primary":true}]`,
 				wantErrStr:    "multiple primary versions",
 			},
+			{
+				name:          "multiple versions with same timestamp (primary)",
+				serializedKey: `[{"key":"ACrYJ2YS9Oem","creation_time":"200000","primary":true},{"key":"ACdcLaKY8VsN","creation_time":"100000"},{"key":"ACrYJ2YS9Oem","creation_time":"200000"}]`,
+				wantErrStr:    "multiple versions with creation timestamp",
+			},
+			{
+				name:          "multiple versions with same timestamp (non-primary)",
+				serializedKey: `[{"key":"ACrYJ2YS9Oem","creation_time":"200000","primary":true},{"key":"ACdcLaKY8VsN","creation_time":"100000"},{"key":"ACdcLaKY8VsN","creation_time":"100000"}]`,
+				wantErrStr:    "multiple versions with creation timestamp",
+			},
 		} {
 			test := test
 			t.Run(test.name, func(t *testing.T) {

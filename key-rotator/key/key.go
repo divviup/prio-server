@@ -48,6 +48,15 @@ func fromVersionSlice(vs []Version) (Key, error) {
 	// default ordering for decryption/signature-verification attempts.
 	nonPrimaryVs := vs[1:]
 	sort.Slice(nonPrimaryVs, func(i, j int) bool { return nonPrimaryVs[j].CreationTimestamp < nonPrimaryVs[i].CreationTimestamp })
+
+	// Validate that all key versions have distinct creation timestamps.
+	pkTS := vs[0].CreationTimestamp
+	for i, v := range nonPrimaryVs {
+		if ts := v.CreationTimestamp; ts == pkTS || (i > 0 && ts == nonPrimaryVs[i-1].CreationTimestamp) {
+			return Key{}, fmt.Errorf("key contains multiple versions with creation timestamp %d", ts)
+		}
+	}
+
 	return Key{vs}, nil
 }
 
