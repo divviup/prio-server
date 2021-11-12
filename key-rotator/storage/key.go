@@ -131,7 +131,7 @@ func (k k8sKey) getKey(ctx context.Context, secretName string, parseSecretKey fu
 		if err != nil {
 			return key.Key{}, fmt.Errorf("couldn't interpret secret %q secret key as key: %w", secretName, err)
 		}
-		secretKey, err := key.FromVersions(key.Version{KeyMaterial: keyMaterial, CreationTime: time.Unix(0, 0), Primary: true})
+		secretKey, err := key.FromVersions(key.Version{KeyMaterial: keyMaterial, CreationTime: time.Unix(0, 0)})
 		if err != nil {
 			return key.Key{}, fmt.Errorf("couldn't create key: %w", err)
 		}

@@ -50,13 +50,13 @@ func TestRotateKeys(t *testing.T) {
 		name string
 
 		// Initial state.
-		preBSKVersions  map[LI][]int64          // batch signing keys; (locality, ingestor) -> version timestamps; the FIRST version is considered primary
-		prePEKVersions  map[string][]int64      // packet encryption keys; locality -> version timestamps; the FIRST version is considered primary
+		preBSKVersions  map[LI][]int64          // batch signing keys; (locality, ingestor) -> version timestamps; the first version is considered primary
+		prePEKVersions  map[string][]int64      // packet encryption keys; locality -> version timestamps; the first version is considered primary
 		preManifestInfo map[string]manifestInfo // (locality, ingestor) -> manifest info
 
 		// Desired state.
-		postBSKVersions  map[LI][]int64          // batch signing keys; (locality, ingestor) -> version timestamps; the FIRST version is considered primary
-		postPEKVersions  map[string][]int64      // packet encryption keys; locality -> version timestamps; the FIRST version is considered primary
+		postBSKVersions  map[LI][]int64          // batch signing keys; (locality, ingestor) -> version timestamps; the first version is considered primary
+		postPEKVersions  map[string][]int64      // packet encryption keys; locality -> version timestamps; the first version is considered primary
 		postManifestInfo map[string]manifestInfo // (locality, ingestor) -> manifest info
 	}{
 		{
@@ -509,8 +509,11 @@ func manifestStore(t *testing.T, manifestInfos map[string]manifestInfo) *storage
 // timestamps, random P256 keys, and the first timestamp being considered
 // primary.
 func keyFromTimestamps(t *testing.T, verTSs []int64) key.Key {
+	if len(verTSs) == 0 {
+		return key.Key{}
+	}
 	var vs []key.Version
-	for i, ts := range verTSs {
+	for _, ts := range verTSs {
 		m, err := key.P256.New()
 		if err != nil {
 			t.Fatalf("Couldn't create new P256 key material: %v", err)
@@ -518,10 +521,9 @@ func keyFromTimestamps(t *testing.T, verTSs []int64) key.Key {
 		vs = append(vs, key.Version{
 			KeyMaterial:  m,
 			CreationTime: time.Unix(ts, 0),
-			Primary:      i == 0,
 		})
 	}
-	k, err := key.FromVersions(vs...)
+	k, err := key.FromVersions(vs[0], vs[1:]...)
 	if err != nil {
 		t.Fatalf("Couldn't create key: %v", err)
 	}

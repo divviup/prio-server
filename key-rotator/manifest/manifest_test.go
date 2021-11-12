@@ -42,8 +42,8 @@ func TestUpdateKeys(t *testing.T) {
 	}{
 		{
 			name:                "no keys at start (new environment rollout)",
-			batchSigningKey:     k(kv(10, k0), pkv(15, k1), kv(20, k2)),
-			packetEncryptionKey: k(kv(10, k3), kv(15, k4), pkv(20, k5)),
+			batchSigningKey:     k(kv(15, k1), kv(10, k0), kv(20, k2)),
+			packetEncryptionKey: k(kv(20, k5), kv(10, k3), kv(15, k4)),
 			wantBSKs: map[string]key.Material{
 				"bsk-10": k0,
 				"bsk-15": k1,
@@ -59,8 +59,8 @@ func TestUpdateKeys(t *testing.T) {
 			name:                "keys already populated, old key material kept",
 			initialBSKs:         map[string]key.Material{"bsk-10": k0},
 			initialPEKs:         map[string]key.Material{"pek-10": k1},
-			batchSigningKey:     k(pkv(10, k2)),
-			packetEncryptionKey: k(pkv(10, k3)),
+			batchSigningKey:     k(kv(10, k2)),
+			packetEncryptionKey: k(kv(10, k3)),
 			wantBSKs:            map[string]key.Material{"bsk-10": k0},
 			wantPEKs:            map[string]key.Material{"pek-10": k1},
 		},
@@ -71,8 +71,8 @@ func TestUpdateKeys(t *testing.T) {
 			name:                "before first rotation (0 timestamp)",
 			initialBSKs:         map[string]key.Material{"bsk": k0},
 			initialPEKs:         map[string]key.Material{"pek": k0},
-			batchSigningKey:     k(noTimePKV(k0)),
-			packetEncryptionKey: k(noTimePKV(k0)),
+			batchSigningKey:     k(kv(0, k0)),
+			packetEncryptionKey: k(kv(0, k0)),
 			wantBSKs:            map[string]key.Material{"bsk": k0},
 			wantPEKs:            map[string]key.Material{"pek": k0},
 		},
@@ -80,8 +80,8 @@ func TestUpdateKeys(t *testing.T) {
 			name:                "first new key (0 timestamp)",
 			initialBSKs:         map[string]key.Material{"bsk": k0},
 			initialPEKs:         map[string]key.Material{"pek": k0},
-			batchSigningKey:     k(noTimePKV(k0), kv(10, k1)),
-			packetEncryptionKey: k(noTimePKV(k0), kv(10, k1)),
+			batchSigningKey:     k(kv(0, k0), kv(10, k1)),
+			packetEncryptionKey: k(kv(0, k0), kv(10, k1)),
 			wantBSKs:            map[string]key.Material{"bsk": k0, "bsk-10": k1},
 			wantPEKs:            map[string]key.Material{"pek": k0},
 		},
@@ -89,8 +89,8 @@ func TestUpdateKeys(t *testing.T) {
 			name:                "first primary-key change (0 timestamp)",
 			initialBSKs:         map[string]key.Material{"bsk": k0, "bsk-10": k1},
 			initialPEKs:         map[string]key.Material{"pek": k0},
-			batchSigningKey:     k(noTimeKV(k0), pkv(10, k1)),
-			packetEncryptionKey: k(noTimeKV(k0), pkv(10, k1)),
+			batchSigningKey:     k(kv(10, k1), kv(0, k0)),
+			packetEncryptionKey: k(kv(10, k1), kv(0, k0)),
 			wantBSKs:            map[string]key.Material{"bsk": k0, "bsk-10": k1},
 			wantPEKs:            map[string]key.Material{"pek-10": k1},
 		},
@@ -98,8 +98,8 @@ func TestUpdateKeys(t *testing.T) {
 			name:                "first key removal (0 timestamp)",
 			initialBSKs:         map[string]key.Material{"bsk": k0, "bsk-10": k1},
 			initialPEKs:         map[string]key.Material{"pek-10": k1},
-			packetEncryptionKey: k(pkv(10, k1)),
-			batchSigningKey:     k(pkv(10, k1)),
+			packetEncryptionKey: k(kv(10, k1)),
+			batchSigningKey:     k(kv(10, k1)),
 			wantBSKs:            map[string]key.Material{"bsk-10": k1},
 			wantPEKs:            map[string]key.Material{"pek-10": k1},
 		},
@@ -107,8 +107,8 @@ func TestUpdateKeys(t *testing.T) {
 			name:                "stable state (before rotation)",
 			initialBSKs:         map[string]key.Material{"bsk-10": k0, "bsk-20": k1},
 			initialPEKs:         map[string]key.Material{"pek-20": k1},
-			batchSigningKey:     k(kv(10, k0), pkv(20, k1)),
-			packetEncryptionKey: k(kv(10, k0), pkv(20, k1)),
+			batchSigningKey:     k(kv(20, k1), kv(10, k0)),
+			packetEncryptionKey: k(kv(20, k1), kv(10, k0)),
 			wantBSKs:            map[string]key.Material{"bsk-10": k0, "bsk-20": k1},
 			wantPEKs:            map[string]key.Material{"pek-20": k1},
 		},
@@ -116,8 +116,8 @@ func TestUpdateKeys(t *testing.T) {
 			name:                "new key",
 			initialBSKs:         map[string]key.Material{"bsk-10": k0, "bsk-20": k1},
 			initialPEKs:         map[string]key.Material{"pek-20": k1},
-			batchSigningKey:     k(kv(10, k0), pkv(20, k1), kv(30, k2)),
-			packetEncryptionKey: k(kv(10, k0), pkv(20, k1), kv(30, k2)),
+			batchSigningKey:     k(kv(20, k1), kv(10, k0), kv(30, k2)),
+			packetEncryptionKey: k(kv(20, k1), kv(10, k0), kv(30, k2)),
 			wantBSKs:            map[string]key.Material{"bsk-10": k0, "bsk-20": k1, "bsk-30": k2},
 			wantPEKs:            map[string]key.Material{"pek-20": k1},
 		},
@@ -125,8 +125,8 @@ func TestUpdateKeys(t *testing.T) {
 			name:                "rotation",
 			initialBSKs:         map[string]key.Material{"bsk-10": k0, "bsk-20": k1, "bsk-30": k2},
 			initialPEKs:         map[string]key.Material{"pek-20": k1},
-			batchSigningKey:     k(kv(10, k0), kv(20, k1), pkv(30, k2)),
-			packetEncryptionKey: k(kv(10, k0), kv(20, k1), pkv(30, k2)),
+			batchSigningKey:     k(kv(30, k2), kv(10, k0), kv(20, k1)),
+			packetEncryptionKey: k(kv(30, k2), kv(10, k0), kv(20, k1)),
 			wantBSKs:            map[string]key.Material{"bsk-10": k0, "bsk-20": k1, "bsk-30": k2},
 			wantPEKs:            map[string]key.Material{"pek-30": k2},
 		},
@@ -134,8 +134,8 @@ func TestUpdateKeys(t *testing.T) {
 			name:                "removal",
 			initialBSKs:         map[string]key.Material{"bsk-10": k0, "bsk-20": k1, "bsk-30": k2},
 			initialPEKs:         map[string]key.Material{"pek-30": k2},
-			batchSigningKey:     k(kv(20, k1), pkv(30, k2)),
-			packetEncryptionKey: k(kv(20, k1), pkv(30, k2)),
+			batchSigningKey:     k(kv(30, k2), kv(20, k1)),
+			packetEncryptionKey: k(kv(30, k2), kv(20, k1)),
 			wantBSKs:            map[string]key.Material{"bsk-20": k1, "bsk-30": k2},
 			wantPEKs:            map[string]key.Material{"pek-30": k2},
 		},
@@ -239,41 +239,22 @@ func mustP256() key.Material {
 	return k
 }
 
-// k creates a new key or dies trying.
-func k(vs ...key.Version) key.Key {
-	k, err := key.FromVersions(vs...)
+// k creates a new key or dies trying. pkv is the primary key version, vs are
+// other versions.
+func k(pkv key.Version, vs ...key.Version) key.Key {
+	k, err := key.FromVersions(pkv, vs...)
 	if err != nil {
 		panic(fmt.Sprintf("Couldn't create key from versions: %v", err))
 	}
 	return k
 }
 
-// kv creates a non-primary key version with the given timestamp and raw key.
+// kv creates a key version with the given timestamp and raw key.
 func kv(ts int64, k key.Material) key.Version {
 	return key.Version{
 		KeyMaterial:  k,
 		CreationTime: time.Unix(ts, 0),
 	}
-}
-
-// pkv creates a primary key version with the given timestamp and raw key.
-func pkv(ts int64, k key.Material) key.Version {
-	kv := kv(ts, k)
-	kv.Primary = true
-	return kv
-}
-
-func noTimeKV(k key.Material) key.Version {
-	return key.Version{
-		KeyMaterial:  k,
-		CreationTime: time.Unix(0, 0),
-	}
-}
-
-func noTimePKV(k key.Material) key.Version {
-	kv := noTimeKV(k)
-	kv.Primary = true
-	return kv
 }
 
 func pubkeyFromRaw(raw key.Material) *ecdsa.PublicKey {
