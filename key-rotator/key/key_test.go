@@ -267,6 +267,23 @@ func TestKeyRotate(t *testing.T) {
 			t.Errorf("Wanted error containing %q, got: %v", wantErrString, err)
 		}
 	})
+	t.Run("key rotation results in empty key", func(t *testing.T) {
+		t.Parallel()
+		const wantErrString = "key must contain at least one version"
+		cfg := RotationConfig{
+			CreateKeyFunc: func() (Material, error) { return newTestKey(now), nil },
+			CreateMinAge:  100000 * time.Second,
+
+			PrimaryMinAge: 100000 * time.Second,
+
+			DeleteMinAge:      0,
+			DeleteMinKeyCount: 0,
+		}
+		_, err := k(50000).Rotate(time.Unix(now, 0), cfg)
+		if err == nil || !strings.Contains(err.Error(), wantErrString) {
+			t.Errorf("Wanted error containing %q, got: %v", wantErrString, err)
+		}
+	})
 }
 
 // k creates a new key or dies trying with the given version timestamps and

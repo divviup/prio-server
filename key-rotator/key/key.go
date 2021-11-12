@@ -144,41 +144,46 @@ func (cfg RotationConfig) Validate() error {
 //    * If there is a key version not younger than `primary_min_age`, select
 //      the youngest such key version as primary.
 //    * Otherwise, select the oldest key version as primary.
+//
+// The returned key is guaranteed to include at least one version. If the
+// RotationConfig is such that all key versions would be deleted, an error is
+// returned.
 func (k Key) Rotate(now time.Time, cfg RotationConfig) (Key, error) {
 	// Validate parameters.
 	if err := cfg.Validate(); err != nil {
 		return Key{}, fmt.Errorf("invalid rotation config: %w", err)
 	}
 
-	// Copy the existing list of key versions, sorting by creation time (oldest
-	// to youngest). Also, validate that we aren't trying to rotate a key
-	// containing a version from the "future" to simplify later logic.
+	// Copy the existing list of key versions, sorting by creation time
+	// ascending (oldest to youngest). Also, validate that we aren't trying to
+	// rotate a key containing a version from the "future" to simplify later
+	// logic.
 	nowTS := now.Unix()
 	age := func(v Version) time.Duration { return time.Second * time.Duration(nowTS-v.CreationTimestamp) }
-	kvs := make([]Version, 0, 1+len(k.v))
+	vs := make([]Version, 0, 1+len(k.v))
 	for _, v := range k.v {
 		if age(v) < 0 {
 			return Key{}, fmt.Errorf("found key version with creation timestamp %d, after now (%d)", v.CreationTimestamp, nowTS)
 		}
-		kvs = append(kvs, v)
+		vs = append(vs, v)
 	}
-	sort.Slice(kvs, func(i, j int) bool { return kvs[i].CreationTimestamp < kvs[j].CreationTimestamp })
+	sort.Slice(vs, func(i, j int) bool { return vs[i].CreationTimestamp < vs[j].CreationTimestamp })
 
 	// Policy: if no key versions exist, or if the youngest key version is
 	// older than `create_min_age`, create a new key version.
-	if len(kvs) == 0 || age(kvs[len(kvs)-1]) > cfg.CreateMinAge {
+	if len(vs) == 0 || age(vs[len(vs)-1]) > cfg.CreateMinAge {
 		m, err := cfg.CreateKeyFunc()
 		if err != nil {
 			return Key{}, fmt.Errorf("couldn't create new key version: %w", err)
 		}
-		kvs = append(kvs, Version{KeyMaterial: m, CreationTimestamp: nowTS})
+		vs = append(vs, Version{KeyMaterial: m, CreationTimestamp: nowTS})
 	}
 
 	// Policy: While there are more than `delete_min_key_count` keys, and the
 	// oldest key version is older than `delete_min_age`, delete the oldest key
 	// version.
-	for len(kvs) > cfg.DeleteMinKeyCount && age(kvs[0]) > cfg.DeleteMinAge {
-		kvs = kvs[1:]
+	for len(vs) > cfg.DeleteMinKeyCount && age(vs[0]) > cfg.DeleteMinAge {
+		vs = vs[1:]
 	}
 
 	// Policy: determine the current primary version:
@@ -192,12 +197,23 @@ func (k Key) Rotate(now time.Time, cfg RotationConfig) (Key, error) {
 	// not zero, we want to use the next key version older than the one we
 	// found, i.e. the one in the preceding index. The determined primary key
 	// version is "selected" by swapping it into the 0'th index.
-	primaryIdx := sort.Search(len(kvs), func(i int) bool { return age(kvs[i]) < cfg.PrimaryMinAge })
-	if primaryIdx > 0 {
-		primaryIdx--
+	if len(vs) > 0 {
+		primaryIdx := sort.Search(len(vs), func(i int) bool { return age(vs[i]) < cfg.PrimaryMinAge })
+		if primaryIdx > 0 {
+			primaryIdx--
+		}
+		vs[0], vs[primaryIdx] = vs[primaryIdx], vs[0]
 	}
-	kvs[0], kvs[primaryIdx] = kvs[primaryIdx], kvs[0]
-	return fromVersionSlice(kvs)
+
+	// Validate invariants & return key.
+	if len(vs) == 0 {
+		return Key{}, fmt.Errorf("key validation error: after rotation, key must contain at least one version")
+	}
+	newK, err := fromVersionSlice(vs)
+	if err != nil {
+		return Key{}, fmt.Errorf("key validation error: %w", err)
+	}
+	return newK, nil
 }
 
 func (k Key) MarshalJSON() ([]byte, error) {
@@ -228,18 +244,18 @@ func (k *Key) UnmarshalJSON(data []byte) error {
 		if jv.Primary {
 			vs[0], vs[i] = vs[i], vs[0]
 			if foundPrimary {
-				return errors.New("validation error: serialized key contains multiple primary versions")
+				return errors.New("key validation error: serialized key contains multiple primary versions")
 			}
 			foundPrimary = true
 		}
 	}
 	if !foundPrimary {
-		return errors.New("validation error: serialized key contains no primary versions")
+		return errors.New("key validation error: serialized key contains no primary versions")
 	}
 	var err error
 	*k, err = fromVersionSlice(vs)
 	if err != nil {
-		return fmt.Errorf("validation error: %w", err)
+		return fmt.Errorf("key validation error: %w", err)
 	}
 	return nil
 }
