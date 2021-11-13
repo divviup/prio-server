@@ -1,6 +1,7 @@
 package manifest
 
 import (
+	"errors"
 	"fmt"
 
 	"github.com/abetterinternet/prio-server/key-rotator/key"
@@ -56,7 +57,22 @@ type UpdateKeysConfig struct {
 	PacketEncryptionKeyCSRFQDN  string  // the FQDN to specify for packet encryption key CSRs
 }
 
+func (cfg UpdateKeysConfig) Validate() error {
+	if cfg.BatchSigningKey.IsEmpty() {
+		return errors.New("batch signing key has no key versions")
+	}
+	if cfg.PacketEncryptionKey.IsEmpty() {
+		return errors.New("packet encryption key has no key versions")
+	}
+	return nil
+}
+
 func (m DataShareProcessorSpecificManifest) UpdateKeys(cfg UpdateKeysConfig) (DataShareProcessorSpecificManifest, error) {
+	// Validate parameters.
+	if err := cfg.Validate(); err != nil {
+		return DataShareProcessorSpecificManifest{}, fmt.Errorf("invalid update config: %w", err)
+	}
+
 	// Copy the current manifest, clearing any existing batch signing/packet encryption keys.
 	newM := m
 	newM.BatchSigningPublicKeys, newM.PacketEncryptionKeyCSRs = BatchSigningPublicKeys{}, PacketEncryptionKeyCSRs{}

@@ -5,6 +5,7 @@ import (
 	"crypto/x509"
 	"encoding/pem"
 	"fmt"
+	"strings"
 	"testing"
 
 	"github.com/abetterinternet/prio-server/key-rotator/key"
@@ -224,6 +225,53 @@ func TestUpdateKeys(t *testing.T) {
 			}
 			if diff := cmp.Diff(wantPEKPubkeys, gotPEKPubkeys); diff != "" {
 				t.Errorf("UpdateKeys produced incorrect packet encryption keys (-want +got):\n%s", diff)
+			}
+		})
+	}
+
+	// Failure tests.
+	for _, test := range []struct {
+		name       string
+		cfg        UpdateKeysConfig
+		wantErrStr string
+	}{
+		{
+			name: "empty batch signing key",
+			cfg: UpdateKeysConfig{
+				BatchSigningKey:             key.Key{},
+				BatchSigningKeyIDPrefix:     bskPrefix,
+				PacketEncryptionKey:         k(kv(0, k0)),
+				PacketEncryptionKeyIDPrefix: pekPrefix,
+				PacketEncryptionKeyCSRFQDN:  fqdn,
+			},
+			wantErrStr: "batch signing key has no key versions",
+		},
+		{
+			name: "empty packet encryption key",
+			cfg: UpdateKeysConfig{
+				BatchSigningKey:             k(kv(0, k0)),
+				BatchSigningKeyIDPrefix:     bskPrefix,
+				PacketEncryptionKey:         key.Key{},
+				PacketEncryptionKeyIDPrefix: pekPrefix,
+				PacketEncryptionKeyCSRFQDN:  fqdn,
+			},
+			wantErrStr: "packet encryption key has no key versions",
+		},
+	} {
+		test := test
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			_, err := DataShareProcessorSpecificManifest{
+				Format:                  1,
+				IngestionIdentity:       fmt.Sprintf("%q ingestion identity", test.name),
+				IngestionBucket:         fmt.Sprintf("%q ingestion bucket", test.name),
+				PeerValidationIdentity:  fmt.Sprintf("%q peer validation identity", test.name),
+				PeerValidationBucket:    fmt.Sprintf("%q peer validation bucket", test.name),
+				BatchSigningPublicKeys:  BatchSigningPublicKeys{},
+				PacketEncryptionKeyCSRs: PacketEncryptionKeyCSRs{},
+			}.UpdateKeys(test.cfg)
+			if err == nil || !strings.Contains(err.Error(), test.wantErrStr) {
+				t.Errorf("Wanted error containing %q, got: %v", test.wantErrStr, err)
 			}
 		})
 	}
