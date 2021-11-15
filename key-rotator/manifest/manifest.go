@@ -137,7 +137,7 @@ func validateUpdatedManifest(m, oldM DataShareProcessorSpecificManifest) error {
 
 	// Post-update, manifests must have exactly one packet encryption key version.
 	if len(m.PacketEncryptionKeyCSRs) != 1 {
-		return fmt.Errorf("expected only one packet encryption public key (had %d)", len(m.PacketEncryptionKeyCSRs))
+		return fmt.Errorf("expected exactly one packet encryption public key (had %d)", len(m.PacketEncryptionKeyCSRs))
 	}
 
 	// Post-update, manifests' non-key data must match pre-update manifest data exactly.
