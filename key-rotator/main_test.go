@@ -2,7 +2,12 @@ package main
 
 import (
 	"context"
+	"crypto/ecdsa"
+	"crypto/elliptic"
 	"fmt"
+	"hash/fnv"
+	"io"
+	"math/rand"
 	"testing"
 	"time"
 
@@ -16,8 +21,8 @@ var ctx = context.Background()
 type LI = storagetest.LocalityIngestor
 
 type manifestInfo struct {
-	batchSigningKeyVersions     []string
-	packetEncryptionKeyVersions []string
+	batchSigningKeyVersions     []int64
+	packetEncryptionKeyVersions []int64
 }
 
 func TestRotateKeys(t *testing.T) {
@@ -50,14 +55,14 @@ func TestRotateKeys(t *testing.T) {
 		name string
 
 		// Initial state.
-		preBSKVersions  map[LI][]int64          // batch signing keys; (locality, ingestor) -> version timestamps; the first version is considered primary
-		prePEKVersions  map[string][]int64      // packet encryption keys; locality -> version timestamps; the first version is considered primary
-		preManifestInfo map[string]manifestInfo // (locality, ingestor) -> manifest info
+		preBSKVersions  map[LI][]int64      // batch signing keys; (locality, ingestor) -> version timestamps; the first version is considered primary
+		prePEKVersions  map[string][]int64  // packet encryption keys; locality -> version timestamps; the first version is considered primary
+		preManifestInfo map[LI]manifestInfo // (locality, ingestor) -> manifest info
 
 		// Desired state.
-		postBSKVersions  map[LI][]int64          // batch signing keys; (locality, ingestor) -> version timestamps; the first version is considered primary
-		postPEKVersions  map[string][]int64      // packet encryption keys; locality -> version timestamps; the first version is considered primary
-		postManifestInfo map[string]manifestInfo // (locality, ingestor) -> manifest info
+		postBSKVersions  map[LI][]int64      // batch signing keys; (locality, ingestor) -> version timestamps; the first version is considered primary
+		postPEKVersions  map[string][]int64  // packet encryption keys; locality -> version timestamps; the first version is considered primary
+		postManifestInfo map[LI]manifestInfo // (locality, ingestor) -> manifest info
 	}{
 		{
 			name: "stable state",
@@ -68,14 +73,14 @@ func TestRotateKeys(t *testing.T) {
 			prePEKVersions: map[string][]int64{
 				"asgard": {99500},
 			},
-			preManifestInfo: map[string]manifestInfo{
-				"asgard-ingestor-1": {
-					batchSigningKeyVersions:     []string{"prio-env-asgard-ingestor-1-batch-signing-key-99600", "prio-env-asgard-ingestor-1-batch-signing-key-99000"},
-					packetEncryptionKeyVersions: []string{"prio-env-asgard-packet-decryption-key-99500"},
+			preManifestInfo: map[LI]manifestInfo{
+				li("asgard", "ingestor-1"): {
+					batchSigningKeyVersions:     []int64{99600, 99000},
+					packetEncryptionKeyVersions: []int64{99500},
 				},
-				"asgard-ingestor-2": {
-					batchSigningKeyVersions:     []string{"prio-env-asgard-ingestor-2-batch-signing-key-99400", "prio-env-asgard-ingestor-2-batch-signing-key-99100"},
-					packetEncryptionKeyVersions: []string{"prio-env-asgard-packet-decryption-key-99500"},
+				li("asgard", "ingestor-2"): {
+					batchSigningKeyVersions:     []int64{99400, 99100},
+					packetEncryptionKeyVersions: []int64{99500},
 				},
 			},
 
@@ -86,14 +91,14 @@ func TestRotateKeys(t *testing.T) {
 			postPEKVersions: map[string][]int64{
 				"asgard": {99500},
 			},
-			postManifestInfo: map[string]manifestInfo{
-				"asgard-ingestor-1": {
-					batchSigningKeyVersions:     []string{"prio-env-asgard-ingestor-1-batch-signing-key-99600", "prio-env-asgard-ingestor-1-batch-signing-key-99000"},
-					packetEncryptionKeyVersions: []string{"prio-env-asgard-ingestion-packet-decryption-key-99500"},
+			postManifestInfo: map[LI]manifestInfo{
+				li("asgard", "ingestor-1"): {
+					batchSigningKeyVersions:     []int64{99600, 99000},
+					packetEncryptionKeyVersions: []int64{99500},
 				},
-				"asgard-ingestor-2": {
-					batchSigningKeyVersions:     []string{"prio-env-asgard-ingestor-2-batch-signing-key-99400", "prio-env-asgard-ingestor-2-batch-signing-key-99100"},
-					packetEncryptionKeyVersions: []string{"prio-env-asgard-ingestion-packet-decryption-key-99500"},
+				li("asgard", "ingestor-2"): {
+					batchSigningKeyVersions:     []int64{99400, 99100},
+					packetEncryptionKeyVersions: []int64{99500},
 				},
 			},
 		},
@@ -107,14 +112,14 @@ func TestRotateKeys(t *testing.T) {
 			prePEKVersions: map[string][]int64{
 				"asgard": {0},
 			},
-			preManifestInfo: map[string]manifestInfo{
-				"asgard-ingestor-1": {
-					batchSigningKeyVersions:     []string{"prio-env-asgard-ingestor-1-batch-signing-key"},
-					packetEncryptionKeyVersions: []string{"prio-env-asgard-packet-decryption-key"},
+			preManifestInfo: map[LI]manifestInfo{
+				li("asgard", "ingestor-1"): {
+					batchSigningKeyVersions:     []int64{0},
+					packetEncryptionKeyVersions: []int64{0},
 				},
-				"asgard-ingestor-2": {
-					batchSigningKeyVersions:     []string{"prio-env-asgard-ingestor-2-batch-signing-key"},
-					packetEncryptionKeyVersions: []string{"prio-env-asgard-packet-decryption-key"},
+				li("asgard", "ingestor-2"): {
+					batchSigningKeyVersions:     []int64{0},
+					packetEncryptionKeyVersions: []int64{0},
 				},
 			},
 
@@ -125,14 +130,14 @@ func TestRotateKeys(t *testing.T) {
 			postPEKVersions: map[string][]int64{
 				"asgard": {100000, 0},
 			},
-			postManifestInfo: map[string]manifestInfo{
-				"asgard-ingestor-1": {
-					batchSigningKeyVersions:     []string{"prio-env-asgard-ingestor-1-batch-signing-key-100000", "prio-env-asgard-ingestor-1-batch-signing-key"},
-					packetEncryptionKeyVersions: []string{"prio-env-asgard-ingestion-packet-decryption-key-100000"},
+			postManifestInfo: map[LI]manifestInfo{
+				li("asgard", "ingestor-1"): {
+					batchSigningKeyVersions:     []int64{100000, 0},
+					packetEncryptionKeyVersions: []int64{100000},
 				},
-				"asgard-ingestor-2": {
-					batchSigningKeyVersions:     []string{"prio-env-asgard-ingestor-2-batch-signing-key-100000", "prio-env-asgard-ingestor-2-batch-signing-key"},
-					packetEncryptionKeyVersions: []string{"prio-env-asgard-ingestion-packet-decryption-key-100000"},
+				li("asgard", "ingestor-2"): {
+					batchSigningKeyVersions:     []int64{100000, 0},
+					packetEncryptionKeyVersions: []int64{100000},
 				},
 			},
 		},
@@ -146,14 +151,14 @@ func TestRotateKeys(t *testing.T) {
 			prePEKVersions: map[string][]int64{
 				"asgard": {},
 			},
-			preManifestInfo: map[string]manifestInfo{
-				"asgard-ingestor-1": {
-					batchSigningKeyVersions:     []string{},
-					packetEncryptionKeyVersions: []string{},
+			preManifestInfo: map[LI]manifestInfo{
+				li("asgard", "ingestor-1"): {
+					batchSigningKeyVersions:     []int64{},
+					packetEncryptionKeyVersions: []int64{},
 				},
-				"asgard-ingestor-2": {
-					batchSigningKeyVersions:     []string{},
-					packetEncryptionKeyVersions: []string{},
+				li("asgard", "ingestor-2"): {
+					batchSigningKeyVersions:     []int64{},
+					packetEncryptionKeyVersions: []int64{},
 				},
 			},
 
@@ -164,14 +169,14 @@ func TestRotateKeys(t *testing.T) {
 			postPEKVersions: map[string][]int64{
 				"asgard": {100000},
 			},
-			postManifestInfo: map[string]manifestInfo{
-				"asgard-ingestor-1": {
-					batchSigningKeyVersions:     []string{"prio-env-asgard-ingestor-1-batch-signing-key-100000"},
-					packetEncryptionKeyVersions: []string{"prio-env-asgard-ingestion-packet-decryption-key-100000"},
+			postManifestInfo: map[LI]manifestInfo{
+				li("asgard", "ingestor-1"): {
+					batchSigningKeyVersions:     []int64{100000},
+					packetEncryptionKeyVersions: []int64{100000},
 				},
-				"asgard-ingestor-2": {
-					batchSigningKeyVersions:     []string{"prio-env-asgard-ingestor-2-batch-signing-key-100000"},
-					packetEncryptionKeyVersions: []string{"prio-env-asgard-ingestion-packet-decryption-key-100000"},
+				li("asgard", "ingestor-2"): {
+					batchSigningKeyVersions:     []int64{100000},
+					packetEncryptionKeyVersions: []int64{100000},
 				},
 			},
 		},
@@ -185,14 +190,14 @@ func TestRotateKeys(t *testing.T) {
 			prePEKVersions: map[string][]int64{
 				"asgard": {52000},
 			},
-			preManifestInfo: map[string]manifestInfo{
-				"asgard-ingestor-1": {
-					batchSigningKeyVersions:     []string{"prio-env-asgard-ingestor-1-batch-signing-key-50000"},
-					packetEncryptionKeyVersions: []string{"prio-env-asgard-packet-decryption-key-52000"},
+			preManifestInfo: map[LI]manifestInfo{
+				li("asgard", "ingestor-1"): {
+					batchSigningKeyVersions:     []int64{50000},
+					packetEncryptionKeyVersions: []int64{52000},
 				},
-				"asgard-ingestor-2": {
-					batchSigningKeyVersions:     []string{"prio-env-asgard-ingestor-2-batch-signing-key-51000"},
-					packetEncryptionKeyVersions: []string{"prio-env-asgard-packet-decryption-key-52000"},
+				li("asgard", "ingestor-2"): {
+					batchSigningKeyVersions:     []int64{51000},
+					packetEncryptionKeyVersions: []int64{52000},
 				},
 			},
 
@@ -203,14 +208,14 @@ func TestRotateKeys(t *testing.T) {
 			postPEKVersions: map[string][]int64{
 				"asgard": {100000, 52000},
 			},
-			postManifestInfo: map[string]manifestInfo{
-				"asgard-ingestor-1": {
-					batchSigningKeyVersions:     []string{"prio-env-asgard-ingestor-1-batch-signing-key-50000", "prio-env-asgard-ingestor-1-batch-signing-key-100000"},
-					packetEncryptionKeyVersions: []string{"prio-env-asgard-ingestion-packet-decryption-key-100000"},
+			postManifestInfo: map[LI]manifestInfo{
+				li("asgard", "ingestor-1"): {
+					batchSigningKeyVersions:     []int64{50000, 100000},
+					packetEncryptionKeyVersions: []int64{100000},
 				},
-				"asgard-ingestor-2": {
-					batchSigningKeyVersions:     []string{"prio-env-asgard-ingestor-2-batch-signing-key-51000", "prio-env-asgard-ingestor-2-batch-signing-key-100000"},
-					packetEncryptionKeyVersions: []string{"prio-env-asgard-ingestion-packet-decryption-key-100000"},
+				li("asgard", "ingestor-2"): {
+					batchSigningKeyVersions:     []int64{51000, 100000},
+					packetEncryptionKeyVersions: []int64{100000},
 				},
 			},
 		},
@@ -226,14 +231,14 @@ func TestRotateKeys(t *testing.T) {
 			prePEKVersions: map[string][]int64{
 				"asgard": {52000},
 			},
-			preManifestInfo: map[string]manifestInfo{
-				"asgard-ingestor-1": {
-					batchSigningKeyVersions:     []string{"prio-env-asgard-ingestor-1-batch-signing-key-50000"},
-					packetEncryptionKeyVersions: []string{"prio-env-asgard-packet-decryption-key-52000"},
+			preManifestInfo: map[LI]manifestInfo{
+				li("asgard", "ingestor-1"): {
+					batchSigningKeyVersions:     []int64{50000},
+					packetEncryptionKeyVersions: []int64{52000},
 				},
-				"asgard-ingestor-2": {
-					batchSigningKeyVersions:     []string{"prio-env-asgard-ingestor-2-batch-signing-key-51000"},
-					packetEncryptionKeyVersions: []string{"prio-env-asgard-packet-decryption-key-52000"},
+				li("asgard", "ingestor-2"): {
+					batchSigningKeyVersions:     []int64{51000},
+					packetEncryptionKeyVersions: []int64{52000},
 				},
 			},
 
@@ -244,14 +249,14 @@ func TestRotateKeys(t *testing.T) {
 			postPEKVersions: map[string][]int64{
 				"asgard": {100000, 52000},
 			},
-			postManifestInfo: map[string]manifestInfo{
-				"asgard-ingestor-1": {
-					batchSigningKeyVersions:     []string{"prio-env-asgard-ingestor-1-batch-signing-key-50000", "prio-env-asgard-ingestor-1-batch-signing-key-100000"},
-					packetEncryptionKeyVersions: []string{"prio-env-asgard-ingestion-packet-decryption-key-100000"},
+			postManifestInfo: map[LI]manifestInfo{
+				li("asgard", "ingestor-1"): {
+					batchSigningKeyVersions:     []int64{50000, 100000},
+					packetEncryptionKeyVersions: []int64{100000},
 				},
-				"asgard-ingestor-2": {
-					batchSigningKeyVersions:     []string{"prio-env-asgard-ingestor-2-batch-signing-key-51000", "prio-env-asgard-ingestor-2-batch-signing-key-100000"},
-					packetEncryptionKeyVersions: []string{"prio-env-asgard-ingestion-packet-decryption-key-100000"},
+				li("asgard", "ingestor-2"): {
+					batchSigningKeyVersions:     []int64{51000, 100000},
+					packetEncryptionKeyVersions: []int64{100000},
 				},
 			},
 		},
@@ -267,14 +272,14 @@ func TestRotateKeys(t *testing.T) {
 			prePEKVersions: map[string][]int64{
 				"asgard": {100000, 52000},
 			},
-			preManifestInfo: map[string]manifestInfo{
-				"asgard-ingestor-1": {
-					batchSigningKeyVersions:     []string{"prio-env-asgard-ingestor-1-batch-signing-key-50000", "prio-env-asgard-ingestor-1-batch-signing-key-100000"},
-					packetEncryptionKeyVersions: []string{"prio-env-asgard-ingestion-packet-decryption-key-100000"},
+			preManifestInfo: map[LI]manifestInfo{
+				li("asgard", "ingestor-1"): {
+					batchSigningKeyVersions:     []int64{50000, 100000},
+					packetEncryptionKeyVersions: []int64{100000},
 				},
-				"asgard-ingestor-2": {
-					batchSigningKeyVersions:     []string{"prio-env-asgard-ingestor-2-batch-signing-key-51000"},
-					packetEncryptionKeyVersions: []string{"prio-env-asgard-packet-decryption-key-52000"},
+				li("asgard", "ingestor-2"): {
+					batchSigningKeyVersions:     []int64{51000},
+					packetEncryptionKeyVersions: []int64{52000},
 				},
 			},
 
@@ -285,14 +290,14 @@ func TestRotateKeys(t *testing.T) {
 			postPEKVersions: map[string][]int64{
 				"asgard": {100000, 52000},
 			},
-			postManifestInfo: map[string]manifestInfo{
-				"asgard-ingestor-1": {
-					batchSigningKeyVersions:     []string{"prio-env-asgard-ingestor-1-batch-signing-key-50000", "prio-env-asgard-ingestor-1-batch-signing-key-100000"},
-					packetEncryptionKeyVersions: []string{"prio-env-asgard-ingestion-packet-decryption-key-100000"},
+			postManifestInfo: map[LI]manifestInfo{
+				li("asgard", "ingestor-1"): {
+					batchSigningKeyVersions:     []int64{50000, 100000},
+					packetEncryptionKeyVersions: []int64{100000},
 				},
-				"asgard-ingestor-2": {
-					batchSigningKeyVersions:     []string{"prio-env-asgard-ingestor-2-batch-signing-key-51000", "prio-env-asgard-ingestor-2-batch-signing-key-100000"},
-					packetEncryptionKeyVersions: []string{"prio-env-asgard-ingestion-packet-decryption-key-100000"},
+				li("asgard", "ingestor-2"): {
+					batchSigningKeyVersions:     []int64{51000, 100000},
+					packetEncryptionKeyVersions: []int64{100000},
 				},
 			},
 		},
@@ -303,8 +308,8 @@ func TestRotateKeys(t *testing.T) {
 
 			// Cosntruct keys/manifests from initial key/manifest info, and
 			// store them into key/manifest stores.
-			keyStore := keyStore(t, test.preBSKVersions, test.prePEKVersions)
-			manifestStore := manifestStore(t, test.preManifestInfo)
+			keyStore := keyStore(test.preBSKVersions, test.prePEKVersions)
+			manifestStore := manifestStore(test.preManifestInfo)
 
 			preBSKs, prePEKs := dupLIToKeyMap(keyStore.BatchSigningKeys()), dupStrToKeyMap(keyStore.PacketEncryptionKeys())
 			preManifests := dupStrToManifestMap(manifestStore.GetDataShareProcessorSpecificManifests())
@@ -398,15 +403,31 @@ func TestRotateKeys(t *testing.T) {
 			}
 
 			// Verify manifests.
+			type wantManifestInfo struct {
+				manifestInfo
+				li LI
+			}
+			wantManifests := map[string]wantManifestInfo{}
+			for li, info := range test.postManifestInfo {
+				wantManifests[liToDSP(li)] = wantManifestInfo{info, li}
+			}
+
 			gotManifests := manifestStore.GetDataShareProcessorSpecificManifests()
 			for dsp, gotM := range gotManifests {
 				// Verify versions match expected versions.
-				wantInfo, ok := test.postManifestInfo[dsp]
+				wantInfo, ok := wantManifests[dsp]
 				if !ok {
 					t.Errorf("Unexpected manifest for %q", dsp)
 					continue
 				}
-				wantBSKVers, wantPEKVers := strsToSet(wantInfo.batchSigningKeyVersions), strsToSet(wantInfo.packetEncryptionKeyVersions)
+				wantBSKVers := map[string]struct{}{}
+				for _, ts := range wantInfo.batchSigningKeyVersions {
+					wantBSKVers[bskKID(wantInfo.li, ts)] = struct{}{}
+				}
+				wantPEKVers := map[string]struct{}{}
+				for _, ts := range wantInfo.packetEncryptionKeyVersions {
+					wantPEKVers[pekKID(wantInfo.li.Locality, ts)] = struct{}{}
+				}
 				for wv := range wantBSKVers {
 					if _, ok := gotM.BatchSigningPublicKeys[wv]; !ok {
 						t.Errorf("Manifest for %q missing batch signing key version %q", dsp, wv)
@@ -449,7 +470,7 @@ func TestRotateKeys(t *testing.T) {
 					}
 				}
 			}
-			for dsp := range test.postManifestInfo {
+			for dsp := range wantManifests {
 				if _, ok := gotManifests[dsp]; !ok {
 					t.Errorf("Missing expected manifest for %q", dsp)
 				}
@@ -461,17 +482,17 @@ func TestRotateKeys(t *testing.T) {
 // keyStore creates a keystore with the given batch signing/packet encryption
 // key versions, specified as a map from (locality, ingestor) or locality
 // (respectively) to versions identified by UNIX second timestamps.
-func keyStore(t *testing.T, bskVersions map[LI][]int64, pekVersions map[string][]int64) *storagetest.Key {
+func keyStore(bskVersions map[LI][]int64, pekVersions map[string][]int64) *storagetest.Key {
 	ks := storagetest.NewKey()
 
 	bsks := ks.BatchSigningKeys()
 	for li, vers := range bskVersions {
-		bsks[li] = keyFromTimestamps(t, vers)
+		bsks[li] = bsk(li, vers...)
 	}
 
 	peks := ks.PacketEncryptionKeys()
 	for loc, vers := range pekVersions {
-		peks[loc] = keyFromTimestamps(t, vers)
+		peks[loc] = pek(loc, vers...)
 	}
 
 	return ks
@@ -480,19 +501,29 @@ func keyStore(t *testing.T, bskVersions map[LI][]int64, pekVersions map[string][
 // manifestStore creates a manifest store with the given manifests, specified
 // as a map from data-share processor (i.e. locality & ingestor) to
 // manifestInfo.
-func manifestStore(t *testing.T, manifestInfos map[string]manifestInfo) *storagetest.Manifest {
+func manifestStore(manifestInfos map[LI]manifestInfo) *storagetest.Manifest {
 	m := storagetest.NewManifest()
 	ms := m.GetDataShareProcessorSpecificManifests()
-	for dsp, info := range manifestInfos {
+	for li, info := range manifestInfos {
 		bsks := manifest.BatchSigningPublicKeys{}
-		for _, bskVer := range info.batchSigningKeyVersions {
-			bsks[bskVer] = manifest.BatchSigningPublicKey{PublicKey: fmt.Sprintf("Key material for batch signing key version %q", bskVer)}
+		for _, ts := range info.batchSigningKeyVersions {
+			kid := bskKID(li, ts)
+			pkix, err := material(kid).PublicAsPKIX()
+			if err != nil {
+				panic(fmt.Sprintf("Couldn't serialize key material as PKIX: %v", err))
+			}
+			bsks[kid] = manifest.BatchSigningPublicKey{PublicKey: pkix}
 		}
 		peks := manifest.PacketEncryptionKeyCSRs{}
-		for _, pekVer := range info.packetEncryptionKeyVersions {
-			peks[pekVer] = manifest.PacketEncryptionCertificate{CertificateSigningRequest: fmt.Sprintf("CSR for packet encryption key version %q", pekVer)}
+		for _, ts := range info.packetEncryptionKeyVersions {
+			kid := pekKID(li.Locality, ts)
+			csr, err := material(kid).PublicAsCSR("some.fqdn")
+			if err != nil {
+				panic(fmt.Sprintf("Couldn't serialize key material as CSR: %v", err))
+			}
+			peks[kid] = manifest.PacketEncryptionCertificate{CertificateSigningRequest: csr}
 		}
-		ms[dsp] = manifest.DataShareProcessorSpecificManifest{
+		ms[liToDSP(li)] = manifest.DataShareProcessorSpecificManifest{
 			Format:                  1,
 			IngestionIdentity:       "ingestion-identity",
 			IngestionBucket:         "ingestion-bucket",
@@ -505,45 +536,94 @@ func manifestStore(t *testing.T, manifestInfos map[string]manifestInfo) *storage
 	return m
 }
 
-// keyFromTimestamps creates a new Key, with versions matching the given
-// timestamps, random P256 keys, and the first timestamp being considered
-// primary.
-func keyFromTimestamps(t *testing.T, verTSs []int64) key.Key {
-	if len(verTSs) == 0 {
+// bsk creates a batch signing key with the given timestamps. Key material is
+// arbitrary, but will match that of other batch signing keys at the same
+// timestamp, locality, & ingestor, and will very likely not match other
+// key materials. If timestamps are provided, the first timestamp is used as
+// the primary key version.
+func bsk(li LI, tss ...int64) key.Key {
+	if len(tss) == 0 {
 		return key.Key{}
 	}
 	var vs []key.Version
-	for _, ts := range verTSs {
-		m, err := key.P256.New()
-		if err != nil {
-			t.Fatalf("Couldn't create new P256 key material: %v", err)
-		}
+	for _, ts := range tss {
 		vs = append(vs, key.Version{
-			KeyMaterial:       m,
+			KeyMaterial:       material(bskKID(li, ts)),
 			CreationTimestamp: ts,
 		})
 	}
 	k, err := key.FromVersions(vs[0], vs[1:]...)
 	if err != nil {
-		t.Fatalf("Couldn't create key: %v", err)
+		panic(fmt.Sprintf("Couldn't create key: %v", err))
 	}
 	return k
 }
+
+// pek creates a packet encryption key with the given timestamps. Key material
+// is arbitrary, but will match that of other packet encryption keys at the
+// same timestamp & locality, and will very likely not match other key
+// materials. If timestamps are provided, the first timestamp is used as the
+// primary key version.
+func pek(locality string, tss ...int64) key.Key {
+	if len(tss) == 0 {
+		return key.Key{}
+	}
+	var vs []key.Version
+	for _, ts := range tss {
+		vs = append(vs, key.Version{
+			KeyMaterial:       material(pekKID(locality, ts)),
+			CreationTimestamp: ts,
+		})
+	}
+	k, err := key.FromVersions(vs[0], vs[1:]...)
+	if err != nil {
+		panic(fmt.Sprintf("Couldn't create key: %v", err))
+	}
+	return k
+}
+
+// material generates deterministic key material based on the given `kid`. It
+// is very likely that different `kid` values will produce different key
+// material. Not secure, for testing use only.
+func material(kid string) key.Material {
+	// Stretch `kid` into a deterministic, arbitrary stream of bytes.
+	h := fnv.New64()
+	io.WriteString(h, kid)
+	rnd := rand.New(rand.NewSource(int64(h.Sum64())))
+
+	// Use byte stream to generate a P256 key, and wrap it into a key.Material.
+	privKey, err := ecdsa.GenerateKey(elliptic.P256(), rnd)
+	if err != nil {
+		panic(fmt.Sprintf("Couldn't create new P256 key: %v", err))
+	}
+	m, err := key.P256MaterialFrom(privKey)
+	if err != nil {
+		panic(fmt.Sprintf("Couldn't create P256 material: %v", err))
+	}
+	return m
+}
+
+func bskKID(li LI, ts int64) string {
+	if ts == 0 {
+		return fmt.Sprintf("prio-env-%s-%s-batch-signing-key", li.Locality, li.Ingestor)
+	}
+	return fmt.Sprintf("prio-env-%s-%s-batch-signing-key-%d", li.Locality, li.Ingestor, ts)
+}
+
+func pekKID(locality string, ts int64) string {
+	if ts == 0 {
+		return fmt.Sprintf("prio-env-%s-ingestion-packet-decryption-key", locality)
+	}
+	return fmt.Sprintf("prio-env-%s-ingestion-packet-decryption-key-%d", locality, ts)
+}
+
+func liToDSP(li LI) string { return fmt.Sprintf("%s-%s", li.Locality, li.Ingestor) }
 
 // int64sToSet converts a slice of int64 to an equivalent set.
 func int64sToSet(vals []int64) map[int64]struct{} {
 	rslt := map[int64]struct{}{}
 	for _, i := range vals {
 		rslt[i] = struct{}{}
-	}
-	return rslt
-}
-
-// strsToSet converts a slice of strings to an equivalent set.
-func strsToSet(vals []string) map[string]struct{} {
-	rslt := map[string]struct{}{}
-	for _, s := range vals {
-		rslt[s] = struct{}{}
 	}
 	return rslt
 }
