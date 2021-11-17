@@ -2,17 +2,14 @@ package manifest
 
 import (
 	"crypto/ecdsa"
-	"crypto/elliptic"
 	"fmt"
-	"hash/fnv"
-	"io"
-	"math/rand"
 	"strings"
 	"testing"
 
 	"github.com/google/go-cmp/cmp"
 
 	"github.com/abetterinternet/prio-server/key-rotator/key"
+	keytest "github.com/abetterinternet/prio-server/key-rotator/key/test"
 )
 
 const (
@@ -261,7 +258,7 @@ func TestUpdateKeys(t *testing.T) {
 		},
 		{
 			name:                "key material differs from update config key material (batch signing key)",
-			manifestBSKs:        BatchSigningPublicKeys{"bsk": batchSigningPublicKey(m("bsk-garbage"))},
+			manifestBSKs:        BatchSigningPublicKeys{"bsk": batchSigningPublicKey(keytest.Material("bsk-garbage"))},
 			manifestPEKs:        manifestPEK(0),
 			batchSigningKey:     bsk(0),
 			packetEncryptionKey: pek(0),
@@ -270,7 +267,7 @@ func TestUpdateKeys(t *testing.T) {
 		{
 			name:                "key material differs from update config key material (packet encryption key)",
 			manifestBSKs:        manifestBSK(0),
-			manifestPEKs:        PacketEncryptionKeyCSRs{"pek": packetEncryptionCertificate(m("pek-garbage"))},
+			manifestPEKs:        PacketEncryptionKeyCSRs{"pek": packetEncryptionCertificate(keytest.Material("pek-garbage"))},
 			batchSigningKey:     bsk(0),
 			packetEncryptionKey: pek(0),
 			wantErrStr:          "key mismatch in packet encryption key",
@@ -638,7 +635,7 @@ func bsk(tss ...int64) key.Key {
 	var vs []key.Version
 	for _, ts := range tss {
 		vs = append(vs, key.Version{
-			KeyMaterial:       m(bskKID(ts)),
+			KeyMaterial:       keytest.Material(bskKID(ts)),
 			CreationTimestamp: ts,
 		})
 	}
@@ -661,7 +658,7 @@ func pek(tss ...int64) key.Key {
 	var vs []key.Version
 	for _, ts := range tss {
 		vs = append(vs, key.Version{
-			KeyMaterial:       m(pekKID(ts)),
+			KeyMaterial:       keytest.Material(pekKID(ts)),
 			CreationTimestamp: ts,
 		})
 	}
@@ -680,7 +677,7 @@ func manifestBSK(tss ...int64) BatchSigningPublicKeys {
 	rslt := BatchSigningPublicKeys{}
 	for _, ts := range tss {
 		kid := bskKID(ts)
-		pkix, err := m(kid).PublicAsPKIX()
+		pkix, err := keytest.Material(kid).PublicAsPKIX()
 		if err != nil {
 			panic(fmt.Sprintf("Couldn't serialize key material as PKIX: %v", err))
 		}
@@ -697,34 +694,13 @@ func manifestPEK(tss ...int64) PacketEncryptionKeyCSRs {
 	rslt := PacketEncryptionKeyCSRs{}
 	for _, ts := range tss {
 		kid := pekKID(ts)
-		csr, err := m(kid).PublicAsCSR(fqdn)
+		csr, err := keytest.Material(kid).PublicAsCSR(fqdn)
 		if err != nil {
 			panic(fmt.Sprintf("Couldn't serialize key material as CSR: %v", err))
 		}
 		rslt[kid] = PacketEncryptionCertificate{CertificateSigningRequest: csr}
 	}
 	return rslt
-}
-
-// m generates deterministic key material based on the given `kid`. It is very
-// likely that different `kid` values will produce different key material. Not
-// secure, for testing use only.
-func m(kid string) key.Material {
-	// Stretch `kid` into a deterministic, arbitrary stream of bytes.
-	h := fnv.New64()
-	io.WriteString(h, kid)
-	rnd := rand.New(rand.NewSource(int64(h.Sum64())))
-
-	// Use byte stream to generate a P256 key, and wrap it into a key.Material.
-	privKey, err := ecdsa.GenerateKey(elliptic.P256(), rnd)
-	if err != nil {
-		panic(fmt.Sprintf("Couldn't create new P256 key: %v", err))
-	}
-	m, err := key.P256MaterialFrom(privKey)
-	if err != nil {
-		panic(fmt.Sprintf("Couldn't create P256 material: %v", err))
-	}
-	return m
 }
 
 func bskKID(ts int64) string {

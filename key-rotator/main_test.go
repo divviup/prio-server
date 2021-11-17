@@ -2,16 +2,12 @@ package main
 
 import (
 	"context"
-	"crypto/ecdsa"
-	"crypto/elliptic"
 	"fmt"
-	"hash/fnv"
-	"io"
-	"math/rand"
 	"testing"
 	"time"
 
 	"github.com/abetterinternet/prio-server/key-rotator/key"
+	keytest "github.com/abetterinternet/prio-server/key-rotator/key/test"
 	"github.com/abetterinternet/prio-server/key-rotator/manifest"
 	storagetest "github.com/abetterinternet/prio-server/key-rotator/storage/test"
 )
@@ -508,7 +504,7 @@ func manifestStore(manifestInfos map[LI]manifestInfo) *storagetest.Manifest {
 		bsks := manifest.BatchSigningPublicKeys{}
 		for _, ts := range info.batchSigningKeyVersions {
 			kid := bskKID(li, ts)
-			pkix, err := material(kid).PublicAsPKIX()
+			pkix, err := keytest.Material(kid).PublicAsPKIX()
 			if err != nil {
 				panic(fmt.Sprintf("Couldn't serialize key material as PKIX: %v", err))
 			}
@@ -517,7 +513,7 @@ func manifestStore(manifestInfos map[LI]manifestInfo) *storagetest.Manifest {
 		peks := manifest.PacketEncryptionKeyCSRs{}
 		for _, ts := range info.packetEncryptionKeyVersions {
 			kid := pekKID(li.Locality, ts)
-			csr, err := material(kid).PublicAsCSR("some.fqdn")
+			csr, err := keytest.Material(kid).PublicAsCSR("some.fqdn")
 			if err != nil {
 				panic(fmt.Sprintf("Couldn't serialize key material as CSR: %v", err))
 			}
@@ -548,7 +544,7 @@ func bsk(li LI, tss ...int64) key.Key {
 	var vs []key.Version
 	for _, ts := range tss {
 		vs = append(vs, key.Version{
-			KeyMaterial:       material(bskKID(li, ts)),
+			KeyMaterial:       keytest.Material(bskKID(li, ts)),
 			CreationTimestamp: ts,
 		})
 	}
@@ -571,7 +567,7 @@ func pek(locality string, tss ...int64) key.Key {
 	var vs []key.Version
 	for _, ts := range tss {
 		vs = append(vs, key.Version{
-			KeyMaterial:       material(pekKID(locality, ts)),
+			KeyMaterial:       keytest.Material(pekKID(locality, ts)),
 			CreationTimestamp: ts,
 		})
 	}
@@ -580,27 +576,6 @@ func pek(locality string, tss ...int64) key.Key {
 		panic(fmt.Sprintf("Couldn't create key: %v", err))
 	}
 	return k
-}
-
-// material generates deterministic key material based on the given `kid`. It
-// is very likely that different `kid` values will produce different key
-// material. Not secure, for testing use only.
-func material(kid string) key.Material {
-	// Stretch `kid` into a deterministic, arbitrary stream of bytes.
-	h := fnv.New64()
-	io.WriteString(h, kid)
-	rnd := rand.New(rand.NewSource(int64(h.Sum64())))
-
-	// Use byte stream to generate a P256 key, and wrap it into a key.Material.
-	privKey, err := ecdsa.GenerateKey(elliptic.P256(), rnd)
-	if err != nil {
-		panic(fmt.Sprintf("Couldn't create new P256 key: %v", err))
-	}
-	m, err := key.P256MaterialFrom(privKey)
-	if err != nil {
-		panic(fmt.Sprintf("Couldn't create P256 material: %v", err))
-	}
-	return m
 }
 
 func bskKID(li LI, ts int64) string {
