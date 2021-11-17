@@ -232,7 +232,7 @@ func (testKey) keyType() Type { return Test }
 
 func (k testKey) equal(o material) bool { return k.privKey == o.(*testKey).privKey }
 
-func (k testKey) public() ecdsa.PublicKey { panic("unimplemented") }
+func (k testKey) public() *ecdsa.PublicKey { panic("unimplemented") }
 
 func (k testKey) publicAsCSR(csrFQDN string) (string, error) { return "", errors.New("unimplemented") }
 

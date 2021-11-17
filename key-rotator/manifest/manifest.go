@@ -1,6 +1,9 @@
 package manifest
 
 import (
+	"crypto/ecdsa"
+	"crypto/x509"
+	"encoding/pem"
 	"errors"
 	"fmt"
 
@@ -71,10 +74,30 @@ func (cfg UpdateKeysConfig) Validate() error {
 	return nil
 }
 
+func (cfg UpdateKeysConfig) batchSigningKeyID(ts int64) string {
+	if ts != 0 {
+		return fmt.Sprintf("%s-%d", cfg.BatchSigningKeyIDPrefix, ts)
+	}
+	return cfg.BatchSigningKeyIDPrefix
+}
+
+func (cfg UpdateKeysConfig) packetEncryptionKeyID(ts int64) string {
+	if ts != 0 {
+		return fmt.Sprintf("%s-%d", cfg.PacketEncryptionKeyIDPrefix, ts)
+	}
+	return cfg.PacketEncryptionKeyIDPrefix
+}
+
 func (m DataShareProcessorSpecificManifest) UpdateKeys(cfg UpdateKeysConfig) (DataShareProcessorSpecificManifest, error) {
 	// Validate parameters.
 	if err := cfg.Validate(); err != nil {
 		return DataShareProcessorSpecificManifest{}, fmt.Errorf("invalid update config: %w", err)
+	}
+	if err := validatePreUpdateManifest(cfg, m); err != nil {
+		return DataShareProcessorSpecificManifest{}, fmt.Errorf("manifest pre-update validation error: %w", err)
+	}
+	if err := validateKeyMaterialAgainstManifest(cfg, m); err != nil {
+		return DataShareProcessorSpecificManifest{}, fmt.Errorf("manifest pre-update validation error: %w", err)
 	}
 
 	// Copy the current manifest, clearing any existing batch signing/packet encryption keys.
@@ -83,11 +106,7 @@ func (m DataShareProcessorSpecificManifest) UpdateKeys(cfg UpdateKeysConfig) (Da
 
 	// Update batch signing key.
 	if err := cfg.BatchSigningKey.Versions(func(v key.Version) error {
-		kid := cfg.BatchSigningKeyIDPrefix
-		if ts := v.CreationTimestamp; ts != 0 {
-			kid = fmt.Sprintf("%s-%d", cfg.BatchSigningKeyIDPrefix, ts)
-		}
-
+		kid := cfg.batchSigningKeyID(v.CreationTimestamp)
 		var newBSPK BatchSigningPublicKey
 		if bspk, ok := m.BatchSigningPublicKeys[kid]; ok {
 			newBSPK = bspk
@@ -106,11 +125,7 @@ func (m DataShareProcessorSpecificManifest) UpdateKeys(cfg UpdateKeysConfig) (Da
 
 	// Update packet encryption key.
 	primaryPEKVersion := cfg.PacketEncryptionKey.Primary()
-	kid := cfg.PacketEncryptionKeyIDPrefix
-	if ts := primaryPEKVersion.CreationTimestamp; ts != 0 {
-		kid = fmt.Sprintf("%s-%d", cfg.PacketEncryptionKeyIDPrefix, ts)
-	}
-
+	kid := cfg.packetEncryptionKeyID(primaryPEKVersion.CreationTimestamp)
 	var newPEC PacketEncryptionCertificate
 	if pec, ok := m.PacketEncryptionKeyCSRs[kid]; ok {
 		newPEC = pec
@@ -123,21 +138,88 @@ func (m DataShareProcessorSpecificManifest) UpdateKeys(cfg UpdateKeysConfig) (Da
 	}
 	newM.PacketEncryptionKeyCSRs[kid] = newPEC
 
-	if err := validateUpdatedManifest(newM, m); err != nil {
-		return DataShareProcessorSpecificManifest{}, fmt.Errorf("manifest update validation error: %w", err)
+	// Validate results.
+	if err := validatePostUpdateManifest(cfg, newM, m); err != nil {
+		return DataShareProcessorSpecificManifest{}, fmt.Errorf("manifest post-update validation error: %w", err)
+	}
+	if err := validateKeyMaterialAgainstManifest(cfg, newM); err != nil {
+		return DataShareProcessorSpecificManifest{}, fmt.Errorf("manifest post-update validation error: %w", err)
 	}
 	return newM, nil
 }
 
-func validateUpdatedManifest(m, oldM DataShareProcessorSpecificManifest) error {
+func validatePreUpdateManifest(cfg UpdateKeysConfig, m DataShareProcessorSpecificManifest) error {
+	// Pre-update, if the manifest includes any batch signing key versions, the
+	// update config's batch signing key's primary version is already included
+	// in the manifest.
+	if len(m.BatchSigningPublicKeys) > 0 {
+		kid := cfg.batchSigningKeyID(cfg.BatchSigningKey.Primary().CreationTimestamp)
+		if _, ok := m.BatchSigningPublicKeys[kid]; !ok {
+			return fmt.Errorf("update's batch signing key primary version %q not included in manifest", kid)
+		}
+	}
+
+	// Pre-update, if the manifest includes any packet encryption key versions,
+	// they are included in the update config's packet encryption key.
+	if len(m.PacketEncryptionKeyCSRs) > 0 {
+		pekKIDs := map[string]struct{}{}
+		for kid := range m.PacketEncryptionKeyCSRs {
+			pekKIDs[kid] = struct{}{}
+		}
+		_ = cfg.PacketEncryptionKey.Versions(func(v key.Version) error {
+			kid := cfg.packetEncryptionKeyID(v.CreationTimestamp)
+			delete(pekKIDs, kid)
+			return nil
+		})
+		for kid := range pekKIDs {
+			return fmt.Errorf("manifest packet encryption key version %q not included in update", kid)
+		}
+	}
+
+	return nil
+}
+
+func validatePostUpdateManifest(cfg UpdateKeysConfig, m, oldM DataShareProcessorSpecificManifest) error {
 	// Post-update, manifests must have at least one batch signing key version.
 	if len(m.BatchSigningPublicKeys) == 0 {
 		return errors.New("no batch signing public keys")
 	}
 
+	// Post-update, the key versions in the manifest's batch signing key must
+	// match the key versions in the update config's batch signing key.
+	kids := map[string]struct{}{}
+	_ = cfg.BatchSigningKey.Versions(func(v key.Version) error {
+		kid := cfg.batchSigningKeyID(v.CreationTimestamp)
+		kids[kid] = struct{}{}
+		return nil
+	})
+	for kid := range m.BatchSigningPublicKeys {
+		if _, ok := kids[kid]; !ok {
+			return fmt.Errorf("manifest included unexpected batch signing key version %q", kid)
+		}
+		delete(kids, kid)
+	}
+	for kid := range kids {
+		return fmt.Errorf("manifest missing expected batch signing key version %q", kid)
+	}
+
 	// Post-update, manifests must have exactly one packet encryption key version.
 	if len(m.PacketEncryptionKeyCSRs) != 1 {
 		return fmt.Errorf("expected exactly one packet encryption public key (had %d)", len(m.PacketEncryptionKeyCSRs))
+	}
+
+	// Post-update, the sole version in the manifest's packet encryption key
+	// must be the primary version in the update config.
+	foundPEK := false
+	pekKID := cfg.packetEncryptionKeyID(cfg.PacketEncryptionKey.Primary().CreationTimestamp)
+	for kid := range m.PacketEncryptionKeyCSRs {
+		if kid != pekKID {
+			return fmt.Errorf("manifest included unexpected packet encryption key version %q", kid)
+		}
+		foundPEK = true
+	}
+	if !foundPEK {
+		return fmt.Errorf("manifest missing expected packet encryption key version %q", pekKID)
 	}
 
 	// Post-update, manifests' non-key data must match pre-update manifest data exactly.
@@ -160,6 +242,52 @@ func validateUpdatedManifest(m, oldM DataShareProcessorSpecificManifest) error {
 				return fmt.Errorf("pre-existing packet encryption key %q modified", kid)
 			}
 		}
+	}
+
+	return nil
+}
+
+// validateKeyMaterialAgainstManifest verifies that, for any key versions that
+// exist in both the update config's keys & the manifest's keys, the key
+// material matches. No verification is done for key material that exists in
+// only the update config's keys or only the manifest's keys.
+func validateKeyMaterialAgainstManifest(cfg UpdateKeysConfig, m DataShareProcessorSpecificManifest) error {
+	// Verify batch signing keys.
+	if err := cfg.BatchSigningKey.Versions(func(v key.Version) error {
+		kid := cfg.batchSigningKeyID(v.CreationTimestamp)
+		bsk, ok := m.BatchSigningPublicKeys[kid]
+		if !ok {
+			return nil // key version does not exist in manifest
+		}
+		manifestPubkey, err := bsk.toPublicKey()
+		if err != nil {
+			return fmt.Errorf("couldn't parse batch signing key version %q from manifest: %v", kid, err)
+		}
+		if !manifestPubkey.Equal(v.KeyMaterial.Public()) {
+			return fmt.Errorf("public key mismatch in batch signing key version %q", kid)
+		}
+		return nil
+	}); err != nil {
+		return err
+	}
+
+	// Verify packet encryption keys.
+	if err := cfg.PacketEncryptionKey.Versions(func(v key.Version) error {
+		kid := cfg.packetEncryptionKeyID(v.CreationTimestamp)
+		pek, ok := m.PacketEncryptionKeyCSRs[kid]
+		if !ok {
+			return nil // key version does not exist in manifest
+		}
+		manifestPubkey, err := pek.toPublicKey()
+		if err != nil {
+			return fmt.Errorf("couldn't parse packet encryption key version %q from manifest: %v", kid, err)
+		}
+		if !manifestPubkey.Equal(v.KeyMaterial.Public()) {
+			return fmt.Errorf("public key mismatch in packet encryption key version %q", kid)
+		}
+		return nil
+	}); err != nil {
+		return err
 	}
 
 	return nil
@@ -228,9 +356,41 @@ type BatchSigningPublicKey struct {
 	Expiration string `json:"expiration"`
 }
 
+func (k BatchSigningPublicKey) toPublicKey() (*ecdsa.PublicKey, error) {
+	pemPKIX, _ := pem.Decode([]byte(k.PublicKey))
+	if pemPKIX == nil {
+		return nil, errors.New("couldn't parse as PEM")
+	}
+	pkix, err := x509.ParsePKIXPublicKey(pemPKIX.Bytes)
+	if err != nil {
+		return nil, fmt.Errorf("couldn't parse as PKIX: %v", err)
+	}
+	pub, ok := pkix.(*ecdsa.PublicKey)
+	if !ok {
+		return nil, fmt.Errorf("PKIX public key was a %T, want %T", pub, (*ecdsa.PublicKey)(nil))
+	}
+	return pub, nil
+}
+
 // PacketEncryptionCertificate represents a certificate containing a public key
 // used for packet encryption.
 type PacketEncryptionCertificate struct {
 	// CertificateSigningRequest is the PEM armored PKCS#10 CSR
 	CertificateSigningRequest string `json:"certificate-signing-request"`
+}
+
+func (k PacketEncryptionCertificate) toPublicKey() (*ecdsa.PublicKey, error) {
+	pemCSR, _ := pem.Decode([]byte(k.CertificateSigningRequest))
+	if pemCSR == nil {
+		return nil, fmt.Errorf("couldn't parse as PEM")
+	}
+	csr, err := x509.ParseCertificateRequest(pemCSR.Bytes)
+	if err != nil {
+		return nil, fmt.Errorf("couldn't parse as CSR: %v", err)
+	}
+	pub, ok := csr.PublicKey.(*ecdsa.PublicKey)
+	if !ok {
+		return nil, fmt.Errorf("CSR public key was a %T, want %T", pub, (*ecdsa.PublicKey)(nil))
+	}
+	return pub, nil
 }

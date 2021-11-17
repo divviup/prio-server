@@ -119,7 +119,7 @@ func (m Material) Type() Type { return m.m.keyType() }
 
 // Public returns the public key associated with this key material as an
 // ecdsa.PublicKey.
-func (m Material) Public() ecdsa.PublicKey { return m.m.public() }
+func (m Material) Public() *ecdsa.PublicKey { return m.m.public() }
 
 // PublicAsCSR returns a PEM-encoding of the ASN.1 DER-encoding of a PKCS#10
 // (RFC 2986) CSR over the public portion of the key, signed using the private
@@ -153,8 +153,8 @@ type material interface {
 	equal(o material) bool
 
 	// public returns the public key associated with this key material as an
-	// ecdsa.PublicKey.
-	public() ecdsa.PublicKey
+	// *ecdsa.PublicKey.
+	public() *ecdsa.PublicKey
 
 	// publicAsCSR returns a PEM-encoding of the ASN.1 DER-encoding of a
 	// PKCS#10 (RFC 2986) CSR over the public portion of the key, signed using
@@ -203,7 +203,7 @@ func (p256) keyType() Type { return P256 }
 
 func (m p256) equal(o material) bool { return m.privKey.Equal(o.(*p256).privKey) }
 
-func (m p256) public() ecdsa.PublicKey { return m.privKey.PublicKey }
+func (m p256) public() *ecdsa.PublicKey { return &m.privKey.PublicKey }
 
 func (m p256) publicAsCSR(csrFQDN string) (string, error) {
 	tmpl := &x509.CertificateRequest{
