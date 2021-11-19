@@ -5,6 +5,7 @@ import (
 	"crypto/x509"
 	"encoding/pem"
 	"fmt"
+	"strings"
 	"testing"
 
 	"github.com/abetterinternet/prio-server/key-rotator/key"
@@ -224,6 +225,339 @@ func TestUpdateKeys(t *testing.T) {
 			}
 			if diff := cmp.Diff(wantPEKPubkeys, gotPEKPubkeys); diff != "" {
 				t.Errorf("UpdateKeys produced incorrect packet encryption keys (-want +got):\n%s", diff)
+			}
+		})
+	}
+
+	// Failure tests.
+	for _, test := range []struct {
+		name       string
+		cfg        UpdateKeysConfig
+		wantErrStr string
+	}{
+		{
+			name: "empty batch signing key",
+			cfg: UpdateKeysConfig{
+				BatchSigningKey:             key.Key{},
+				BatchSigningKeyIDPrefix:     bskPrefix,
+				PacketEncryptionKey:         k(kv(0, k0)),
+				PacketEncryptionKeyIDPrefix: pekPrefix,
+				PacketEncryptionKeyCSRFQDN:  fqdn,
+			},
+			wantErrStr: "batch signing key has no key versions",
+		},
+		{
+			name: "empty packet encryption key",
+			cfg: UpdateKeysConfig{
+				BatchSigningKey:             k(kv(0, k0)),
+				BatchSigningKeyIDPrefix:     bskPrefix,
+				PacketEncryptionKey:         key.Key{},
+				PacketEncryptionKeyIDPrefix: pekPrefix,
+				PacketEncryptionKeyCSRFQDN:  fqdn,
+			},
+			wantErrStr: "packet encryption key has no key versions",
+		},
+	} {
+		test := test
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			_, err := DataShareProcessorSpecificManifest{
+				Format:                  1,
+				IngestionIdentity:       fmt.Sprintf("%q ingestion identity", test.name),
+				IngestionBucket:         fmt.Sprintf("%q ingestion bucket", test.name),
+				PeerValidationIdentity:  fmt.Sprintf("%q peer validation identity", test.name),
+				PeerValidationBucket:    fmt.Sprintf("%q peer validation bucket", test.name),
+				BatchSigningPublicKeys:  BatchSigningPublicKeys{},
+				PacketEncryptionKeyCSRs: PacketEncryptionKeyCSRs{},
+			}.UpdateKeys(test.cfg)
+			if err == nil || !strings.Contains(err.Error(), test.wantErrStr) {
+				t.Errorf("Wanted error containing %q, got: %v", test.wantErrStr, err)
+			}
+		})
+	}
+}
+
+func TestUpdateKeysValidations(t *testing.T) {
+	t.Parallel()
+
+	// We check only validation check failures here, and we do so by directly
+	// calling `validateUpdatedManifest` because there is no/should be no way
+	// to trigger these checks via UpdateKeys.
+
+	for _, test := range []struct {
+		name        string
+		manifest    DataShareProcessorSpecificManifest
+		oldManifest DataShareProcessorSpecificManifest // if unspecified, same as manifest
+		wantErrStr  string
+	}{
+		{
+			name: "no batch signing key",
+			manifest: DataShareProcessorSpecificManifest{
+				Format:                 1,
+				IngestionIdentity:      "ingestion-identity",
+				IngestionBucket:        "ingestion-bucket",
+				PeerValidationIdentity: "peer-validation-identity",
+				PeerValidationBucket:   "peer-validation-bucket",
+				BatchSigningPublicKeys: BatchSigningPublicKeys{},
+				PacketEncryptionKeyCSRs: PacketEncryptionKeyCSRs{
+					"pek": PacketEncryptionCertificate{CertificateSigningRequest: "csr"},
+				},
+			},
+			wantErrStr: "no batch signing",
+		},
+		{
+			name: "no packet encryption key",
+			manifest: DataShareProcessorSpecificManifest{
+				Format:                 1,
+				IngestionIdentity:      "ingestion-identity",
+				IngestionBucket:        "ingestion-bucket",
+				PeerValidationIdentity: "peer-validation-identity",
+				PeerValidationBucket:   "peer-validation-bucket",
+				BatchSigningPublicKeys: BatchSigningPublicKeys{
+					"bsk": BatchSigningPublicKey{PublicKey: "pubkey"},
+				},
+				PacketEncryptionKeyCSRs: PacketEncryptionKeyCSRs{},
+			},
+			wantErrStr: "exactly one packet encryption",
+		},
+		{
+			name: "multiple packet encryption keys",
+			manifest: DataShareProcessorSpecificManifest{
+				Format:                 1,
+				IngestionIdentity:      "ingestion-identity",
+				IngestionBucket:        "ingestion-bucket",
+				PeerValidationIdentity: "peer-validation-identity",
+				PeerValidationBucket:   "peer-validation-bucket",
+				BatchSigningPublicKeys: BatchSigningPublicKeys{
+					"bsk": BatchSigningPublicKey{PublicKey: "pubkey"},
+				},
+				PacketEncryptionKeyCSRs: PacketEncryptionKeyCSRs{
+					"pek-1": PacketEncryptionCertificate{CertificateSigningRequest: "csr-1"},
+					"pek-2": PacketEncryptionCertificate{CertificateSigningRequest: "csr-2"},
+				},
+			},
+			wantErrStr: "exactly one packet encryption",
+		},
+		{
+			name: "non-key data modified (format)",
+			manifest: DataShareProcessorSpecificManifest{
+				Format:                 2,
+				IngestionIdentity:      "ingestion-identity",
+				IngestionBucket:        "ingestion-bucket",
+				PeerValidationIdentity: "peer-validation-identity",
+				PeerValidationBucket:   "peer-validation-bucket",
+				BatchSigningPublicKeys: BatchSigningPublicKeys{
+					"bsk": BatchSigningPublicKey{PublicKey: "pubkey"},
+				},
+				PacketEncryptionKeyCSRs: PacketEncryptionKeyCSRs{
+					"pek": PacketEncryptionCertificate{CertificateSigningRequest: "csr"},
+				},
+			},
+			oldManifest: DataShareProcessorSpecificManifest{
+				Format:                 1,
+				IngestionIdentity:      "ingestion-identity",
+				IngestionBucket:        "ingestion-bucket",
+				PeerValidationIdentity: "peer-validation-identity",
+				PeerValidationBucket:   "peer-validation-bucket",
+				BatchSigningPublicKeys: BatchSigningPublicKeys{
+					"bsk": BatchSigningPublicKey{PublicKey: "pubkey"},
+				},
+				PacketEncryptionKeyCSRs: PacketEncryptionKeyCSRs{
+					"pek": PacketEncryptionCertificate{CertificateSigningRequest: "csr"},
+				},
+			},
+			wantErrStr: "non-key data modified",
+		},
+		{
+			name: "non-key data modified (ingestion identity)",
+			manifest: DataShareProcessorSpecificManifest{
+				Format:                 1,
+				IngestionIdentity:      "modified-ingestion-identity",
+				IngestionBucket:        "ingestion-bucket",
+				PeerValidationIdentity: "peer-validation-identity",
+				PeerValidationBucket:   "peer-validation-bucket",
+				BatchSigningPublicKeys: BatchSigningPublicKeys{
+					"bsk": BatchSigningPublicKey{PublicKey: "pubkey"},
+				},
+				PacketEncryptionKeyCSRs: PacketEncryptionKeyCSRs{
+					"pek": PacketEncryptionCertificate{CertificateSigningRequest: "csr"},
+				},
+			},
+			oldManifest: DataShareProcessorSpecificManifest{
+				Format:                 1,
+				IngestionIdentity:      "ingestion-identity",
+				IngestionBucket:        "ingestion-bucket",
+				PeerValidationIdentity: "peer-validation-identity",
+				PeerValidationBucket:   "peer-validation-bucket",
+				BatchSigningPublicKeys: BatchSigningPublicKeys{
+					"bsk": BatchSigningPublicKey{PublicKey: "pubkey"},
+				},
+				PacketEncryptionKeyCSRs: PacketEncryptionKeyCSRs{
+					"pek": PacketEncryptionCertificate{CertificateSigningRequest: "csr"},
+				},
+			},
+			wantErrStr: "non-key data modified",
+		},
+		{
+			name: "non-key data modified (ingestion bucket)",
+			manifest: DataShareProcessorSpecificManifest{
+				Format:                 1,
+				IngestionIdentity:      "ingestion-identity",
+				IngestionBucket:        "modified-ingestion-bucket",
+				PeerValidationIdentity: "peer-validation-identity",
+				PeerValidationBucket:   "peer-validation-bucket",
+				BatchSigningPublicKeys: BatchSigningPublicKeys{
+					"bsk": BatchSigningPublicKey{PublicKey: "pubkey"},
+				},
+				PacketEncryptionKeyCSRs: PacketEncryptionKeyCSRs{
+					"pek": PacketEncryptionCertificate{CertificateSigningRequest: "csr"},
+				},
+			},
+			oldManifest: DataShareProcessorSpecificManifest{
+				Format:                 1,
+				IngestionIdentity:      "ingestion-identity",
+				IngestionBucket:        "ingestion-bucket",
+				PeerValidationIdentity: "peer-validation-identity",
+				PeerValidationBucket:   "peer-validation-bucket",
+				BatchSigningPublicKeys: BatchSigningPublicKeys{
+					"bsk": BatchSigningPublicKey{PublicKey: "pubkey"},
+				},
+				PacketEncryptionKeyCSRs: PacketEncryptionKeyCSRs{
+					"pek": PacketEncryptionCertificate{CertificateSigningRequest: "csr"},
+				},
+			},
+			wantErrStr: "non-key data modified",
+		},
+		{
+			name: "non-key data modified (peer validation identity)",
+			manifest: DataShareProcessorSpecificManifest{
+				Format:                 1,
+				IngestionIdentity:      "ingestion-identity",
+				IngestionBucket:        "ingestion-bucket",
+				PeerValidationIdentity: "modified-peer-validation-identity",
+				PeerValidationBucket:   "peer-validation-bucket",
+				BatchSigningPublicKeys: BatchSigningPublicKeys{
+					"bsk": BatchSigningPublicKey{PublicKey: "pubkey"},
+				},
+				PacketEncryptionKeyCSRs: PacketEncryptionKeyCSRs{
+					"pek": PacketEncryptionCertificate{CertificateSigningRequest: "csr"},
+				},
+			},
+			oldManifest: DataShareProcessorSpecificManifest{
+				Format:                 1,
+				IngestionIdentity:      "ingestion-identity",
+				IngestionBucket:        "ingestion-bucket",
+				PeerValidationIdentity: "peer-validation-identity",
+				PeerValidationBucket:   "peer-validation-bucket",
+				BatchSigningPublicKeys: BatchSigningPublicKeys{
+					"bsk": BatchSigningPublicKey{PublicKey: "pubkey"},
+				},
+				PacketEncryptionKeyCSRs: PacketEncryptionKeyCSRs{
+					"pek": PacketEncryptionCertificate{CertificateSigningRequest: "csr"},
+				},
+			},
+			wantErrStr: "non-key data modified",
+		},
+		{
+			name: "non-key data modified (peer validation bucket)",
+			manifest: DataShareProcessorSpecificManifest{
+				Format:                 1,
+				IngestionIdentity:      "ingestion-identity",
+				IngestionBucket:        "ingestion-bucket",
+				PeerValidationIdentity: "peer-validation-identity",
+				PeerValidationBucket:   "modified-peer-validation-bucket",
+				BatchSigningPublicKeys: BatchSigningPublicKeys{
+					"bsk": BatchSigningPublicKey{PublicKey: "pubkey"},
+				},
+				PacketEncryptionKeyCSRs: PacketEncryptionKeyCSRs{
+					"pek": PacketEncryptionCertificate{CertificateSigningRequest: "csr"},
+				},
+			},
+			oldManifest: DataShareProcessorSpecificManifest{
+				Format:                 1,
+				IngestionIdentity:      "ingestion-identity",
+				IngestionBucket:        "ingestion-bucket",
+				PeerValidationIdentity: "peer-validation-identity",
+				PeerValidationBucket:   "peer-validation-bucket",
+				BatchSigningPublicKeys: BatchSigningPublicKeys{
+					"bsk": BatchSigningPublicKey{PublicKey: "pubkey"},
+				},
+				PacketEncryptionKeyCSRs: PacketEncryptionKeyCSRs{
+					"pek": PacketEncryptionCertificate{CertificateSigningRequest: "csr"},
+				},
+			},
+			wantErrStr: "non-key data modified",
+		},
+		{
+			name: "existing batch signing key modified",
+			manifest: DataShareProcessorSpecificManifest{
+				Format:                 1,
+				IngestionIdentity:      "ingestion-identity",
+				IngestionBucket:        "ingestion-bucket",
+				PeerValidationIdentity: "peer-validation-identity",
+				PeerValidationBucket:   "peer-validation-bucket",
+				BatchSigningPublicKeys: BatchSigningPublicKeys{
+					"bsk": BatchSigningPublicKey{PublicKey: "modified-pubkey"},
+				},
+				PacketEncryptionKeyCSRs: PacketEncryptionKeyCSRs{
+					"pek": PacketEncryptionCertificate{CertificateSigningRequest: "csr"},
+				},
+			},
+			oldManifest: DataShareProcessorSpecificManifest{
+				Format:                 1,
+				IngestionIdentity:      "ingestion-identity",
+				IngestionBucket:        "ingestion-bucket",
+				PeerValidationIdentity: "peer-validation-identity",
+				PeerValidationBucket:   "peer-validation-bucket",
+				BatchSigningPublicKeys: BatchSigningPublicKeys{
+					"bsk": BatchSigningPublicKey{PublicKey: "pubkey"},
+				},
+				PacketEncryptionKeyCSRs: PacketEncryptionKeyCSRs{
+					"pek": PacketEncryptionCertificate{CertificateSigningRequest: "csr"},
+				},
+			},
+			wantErrStr: "pre-existing batch signing key",
+		},
+		{
+			name: "existing packet encryption key modified",
+			manifest: DataShareProcessorSpecificManifest{
+				Format:                 1,
+				IngestionIdentity:      "ingestion-identity",
+				IngestionBucket:        "ingestion-bucket",
+				PeerValidationIdentity: "peer-validation-identity",
+				PeerValidationBucket:   "peer-validation-bucket",
+				BatchSigningPublicKeys: BatchSigningPublicKeys{
+					"bsk": BatchSigningPublicKey{PublicKey: "pubkey"},
+				},
+				PacketEncryptionKeyCSRs: PacketEncryptionKeyCSRs{
+					"pek": PacketEncryptionCertificate{CertificateSigningRequest: "modified-csr"},
+				},
+			},
+			oldManifest: DataShareProcessorSpecificManifest{
+				Format:                 1,
+				IngestionIdentity:      "ingestion-identity",
+				IngestionBucket:        "ingestion-bucket",
+				PeerValidationIdentity: "peer-validation-identity",
+				PeerValidationBucket:   "peer-validation-bucket",
+				BatchSigningPublicKeys: BatchSigningPublicKeys{
+					"bsk": BatchSigningPublicKey{PublicKey: "pubkey"},
+				},
+				PacketEncryptionKeyCSRs: PacketEncryptionKeyCSRs{
+					"pek": PacketEncryptionCertificate{CertificateSigningRequest: "csr"},
+				},
+			},
+		},
+	} {
+		test := test
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			oldM := test.oldManifest
+			if oldM.Equal(DataShareProcessorSpecificManifest{}) {
+				oldM = test.manifest
+			}
+			err := validateUpdatedManifest(test.manifest, oldM)
+			if err == nil || !strings.Contains(err.Error(), test.wantErrStr) {
+				t.Errorf("Wanted error containing %q, got: %v", test.wantErrStr, err)
 			}
 		})
 	}

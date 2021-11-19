@@ -1,6 +1,7 @@
 package manifest
 
 import (
+	"errors"
 	"fmt"
 
 	"github.com/abetterinternet/prio-server/key-rotator/key"
@@ -36,12 +37,16 @@ type DataShareProcessorSpecificManifest struct {
 	PacketEncryptionKeyCSRs PacketEncryptionKeyCSRs `json:"packet-encryption-keys"`
 }
 
-func (m DataShareProcessorSpecificManifest) Equal(o DataShareProcessorSpecificManifest) bool {
+func (m DataShareProcessorSpecificManifest) equalModuloKeys(o DataShareProcessorSpecificManifest) bool {
 	return m.Format == o.Format &&
 		m.IngestionIdentity == o.IngestionIdentity &&
 		m.IngestionBucket == o.IngestionBucket &&
 		m.PeerValidationIdentity == o.PeerValidationIdentity &&
-		m.PeerValidationBucket == o.PeerValidationBucket &&
+		m.PeerValidationBucket == o.PeerValidationBucket
+}
+
+func (m DataShareProcessorSpecificManifest) Equal(o DataShareProcessorSpecificManifest) bool {
+	return m.equalModuloKeys(o) &&
 		m.BatchSigningPublicKeys.Equal(o.BatchSigningPublicKeys) &&
 		m.PacketEncryptionKeyCSRs.Equal(o.PacketEncryptionKeyCSRs)
 }
@@ -56,7 +61,22 @@ type UpdateKeysConfig struct {
 	PacketEncryptionKeyCSRFQDN  string  // the FQDN to specify for packet encryption key CSRs
 }
 
+func (cfg UpdateKeysConfig) Validate() error {
+	if cfg.BatchSigningKey.IsEmpty() {
+		return errors.New("batch signing key has no key versions")
+	}
+	if cfg.PacketEncryptionKey.IsEmpty() {
+		return errors.New("packet encryption key has no key versions")
+	}
+	return nil
+}
+
 func (m DataShareProcessorSpecificManifest) UpdateKeys(cfg UpdateKeysConfig) (DataShareProcessorSpecificManifest, error) {
+	// Validate parameters.
+	if err := cfg.Validate(); err != nil {
+		return DataShareProcessorSpecificManifest{}, fmt.Errorf("invalid update config: %w", err)
+	}
+
 	// Copy the current manifest, clearing any existing batch signing/packet encryption keys.
 	newM := m
 	newM.BatchSigningPublicKeys, newM.PacketEncryptionKeyCSRs = BatchSigningPublicKeys{}, PacketEncryptionKeyCSRs{}
@@ -103,7 +123,46 @@ func (m DataShareProcessorSpecificManifest) UpdateKeys(cfg UpdateKeysConfig) (Da
 	}
 	newM.PacketEncryptionKeyCSRs[kid] = newPEC
 
+	if err := validateUpdatedManifest(newM, m); err != nil {
+		return DataShareProcessorSpecificManifest{}, fmt.Errorf("manifest update validation error: %w", err)
+	}
 	return newM, nil
+}
+
+func validateUpdatedManifest(m, oldM DataShareProcessorSpecificManifest) error {
+	// Post-update, manifests must have at least one batch signing key version.
+	if len(m.BatchSigningPublicKeys) == 0 {
+		return errors.New("no batch signing public keys")
+	}
+
+	// Post-update, manifests must have exactly one packet encryption key version.
+	if len(m.PacketEncryptionKeyCSRs) != 1 {
+		return fmt.Errorf("expected exactly one packet encryption public key (had %d)", len(m.PacketEncryptionKeyCSRs))
+	}
+
+	// Post-update, manifests' non-key data must match pre-update manifest data exactly.
+	if !m.equalModuloKeys(oldM) {
+		return fmt.Errorf("non-key data modified")
+	}
+
+	// Post-update, manifests' key data for key versions that exist both pre- &
+	// post-update must match exactly.
+	for kid, key := range m.BatchSigningPublicKeys {
+		if oldKey, ok := oldM.BatchSigningPublicKeys[kid]; ok {
+			if key != oldKey {
+				return fmt.Errorf("pre-existing batch signing key %q modified", kid)
+			}
+		}
+	}
+	for kid, key := range m.PacketEncryptionKeyCSRs {
+		if oldKey, ok := oldM.PacketEncryptionKeyCSRs[kid]; ok {
+			if key != oldKey {
+				return fmt.Errorf("pre-existing packet encryption key %q modified", kid)
+			}
+		}
+	}
+
+	return nil
 }
 
 // IngestorGlobalManifest represents the global manifest file for an ingestor.
