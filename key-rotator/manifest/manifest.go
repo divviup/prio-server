@@ -261,7 +261,7 @@ func validateKeyMaterialAgainstManifest(cfg UpdateKeysConfig, m DataShareProcess
 		}
 		manifestPubkey, err := bsk.toPublicKey()
 		if err != nil {
-			return fmt.Errorf("couldn't parse batch signing key version %q from manifest: %v", kid, err)
+			return fmt.Errorf("couldn't parse batch signing key version %q from manifest: %w", kid, err)
 		}
 		if !manifestPubkey.Equal(v.KeyMaterial.Public()) {
 			return fmt.Errorf("public key mismatch in batch signing key version %q", kid)
@@ -280,7 +280,7 @@ func validateKeyMaterialAgainstManifest(cfg UpdateKeysConfig, m DataShareProcess
 		}
 		manifestPubkey, err := pek.toPublicKey()
 		if err != nil {
-			return fmt.Errorf("couldn't parse packet encryption key version %q from manifest: %v", kid, err)
+			return fmt.Errorf("couldn't parse packet encryption key version %q from manifest: %w", kid, err)
 		}
 		if !manifestPubkey.Equal(v.KeyMaterial.Public()) {
 			return fmt.Errorf("public key mismatch in packet encryption key version %q", kid)
@@ -363,7 +363,7 @@ func (k BatchSigningPublicKey) toPublicKey() (*ecdsa.PublicKey, error) {
 	}
 	pkix, err := x509.ParsePKIXPublicKey(pemPKIX.Bytes)
 	if err != nil {
-		return nil, fmt.Errorf("couldn't parse as PKIX: %v", err)
+		return nil, fmt.Errorf("couldn't parse as PKIX: %w", err)
 	}
 	pub, ok := pkix.(*ecdsa.PublicKey)
 	if !ok {
@@ -386,7 +386,7 @@ func (k PacketEncryptionCertificate) toPublicKey() (*ecdsa.PublicKey, error) {
 	}
 	csr, err := x509.ParseCertificateRequest(pemCSR.Bytes)
 	if err != nil {
-		return nil, fmt.Errorf("couldn't parse as CSR: %v", err)
+		return nil, fmt.Errorf("couldn't parse as CSR: %w", err)
 	}
 	pub, ok := csr.PublicKey.(*ecdsa.PublicKey)
 	if !ok {

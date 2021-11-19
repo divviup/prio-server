@@ -47,7 +47,7 @@ func (t Type) New() (Material, error) {
 	}
 	m, err := ti.newRandom()
 	if err != nil {
-		return Material{}, fmt.Errorf("couldn't create %v key: %v", t, err)
+		return Material{}, fmt.Errorf("couldn't create %v key: %w", t, err)
 	}
 	return Material{m}, nil
 }
@@ -102,7 +102,7 @@ func (m Material) MarshalText() ([]byte, error) {
 func (m *Material) UnmarshalText(data []byte) error {
 	binBytes := make([]byte, base64.RawStdEncoding.DecodedLen(len(data)))
 	if _, err := base64.RawStdEncoding.Decode(binBytes, data); err != nil {
-		return fmt.Errorf("couldn't decode base64: %v", err)
+		return fmt.Errorf("couldn't decode base64: %w", err)
 	}
 	return m.UnmarshalBinary(binBytes)
 }
