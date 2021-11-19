@@ -61,6 +61,14 @@ func TestP256(t *testing.T) {
 		}
 	})
 
+	t.Run("Public", func(t *testing.T) {
+		t.Parallel()
+		gotKey := key.Public()
+		if !gotKey.Equal(wantPK.Public()) {
+			t.Errorf("Public key does not match generated public key")
+		}
+	})
+
 	t.Run("PublicAsCSR", func(t *testing.T) {
 		t.Parallel()
 		const fqdn = "my.bogus.fqdn"
@@ -223,6 +231,8 @@ func newUninitializedTestKey() material { return &testKey{} }
 func (testKey) keyType() Type { return Test }
 
 func (k testKey) equal(o material) bool { return k.privKey == o.(*testKey).privKey }
+
+func (k testKey) public() *ecdsa.PublicKey { panic("unimplemented") }
 
 func (k testKey) publicAsCSR(csrFQDN string) (string, error) { return "", errors.New("unimplemented") }
 
