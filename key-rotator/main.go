@@ -47,7 +47,6 @@ var (
 	dryRun     = flag.Bool("dry-run", true, "If set, do not actually write any keys or manifests back (only report what would have changed)")
 	timeout    = flag.Duration("timeout", 10*time.Minute, "The `deadline` before key-rotator terminates. Set to 0 to disable timeout")
 	awsRegion  = flag.String("aws-region", "", "If specified, the AWS `region` to use for manifest storage")
-	awsProfile = flag.String("aws-profile", "", "If specified, the AWS `profile` to use for manifest storage")
 	kubeconfig = flag.String("kubeconfig", "", "The `path` to user's kubeconfig file; if unspecified, assumed to be running in-cluster") // typical value is $HOME/.kube/config
 )
 
@@ -145,9 +144,6 @@ func main() {
 	var opts []storage.ManifestOption
 	if *awsRegion != "" {
 		opts = append(opts, storage.WithAWSRegion(*awsRegion))
-	}
-	if *awsProfile != "" {
-		opts = append(opts, storage.WithAWSProfile(*awsProfile))
 	}
 	manifestStore, err := storage.NewManifest(ctx, *manifestBucketURL, opts...)
 	if err != nil {

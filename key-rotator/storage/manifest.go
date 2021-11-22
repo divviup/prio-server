@@ -14,7 +14,6 @@ import (
 	"github.com/abetterinternet/prio-server/key-rotator/manifest"
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/aws/awserr"
-	"github.com/aws/aws-sdk-go/aws/credentials"
 	"github.com/aws/aws-sdk-go/aws/session"
 	"github.com/aws/aws-sdk-go/service/s3"
 	"github.com/rs/zerolog/log"
@@ -72,7 +71,7 @@ func NewManifest(ctx context.Context, bucket string, opts ...ManifestOption) (Ma
 		if err != nil {
 			return nil, fmt.Errorf("couldn't create AWS session: %w", err)
 		}
-		config := aws.NewConfig().WithRegion(os.awsRegion).WithCredentials(credentials.NewSharedCredentials("", os.awsProfile))
+		config := aws.NewConfig().WithRegion(os.awsRegion)
 		s3 := s3.New(sess, config)
 		kv = s3KVStore{s3, bucket}
 
@@ -82,7 +81,7 @@ func NewManifest(ctx context.Context, bucket string, opts ...ManifestOption) (Ma
 	return kvStoreManifest{kv, os.keyPrefix}, nil
 }
 
-type manifestOpts struct{ keyPrefix, awsRegion, awsProfile string }
+type manifestOpts struct{ keyPrefix, awsRegion string }
 
 // ManifestOption represents an option that can be passed to NewManifest.
 type ManifestOption func(*manifestOpts)
@@ -91,12 +90,6 @@ type ManifestOption func(*manifestOpts)
 // be applied to all keys read or written from the underlying data store.
 func WithKeyPrefix(keyPrefix string) ManifestOption {
 	return func(opts *manifestOpts) { opts.keyPrefix = keyPrefix }
-}
-
-// WithAWSProfile returns a manifest option that sets the AWS profile to use.
-// Applies only to Manifests backed by S3.
-func WithAWSProfile(awsProfile string) ManifestOption {
-	return func(opts *manifestOpts) { opts.awsProfile = awsProfile }
 }
 
 // WithAWSRegion returns a manifest option that sets the AWS region to use.
