@@ -2,142 +2,122 @@ package manifest
 
 import (
 	"crypto/ecdsa"
-	"crypto/x509"
-	"encoding/pem"
 	"fmt"
 	"strings"
 	"testing"
 
-	"github.com/abetterinternet/prio-server/key-rotator/key"
 	"github.com/google/go-cmp/cmp"
+
+	"github.com/abetterinternet/prio-server/key-rotator/key"
+	keytest "github.com/abetterinternet/prio-server/key-rotator/key/test"
+)
+
+const (
+	bskPrefix = "bsk"
+	pekPrefix = "pek"
+	fqdn      = "arbitrary.fqdn"
 )
 
 func TestUpdateKeys(t *testing.T) {
 	t.Parallel()
-
-	const (
-		bskPrefix = "bsk"
-		pekPrefix = "pek"
-		fqdn      = "update.fqdn"
-	)
-
-	// Make up a bunch of distinct keys.
-	k0, k1, k2, k3, k4, k5 := mustP256(), mustP256(), mustP256(), mustP256(), mustP256(), mustP256()
 
 	// Success tests.
 	for _, test := range []struct {
 		name string
 
 		// Initial manifest parameters.
-		initialBSKs map[string]key.Material
-		initialPEKs map[string]key.Material
+		initialBSKs BatchSigningPublicKeys
+		initialPEKs PacketEncryptionKeyCSRs
 
 		// UpdateKeys parameters.
 		batchSigningKey     key.Key
 		packetEncryptionKey key.Key
 
 		// Desired output manifest parameters.
-		wantBSKs map[string]key.Material
-		wantPEKs map[string]key.Material
+		wantBSKs BatchSigningPublicKeys
+		wantPEKs PacketEncryptionKeyCSRs
 	}{
 		{
 			name:                "no keys at start (new environment rollout)",
-			batchSigningKey:     k(kv(15, k1), kv(10, k0), kv(20, k2)),
-			packetEncryptionKey: k(kv(20, k5), kv(10, k3), kv(15, k4)),
-			wantBSKs: map[string]key.Material{
-				"bsk-10": k0,
-				"bsk-15": k1,
-				"bsk-20": k2,
-			},
-			wantPEKs: map[string]key.Material{
-				"pek-20": k5,
-			},
-		},
-		{
-			// we purposefully use different keys at same timestamp to test
-			// that we keep old manifest data if the key IDs match up.
-			name:                "keys already populated, old key material kept",
-			initialBSKs:         map[string]key.Material{"bsk-10": k0},
-			initialPEKs:         map[string]key.Material{"pek-10": k1},
-			batchSigningKey:     k(kv(10, k2)),
-			packetEncryptionKey: k(kv(10, k3)),
-			wantBSKs:            map[string]key.Material{"bsk-10": k0},
-			wantPEKs:            map[string]key.Material{"pek-10": k1},
+			batchSigningKey:     bsk(15, 10, 20),
+			packetEncryptionKey: pek(20, 10, 15),
+			wantBSKs:            manifestBSK(10, 15, 20),
+			wantPEKs:            manifestPEK(20),
 		},
 
 		// the following tests verify how manifest updates behave against a
 		// simulated rotation of keys
 		{
 			name:                "before first rotation (0 timestamp)",
-			initialBSKs:         map[string]key.Material{"bsk": k0},
-			initialPEKs:         map[string]key.Material{"pek": k0},
-			batchSigningKey:     k(kv(0, k0)),
-			packetEncryptionKey: k(kv(0, k0)),
-			wantBSKs:            map[string]key.Material{"bsk": k0},
-			wantPEKs:            map[string]key.Material{"pek": k0},
+			initialBSKs:         manifestBSK(0),
+			initialPEKs:         manifestPEK(0),
+			batchSigningKey:     bsk(0),
+			packetEncryptionKey: pek(0),
+			wantBSKs:            manifestBSK(0),
+			wantPEKs:            manifestPEK(0),
 		},
 		{
 			name:                "first new key (0 timestamp)",
-			initialBSKs:         map[string]key.Material{"bsk": k0},
-			initialPEKs:         map[string]key.Material{"pek": k0},
-			batchSigningKey:     k(kv(0, k0), kv(10, k1)),
-			packetEncryptionKey: k(kv(0, k0), kv(10, k1)),
-			wantBSKs:            map[string]key.Material{"bsk": k0, "bsk-10": k1},
-			wantPEKs:            map[string]key.Material{"pek": k0},
+			initialBSKs:         manifestBSK(0),
+			initialPEKs:         manifestPEK(0),
+			batchSigningKey:     bsk(0, 10),
+			packetEncryptionKey: pek(0, 10),
+			wantBSKs:            manifestBSK(0, 10),
+			wantPEKs:            manifestPEK(0),
 		},
 		{
 			name:                "first primary-key change (0 timestamp)",
-			initialBSKs:         map[string]key.Material{"bsk": k0, "bsk-10": k1},
-			initialPEKs:         map[string]key.Material{"pek": k0},
-			batchSigningKey:     k(kv(10, k1), kv(0, k0)),
-			packetEncryptionKey: k(kv(10, k1), kv(0, k0)),
-			wantBSKs:            map[string]key.Material{"bsk": k0, "bsk-10": k1},
-			wantPEKs:            map[string]key.Material{"pek-10": k1},
+			initialBSKs:         manifestBSK(0, 10),
+			initialPEKs:         manifestPEK(0),
+			batchSigningKey:     bsk(10, 0),
+			packetEncryptionKey: pek(10, 0),
+			wantBSKs:            manifestBSK(0, 10),
+			wantPEKs:            manifestPEK(10),
 		},
 		{
 			name:                "first key removal (0 timestamp)",
-			initialBSKs:         map[string]key.Material{"bsk": k0, "bsk-10": k1},
-			initialPEKs:         map[string]key.Material{"pek-10": k1},
-			packetEncryptionKey: k(kv(10, k1)),
-			batchSigningKey:     k(kv(10, k1)),
-			wantBSKs:            map[string]key.Material{"bsk-10": k1},
-			wantPEKs:            map[string]key.Material{"pek-10": k1},
+			initialBSKs:         manifestBSK(0, 10),
+			initialPEKs:         manifestPEK(10),
+			batchSigningKey:     bsk(10),
+			packetEncryptionKey: pek(10),
+			wantBSKs:            manifestBSK(10),
+			wantPEKs:            manifestPEK(10),
 		},
 		{
 			name:                "stable state (before rotation)",
-			initialBSKs:         map[string]key.Material{"bsk-10": k0, "bsk-20": k1},
-			initialPEKs:         map[string]key.Material{"pek-20": k1},
-			batchSigningKey:     k(kv(20, k1), kv(10, k0)),
-			packetEncryptionKey: k(kv(20, k1), kv(10, k0)),
-			wantBSKs:            map[string]key.Material{"bsk-10": k0, "bsk-20": k1},
-			wantPEKs:            map[string]key.Material{"pek-20": k1},
+			initialBSKs:         manifestBSK(10, 20),
+			initialPEKs:         manifestPEK(20),
+			batchSigningKey:     bsk(20, 10),
+			packetEncryptionKey: pek(20, 10),
+			wantBSKs:            manifestBSK(10, 20),
+			wantPEKs:            manifestPEK(20),
 		},
 		{
 			name:                "new key",
-			initialBSKs:         map[string]key.Material{"bsk-10": k0, "bsk-20": k1},
-			initialPEKs:         map[string]key.Material{"pek-20": k1},
-			batchSigningKey:     k(kv(20, k1), kv(10, k0), kv(30, k2)),
-			packetEncryptionKey: k(kv(20, k1), kv(10, k0), kv(30, k2)),
-			wantBSKs:            map[string]key.Material{"bsk-10": k0, "bsk-20": k1, "bsk-30": k2},
-			wantPEKs:            map[string]key.Material{"pek-20": k1},
+			initialBSKs:         manifestBSK(10, 20),
+			initialPEKs:         manifestPEK(20),
+			batchSigningKey:     bsk(20, 10, 30),
+			packetEncryptionKey: pek(20, 10, 30),
+			wantBSKs:            manifestBSK(10, 20, 30),
+			wantPEKs:            manifestPEK(20),
 		},
 		{
 			name:                "rotation",
-			initialBSKs:         map[string]key.Material{"bsk-10": k0, "bsk-20": k1, "bsk-30": k2},
-			initialPEKs:         map[string]key.Material{"pek-20": k1},
-			batchSigningKey:     k(kv(30, k2), kv(10, k0), kv(20, k1)),
-			packetEncryptionKey: k(kv(30, k2), kv(10, k0), kv(20, k1)),
-			wantBSKs:            map[string]key.Material{"bsk-10": k0, "bsk-20": k1, "bsk-30": k2},
-			wantPEKs:            map[string]key.Material{"pek-30": k2},
+			initialBSKs:         manifestBSK(10, 20, 30),
+			initialPEKs:         manifestPEK(20),
+			batchSigningKey:     bsk(30, 10, 20),
+			packetEncryptionKey: pek(30, 10, 20),
+			wantBSKs:            manifestBSK(10, 20, 30),
+			wantPEKs:            manifestPEK(30),
 		},
 		{
 			name:                "removal",
-			initialBSKs:         map[string]key.Material{"bsk-10": k0, "bsk-20": k1, "bsk-30": k2},
-			initialPEKs:         map[string]key.Material{"pek-30": k2},
-			batchSigningKey:     k(kv(30, k2), kv(20, k1)),
-			packetEncryptionKey: k(kv(30, k2), kv(20, k1)),
-			wantBSKs:            map[string]key.Material{"bsk-20": k1, "bsk-30": k2},
-			wantPEKs:            map[string]key.Material{"pek-30": k2},
+			initialBSKs:         manifestBSK(10, 20, 30),
+			initialPEKs:         manifestPEK(30),
+			batchSigningKey:     bsk(30, 20),
+			packetEncryptionKey: pek(30, 20),
+			wantBSKs:            manifestBSK(20, 30),
+			wantPEKs:            manifestPEK(30),
 		},
 	} {
 		test := test
@@ -157,21 +137,13 @@ func TestUpdateKeys(t *testing.T) {
 			}
 			origM := m // We save off a copy of our initial manifest so that we can check that it didn't change.
 			origM.BatchSigningPublicKeys, origM.PacketEncryptionKeyCSRs = BatchSigningPublicKeys{}, PacketEncryptionKeyCSRs{}
-			for kid, raw := range test.initialBSKs {
-				pkix, err := raw.PublicAsPKIX()
-				if err != nil {
-					t.Fatalf("Couldn't serialize initialBSK %q as PKIX: %v", kid, err)
-				}
-				m.BatchSigningPublicKeys[kid] = BatchSigningPublicKey{PublicKey: pkix}
-				origM.BatchSigningPublicKeys[kid] = BatchSigningPublicKey{PublicKey: pkix}
+			for kid, bspk := range test.initialBSKs {
+				m.BatchSigningPublicKeys[kid] = bspk
+				origM.BatchSigningPublicKeys[kid] = bspk
 			}
-			for kid, raw := range test.initialPEKs {
-				csr, err := raw.PublicAsCSR("initial.fqdn")
-				if err != nil {
-					t.Fatalf("Couldn't serialize initialPEK %q as CSR: %v", kid, err)
-				}
-				m.PacketEncryptionKeyCSRs[kid] = PacketEncryptionCertificate{CertificateSigningRequest: csr}
-				origM.PacketEncryptionKeyCSRs[kid] = PacketEncryptionCertificate{CertificateSigningRequest: csr}
+			for kid, pek := range test.initialPEKs {
+				m.PacketEncryptionKeyCSRs[kid] = pek
+				origM.PacketEncryptionKeyCSRs[kid] = pek
 			}
 
 			// Perform an update-keys operation.
@@ -206,18 +178,36 @@ func TestUpdateKeys(t *testing.T) {
 			// public key into a CSR will produce different bytes each time.)
 			wantBSKPubkeys, wantPEKPubkeys := map[string]*ecdsa.PublicKey{}, map[string]*ecdsa.PublicKey{}
 			for kid, bsk := range test.wantBSKs {
-				wantBSKPubkeys[kid] = pubkeyFromRaw(bsk)
+				pub, err := bsk.toPublicKey()
+				if err != nil {
+					t.Errorf("Couldn't convert wantBSKs[%q] to public key: %v", kid, err)
+				}
+				wantBSKPubkeys[kid] = pub
 			}
 			for kid, pek := range test.wantPEKs {
-				wantPEKPubkeys[kid] = pubkeyFromRaw(pek)
+				pub, err := pek.toPublicKey()
+				if err != nil {
+					t.Errorf("Couldn't convert wantPEKs[%q] to public key: %v", kid, err)
+				}
+				wantPEKPubkeys[kid] = pub
 			}
 
 			gotBSKPubkeys, gotPEKPubkeys := map[string]*ecdsa.PublicKey{}, map[string]*ecdsa.PublicKey{}
 			for kid, bsk := range gotBSKs {
-				gotBSKPubkeys[kid] = pubkeyFromPKIX(bsk.PublicKey)
+				pub, err := bsk.toPublicKey()
+				if err != nil {
+					t.Errorf("Batch signing key ID %q was unparseable: %v", kid, err)
+					continue
+				}
+				gotBSKPubkeys[kid] = pub
 			}
 			for kid, pek := range gotPEKs {
-				gotPEKPubkeys[kid] = pubkeyFromCSR(pek.CertificateSigningRequest)
+				pub, err := pek.toPublicKey()
+				if err != nil {
+					t.Errorf("Packet encryption key ID %q was unparseable: %v", kid, err)
+					continue
+				}
+				gotPEKPubkeys[kid] = pub
 			}
 
 			if diff := cmp.Diff(wantBSKPubkeys, gotBSKPubkeys); diff != "" {
@@ -231,45 +221,84 @@ func TestUpdateKeys(t *testing.T) {
 
 	// Failure tests.
 	for _, test := range []struct {
-		name       string
-		cfg        UpdateKeysConfig
-		wantErrStr string
+		name                string
+		manifestBSKs        BatchSigningPublicKeys
+		manifestPEKs        PacketEncryptionKeyCSRs
+		batchSigningKey     key.Key
+		packetEncryptionKey key.Key
+		wantErrStr          string
 	}{
 		{
-			name: "empty batch signing key",
-			cfg: UpdateKeysConfig{
-				BatchSigningKey:             key.Key{},
-				BatchSigningKeyIDPrefix:     bskPrefix,
-				PacketEncryptionKey:         k(kv(0, k0)),
-				PacketEncryptionKeyIDPrefix: pekPrefix,
-				PacketEncryptionKeyCSRFQDN:  fqdn,
-			},
-			wantErrStr: "batch signing key has no key versions",
+			name:                "empty batch signing key",
+			batchSigningKey:     bsk(),
+			packetEncryptionKey: pek(0),
+			wantErrStr:          "batch signing key has no key versions",
 		},
 		{
-			name: "empty packet encryption key",
-			cfg: UpdateKeysConfig{
-				BatchSigningKey:             k(kv(0, k0)),
-				BatchSigningKeyIDPrefix:     bskPrefix,
-				PacketEncryptionKey:         key.Key{},
-				PacketEncryptionKeyIDPrefix: pekPrefix,
-				PacketEncryptionKeyCSRFQDN:  fqdn,
-			},
-			wantErrStr: "packet encryption key has no key versions",
+			name:                "empty packet encryption key",
+			batchSigningKey:     bsk(0),
+			packetEncryptionKey: pek(),
+			wantErrStr:          "packet encryption key has no key versions",
+		},
+		{
+			name:                "manifest does not contain primary version of update config batch signing key",
+			manifestBSKs:        manifestBSK(10, 20),
+			manifestPEKs:        manifestPEK(0),
+			batchSigningKey:     bsk(0, 10, 20),
+			packetEncryptionKey: pek(0),
+			wantErrStr:          "update's batch signing key primary version",
+		},
+		{
+			name:                "manifest contains packet encryption key that does not match to update config packet encryption key",
+			manifestBSKs:        manifestBSK(0),
+			manifestPEKs:        manifestPEK(10),
+			batchSigningKey:     bsk(0),
+			packetEncryptionKey: pek(0),
+			wantErrStr:          "manifest packet encryption key version",
+		},
+		{
+			name:                "key material differs from update config key material (batch signing key)",
+			manifestBSKs:        BatchSigningPublicKeys{"bsk": batchSigningPublicKey(keytest.Material("bsk-garbage"))},
+			manifestPEKs:        manifestPEK(0),
+			batchSigningKey:     bsk(0),
+			packetEncryptionKey: pek(0),
+			wantErrStr:          "key mismatch in batch signing key",
+		},
+		{
+			name:                "key material differs from update config key material (packet encryption key)",
+			manifestBSKs:        manifestBSK(0),
+			manifestPEKs:        PacketEncryptionKeyCSRs{"pek": packetEncryptionCertificate(keytest.Material("pek-garbage"))},
+			batchSigningKey:     bsk(0),
+			packetEncryptionKey: pek(0),
+			wantErrStr:          "key mismatch in packet encryption key",
 		},
 	} {
 		test := test
 		t.Run(test.name, func(t *testing.T) {
 			t.Parallel()
-			_, err := DataShareProcessorSpecificManifest{
+
+			// Create manifest per test parameters.
+			m := DataShareProcessorSpecificManifest{
 				Format:                  1,
 				IngestionIdentity:       fmt.Sprintf("%q ingestion identity", test.name),
 				IngestionBucket:         fmt.Sprintf("%q ingestion bucket", test.name),
 				PeerValidationIdentity:  fmt.Sprintf("%q peer validation identity", test.name),
 				PeerValidationBucket:    fmt.Sprintf("%q peer validation bucket", test.name),
-				BatchSigningPublicKeys:  BatchSigningPublicKeys{},
-				PacketEncryptionKeyCSRs: PacketEncryptionKeyCSRs{},
-			}.UpdateKeys(test.cfg)
+				BatchSigningPublicKeys:  test.manifestBSKs,
+				PacketEncryptionKeyCSRs: test.manifestPEKs,
+			}
+
+			// Create config per test paramemters.
+			cfg := UpdateKeysConfig{
+				BatchSigningKey:             test.batchSigningKey,
+				BatchSigningKeyIDPrefix:     bskPrefix,
+				PacketEncryptionKey:         test.packetEncryptionKey,
+				PacketEncryptionKeyIDPrefix: pekPrefix,
+				PacketEncryptionKeyCSRFQDN:  fqdn,
+			}
+
+			// Attempt to update keys, and verify that we get the expected error.
+			_, err := m.UpdateKeys(cfg)
 			if err == nil || !strings.Contains(err.Error(), test.wantErrStr) {
 				t.Errorf("Wanted error containing %q, got: %v", test.wantErrStr, err)
 			}
@@ -277,285 +306,297 @@ func TestUpdateKeys(t *testing.T) {
 	}
 }
 
-func TestUpdateKeysValidations(t *testing.T) {
+func TestPostUpdateKeysValidations(t *testing.T) {
 	t.Parallel()
 
 	// We check only validation check failures here, and we do so by directly
-	// calling `validateUpdatedManifest` because there is no/should be no way
-	// to trigger these checks via UpdateKeys.
+	// calling `validateUpdatedManifest` rather than calling `UpdateKeys`
+	// because there is no/should be no way to trigger these checks via
+	// UpdateKeys. Successes are implicitly tested by testing the public
+	// `UpdateKeys` API in `TestUpdateKeys`.
 
 	for _, test := range []struct {
-		name        string
-		manifest    DataShareProcessorSpecificManifest
-		oldManifest DataShareProcessorSpecificManifest // if unspecified, same as manifest
-		wantErrStr  string
+		name                string
+		batchSigningKey     key.Key
+		packetEncryptionKey key.Key
+		manifest            DataShareProcessorSpecificManifest
+		oldManifest         DataShareProcessorSpecificManifest // if unspecified, same as manifest
+		wantErrStr          string
 	}{
 		{
-			name: "no batch signing key",
+			name:                "no batch signing key",
+			batchSigningKey:     bsk(),
+			packetEncryptionKey: pek(0),
 			manifest: DataShareProcessorSpecificManifest{
-				Format:                 1,
-				IngestionIdentity:      "ingestion-identity",
-				IngestionBucket:        "ingestion-bucket",
-				PeerValidationIdentity: "peer-validation-identity",
-				PeerValidationBucket:   "peer-validation-bucket",
-				BatchSigningPublicKeys: BatchSigningPublicKeys{},
-				PacketEncryptionKeyCSRs: PacketEncryptionKeyCSRs{
-					"pek": PacketEncryptionCertificate{CertificateSigningRequest: "csr"},
-				},
+				Format:                  1,
+				IngestionIdentity:       "ingestion-identity",
+				IngestionBucket:         "ingestion-bucket",
+				PeerValidationIdentity:  "peer-validation-identity",
+				PeerValidationBucket:    "peer-validation-bucket",
+				BatchSigningPublicKeys:  manifestBSK(),
+				PacketEncryptionKeyCSRs: manifestPEK(0),
 			},
 			wantErrStr: "no batch signing",
 		},
 		{
-			name: "no packet encryption key",
+			name:                "manifest batch signing key includes unexpected version",
+			batchSigningKey:     bsk(0),
+			packetEncryptionKey: pek(0),
 			manifest: DataShareProcessorSpecificManifest{
-				Format:                 1,
-				IngestionIdentity:      "ingestion-identity",
-				IngestionBucket:        "ingestion-bucket",
-				PeerValidationIdentity: "peer-validation-identity",
-				PeerValidationBucket:   "peer-validation-bucket",
-				BatchSigningPublicKeys: BatchSigningPublicKeys{
-					"bsk": BatchSigningPublicKey{PublicKey: "pubkey"},
-				},
-				PacketEncryptionKeyCSRs: PacketEncryptionKeyCSRs{},
+				Format:                  1,
+				IngestionIdentity:       "ingestion-identity",
+				IngestionBucket:         "ingestion-bucket",
+				PeerValidationIdentity:  "peer-validation-identity",
+				PeerValidationBucket:    "peer-validation-bucket",
+				BatchSigningPublicKeys:  manifestBSK(0, 10),
+				PacketEncryptionKeyCSRs: manifestPEK(0),
+			},
+			wantErrStr: "manifest included unexpected batch signing key",
+		},
+		{
+			name:                "manifest batch signing key missing expected version",
+			batchSigningKey:     bsk(0, 10),
+			packetEncryptionKey: pek(0),
+			manifest: DataShareProcessorSpecificManifest{
+				Format:                  1,
+				IngestionIdentity:       "ingestion-identity",
+				IngestionBucket:         "ingestion-bucket",
+				PeerValidationIdentity:  "peer-validation-identity",
+				PeerValidationBucket:    "peer-validation-bucket",
+				BatchSigningPublicKeys:  manifestBSK(10),
+				PacketEncryptionKeyCSRs: manifestPEK(0),
+			},
+			wantErrStr: "manifest missing expected batch signing key",
+		},
+		{
+			name:                "no packet encryption key",
+			batchSigningKey:     bsk(0),
+			packetEncryptionKey: pek(),
+			manifest: DataShareProcessorSpecificManifest{
+				Format:                  1,
+				IngestionIdentity:       "ingestion-identity",
+				IngestionBucket:         "ingestion-bucket",
+				PeerValidationIdentity:  "peer-validation-identity",
+				PeerValidationBucket:    "peer-validation-bucket",
+				BatchSigningPublicKeys:  manifestBSK(0),
+				PacketEncryptionKeyCSRs: manifestPEK(),
 			},
 			wantErrStr: "exactly one packet encryption",
 		},
 		{
-			name: "multiple packet encryption keys",
+			name:                "mismatched packet encryption key",
+			batchSigningKey:     bsk(0),
+			packetEncryptionKey: pek(0),
 			manifest: DataShareProcessorSpecificManifest{
-				Format:                 1,
-				IngestionIdentity:      "ingestion-identity",
-				IngestionBucket:        "ingestion-bucket",
-				PeerValidationIdentity: "peer-validation-identity",
-				PeerValidationBucket:   "peer-validation-bucket",
-				BatchSigningPublicKeys: BatchSigningPublicKeys{
-					"bsk": BatchSigningPublicKey{PublicKey: "pubkey"},
-				},
-				PacketEncryptionKeyCSRs: PacketEncryptionKeyCSRs{
-					"pek-1": PacketEncryptionCertificate{CertificateSigningRequest: "csr-1"},
-					"pek-2": PacketEncryptionCertificate{CertificateSigningRequest: "csr-2"},
-				},
+				Format:                  1,
+				IngestionIdentity:       "ingestion-identity",
+				IngestionBucket:         "ingestion-bucket",
+				PeerValidationIdentity:  "peer-validation-identity",
+				PeerValidationBucket:    "peer-validation-bucket",
+				BatchSigningPublicKeys:  manifestBSK(0),
+				PacketEncryptionKeyCSRs: manifestPEK(10),
+			},
+			wantErrStr: "manifest included unexpected packet encryption key",
+		},
+		{
+			name:                "multiple packet encryption keys",
+			batchSigningKey:     bsk(0),
+			packetEncryptionKey: pek(1, 2),
+			manifest: DataShareProcessorSpecificManifest{
+				Format:                  1,
+				IngestionIdentity:       "ingestion-identity",
+				IngestionBucket:         "ingestion-bucket",
+				PeerValidationIdentity:  "peer-validation-identity",
+				PeerValidationBucket:    "peer-validation-bucket",
+				BatchSigningPublicKeys:  manifestBSK(0),
+				PacketEncryptionKeyCSRs: manifestPEK(1, 2),
 			},
 			wantErrStr: "exactly one packet encryption",
 		},
 		{
-			name: "non-key data modified (format)",
+			name:                "non-key data modified (format)",
+			batchSigningKey:     bsk(0),
+			packetEncryptionKey: pek(0),
 			manifest: DataShareProcessorSpecificManifest{
-				Format:                 2,
-				IngestionIdentity:      "ingestion-identity",
-				IngestionBucket:        "ingestion-bucket",
-				PeerValidationIdentity: "peer-validation-identity",
-				PeerValidationBucket:   "peer-validation-bucket",
-				BatchSigningPublicKeys: BatchSigningPublicKeys{
-					"bsk": BatchSigningPublicKey{PublicKey: "pubkey"},
-				},
-				PacketEncryptionKeyCSRs: PacketEncryptionKeyCSRs{
-					"pek": PacketEncryptionCertificate{CertificateSigningRequest: "csr"},
-				},
+				Format:                  2,
+				IngestionIdentity:       "ingestion-identity",
+				IngestionBucket:         "ingestion-bucket",
+				PeerValidationIdentity:  "peer-validation-identity",
+				PeerValidationBucket:    "peer-validation-bucket",
+				BatchSigningPublicKeys:  manifestBSK(0),
+				PacketEncryptionKeyCSRs: manifestPEK(0),
 			},
 			oldManifest: DataShareProcessorSpecificManifest{
-				Format:                 1,
-				IngestionIdentity:      "ingestion-identity",
-				IngestionBucket:        "ingestion-bucket",
-				PeerValidationIdentity: "peer-validation-identity",
-				PeerValidationBucket:   "peer-validation-bucket",
-				BatchSigningPublicKeys: BatchSigningPublicKeys{
-					"bsk": BatchSigningPublicKey{PublicKey: "pubkey"},
-				},
-				PacketEncryptionKeyCSRs: PacketEncryptionKeyCSRs{
-					"pek": PacketEncryptionCertificate{CertificateSigningRequest: "csr"},
-				},
+				Format:                  1,
+				IngestionIdentity:       "ingestion-identity",
+				IngestionBucket:         "ingestion-bucket",
+				PeerValidationIdentity:  "peer-validation-identity",
+				PeerValidationBucket:    "peer-validation-bucket",
+				BatchSigningPublicKeys:  manifestBSK(0),
+				PacketEncryptionKeyCSRs: manifestPEK(0),
 			},
 			wantErrStr: "non-key data modified",
 		},
 		{
-			name: "non-key data modified (ingestion identity)",
+			name:                "non-key data modified (ingestion identity)",
+			batchSigningKey:     bsk(0),
+			packetEncryptionKey: pek(0),
 			manifest: DataShareProcessorSpecificManifest{
-				Format:                 1,
-				IngestionIdentity:      "modified-ingestion-identity",
-				IngestionBucket:        "ingestion-bucket",
-				PeerValidationIdentity: "peer-validation-identity",
-				PeerValidationBucket:   "peer-validation-bucket",
-				BatchSigningPublicKeys: BatchSigningPublicKeys{
-					"bsk": BatchSigningPublicKey{PublicKey: "pubkey"},
-				},
-				PacketEncryptionKeyCSRs: PacketEncryptionKeyCSRs{
-					"pek": PacketEncryptionCertificate{CertificateSigningRequest: "csr"},
-				},
+				Format:                  1,
+				IngestionIdentity:       "modified-ingestion-identity",
+				IngestionBucket:         "ingestion-bucket",
+				PeerValidationIdentity:  "peer-validation-identity",
+				PeerValidationBucket:    "peer-validation-bucket",
+				BatchSigningPublicKeys:  manifestBSK(0),
+				PacketEncryptionKeyCSRs: manifestPEK(0),
 			},
 			oldManifest: DataShareProcessorSpecificManifest{
-				Format:                 1,
-				IngestionIdentity:      "ingestion-identity",
-				IngestionBucket:        "ingestion-bucket",
-				PeerValidationIdentity: "peer-validation-identity",
-				PeerValidationBucket:   "peer-validation-bucket",
-				BatchSigningPublicKeys: BatchSigningPublicKeys{
-					"bsk": BatchSigningPublicKey{PublicKey: "pubkey"},
-				},
-				PacketEncryptionKeyCSRs: PacketEncryptionKeyCSRs{
-					"pek": PacketEncryptionCertificate{CertificateSigningRequest: "csr"},
-				},
+				Format:                  1,
+				IngestionIdentity:       "ingestion-identity",
+				IngestionBucket:         "ingestion-bucket",
+				PeerValidationIdentity:  "peer-validation-identity",
+				PeerValidationBucket:    "peer-validation-bucket",
+				BatchSigningPublicKeys:  manifestBSK(0),
+				PacketEncryptionKeyCSRs: manifestPEK(0),
 			},
 			wantErrStr: "non-key data modified",
 		},
 		{
-			name: "non-key data modified (ingestion bucket)",
+			name:                "non-key data modified (ingestion bucket)",
+			batchSigningKey:     bsk(0),
+			packetEncryptionKey: pek(0),
 			manifest: DataShareProcessorSpecificManifest{
-				Format:                 1,
-				IngestionIdentity:      "ingestion-identity",
-				IngestionBucket:        "modified-ingestion-bucket",
-				PeerValidationIdentity: "peer-validation-identity",
-				PeerValidationBucket:   "peer-validation-bucket",
-				BatchSigningPublicKeys: BatchSigningPublicKeys{
-					"bsk": BatchSigningPublicKey{PublicKey: "pubkey"},
-				},
-				PacketEncryptionKeyCSRs: PacketEncryptionKeyCSRs{
-					"pek": PacketEncryptionCertificate{CertificateSigningRequest: "csr"},
-				},
+				Format:                  1,
+				IngestionIdentity:       "ingestion-identity",
+				IngestionBucket:         "modified-ingestion-bucket",
+				PeerValidationIdentity:  "peer-validation-identity",
+				PeerValidationBucket:    "peer-validation-bucket",
+				BatchSigningPublicKeys:  manifestBSK(0),
+				PacketEncryptionKeyCSRs: manifestPEK(0),
 			},
 			oldManifest: DataShareProcessorSpecificManifest{
-				Format:                 1,
-				IngestionIdentity:      "ingestion-identity",
-				IngestionBucket:        "ingestion-bucket",
-				PeerValidationIdentity: "peer-validation-identity",
-				PeerValidationBucket:   "peer-validation-bucket",
-				BatchSigningPublicKeys: BatchSigningPublicKeys{
-					"bsk": BatchSigningPublicKey{PublicKey: "pubkey"},
-				},
-				PacketEncryptionKeyCSRs: PacketEncryptionKeyCSRs{
-					"pek": PacketEncryptionCertificate{CertificateSigningRequest: "csr"},
-				},
+				Format:                  1,
+				IngestionIdentity:       "ingestion-identity",
+				IngestionBucket:         "ingestion-bucket",
+				PeerValidationIdentity:  "peer-validation-identity",
+				PeerValidationBucket:    "peer-validation-bucket",
+				BatchSigningPublicKeys:  manifestBSK(0),
+				PacketEncryptionKeyCSRs: manifestPEK(0),
 			},
 			wantErrStr: "non-key data modified",
 		},
 		{
-			name: "non-key data modified (peer validation identity)",
+			name:                "non-key data modified (peer validation identity)",
+			batchSigningKey:     bsk(0),
+			packetEncryptionKey: pek(0),
 			manifest: DataShareProcessorSpecificManifest{
-				Format:                 1,
-				IngestionIdentity:      "ingestion-identity",
-				IngestionBucket:        "ingestion-bucket",
-				PeerValidationIdentity: "modified-peer-validation-identity",
-				PeerValidationBucket:   "peer-validation-bucket",
-				BatchSigningPublicKeys: BatchSigningPublicKeys{
-					"bsk": BatchSigningPublicKey{PublicKey: "pubkey"},
-				},
-				PacketEncryptionKeyCSRs: PacketEncryptionKeyCSRs{
-					"pek": PacketEncryptionCertificate{CertificateSigningRequest: "csr"},
-				},
+				Format:                  1,
+				IngestionIdentity:       "ingestion-identity",
+				IngestionBucket:         "ingestion-bucket",
+				PeerValidationIdentity:  "modified-peer-validation-identity",
+				PeerValidationBucket:    "peer-validation-bucket",
+				BatchSigningPublicKeys:  manifestBSK(0),
+				PacketEncryptionKeyCSRs: manifestPEK(0),
 			},
 			oldManifest: DataShareProcessorSpecificManifest{
-				Format:                 1,
-				IngestionIdentity:      "ingestion-identity",
-				IngestionBucket:        "ingestion-bucket",
-				PeerValidationIdentity: "peer-validation-identity",
-				PeerValidationBucket:   "peer-validation-bucket",
-				BatchSigningPublicKeys: BatchSigningPublicKeys{
-					"bsk": BatchSigningPublicKey{PublicKey: "pubkey"},
-				},
-				PacketEncryptionKeyCSRs: PacketEncryptionKeyCSRs{
-					"pek": PacketEncryptionCertificate{CertificateSigningRequest: "csr"},
-				},
+				Format:                  1,
+				IngestionIdentity:       "ingestion-identity",
+				IngestionBucket:         "ingestion-bucket",
+				PeerValidationIdentity:  "peer-validation-identity",
+				PeerValidationBucket:    "peer-validation-bucket",
+				BatchSigningPublicKeys:  manifestBSK(0),
+				PacketEncryptionKeyCSRs: manifestPEK(0),
 			},
 			wantErrStr: "non-key data modified",
 		},
 		{
-			name: "non-key data modified (peer validation bucket)",
+			name:                "non-key data modified (peer validation bucket)",
+			batchSigningKey:     bsk(0),
+			packetEncryptionKey: pek(0),
 			manifest: DataShareProcessorSpecificManifest{
-				Format:                 1,
-				IngestionIdentity:      "ingestion-identity",
-				IngestionBucket:        "ingestion-bucket",
-				PeerValidationIdentity: "peer-validation-identity",
-				PeerValidationBucket:   "modified-peer-validation-bucket",
-				BatchSigningPublicKeys: BatchSigningPublicKeys{
-					"bsk": BatchSigningPublicKey{PublicKey: "pubkey"},
-				},
-				PacketEncryptionKeyCSRs: PacketEncryptionKeyCSRs{
-					"pek": PacketEncryptionCertificate{CertificateSigningRequest: "csr"},
-				},
+				Format:                  1,
+				IngestionIdentity:       "ingestion-identity",
+				IngestionBucket:         "ingestion-bucket",
+				PeerValidationIdentity:  "peer-validation-identity",
+				PeerValidationBucket:    "modified-peer-validation-bucket",
+				BatchSigningPublicKeys:  manifestBSK(0),
+				PacketEncryptionKeyCSRs: manifestPEK(0),
 			},
 			oldManifest: DataShareProcessorSpecificManifest{
-				Format:                 1,
-				IngestionIdentity:      "ingestion-identity",
-				IngestionBucket:        "ingestion-bucket",
-				PeerValidationIdentity: "peer-validation-identity",
-				PeerValidationBucket:   "peer-validation-bucket",
-				BatchSigningPublicKeys: BatchSigningPublicKeys{
-					"bsk": BatchSigningPublicKey{PublicKey: "pubkey"},
-				},
-				PacketEncryptionKeyCSRs: PacketEncryptionKeyCSRs{
-					"pek": PacketEncryptionCertificate{CertificateSigningRequest: "csr"},
-				},
+				Format:                  1,
+				IngestionIdentity:       "ingestion-identity",
+				IngestionBucket:         "ingestion-bucket",
+				PeerValidationIdentity:  "peer-validation-identity",
+				PeerValidationBucket:    "peer-validation-bucket",
+				BatchSigningPublicKeys:  manifestBSK(0),
+				PacketEncryptionKeyCSRs: manifestPEK(0),
 			},
 			wantErrStr: "non-key data modified",
 		},
 		{
-			name: "existing batch signing key modified",
+			name:                "existing batch signing key modified",
+			batchSigningKey:     bsk(0),
+			packetEncryptionKey: pek(0),
 			manifest: DataShareProcessorSpecificManifest{
-				Format:                 1,
-				IngestionIdentity:      "ingestion-identity",
-				IngestionBucket:        "ingestion-bucket",
-				PeerValidationIdentity: "peer-validation-identity",
-				PeerValidationBucket:   "peer-validation-bucket",
-				BatchSigningPublicKeys: BatchSigningPublicKeys{
-					"bsk": BatchSigningPublicKey{PublicKey: "modified-pubkey"},
-				},
-				PacketEncryptionKeyCSRs: PacketEncryptionKeyCSRs{
-					"pek": PacketEncryptionCertificate{CertificateSigningRequest: "csr"},
-				},
+				Format:                  1,
+				IngestionIdentity:       "ingestion-identity",
+				IngestionBucket:         "ingestion-bucket",
+				PeerValidationIdentity:  "peer-validation-identity",
+				PeerValidationBucket:    "peer-validation-bucket",
+				BatchSigningPublicKeys:  manifestBSK(0),
+				PacketEncryptionKeyCSRs: manifestPEK(0),
 			},
 			oldManifest: DataShareProcessorSpecificManifest{
-				Format:                 1,
-				IngestionIdentity:      "ingestion-identity",
-				IngestionBucket:        "ingestion-bucket",
-				PeerValidationIdentity: "peer-validation-identity",
-				PeerValidationBucket:   "peer-validation-bucket",
-				BatchSigningPublicKeys: BatchSigningPublicKeys{
-					"bsk": BatchSigningPublicKey{PublicKey: "pubkey"},
-				},
-				PacketEncryptionKeyCSRs: PacketEncryptionKeyCSRs{
-					"pek": PacketEncryptionCertificate{CertificateSigningRequest: "csr"},
-				},
+				Format:                  1,
+				IngestionIdentity:       "ingestion-identity",
+				IngestionBucket:         "ingestion-bucket",
+				PeerValidationIdentity:  "peer-validation-identity",
+				PeerValidationBucket:    "peer-validation-bucket",
+				BatchSigningPublicKeys:  BatchSigningPublicKeys{"bsk": BatchSigningPublicKey{PublicKey: "old BSK value"}},
+				PacketEncryptionKeyCSRs: manifestPEK(0),
 			},
 			wantErrStr: "pre-existing batch signing key",
 		},
 		{
-			name: "existing packet encryption key modified",
+			name:                "existing packet encryption key modified",
+			batchSigningKey:     bsk(0),
+			packetEncryptionKey: pek(0),
 			manifest: DataShareProcessorSpecificManifest{
-				Format:                 1,
-				IngestionIdentity:      "ingestion-identity",
-				IngestionBucket:        "ingestion-bucket",
-				PeerValidationIdentity: "peer-validation-identity",
-				PeerValidationBucket:   "peer-validation-bucket",
-				BatchSigningPublicKeys: BatchSigningPublicKeys{
-					"bsk": BatchSigningPublicKey{PublicKey: "pubkey"},
-				},
-				PacketEncryptionKeyCSRs: PacketEncryptionKeyCSRs{
-					"pek": PacketEncryptionCertificate{CertificateSigningRequest: "modified-csr"},
-				},
+				Format:                  1,
+				IngestionIdentity:       "ingestion-identity",
+				IngestionBucket:         "ingestion-bucket",
+				PeerValidationIdentity:  "peer-validation-identity",
+				PeerValidationBucket:    "peer-validation-bucket",
+				BatchSigningPublicKeys:  manifestBSK(0),
+				PacketEncryptionKeyCSRs: manifestPEK(0),
 			},
 			oldManifest: DataShareProcessorSpecificManifest{
-				Format:                 1,
-				IngestionIdentity:      "ingestion-identity",
-				IngestionBucket:        "ingestion-bucket",
-				PeerValidationIdentity: "peer-validation-identity",
-				PeerValidationBucket:   "peer-validation-bucket",
-				BatchSigningPublicKeys: BatchSigningPublicKeys{
-					"bsk": BatchSigningPublicKey{PublicKey: "pubkey"},
-				},
-				PacketEncryptionKeyCSRs: PacketEncryptionKeyCSRs{
-					"pek": PacketEncryptionCertificate{CertificateSigningRequest: "csr"},
-				},
+				Format:                  1,
+				IngestionIdentity:       "ingestion-identity",
+				IngestionBucket:         "ingestion-bucket",
+				PeerValidationIdentity:  "peer-validation-identity",
+				PeerValidationBucket:    "peer-validation-bucket",
+				BatchSigningPublicKeys:  manifestBSK(0),
+				PacketEncryptionKeyCSRs: PacketEncryptionKeyCSRs{"pek": PacketEncryptionCertificate{CertificateSigningRequest: "old PEK value"}},
 			},
+			wantErrStr: "pre-existing packet encryption key",
 		},
 	} {
 		test := test
 		t.Run(test.name, func(t *testing.T) {
 			t.Parallel()
+			cfg := UpdateKeysConfig{
+				BatchSigningKey:             test.batchSigningKey,
+				BatchSigningKeyIDPrefix:     bskPrefix,
+				PacketEncryptionKey:         test.packetEncryptionKey,
+				PacketEncryptionKeyIDPrefix: pekPrefix,
+				PacketEncryptionKeyCSRFQDN:  fqdn,
+			}
 			oldM := test.oldManifest
 			if oldM.Equal(DataShareProcessorSpecificManifest{}) {
 				oldM = test.manifest
 			}
-			err := validateUpdatedManifest(test.manifest, oldM)
+			err := validatePostUpdateManifest(cfg, test.manifest, oldM)
 			if err == nil || !strings.Contains(err.Error(), test.wantErrStr) {
 				t.Errorf("Wanted error containing %q, got: %v", test.wantErrStr, err)
 			}
@@ -563,66 +604,115 @@ func TestUpdateKeysValidations(t *testing.T) {
 	}
 }
 
-// mustP256 creates a new random P256 key or dies trying.
-func mustP256() key.Material {
-	k, err := key.P256.New()
+// batchSigningPublicKey creates a BatchSigningPublicKey containing the public
+// portion of the given key material.
+func batchSigningPublicKey(m key.Material) BatchSigningPublicKey {
+	pkix, err := m.PublicAsPKIX()
 	if err != nil {
-		panic(fmt.Sprintf("Couldn't create new P256 key: %v", err))
+		panic(fmt.Sprintf("Couldn't convert public key to PKIX: %v", err))
+	}
+	return BatchSigningPublicKey{PublicKey: pkix}
+}
+
+// packetEncryptionCertificate creates a PacketEncryptionCertificate containing
+// the public portion of the given key material.
+func packetEncryptionCertificate(m key.Material) PacketEncryptionCertificate {
+	csr, err := m.PublicAsCSR(fqdn)
+	if err != nil {
+		panic(fmt.Sprintf("Couldn't convert public key to CSR: %v", err))
+	}
+	return PacketEncryptionCertificate{CertificateSigningRequest: csr}
+}
+
+// bsk creates a batch signing key with the given timestamps. Key material is
+// arbitrary, but will match that of other batch signing keys at the same
+// timestamp, and will very likely not match other key materials. If timestamps
+// are provided, the first timestamp is used as the primary key version.
+func bsk(tss ...int64) key.Key {
+	if len(tss) == 0 {
+		return key.Key{}
+	}
+	var vs []key.Version
+	for _, ts := range tss {
+		vs = append(vs, key.Version{
+			KeyMaterial:       keytest.Material(bskKID(ts)),
+			CreationTimestamp: ts,
+		})
+	}
+	k, err := key.FromVersions(vs[0], vs[1:]...)
+	if err != nil {
+		panic(fmt.Sprintf("Couldn't create key: %v", err))
 	}
 	return k
 }
 
-// k creates a new key or dies trying. pkv is the primary key version, vs are
-// other versions.
-func k(pkv key.Version, vs ...key.Version) key.Key {
-	k, err := key.FromVersions(pkv, vs...)
+// pek creates a packet encryption key with the given timestamps. Key material
+// is arbitrary, but will match that of other packet encryption keys at the
+// same timestamp, and will very likely not match other key materials. If
+// timestamps are provided, the first timestamp is used as the primary key
+// version.
+func pek(tss ...int64) key.Key {
+	if len(tss) == 0 {
+		return key.Key{}
+	}
+	var vs []key.Version
+	for _, ts := range tss {
+		vs = append(vs, key.Version{
+			KeyMaterial:       keytest.Material(pekKID(ts)),
+			CreationTimestamp: ts,
+		})
+	}
+	k, err := key.FromVersions(vs[0], vs[1:]...)
 	if err != nil {
-		panic(fmt.Sprintf("Couldn't create key from versions: %v", err))
+		panic(fmt.Sprintf("Couldn't create key: %v", err))
 	}
 	return k
 }
 
-// kv creates a key version with the given timestamp and raw key.
-func kv(ts int64, k key.Material) key.Version {
-	return key.Version{
-		KeyMaterial:       k,
-		CreationTimestamp: ts,
+// manifestBSK creates a manifest BatchSigningPublicKeys with the given
+// timetamps. Order does not matter. Key material is arbitrary, but will match
+// that of other batch signing keys at the same timestamp, and will very likely
+// not match other key materials.
+func manifestBSK(tss ...int64) BatchSigningPublicKeys {
+	rslt := BatchSigningPublicKeys{}
+	for _, ts := range tss {
+		kid := bskKID(ts)
+		pkix, err := keytest.Material(kid).PublicAsPKIX()
+		if err != nil {
+			panic(fmt.Sprintf("Couldn't serialize key material as PKIX: %v", err))
+		}
+		rslt[kid] = BatchSigningPublicKey{PublicKey: pkix}
 	}
+	return rslt
 }
 
-func pubkeyFromRaw(raw key.Material) *ecdsa.PublicKey {
-	// A raw key won't give us its key material (even public) directly, but we
-	// can serialize it & parse it back.
-	pkix, err := raw.PublicAsPKIX()
-	if err != nil {
-		panic(fmt.Sprintf("Couldn't serialize raw key as PEM-encoded PKIX: %v", err))
+// manifestPEK creates a manifest PacketEncryptionKeyCSRs with the given
+// timestamps. Order does not matter. Key material is arbitrary, but will match
+// that of other packet encryption keys at the same timestamp, and will very
+// likely not match other key materials.
+func manifestPEK(tss ...int64) PacketEncryptionKeyCSRs {
+	rslt := PacketEncryptionKeyCSRs{}
+	for _, ts := range tss {
+		kid := pekKID(ts)
+		csr, err := keytest.Material(kid).PublicAsCSR(fqdn)
+		if err != nil {
+			panic(fmt.Sprintf("Couldn't serialize key material as CSR: %v", err))
+		}
+		rslt[kid] = PacketEncryptionCertificate{CertificateSigningRequest: csr}
 	}
-	return pubkeyFromPKIX(pkix)
+	return rslt
 }
 
-func pubkeyFromPKIX(pemPKIX string) *ecdsa.PublicKey {
-	p, _ := pem.Decode([]byte(pemPKIX))
-	if p == nil {
-		panic(fmt.Sprintf("Couldn't decode PEM block from %q", pemPKIX))
+func bskKID(ts int64) string {
+	if ts == 0 {
+		return bskPrefix
 	}
-	pub, err := x509.ParsePKIXPublicKey(p.Bytes)
-	if err != nil {
-		panic(fmt.Sprintf("Couldn't parse PEM block data as PKIX public key: %v", err))
-	}
-	return pub.(*ecdsa.PublicKey)
+	return fmt.Sprintf("%s-%d", bskPrefix, ts)
 }
 
-func pubkeyFromCSR(pemCSR string) *ecdsa.PublicKey {
-	p, _ := pem.Decode([]byte(pemCSR))
-	if p == nil {
-		panic(fmt.Sprintf("Couldn't decode PEM block from %q", pemCSR))
+func pekKID(ts int64) string {
+	if ts == 0 {
+		return pekPrefix
 	}
-	csr, err := x509.ParseCertificateRequest(p.Bytes)
-	if err != nil {
-		panic(fmt.Sprintf("Couldn't parse PEM block data as a CSR: %v", err))
-	}
-	if err := csr.CheckSignature(); err != nil {
-		panic("CSR is unsigned!?")
-	}
-	return csr.PublicKey.(*ecdsa.PublicKey)
+	return fmt.Sprintf("%s-%d", pekPrefix, ts)
 }
