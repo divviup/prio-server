@@ -11,7 +11,6 @@ import (
 	"errors"
 	"fmt"
 	"math/big"
-	"time"
 
 	"github.com/rs/zerolog/log"
 	k8smeta "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -131,7 +130,7 @@ func (k k8sKey) getKey(ctx context.Context, secretName string, parseSecretKey fu
 		if err != nil {
 			return key.Key{}, fmt.Errorf("couldn't interpret secret %q secret key as key: %w", secretName, err)
 		}
-		secretKey, err := key.FromVersions(key.Version{KeyMaterial: keyMaterial, CreationTime: time.Unix(0, 0), Primary: true})
+		secretKey, err := key.FromVersions(key.Version{KeyMaterial: keyMaterial, CreationTimestamp: 0})
 		if err != nil {
 			return key.Key{}, fmt.Errorf("couldn't create key: %w", err)
 		}
@@ -150,21 +149,7 @@ func (k k8sKey) packetEncryptionKeyName(locality string) string {
 }
 
 func serializeBatchSigningSecretKey(k key.Key) ([]byte, error) {
-	var primaryKeyMaterial *key.Material
-	if err := k.VisitVersions(func(v key.Version) error {
-		if v.Primary {
-			if primaryKeyMaterial != nil {
-				return errors.New("key contains multiple primary versions")
-			}
-			primaryKeyMaterial = &v.KeyMaterial
-		}
-		return nil
-	}); err != nil {
-		return nil, err
-	}
-	if primaryKeyMaterial == nil {
-		return nil, errors.New("key contains no primary version")
-	}
+	primaryKeyMaterial := k.Primary().KeyMaterial
 	kmBytes, err := primaryKeyMaterial.AsPKCS8()
 	if err != nil {
 		return nil, err
@@ -190,7 +175,7 @@ func parseBatchSigningSecretKey(keyMaterialBytes []byte) (key.Material, error) {
 
 func serializePacketEncryptionSecretKey(k key.Key) ([]byte, error) {
 	var buf bytes.Buffer
-	if err := k.VisitVersions(func(v key.Version) error {
+	if err := k.Versions(func(v key.Version) error {
 		if buf.Len() > 0 {
 			buf.WriteRune(',')
 		}

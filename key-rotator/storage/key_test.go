@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"math/big"
 	"testing"
-	"time"
 
 	"github.com/google/go-cmp/cmp"
 	k8sapi "k8s.io/api/core/v1"
@@ -31,7 +30,7 @@ func TestKubernetesKey(t *testing.T) {
 
 		// wantSecretKey taken directly from a dev environment secret
 		// store. Other values derived from wantSecretKey.
-		wantKey := k(pkv(0, mustP256From(&ecdsa.PrivateKey{
+		wantKey := k(kv(0, mustP256From(&ecdsa.PrivateKey{
 			PublicKey: ecdsa.PublicKey{
 				Curve: elliptic.P256(),
 				X:     mustInt("100281053943626114588339627807397740475849787919368479671799651521728988695054"),
@@ -123,7 +122,7 @@ func TestKubernetesKey(t *testing.T) {
 
 		// wantSecretKey taken directly from a dev environment secret
 		// store. Other values derived from wantSecretKey.
-		wantKey := k(pkv(0, mustP256From(&ecdsa.PrivateKey{
+		wantKey := k(kv(0, mustP256From(&ecdsa.PrivateKey{
 			PublicKey: ecdsa.PublicKey{
 				Curve: elliptic.P256(),
 				X:     mustInt("78527022544260903523204947018872622072202784880351210249668611210032537819764"),
@@ -219,9 +218,10 @@ func mustP256From(privKey *ecdsa.PrivateKey) key.Material {
 	return k
 }
 
-// k creates a new key or dies trying.
-func k(vs ...key.Version) key.Key {
-	k, err := key.FromVersions(vs...)
+// k creates a new key or dies trying. pkv is the primary key version, vs are
+// other versions.
+func k(pkv key.Version, vs ...key.Version) key.Key {
+	k, err := key.FromVersions(pkv, vs...)
 	if err != nil {
 		panic(fmt.Sprintf("Couldn't create key from versions: %v", err))
 	}
@@ -231,16 +231,9 @@ func k(vs ...key.Version) key.Key {
 // kv creates a non-primary key version with the given timestamp and raw key.
 func kv(ts int64, k key.Material) key.Version {
 	return key.Version{
-		KeyMaterial:  k,
-		CreationTime: time.Unix(ts, 0),
+		KeyMaterial:       k,
+		CreationTimestamp: ts,
 	}
-}
-
-// pkv creates a primary key version with the given timestamp and raw key.
-func pkv(ts int64, k key.Material) key.Version {
-	kv := kv(ts, k)
-	kv.Primary = true
-	return kv
 }
 
 func putEmpty(sd map[string]map[string][]byte, name string) {
