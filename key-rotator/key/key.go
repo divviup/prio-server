@@ -174,7 +174,10 @@ func (k Key) Rotate(now time.Time, cfg RotationConfig) (Key, error) {
 
 	// Policy: if no key versions exist, or if the youngest key version is
 	// older than `create_min_age`, create a new key version.
-	if len(vs) == 0 || age(vs[len(vs)-1]) > cfg.CreateMinAge {
+	// (The version at the largest index is guaranteed to be the youngest due
+	// to the sort criteria.)
+	youngestVersionIdx := len(vs) - 1
+	if len(vs) == 0 || age(vs[youngestVersionIdx]) > cfg.CreateMinAge {
 		m, err := cfg.CreateKeyFunc()
 		if err != nil {
 			return Key{}, fmt.Errorf("couldn't create new key version: %w", err)
@@ -185,6 +188,8 @@ func (k Key) Rotate(now time.Time, cfg RotationConfig) (Key, error) {
 	// Policy: While there are more than `delete_min_key_count` keys, and the
 	// oldest key version is older than `delete_min_age`, delete the oldest key
 	// version.
+	// (The version at index 0 is guaranteed to be the oldest version due to
+	// the sort criteria.)
 	for len(vs) > cfg.DeleteMinKeyCount && age(vs[0]) > cfg.DeleteMinAge {
 		vs = vs[1:]
 	}
