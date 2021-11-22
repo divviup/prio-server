@@ -422,8 +422,7 @@ func main() {
 	}
 
 	manifestStorage, err := storage.NewManifest(ctx, terraformOutput.ManifestBucket.Value.URL,
-		storage.WithAWSRegion(terraformOutput.ManifestBucket.Value.AWSRegion),
-		storage.WithAWSProfile(terraformOutput.ManifestBucket.Value.AWSProfile))
+		storage.WithAWSRegion(terraformOutput.ManifestBucket.Value.AWSRegion))
 	if err != nil {
 		log.Fatalf("%s", err)
 	}
@@ -431,8 +430,7 @@ func main() {
 	if terraformOutput.HasTestEnvironment.Value && terraformOutput.SingletonIngestor.Value != nil {
 		globalManifestStorage, err := storage.NewManifest(ctx, terraformOutput.ManifestBucket.Value.URL,
 			storage.WithKeyPrefix("singleton-ingestor"),
-			storage.WithAWSRegion(terraformOutput.ManifestBucket.Value.AWSRegion),
-			storage.WithAWSProfile(terraformOutput.ManifestBucket.Value.AWSProfile))
+			storage.WithAWSRegion(terraformOutput.ManifestBucket.Value.AWSRegion))
 		if err != nil {
 			log.Fatalf("%s", err)
 		}

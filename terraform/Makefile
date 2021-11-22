@@ -104,7 +104,7 @@ apply: prep ## Have terraform do the things. This will cost money.
 		-input=false \
 		-refresh=true \
 		-var-file="$(VARS)"
-	echo "If that succeeded, run 'terraform output --json | (cd ../deploy-tool/ ; go run main.go )'"
+	echo "If that succeeded, set AWS_PROFILE & run 'terraform output --json | (cd ../deploy-tool/ ; go run main.go )'"
 
 .PHONY: plan-bootstrap
 plan-bootstrap: prep ## Show what terraform thinks it will do
@@ -135,7 +135,7 @@ apply-bootstrap: prep ## Have terraform bring up the minimal resources needed to
 		-target=module.gke \
 		-target=module.eks \
 		-target=module.custom_metrics
-	echo "If that succeeded, run 'terraform output --json | (cd ../deploy-tool/ ; go run main.go )'"
+	echo "If that succeeded, set AWS_PROFILE & run 'terraform output --json | (cd ../deploy-tool/ ; go run main.go )'"
 
 .PHONY: destroy-bootstrap
 destroy-bootstrap: prep ## Have terraform destroy the resources brought up by apply-bootstrap
