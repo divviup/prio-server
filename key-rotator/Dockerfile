@@ -2,12 +2,12 @@ FROM golang:1.17.3 as builder
 
 # Copy go modules first, to allow module download to be cached.
 WORKDIR /workspace
-COPY go.mod go.mod
-COPY go.sum go.sum
+COPY key-rotator/go.mod go.mod
+COPY key-rotator/go.sum go.sum
 RUN go mod download
 
 # Copy everything over and build.
-COPY . .
+COPY key-rotator/. .
 RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o key-rotator
 
 FROM scratch
