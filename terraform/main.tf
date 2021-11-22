@@ -187,6 +187,16 @@ variable "facilitator_version" {
   default = "latest"
 }
 
+variable "key_rotator_image" {
+  type    = string
+  default = "prio-key-rotator"
+}
+
+variable "key_rotator_version" {
+  type    = string
+  default = "latest"
+}
+
 variable "prometheus_server_persistent_disk_size_gb" {
   type = number
   # This is quite high, but it's the minimum for GCE regional disks
@@ -207,6 +217,36 @@ variable "cluster_settings" {
     gcp_machine_type   = string
     aws_machine_types  = list(string)
   })
+}
+
+variable "batch_signing_key_rotation_policy" {
+  type = object({
+    create_min_age   = string
+    primary_min_age  = string
+    delete_min_age   = string
+    delete_min_count = number
+  })
+  default = {
+    create_min_age   = "6480h" // 6480 hours = 9 months (w/ 30-day months, 24-hour days)
+    primary_min_age  = "168h"  // 168 hours = 1 week (w/ 24-hour days)
+    delete_min_age   = "9360h" // 9360 hours = 13 months (w/ 30-day months, 24-hour days)
+    delete_min_count = 2
+  }
+}
+
+variable "packet_encryption_key_rotation_policy" {
+  type = object({
+    create_min_age   = string
+    primary_min_age  = string
+    delete_min_age   = string
+    delete_min_count = number
+  })
+  default = {
+    create_min_age   = "6480h" // 6480 hours = 9 months (w/ 30-day months, 24-hour days)
+    primary_min_age  = "0"
+    delete_min_age   = "9360h" // 9360 hours = 13 months (w/ 30-day months, 24-hour days)
+    delete_min_count = 2
+  }
 }
 
 terraform {
@@ -460,17 +500,19 @@ locals {
   })
 
   manifest = var.use_aws ? {
-    bucket      = module.manifest_aws[0].bucket
-    bucket_url  = module.manifest_aws[0].bucket_url
-    base_url    = module.manifest_aws[0].base_url
-    aws_region  = var.aws_region
-    aws_profile = var.aws_profile
+    bucket         = module.manifest_aws[0].bucket
+    bucket_url     = module.manifest_aws[0].bucket_url
+    base_url       = module.manifest_aws[0].base_url
+    aws_bucket_arn = module.manifest_aws[0].bucket_arn
+    aws_region     = var.aws_region
+    aws_profile    = var.aws_profile
     } : {
-    bucket      = module.manifest_gcp[0].bucket
-    bucket_url  = module.manifest_gcp[0].bucket_url
-    base_url    = module.manifest_gcp[0].base_url
-    aws_region  = ""
-    aws_profile = ""
+    bucket         = module.manifest_gcp[0].bucket
+    bucket_url     = module.manifest_gcp[0].bucket_url
+    base_url       = module.manifest_gcp[0].base_url
+    aws_bucket_arn = ""
+    aws_region     = ""
+    aws_profile    = ""
   }
 
   kubernetes_cluster = var.use_aws ? {
@@ -486,6 +528,26 @@ locals {
     token                      = module.gke[0].token
     kubectl_command            = "gcloud container clusters get-credentials ${module.gke[0].cluster_name} --region ${var.gcp_region} --project ${var.gcp_project}"
   }
+}
+
+module "kubernetes_locality" {
+  for_each = toset(var.localities)
+  source   = "./modules/kubernetes_locality"
+
+  environment                           = var.environment
+  container_registry                    = var.container_registry
+  key_rotator_image                     = var.key_rotator_image
+  key_rotator_version                   = var.key_rotator_version
+  use_aws                               = var.use_aws
+  gcp_project                           = var.gcp_project
+  eks_oidc_provider                     = var.use_aws ? module.eks[0].oidc_provider : { url = "", arn = "" }
+  manifest_bucket                       = local.manifest
+  kubernetes_namespace                  = kubernetes_namespace.namespaces[each.key].metadata[0].name
+  locality                              = each.key
+  ingestors                             = keys(var.ingestors)
+  certificate_fqdn                      = "${kubernetes_namespace.namespaces[each.key].metadata[0].name}.${var.environment}.certificates.${var.manifest_domain}"
+  batch_signing_key_rotation_policy     = var.batch_signing_key_rotation_policy
+  packet_encryption_key_rotation_policy = var.packet_encryption_key_rotation_policy
 }
 
 module "data_share_processors" {
