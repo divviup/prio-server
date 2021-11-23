@@ -201,7 +201,7 @@ resource "kubernetes_secret" "batch_signing_key" {
 
   lifecycle {
     ignore_changes = [
-      data["secret_key"]
+      data
     ]
   }
 }
