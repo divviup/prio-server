@@ -6,6 +6,7 @@ import (
 	"encoding/pem"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/abetterinternet/prio-server/key-rotator/key"
 )
@@ -115,7 +116,11 @@ func (m DataShareProcessorSpecificManifest) UpdateKeys(cfg UpdateKeysConfig) (Da
 			if err != nil {
 				return fmt.Errorf("couldn't create PKIX-encoding for batch signing key version with creation timestamp %d: %w", v.CreationTimestamp, err)
 			}
-			newBSPK = BatchSigningPublicKey{PublicKey: pkix}
+			const batchSigningPublicKeyValidityPeriod = 100 * 365 * 24 * time.Hour // 100 years
+			newBSPK = BatchSigningPublicKey{
+				PublicKey:  pkix,
+				Expiration: time.Now().UTC().Add(batchSigningPublicKeyValidityPeriod).Format(time.RFC3339),
+			}
 		}
 		newM.BatchSigningPublicKeys[kid] = newBSPK
 		return nil
@@ -352,7 +357,7 @@ type BatchSigningPublicKey struct {
 	// PublicKey is the PEM armored base64 encoding of the ASN.1 encoding of the
 	// PKIX SubjectPublicKeyInfo structure. It must be an ECDSA P256 key.
 	PublicKey string `json:"public-key"`
-	// Expiration is the ISO 8601 encoded UTC date at which this key expires.
+	// Expiration is the RFC3339-encoded UTC date at which this key expires.
 	Expiration string `json:"expiration"`
 }
 
