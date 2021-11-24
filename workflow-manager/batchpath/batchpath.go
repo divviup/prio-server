@@ -2,6 +2,7 @@ package batchpath
 
 import (
 	"fmt"
+	"math"
 	"sort"
 	"strconv"
 	"strings"
@@ -87,8 +88,13 @@ func New(batchName string) (*BatchPath, error) {
 	var dateComponents []int
 	for _, c := range batchDate {
 		parsed, err := strconv.ParseInt(c, 10, 64)
-		if err != nil {
+		switch {
+		case err != nil:
 			return nil, fmt.Errorf("parsing date component %q in %q: %w", c, batchName, err)
+		case parsed > math.MaxInt:
+			return nil, fmt.Errorf("parsing date component %q in %q: parsed value (%d) larger than maximum allowed value (%d)", c, batchName, parsed, math.MaxInt)
+		case parsed < 0:
+			return nil, fmt.Errorf("parsing date component %q in %q: parsed value (%d) smaller than minimum allowed value (%d)", c, batchName, parsed, 0)
 		}
 		dateComponents = append(dateComponents, int(parsed))
 	}
