@@ -34,6 +34,10 @@ output "bucket_url" {
   value = "s3://${aws_s3_bucket.manifests.bucket}"
 }
 
+output "bucket_arn" {
+  value = aws_s3_bucket.manifests.arn
+}
+
 output "base_url" {
   value = aws_s3_bucket.manifests.bucket_domain_name
 }
