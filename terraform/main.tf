@@ -249,6 +249,11 @@ variable "packet_encryption_key_rotation_policy" {
   }
 }
 
+variable "enable_key_rotation_localities" {
+  type    = list(string)
+  default = []
+}
+
 terraform {
   backend "gcs" {}
 
@@ -424,7 +429,7 @@ resource "kubernetes_secret" "ingestion_packet_decryption_keys" {
 
   lifecycle {
     ignore_changes = [
-      data["secret_key"]
+      data
     ]
   }
 }
@@ -548,6 +553,7 @@ module "kubernetes_locality" {
   certificate_fqdn                      = "${kubernetes_namespace.namespaces[each.key].metadata[0].name}.${var.environment}.certificates.${var.manifest_domain}"
   batch_signing_key_rotation_policy     = var.batch_signing_key_rotation_policy
   packet_encryption_key_rotation_policy = var.packet_encryption_key_rotation_policy
+  enable_key_rotator_localities         = toset(var.enable_key_rotation_localities)
 }
 
 module "data_share_processors" {

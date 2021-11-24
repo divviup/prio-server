@@ -72,6 +72,14 @@ variable "packet_encryption_key_rotation_policy" {
   })
 }
 
+variable "enable_key_rotator_localities" {
+  type        = set(string)
+  description = <<DESCRIPTION
+A set of localities where the key rotator is allowed to run. The special value
+"*" indicates that the key rotator should run in all localities.
+DESCRIPTION
+}
+
 locals {
   iam_entity_name = "${var.environment}-${var.locality}-key-rotator"
 }
@@ -101,6 +109,7 @@ resource "kubernetes_role" "key_rotator_role" {
       "list",
       "get",
       "delete",
+      "update",
     ]
   }
 }
@@ -140,9 +149,8 @@ resource "aws_iam_role_policy" "key_rotator_manifest_bucket_writer" {
           "s3:PutObjectAcl",
           "s3:GetObject",
           "s3:GetObjectAcl",
-          "s3:DeleteObjectAcl",
         ]
-        Resource = var.manifest_bucket.aws_bucket_arn
+        Resource = "${var.manifest_bucket.aws_bucket_arn}/*",
       }
     ]
   })
@@ -196,7 +204,7 @@ resource "kubernetes_cron_job" "key_rotator" {
                 "--ingestors=${join(",", var.ingestors)}",
                 "--csr-fqdn=${var.certificate_fqdn}",
                 "--aws-region=${var.manifest_bucket.aws_region}",
-                "--dry-run=true", # TODO(brandon): make this configurable
+                "--dry-run=${!(contains(var.enable_key_rotator_localities, "*") || contains(var.enable_key_rotator_localities, var.locality))}",
 
                 "--batch-signing-key-create-min-age=${var.batch_signing_key_rotation_policy.create_min_age}",
                 "--batch-signing-key-primary-min-age=${var.batch_signing_key_rotation_policy.primary_min_age}",
