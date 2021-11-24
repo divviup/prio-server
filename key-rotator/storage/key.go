@@ -123,10 +123,11 @@ func (k k8sKey) getKey(ctx context.Context, secretName string, parseSecretKey fu
 	// Parse as an "old" secret_key-serialized key.
 	if liveVersion, ok := s.Data[liveVersionsSecretKey]; ok && string(liveVersion) != secretKeyUnfilledValue {
 		keyMaterialBytes := make([]byte, base64.StdEncoding.DecodedLen(len(liveVersion)))
-		if _, err := base64.StdEncoding.Decode(keyMaterialBytes, liveVersion); err != nil {
+		n, err := base64.StdEncoding.Decode(keyMaterialBytes, liveVersion)
+		if err != nil {
 			return key.Key{}, fmt.Errorf("couldn't interpret secret %q secret key as base64: %w", secretName, err)
 		}
-		keyMaterial, err := parseSecretKey(keyMaterialBytes)
+		keyMaterial, err := parseSecretKey(keyMaterialBytes[:n])
 		if err != nil {
 			return key.Key{}, fmt.Errorf("couldn't interpret secret %q secret key as key: %w", secretName, err)
 		}

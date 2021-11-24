@@ -125,13 +125,13 @@ func TestKubernetesKey(t *testing.T) {
 		wantKey := k(kv(0, mustP256From(&ecdsa.PrivateKey{
 			PublicKey: ecdsa.PublicKey{
 				Curve: elliptic.P256(),
-				X:     mustInt("78527022544260903523204947018872622072202784880351210249668611210032537819764"),
-				Y:     mustInt("22745617558975184728664387250484621262807351942545566697101728810261708479900"),
+				X:     mustInt("30176607170335032169658242164164128826835373272126183526750106092296931195595"),
+				Y:     mustInt("108357461753906582253786936365593814628895529785013716760654244774460420655478"),
 			},
-			D: mustInt("7417359065569682521889946159093475243201835077729681597084399613736246477746929664"),
+			D: mustInt("79147076814969273829273941581782929461090592164040248130581241256142186071590"),
 		})))
-		const wantSecretKey = "BK2cuD4p1h6OEMMwaBh1UfJq7PAK8HgnQ/ztl3PFIlp0MkmQNYJkekvodLyqcte2t3WQoejx0J9/QqhZ19/fHZz6OZAo45m1iEaeq0f20adSOgf53w/5jvPwlLE/Tss3EQAA" // taken from a dev environment's actual secret
-		const wantKeyVersions = `[{"key":"AQKtnLg+KdYejhDDMGgYdVHyauzwCvB4J0P87ZdzxSJadPo5kCjjmbWIRp6rR/bRp1I6B/nfD/mO8/CUsT9OyzcRAAA","creation_time":"0","primary":true}]`
+		const wantSecretKey = "BEK3Wrk7GOIkNmFqgbSN/P0eDFexXgSLWm7SrcPitTrL75AmZBrL3IoNy4CdrFJt5br2jA0RSkrnFLh5FAvuCXau+6hxT2U6N4c8sTbUJIRQe25MQ1peZQ4J0FZuChXGJg==" // taken from a dev environment's actual secret
+		const wantKeyVersions = `[{"key":"AQJCt1q5OxjiJDZhaoG0jfz9HgxXsV4Ei1pu0q3D4rU6y677qHFPZTo3hzyxNtQkhFB7bkxDWl5lDgnQVm4KFcYm","creation_time":"0","primary":true}]`
 
 		t.Run("Put", func(t *testing.T) {
 			t.Parallel()

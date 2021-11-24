@@ -101,10 +101,11 @@ func (m Material) MarshalText() ([]byte, error) {
 
 func (m *Material) UnmarshalText(data []byte) error {
 	binBytes := make([]byte, base64.RawStdEncoding.DecodedLen(len(data)))
-	if _, err := base64.RawStdEncoding.Decode(binBytes, data); err != nil {
+	n, err := base64.RawStdEncoding.Decode(binBytes, data)
+	if err != nil {
 		return fmt.Errorf("couldn't decode base64: %w", err)
 	}
-	return m.UnmarshalBinary(binBytes)
+	return m.UnmarshalBinary(binBytes[:n])
 }
 
 func (m Material) Equal(o Material) bool {
