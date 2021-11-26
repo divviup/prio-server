@@ -370,11 +370,12 @@ func writeManifests(
 		ingestor, oldManifest, newManifest := ingestor, oldManifest, newManifestByIngestor[ingestor]
 		eg.Go(func() error {
 			if oldManifest.Equal(newManifest) {
+				log.Debug().Msgf("Skipping write for manifest for (%q, %q): key unchanged", locality, ingestor)
 				return nil
 			}
-			dspName := dspName(locality, ingestor)
-			if err := manifestStore.PutDataShareProcessorSpecificManifest(ctx, dspName, newManifest); err != nil {
-				return fmt.Errorf("couldn't write manifest for %q: %w", dspName, err)
+			log.Info().Msgf("Writing manifest for (%q, %q): %s", locality, ingestor, newManifest.Diff(oldManifest))
+			if err := manifestStore.PutDataShareProcessorSpecificManifest(ctx, dspName(locality, ingestor), newManifest); err != nil {
+				return fmt.Errorf("couldn't write manifest for (%q, %q): %w", locality, ingestor, err)
 			}
 			return nil
 		})

@@ -6,6 +6,7 @@ import (
 	"encoding/pem"
 	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/abetterinternet/prio-server/key-rotator/key"
 )
@@ -48,10 +49,87 @@ func (m DataShareProcessorSpecificManifest) equalModuloKeys(o DataShareProcessor
 		m.PeerValidationBucket == o.PeerValidationBucket
 }
 
+// Equal returns true if and only if this manifest is equal to the given
+// manifest.
 func (m DataShareProcessorSpecificManifest) Equal(o DataShareProcessorSpecificManifest) bool {
 	return m.equalModuloKeys(o) &&
 		m.BatchSigningPublicKeys.Equal(o.BatchSigningPublicKeys) &&
 		m.PacketEncryptionKeyCSRs.Equal(o.PacketEncryptionKeyCSRs)
+}
+
+// Diff returns a human-readable string describing the differences from the
+// given `o` to this manifest, suitable for logging. Diff returns the empty
+// string if and only if the two keys are equal.
+func (m DataShareProcessorSpecificManifest) Diff(o DataShareProcessorSpecificManifest) string {
+	// Build up structures allowing easy generation of diffs.
+	bskInfos := map[string]struct{ old, new *BatchSigningPublicKey }{}
+	for kid, key := range m.BatchSigningPublicKeys {
+		key := key
+		info := bskInfos[kid]
+		info.new = &key
+		bskInfos[kid] = info
+	}
+	for kid, key := range o.BatchSigningPublicKeys {
+		key := key
+		info := bskInfos[kid]
+		info.old = &key
+		bskInfos[kid] = info
+	}
+
+	pekInfos := map[string]struct{ old, new *PacketEncryptionCertificate }{}
+	for kid, key := range m.PacketEncryptionKeyCSRs {
+		key := key
+		info := pekInfos[kid]
+		info.new = &key
+		pekInfos[kid] = info
+	}
+	for kid, key := range o.PacketEncryptionKeyCSRs {
+		key := key
+		info := pekInfos[kid]
+		info.old = &key
+		pekInfos[kid] = info
+	}
+
+	// Generate diffs.
+	var diffs []string
+	if m.Format != o.Format {
+		diffs = append(diffs, fmt.Sprintf("changed format %d → %d", o.Format, m.Format))
+	}
+	if m.IngestionIdentity != o.IngestionIdentity {
+		diffs = append(diffs, fmt.Sprintf("changed ingestion identity %q → %q", o.IngestionIdentity, m.IngestionIdentity))
+	}
+	if m.IngestionBucket != o.IngestionBucket {
+		diffs = append(diffs, fmt.Sprintf("changed ingestion bucket %q → %q", o.IngestionBucket, m.IngestionBucket))
+	}
+	if m.PeerValidationIdentity != o.PeerValidationIdentity {
+		diffs = append(diffs, fmt.Sprintf("changed peer validation identity %q → %q", o.PeerValidationIdentity, m.PeerValidationIdentity))
+	}
+	if m.PeerValidationBucket != o.PeerValidationBucket {
+		diffs = append(diffs, fmt.Sprintf("changed peer validation bucket %q → %q", o.PeerValidationBucket, m.PeerValidationBucket))
+	}
+
+	for kid, info := range bskInfos {
+		switch {
+		case info.old == nil:
+			diffs = append(diffs, fmt.Sprintf("added batch signing key version %q", kid))
+		case info.new == nil:
+			diffs = append(diffs, fmt.Sprintf("removed batch signing key version %q", kid))
+		case (*info.old) != (*info.new):
+			diffs = append(diffs, fmt.Sprintf("modified key material for batch signing key version %q", kid))
+		}
+	}
+	for kid, info := range pekInfos {
+		switch {
+		case info.old == nil:
+			diffs = append(diffs, fmt.Sprintf("added packet encryption key version %q", kid))
+		case info.new == nil:
+			diffs = append(diffs, fmt.Sprintf("removed packet encryption key version %q", kid))
+		case (*info.old) != (*info.new):
+			diffs = append(diffs, fmt.Sprintf("modified key material for packet encryption key version %q", kid))
+		}
+	}
+
+	return strings.Join(diffs, "; ")
 }
 
 // UpdateKeysConfig configures an UpdateKeys operation.
