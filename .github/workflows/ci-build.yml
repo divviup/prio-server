@@ -92,6 +92,15 @@ jobs:
       with:
         file: ./facilitator/Dockerfile
 
+  workflow-manager-docker:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v2
+    - name: Set up Docker build
+      uses: docker/setup-buildx-action@v1
+    - name: build
+      run: ./workflow-manager/build.sh
+
   workflow-manager-test:
     runs-on: ubuntu-latest
     defaults:

@@ -57,7 +57,7 @@ jobs:
     - name: push-latest
       run: docker push letsencrypt/prio-workflow-manager:latest
 
-  push-workflow-manager:
+  push-key-rotator:
     runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@v2
