@@ -9,6 +9,9 @@ import (
 	"sync"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/promauto"
+	"github.com/prometheus/client_golang/prometheus/push"
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
 	"golang.org/x/sync/errgroup"
@@ -44,15 +47,41 @@ var (
 	packetEncryptionKeyDeleteMinCount = flag.Int("packet-encryption-key-delete-min-count", 2, "The minimum number of packet encryption key versions left undeleted after rotation")
 
 	// Other flags.
-	dryRun     = flag.Bool("dry-run", true, "If set, do not actually write any keys or manifests back (only report what would have changed)")
-	timeout    = flag.Duration("timeout", 10*time.Minute, "The `deadline` before key-rotator terminates. Set to 0 to disable timeout")
-	awsRegion  = flag.String("aws-region", "", "If specified, the AWS `region` to use for manifest storage")
-	kubeconfig = flag.String("kubeconfig", "", "The `path` to user's kubeconfig file; if unspecified, assumed to be running in-cluster") // typical value is $HOME/.kube/config
+	dryRun      = flag.Bool("dry-run", true, "If set, do not actually write any keys or manifests back (only report what would have changed)")
+	timeout     = flag.Duration("timeout", 10*time.Minute, "The `deadline` before key-rotator terminates. Set to 0 to disable timeout")
+	awsRegion   = flag.String("aws-region", "", "If specified, the AWS `region` to use for manifest storage")
+	pushGateway = flag.String("push-gateway", "", "Set this to the gateway to use with prometheus. If left empty, metrics will not be pushed to prometheus.")
+	kubeconfig  = flag.String("kubeconfig", "", "The `path` to user's kubeconfig file; if unspecified, assumed to be running in-cluster") // typical value is $HOME/.kube/config
+
+	// Metrics.
+	pusher      *push.Pusher // populated only if --push-gateway is specified.
+	keysWritten = promauto.NewCounter(prometheus.CounterOpts{
+		Name: "key_rotator_keys_written",
+		Help: "Number of keys written by the key rotator.",
+	})
+	manifestsWritten = promauto.NewCounter(prometheus.CounterOpts{
+		Name: "key_rotator_manifests_written",
+		Help: "Number of manifests written by the key rotator.",
+	})
+	lastSuccess = promauto.NewGauge(prometheus.GaugeOpts{
+		Name: "key_rotator_last_success",
+		Help: "Time of last successful run, as a UNIX seconds timestamp.",
+	})
+	lastFailure = promauto.NewGauge(prometheus.GaugeOpts{
+		Name: "key_rotator_last_failure",
+		Help: "Time of last failed run, as a UNIX seconds timestamp.",
+	})
 )
 
 func main() {
 	// Parse & validate flags.
 	flag.Parse()
+
+	if *pushGateway != "" {
+		pusher = push.New(*pushGateway, "key-rotator").
+			Gatherer(prometheus.DefaultGatherer).
+			Grouping("locality", *locality)
+	}
 
 	if *kubeconfig != "" {
 		// If we are running on someone's workstation, get nice pretty-printed
@@ -62,40 +91,40 @@ func main() {
 
 	switch {
 	case *prioEnv == "":
-		log.Fatal().Str("value", *prioEnv).Msgf("--prio-environment is required")
+		fail("--prio-environment is required")
 	case *namespace == "":
-		log.Fatal().Str("value", *namespace).Msgf("--kubernetes-namespace is required")
+		fail("--kubernetes-namespace is required")
 	case *manifestBucketURL == "":
-		log.Fatal().Str("value", *manifestBucketURL).Msgf("--manifest-bucket-url is required")
+		fail("--manifest-bucket-url is required")
 	case *locality == "":
-		log.Fatal().Str("value", *locality).Msgf("--locality is required")
+		fail("--locality is required")
 	case *csrFQDN == "":
-		log.Fatal().Str("value", *csrFQDN).Msgf("--csr-fqdn is required")
+		fail("--csr-fqdn is required")
 	case *batchSigningKeyCreateMinAge < 0:
-		log.Fatal().Dur("value", *batchSigningKeyCreateMinAge).Msgf("--batch-signing-key-create-min-age must be non-negative")
+		fail("--batch-signing-key-create-min-age must be non-negative")
 	case *batchSigningKeyPrimaryMinAge < 0:
-		log.Fatal().Dur("value", *batchSigningKeyPrimaryMinAge).Msgf("--batch-signing-key-primary-min-age must be non-negative")
+		fail("--batch-signing-key-primary-min-age must be non-negative")
 	case *batchSigningKeyDeleteMinAge < 0:
-		log.Fatal().Dur("value", *batchSigningKeyDeleteMinAge).Msgf("--batch-signing-key-delete-min-age must be non-negative")
+		fail("--batch-signing-key-delete-min-age must be non-negative")
 	case *batchSigningKeyDeleteMinCount < 0:
-		log.Fatal().Int("value", *batchSigningKeyDeleteMinCount).Msgf("--batch-signing-key-delete-min-count must be non-negative")
+		fail("--batch-signing-key-delete-min-count must be non-negative")
 	case *packetEncryptionKeyCreateMinAge < 0:
-		log.Fatal().Dur("value", *packetEncryptionKeyCreateMinAge).Msgf("--packet-encryption-key-create-min-age must be non-negative")
+		fail("--packet-encryption-key-create-min-age must be non-negative")
 	case *packetEncryptionKeyPrimaryMinAge < 0:
-		log.Fatal().Dur("value", *packetEncryptionKeyPrimaryMinAge).Msgf("--packet-encryption-key-primary-min-age must be non-negative")
+		fail("--packet-encryption-key-primary-min-age must be non-negative")
 	case *packetEncryptionKeyDeleteMinAge < 0:
-		log.Fatal().Dur("value", *packetEncryptionKeyDeleteMinAge).Msgf("--packet-encryption-key-delete-min-age must be non-negative")
+		fail("--packet-encryption-key-delete-min-age must be non-negative")
 	case *packetEncryptionKeyDeleteMinCount < 0:
-		log.Fatal().Int("value", *packetEncryptionKeyDeleteMinCount).Msgf("--packet-encryption-key-delete-min-count must be non-negative")
+		fail("--packet-encryption-key-delete-min-count must be non-negative")
 	case *timeout < 0:
-		log.Fatal().Dur("value", *timeout).Msgf("--timeout must be non-negative")
+		fail("--timeout must be non-negative")
 	}
 
 	ingestorLst := strings.Split(*ingestors, ",")
 	for i, v := range ingestorLst {
 		v = strings.TrimSpace(v)
 		if v == "" {
-			log.Fatal().Str("value", *ingestors).Msgf("--ingestors must be comma-separated list of ingestor names")
+			fail("--ingestors must be comma-separated list of ingestor names")
 		}
 		ingestorLst[i] = v
 	}
@@ -116,7 +145,7 @@ func main() {
 	case *kubeconfig == "": // in-cluster config, https://github.com/kubernetes/client-go/blob/master/examples/in-cluster-client-configuration/main.go
 		c, err := rest.InClusterConfig()
 		if err != nil {
-			log.Fatal().Err(err).Msgf("Couldn't get in-cluster Kubernetes config (if running out-of-cluster specify --kubeconfig): %v", err)
+			fail("Couldn't get in-cluster Kubernetes config (if running out-of-cluster specify --kubeconfig): %v", err)
 		}
 		cfg = c
 		log.Info().Msgf("Using in-cluster Kubernetes config")
@@ -124,7 +153,7 @@ func main() {
 	default: // out-of-cluster config, https://github.com/kubernetes/client-go/blob/master/examples/out-of-cluster-client-configuration/main.go
 		c, err := clientcmd.BuildConfigFromFlags("", *kubeconfig)
 		if err != nil {
-			log.Fatal().Err(err).Msgf("Couldn't get out-of-cluster Kubernetes config: %v", err)
+			fail("Couldn't get out-of-cluster Kubernetes config: %v", err)
 		}
 		cfg = c
 		log.Info().Msgf("Using out-of-cluster Kubernetes config")
@@ -132,11 +161,11 @@ func main() {
 
 	k8s, err := kubernetes.NewForConfig(cfg)
 	if err != nil {
-		log.Fatal().Err(err).Msgf("Couldn't create Kubernetes client: %v", err)
+		fail("Couldn't create Kubernetes client: %v", err)
 	}
 	keyStore, err := storage.NewKey(k8s.CoreV1().Secrets(*namespace), *prioEnv)
 	if err != nil {
-		log.Fatal().Err(err).Msgf("Couldn't create key store: %v", err)
+		fail("Couldn't create key store: %v", err)
 	}
 
 	// Get Manifest storage client.
@@ -147,7 +176,7 @@ func main() {
 	}
 	manifestStore, err := storage.NewManifest(ctx, *manifestBucketURL, opts...)
 	if err != nil {
-		log.Fatal().Err(err).Msgf("Couldn't create manifest store: %v", err)
+		fail("Couldn't create manifest store: %v", err)
 	}
 
 	// ...and go!
@@ -179,7 +208,12 @@ func main() {
 			DeleteMinKeyCount: *packetEncryptionKeyDeleteMinCount,
 		},
 	}); err != nil {
-		log.Fatal().Err(err).Msgf("Couldn't rotate keys: %v", err)
+		fail("Couldn't rotate keys: %v", err)
+	}
+
+	lastSuccess.SetToCurrentTime()
+	if err := tryPushMetrics(); err != nil {
+		log.Error().Err(err).Msgf("Couldn't push metrics: %v", err)
 	}
 	log.Info().Msgf("Keys rotated successfully")
 }
@@ -341,6 +375,7 @@ func writeKeys(ctx context.Context, keyStore storage.Key, locality string,
 		if err := keyStore.PutPacketEncryptionKey(ctx, locality, newPacketEncryptionKey); err != nil {
 			return fmt.Errorf("couldn't write packet encryption key for %q: %w", locality, err)
 		}
+		keysWritten.Inc()
 		return nil
 	})
 
@@ -354,6 +389,7 @@ func writeKeys(ctx context.Context, keyStore storage.Key, locality string,
 			if err := keyStore.PutBatchSigningKey(ctx, locality, ingestor, newKey); err != nil {
 				return fmt.Errorf("couldn't write batch signing key for (%q, %q): %w", locality, ingestor, err)
 			}
+			keysWritten.Inc()
 			return nil
 		})
 	}
@@ -376,6 +412,7 @@ func writeManifests(
 			if err := manifestStore.PutDataShareProcessorSpecificManifest(ctx, dspName, newManifest); err != nil {
 				return fmt.Errorf("couldn't write manifest for %q: %w", dspName, err)
 			}
+			manifestsWritten.Inc()
 			return nil
 		})
 	}
@@ -384,6 +421,21 @@ func writeManifests(
 }
 
 func dspName(locality, ingestor string) string { return fmt.Sprintf("%s-%s", locality, ingestor) }
+
+func fail(format string, v ...interface{}) {
+	lastFailure.SetToCurrentTime()
+	if err := tryPushMetrics(); err != nil {
+		log.Error().Msgf("Couldn't push metrics while failing: %v", err)
+	}
+	log.Fatal().Msgf(format, v...)
+}
+
+func tryPushMetrics() error {
+	if pusher != nil {
+		return pusher.Push()
+	}
+	return nil
+}
 
 // dryRunKeyStore logs (but otherwise ignores) puts, and allows gets by
 // deferring to the internal storage.Key's implementation.
