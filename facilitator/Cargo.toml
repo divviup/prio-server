@@ -16,7 +16,7 @@ chrono = { version = "0.4", features = ["serde"] }
 clap = "2.33.3"
 derivative = "2.1.1"
 dyn-clone = "1.0.4"
-elliptic-curve = { version = "0.10.6", features = ["pem"] }
+elliptic-curve = { version = "0.11.1", features = ["pem"] }
 hex = "0.4"
 hmac = "0.11"
 http = "^0.2"
@@ -47,7 +47,7 @@ serde = { version = "^1.0", features = ["derive"] }
 serde_json = "1.0"
 tempfile = "3.1.0"
 thiserror = "1.0"
-tokio = { version = "^1.13", features = ["full"] }
+tokio = { version = "^1.14", features = ["full"] }
 ureq = { version = "^2.3", features = ["json"] }
 url = "2.2.2"
 urlencoding = "2.1.0"
