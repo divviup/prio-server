@@ -75,10 +75,7 @@ jobs:
       uses: docker/build-push-action@v2
       with:
         file: ./key-rotator/Dockerfile
-    - name: tag
-      run: docker tag letsencrypt/prio-key-rotator letsencrypt/prio-key-rotator:${{ steps.get_version.outputs.VERSION }}
-    - name: tag-latest
-      run: docker tag letsencrypt/prio-key-rotator letsencrypt/prio-key-rotator:latest
+        tags: letsencrypt/prio-key-rotator:${{ steps.get_version.outputs.VERSION }},letsencrypt/prio-key-rotator:latest
     - name: push
       run: docker push letsencrypt/prio-key-rotator:${{ steps.get_version.outputs.VERSION }}
     - name: push-latest
