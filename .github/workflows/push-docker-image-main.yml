@@ -74,7 +74,4 @@ jobs:
       with:
         file: ./key-rotator/Dockerfile
         tags: letsencrypt/prio-key-rotator:${{ steps.get_hash.outputs.HASH }},letsencrypt/prio-key-rotator:latest-main
-    - name: push hash
-      run: docker push letsencrypt/prio-key-rotator:${{ steps.get_hash.outputs.HASH }}
-    - name: push latest-main
-      run: docker push letsencrypt/prio-key-rotator:latest-main
+        push: true
