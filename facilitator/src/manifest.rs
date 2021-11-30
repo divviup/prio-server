@@ -241,7 +241,8 @@ impl DataShareProcessorSpecificManifest {
         for (identifier, public_key) in pem_keys.iter() {
             keys.insert(
                 identifier.clone(),
-                public_key_from_pem(&public_key.public_key)?,
+                public_key_from_pem(&public_key.public_key)
+                    .with_context(|| format!("couldn't parse key identifier {}", identifier))?,
             );
         }
         Ok(keys)
@@ -525,7 +526,8 @@ impl IngestionServerManifest {
         for (identifier, public_key) in self.batch_signing_public_keys.iter() {
             keys.insert(
                 identifier.clone(),
-                public_key_from_pem(&public_key.public_key)?,
+                public_key_from_pem(&public_key.public_key)
+                    .with_context(|| format!("couldn't parse key identifier {}", identifier))?,
             );
         }
         Ok(keys)
@@ -615,18 +617,22 @@ fn public_key_from_pem(pem_key: &str) -> Result<UnparsedPublicKey<Vec<u8>>> {
         return Err(anyhow!("empty PEM input"));
     }
     let pem = pem::parse(&pem_key).context(format!("failed to parse key as PEM: {}", pem_key))?;
-    if pem.tag != "PUBLIC KEY" {
+    const WANT_PEM_TAG: &str = "PUBLIC KEY";
+    if pem.tag != WANT_PEM_TAG {
         return Err(anyhow!(
-            "key for identifier {} is not a PEM encoded public key"
+            "key is not a PEM-encoded public key (want tag {}, got tag {})",
+            WANT_PEM_TAG,
+            pem.tag
         ));
     }
 
     // An ECDSA P256 public key in this encoding will always be 26 bytes of
     // prefix + 65 bytes of key = 91 bytes total. e.g.,
     // https://lapo.it/asn1js/#MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgD______________________________________________________________________________________w
-    if pem.contents.len() != 91 {
+    const WANT_PEM_CONTENT_LENGTH: usize = 91;
+    if pem.contents.len() != WANT_PEM_CONTENT_LENGTH {
         return Err(anyhow!(
-            "PEM contents are wrong size for ASN.1 encoded ECDSA P256 SubjectPublicKeyInfo"
+            "PEM contents are wrong size for ASN.1 encoded ECDSA P256 SubjectPublicKeyInfo (want length {}, got length {})", WANT_PEM_CONTENT_LENGTH, pem.contents.len()
         ));
     }
 
