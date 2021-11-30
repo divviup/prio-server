@@ -179,14 +179,3 @@ jobs:
         working-directory: workflow-manager
         version: "v1.43.0"
         args: "--config ../.golangci.yml --timeout 10m"
-
-  task-replayer-golangci-lint:
-    runs-on: ubuntu-latest
-    steps:
-    - uses: actions/checkout@v2
-    - name: Run golangci-lint on task-replayer
-      uses: golangci/golangci-lint-action@v2.5.2
-      with:
-        working-directory: task-replayer
-        version: "v1.43.0"
-        args: "--config ../.golangci.yml --timeout 10m"
