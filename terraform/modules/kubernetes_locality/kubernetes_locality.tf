@@ -54,6 +54,10 @@ variable "certificate_fqdn" {
   type = string
 }
 
+variable "pushgateway" {
+  type = string
+}
+
 variable "batch_signing_key_rotation_policy" {
   type = object({
     create_min_age   = string
@@ -171,8 +175,7 @@ resource "kubernetes_cron_job" "key_rotator" {
   }
 
   spec {
-    #schedule                      = "0 20 * * MON-THU" # 8 PM (UTC) daily, Monday thru Thursday
-    schedule                      = "* * * * *" # once per minute
+    schedule                      = "0 20 * * MON-THU" # 8 PM (UTC) daily, Monday thru Thursday
     concurrency_policy            = "Forbid"
     successful_jobs_history_limit = 5
     failed_jobs_history_limit     = 5
@@ -205,6 +208,7 @@ resource "kubernetes_cron_job" "key_rotator" {
                 "--ingestors=${join(",", var.ingestors)}",
                 "--csr-fqdn=${var.certificate_fqdn}",
                 "--aws-region=${var.manifest_bucket.aws_region}",
+                "--push-gateway=${var.pushgateway}",
                 "--dry-run=${!(contains(var.enable_key_rotator_localities, "*") || contains(var.enable_key_rotator_localities, var.locality))}",
 
                 "--batch-signing-key-create-min-age=${var.batch_signing_key_rotation_policy.create_min_age}",
