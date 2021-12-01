@@ -357,7 +357,7 @@ type BatchSigningPublicKey struct {
 	// PublicKey is the PEM armored base64 encoding of the ASN.1 encoding of the
 	// PKIX SubjectPublicKeyInfo structure. It must be an ECDSA P256 key.
 	PublicKey string `json:"public-key"`
-	// Expiration is the RFC3339-encoded UTC date at which this key expires.
+	// Expiration is the ISO 8601 encoded UTC date at which this key expires.
 	Expiration string `json:"expiration"`
 }
 
