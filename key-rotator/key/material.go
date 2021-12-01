@@ -184,10 +184,11 @@ var _ material = &p256{} // verify p256 implements material
 // P256From returns a new Material of type P256 based on the given P256 private
 // key.
 func P256MaterialFrom(key *ecdsa.PrivateKey) (Material, error) {
-	if key.Curve != elliptic.P256() {
-		return Material{}, fmt.Errorf("key was %s rather than P256", key.Curve.Params().Name)
+	var m p256
+	if err := m.setKey(key); err != nil {
+		return Material{}, err
 	}
-	return Material{&p256{key}}, nil
+	return Material{&m}, nil
 }
 
 func newRandomP256() (material, error) {
@@ -195,7 +196,11 @@ func newRandomP256() (material, error) {
 	if err != nil {
 		return nil, fmt.Errorf("couldn't generate new key: %w", err)
 	}
-	return &p256{key}, nil
+	var m p256
+	if err := m.setKey(key); err != nil {
+		return nil, err
+	}
+	return &m, nil
 }
 
 func newUninitializedP256() material { return &p256{} }
@@ -245,21 +250,55 @@ func (m p256) MarshalBinary() ([]byte, error) {
 }
 
 func (m *p256) UnmarshalBinary(data []byte) error {
-	const p256PubkeyCompressedLen = 33 // P256 uses 256-bit = 8-byte points; the length of MarshalCompressed is 1 + point_byte_length.
+	const (
+		p256PubkeyCompressedLen = 33 // P256 uses 256-bit = 32-byte points; the length of MarshalCompressed is 1 + point_byte_length.
+		p256PrivateKeySize      = 32 // P256 private key (D) values are 256-bit = 32 bytes in length.
+	)
 
-	x, y := elliptic.UnmarshalCompressed(elliptic.P256(), data[:p256PubkeyCompressedLen])
+	// Deserialize bytes back into X/Y/D values.
+	if wantLen := p256PubkeyCompressedLen + p256PrivateKeySize; len(data) != wantLen {
+		return fmt.Errorf("serialized data has wrong length (want %d, got %d)", wantLen, len(data))
+	}
+	c := elliptic.P256()
+	x, y := elliptic.UnmarshalCompressed(c, data[:p256PubkeyCompressedLen])
 	if x == nil {
 		return errors.New("couldn't unmarshal compressed public key")
 	}
 	d := new(big.Int).SetBytes(data[p256PubkeyCompressedLen:])
 
-	*m = p256{&ecdsa.PrivateKey{
+	return m.setKey(&ecdsa.PrivateKey{
 		PublicKey: ecdsa.PublicKey{
-			Curve: elliptic.P256(),
+			Curve: c,
 			X:     x,
 			Y:     y,
 		},
 		D: d,
-	}}
+	})
+}
+
+func (m *p256) setKey(k *ecdsa.PrivateKey) error {
+	// Check that the provided key is actually a P-256 key.
+	c := elliptic.P256()
+	if k.Curve != c {
+		return fmt.Errorf("key was %s rather than P-256", k.Curve.Params().Name)
+	}
+
+	// Check that (public key) X, Y corresponds to a point on the curve.
+	// See implementation of `elliptic.Unmarshal` for evidence that this is a
+	// sufficient check on the public key.
+	p := c.Params().P
+	if k.X.Cmp(p) >= 0 || k.Y.Cmp(p) >= 0 || !c.IsOnCurve(k.X, k.Y) {
+		return errors.New("invalid public key")
+	}
+
+	// Check that (private key) D corresponds to (public key) X, Y.
+	// See implementation of `ecdsa.GenerateKey` for evidence that this is a
+	// correct method of translating D -> (X, Y).
+	wantX, wantY := c.ScalarBaseMult(k.D.Bytes())
+	if wantX.Cmp(k.X) != 0 || wantY.Cmp(k.Y) != 0 {
+		return errors.New("public/private key mismatch")
+	}
+
+	*m = p256{k}
 	return nil
 }

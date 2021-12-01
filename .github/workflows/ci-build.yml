@@ -92,6 +92,15 @@ jobs:
       with:
         file: ./facilitator/Dockerfile
 
+  workflow-manager-docker:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v2
+    - name: Set up Docker build
+      uses: docker/setup-buildx-action@v1
+    - name: build
+      run: ./workflow-manager/build.sh
+
   workflow-manager-test:
     runs-on: ubuntu-latest
     defaults:
@@ -177,16 +186,5 @@ jobs:
       uses: golangci/golangci-lint-action@v2.5.2
       with:
         working-directory: workflow-manager
-        version: "v1.43.0"
-        args: "--config ../.golangci.yml --timeout 10m"
-
-  task-replayer-golangci-lint:
-    runs-on: ubuntu-latest
-    steps:
-    - uses: actions/checkout@v2
-    - name: Run golangci-lint on task-replayer
-      uses: golangci/golangci-lint-action@v2.5.2
-      with:
-        working-directory: task-replayer
         version: "v1.43.0"
         args: "--config ../.golangci.yml --timeout 10m"

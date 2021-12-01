@@ -370,8 +370,10 @@ func writeKeys(ctx context.Context, keyStore storage.Key, locality string,
 	// Write packet encryption key.
 	eg.Go(func() error {
 		if oldPacketEncryptionKey.Equal(newPacketEncryptionKey) {
+			log.Debug().Str("locality", locality).Msgf("Skipping write for packet encryption key for %q: key unchanged", locality)
 			return nil
 		}
+		log.Info().Str("locality", locality).Msgf("Writing packet encryption key for %q due to changes to key: %s", locality, newPacketEncryptionKey.Diff(oldPacketEncryptionKey))
 		if err := keyStore.PutPacketEncryptionKey(ctx, locality, newPacketEncryptionKey); err != nil {
 			return fmt.Errorf("couldn't write packet encryption key for %q: %w", locality, err)
 		}
@@ -384,8 +386,10 @@ func writeKeys(ctx context.Context, keyStore storage.Key, locality string,
 		ingestor, oldKey, newKey := ingestor, oldKey, newBatchSigningKeyByIngestor[ingestor]
 		eg.Go(func() error {
 			if oldKey.Equal(newKey) {
+				log.Debug().Str("locality", locality).Str("ingestor", ingestor).Msgf("Skipping write for batch signing key for (%q, %q): key unchanged", locality, ingestor)
 				return nil
 			}
+			log.Info().Str("locality", locality).Str("ingestor", ingestor).Msgf("Writing batch signing key for (%q, %q) due to changes to key: %s", locality, ingestor, newKey.Diff(oldKey))
 			if err := keyStore.PutBatchSigningKey(ctx, locality, ingestor, newKey); err != nil {
 				return fmt.Errorf("couldn't write batch signing key for (%q, %q): %w", locality, ingestor, err)
 			}

@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"sort"
+	"strings"
 	"time"
 )
 
@@ -71,6 +72,65 @@ func (k Key) Equal(o Key) bool {
 		}
 	}
 	return true
+}
+
+// Diff returns a human-readable string describing the differences from the
+// given `o` key to this key, suitable for logging. Diff returns the empty
+// string if and only if the two keys are equal.
+func (k Key) Diff(o Key) string {
+	// Build up structures allowing easy generation of diffs.
+	var newPrimaryKeyTS, oldPrimaryKeyTS *int64
+	infos := map[int64]struct{ oldMat, newMat *Material }{}
+	for i, v := range k.v {
+		v := v
+		if i == 0 {
+			newPrimaryKeyTS = &v.CreationTimestamp
+		}
+		info := infos[v.CreationTimestamp]
+		info.newMat = &v.KeyMaterial
+		infos[v.CreationTimestamp] = info
+	}
+	for i, v := range o.v {
+		v := v
+		if i == 0 {
+			oldPrimaryKeyTS = &v.CreationTimestamp
+		}
+		info := infos[v.CreationTimestamp]
+		info.oldMat = &v.KeyMaterial
+		infos[v.CreationTimestamp] = info
+	}
+	timestamps := make([]int64, 0, len(infos))
+	for ts := range infos {
+		timestamps = append(timestamps, ts)
+	}
+	sort.Slice(timestamps, func(i, j int) bool { return timestamps[i] < timestamps[j] })
+
+	// Generate primary-version diffs.
+	var diffs []string
+	switch {
+	case newPrimaryKeyTS == nil && oldPrimaryKeyTS == nil:
+		// no diff if both keys are empty
+	case oldPrimaryKeyTS == nil:
+		diffs = append(diffs, fmt.Sprintf("changed primary version none → %d", *newPrimaryKeyTS))
+	case newPrimaryKeyTS == nil:
+		diffs = append(diffs, fmt.Sprintf("changed primary version %d → none", *oldPrimaryKeyTS))
+	case *oldPrimaryKeyTS != *newPrimaryKeyTS:
+		diffs = append(diffs, fmt.Sprintf("changed primary version %d → %d", *oldPrimaryKeyTS, *newPrimaryKeyTS))
+	}
+
+	// Generate key version diffs.
+	for _, ts := range timestamps {
+		info := infos[ts]
+		switch {
+		case info.oldMat == nil:
+			diffs = append(diffs, fmt.Sprintf("added version %d", ts))
+		case info.newMat == nil:
+			diffs = append(diffs, fmt.Sprintf("removed version %d", ts))
+		case !info.oldMat.Equal(*info.newMat):
+			diffs = append(diffs, fmt.Sprintf("modified key material for version %d", ts))
+		}
+	}
+	return strings.Join(diffs, "; ")
 }
 
 // IsEmpty returns true if and only if this is the empty key, i.e. the key with

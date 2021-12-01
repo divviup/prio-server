@@ -13,6 +13,7 @@ import (
 	"fmt"
 	"io"
 	"math/big"
+	"strings"
 	"testing"
 )
 
@@ -58,6 +59,20 @@ func TestP256(t *testing.T) {
 		newPK := newKey.m.(*p256).privKey
 		if !newPK.Equal(wantPK) {
 			t.Errorf("Text-encoded key does not match generated private key")
+		}
+	})
+
+	t.Run("text: too long", func(t *testing.T) {
+		const (
+			goodKey    = "AQJGD3XAhT4EZwSqbfj/9xnh5BmPLftXDEl0RnjwPmoqkLS8PLbNk5jo9HgIaaLEsjEthmdzQf+WC/0+Ccr5Odw3" // taken from dev environment
+			badKey     = goodKey + "AA"
+			wantErrStr = "wrong length"
+		)
+
+		var k Material
+		err := k.UnmarshalText([]byte(badKey))
+		if err == nil || !strings.Contains(err.Error(), wantErrStr) {
+			t.Errorf("Wanted error containing %q, got: %v", wantErrStr, err)
 		}
 	})
 
@@ -197,6 +212,87 @@ func TestP256(t *testing.T) {
 			t.Fatalf("PKCS #8 private key does not match generated private key")
 		}
 	})
+
+	t.Run("P256MaterialFrom", func(t *testing.T) {
+		t.Parallel()
+
+		// Success test.
+		t.Run("happy path", func(t *testing.T) {
+			t.Parallel()
+			if _, err := P256MaterialFrom(&ecdsa.PrivateKey{
+				PublicKey: ecdsa.PublicKey{
+					Curve: elliptic.P256(),
+					X:     mustInt("100281053943626114588339627807397740475849787919368479671799651521728988695054"),
+					Y:     mustInt("92848018789799398563224167584887395252439620813688048638482994377853029146245"),
+				},
+				D: mustInt("8496960630434574126270397013403207859297604121831246711994989434547040199290"),
+			}); err != nil {
+				t.Errorf("Unexpected error from P256MaterialFrom: %v", err)
+			}
+		})
+
+		// Failure tests.
+		for _, test := range []struct {
+			name       string
+			key        *ecdsa.PrivateKey
+			wantErrStr string
+		}{
+			{
+				name:       "not a P-256 key",
+				key:        mustKey(elliptic.P384()),
+				wantErrStr: "rather than P-256",
+			},
+			{
+				name: "invalid public key",
+				key: &ecdsa.PrivateKey{
+					PublicKey: ecdsa.PublicKey{
+						Curve: elliptic.P256(),
+						X:     mustInt("42"), // should be "100281053943626114588339627807397740475849787919368479671799651521728988695054" instead (obviously)
+						Y:     mustInt("92848018789799398563224167584887395252439620813688048638482994377853029146245"),
+					},
+					D: mustInt("8496960630434574126270397013403207859297604121831246711994989434547040199290"),
+				},
+				wantErrStr: "invalid public key",
+			},
+			{
+				name: "public key does not correspond to private key",
+				key: &ecdsa.PrivateKey{
+					PublicKey: ecdsa.PublicKey{
+						Curve: elliptic.P256(),
+						X:     mustInt("100281053943626114588339627807397740475849787919368479671799651521728988695054"),
+						Y:     mustInt("92848018789799398563224167584887395252439620813688048638482994377853029146245"),
+					},
+					D: mustInt("42"), // should be "8496960630434574126270397013403207859297604121831246711994989434547040199290" instead (obviously)
+				},
+				wantErrStr: "key mismatch",
+			},
+		} {
+			test := test
+			t.Run(test.name, func(t *testing.T) {
+				t.Parallel()
+				_, err := P256MaterialFrom(test.key)
+				if err == nil || !strings.Contains(err.Error(), test.wantErrStr) {
+					t.Errorf("Wanted error containing %q, got: %v", test.wantErrStr, err)
+				}
+			})
+		}
+	})
+}
+
+func mustInt(digits string) *big.Int {
+	var z big.Int
+	if _, ok := z.SetString(digits, 10); !ok {
+		panic(fmt.Sprintf("Couldn't set digits of big.Int to %q", digits))
+	}
+	return &z
+}
+
+func mustKey(c elliptic.Curve) *ecdsa.PrivateKey {
+	k, err := ecdsa.GenerateKey(c, rand.Reader)
+	if err != nil {
+		panic(fmt.Sprintf("Couldn't generate %q key: %v", c.Params().Name, err))
+	}
+	return k
 }
 
 // For in-package testing, create a new "TEST" raw key material type; keys are

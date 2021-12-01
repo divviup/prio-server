@@ -6,6 +6,7 @@ import (
 	"encoding/pem"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/abetterinternet/prio-server/key-rotator/key"
 )
@@ -115,7 +116,11 @@ func (m DataShareProcessorSpecificManifest) UpdateKeys(cfg UpdateKeysConfig) (Da
 			if err != nil {
 				return fmt.Errorf("couldn't create PKIX-encoding for batch signing key version with creation timestamp %d: %w", v.CreationTimestamp, err)
 			}
-			newBSPK = BatchSigningPublicKey{PublicKey: pkix}
+			const batchSigningPublicKeyValidityPeriod = 100 * 365 * 24 * time.Hour // 100 years
+			newBSPK = BatchSigningPublicKey{
+				PublicKey:  pkix,
+				Expiration: time.Now().UTC().Add(batchSigningPublicKeyValidityPeriod).Format(time.RFC3339),
+			}
 		}
 		newM.BatchSigningPublicKeys[kid] = newBSPK
 		return nil
