@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/google/go-cmp/cmp"
 
@@ -198,6 +199,9 @@ func TestUpdateKeys(t *testing.T) {
 				if err != nil {
 					t.Errorf("Batch signing key ID %q was unparseable: %v", kid, err)
 					continue
+				}
+				if _, err := time.Parse(time.RFC3339, bsk.Expiration); err != nil {
+					t.Errorf("Batch singing key ID %q had unparseable expiration %q: %v", kid, bsk.Expiration, err)
 				}
 				gotBSKPubkeys[kid] = pub
 			}
@@ -782,7 +786,10 @@ func manifestBSK(tss ...int64) BatchSigningPublicKeys {
 		if err != nil {
 			panic(fmt.Sprintf("Couldn't serialize key material as PKIX: %v", err))
 		}
-		rslt[kid] = BatchSigningPublicKey{PublicKey: pkix}
+		rslt[kid] = BatchSigningPublicKey{
+			PublicKey:  pkix,
+			Expiration: time.Now().Format(time.RFC3339),
+		}
 	}
 	return rslt
 }
