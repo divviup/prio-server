@@ -171,7 +171,8 @@ resource "kubernetes_cron_job" "key_rotator" {
   }
 
   spec {
-    schedule                      = "0 20 * * MON-THU" # 8 PM (UTC) daily, Monday thru Thursday
+    #schedule                      = "0 20 * * MON-THU" # 8 PM (UTC) daily, Monday thru Thursday
+    schedule                      = "* * * * *" # once per minute
     concurrency_policy            = "Forbid"
     successful_jobs_history_limit = 5
     failed_jobs_history_limit     = 5

@@ -55,11 +55,11 @@ var (
 
 	// Metrics.
 	pusher      *push.Pusher // populated only if --push-gateway is specified.
-	keysWritten = promauto.NewCounter(prometheus.CounterOpts{
+	keysWritten = promauto.NewGauge(prometheus.GaugeOpts{
 		Name: "key_rotator_keys_written",
 		Help: "Number of keys written by the key rotator.",
 	})
-	manifestsWritten = promauto.NewCounter(prometheus.CounterOpts{
+	manifestsWritten = promauto.NewGauge(prometheus.GaugeOpts{
 		Name: "key_rotator_manifests_written",
 		Help: "Number of manifests written by the key rotator.",
 	})
