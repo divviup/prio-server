@@ -54,11 +54,17 @@ func TestKeyMarshal(t *testing.T) {
 			t.Fatalf("Couldn't JSON-unmarshal key: %v", err)
 		}
 
-		diff := cmp.Diff(wantKey, gotKey)
+		cmpDiff := cmp.Diff(wantKey, gotKey)
 		if !wantKey.Equal(gotKey) {
-			t.Errorf("gotKey differs from wantKey (-want +got):\n%s", diff)
-		} else if diff != "" {
-			t.Errorf("gotKey is Equal to wantKey, but cmp.Diff disagrees (-want +got):\n%s", diff)
+			t.Errorf("gotKey differs from wantKey (-want +got):\n%s", cmpDiff)
+		} else {
+			if cmpDiff != "" {
+				t.Errorf("gotKey is Equal to wantKey, but cmp.Diff disagrees (-want +got):\n%s", cmpDiff)
+			}
+			keyDiff := wantKey.Diff(gotKey)
+			if keyDiff != "" {
+				t.Errorf("gotKey is Equal to wantKey, but wantKey.Diff(gotKey) disagrees: %s", keyDiff)
+			}
 		}
 	})
 
@@ -225,11 +231,17 @@ func TestKeyRotate(t *testing.T) {
 			if err != nil {
 				t.Fatalf("Unexpected error from Rotate: %v", err)
 			}
-			diff := cmp.Diff(test.wantKey, gotKey)
+			cmpDiff := cmp.Diff(test.wantKey, gotKey)
 			if !gotKey.Equal(test.wantKey) {
-				t.Errorf("gotKey differs from wantKey (-want +got):\n%s", diff)
-			} else if diff != "" {
-				t.Errorf("gotKey is Equal to wantKey, but cmp.Diff disagrees (-want +got):\n%s", diff)
+				t.Errorf("gotKey differs from wantKey (-want +got):\n%s", cmpDiff)
+			} else {
+				if cmpDiff != "" {
+					t.Errorf("gotKey is Equal to wantKey, but cmp.Diff disagrees (-want +got):\n%s", cmpDiff)
+				}
+				keyDiff := test.wantKey.Diff(gotKey)
+				if keyDiff != "" {
+					t.Errorf("gotKey is Equal to wantKey, but wantKey.Diff(gotKey) disagrees: %s", keyDiff)
+				}
 			}
 
 			// Check that Rotate is idempotent when called multiple times with the same timestamp, config.
@@ -237,11 +249,17 @@ func TestKeyRotate(t *testing.T) {
 			if err != nil {
 				t.Fatalf("Unexpected error from second call to Rotate: %v", err)
 			}
-			diff = cmp.Diff(gotKey, secondGotKey)
+			cmpDiff = cmp.Diff(gotKey, secondGotKey)
 			if !secondGotKey.Equal(gotKey) {
-				t.Errorf("secondGotKey differs from gotKey (-got +secondGot):\n%s", diff)
-			} else if diff != "" {
-				t.Errorf("secondGotKey is Equal to gotKey, but cmp.Diff disagrees (-want +got):\n%s", diff)
+				t.Errorf("secondGotKey differs from gotKey (-got +secondGot):\n%s", cmpDiff)
+			} else {
+				if cmpDiff != "" {
+					t.Errorf("secondGotKey is Equal to gotKey, but cmp.Diff disagrees (-want +got):\n%s", cmpDiff)
+				}
+				keyDiff := test.wantKey.Diff(secondGotKey)
+				if keyDiff != "" {
+					t.Errorf("gotKey is Equal to wantKey, but wantKey.Diff(gotKey) disagrees: %s", keyDiff)
+				}
 			}
 		})
 	}
@@ -284,6 +302,90 @@ func TestKeyRotate(t *testing.T) {
 			t.Errorf("Wanted error containing %q, got: %v", wantErrString, err)
 		}
 	})
+}
+
+func TestDiff(t *testing.T) {
+	t.Parallel()
+
+	must := func(k Key, err error) Key {
+		if err != nil {
+			t.Fatalf("Couldn't create key: %v", err)
+		}
+		return k
+	}
+
+	for _, test := range []struct {
+		name     string
+		before   Key
+		after    Key
+		wantDiff string
+	}{
+		{
+			name:     "empty key",
+			before:   Key{},
+			after:    Key{},
+			wantDiff: "",
+		},
+		{
+			name:     "no change",
+			before:   k(100000, 150000),
+			after:    k(100000, 150000),
+			wantDiff: "",
+		},
+		{
+			name:     "added version",
+			before:   k(100000, 150000),
+			after:    k(100000, 150000, 200000),
+			wantDiff: "added version 200000",
+		},
+		{
+			name:     "removed version",
+			before:   k(100000, 150000),
+			after:    k(100000),
+			wantDiff: "removed version 150000",
+		},
+		{
+			name:     "changed primary",
+			before:   k(100000, 150000),
+			after:    k(150000, 100000),
+			wantDiff: "changed primary version 100000 → 150000",
+		},
+		{
+			name:     "added primary",
+			before:   Key{},
+			after:    k(100000),
+			wantDiff: "changed primary version none → 100000; added version 100000",
+		},
+		{
+			name:     "removed primary",
+			before:   k(100000),
+			after:    Key{},
+			wantDiff: "changed primary version 100000 → none; removed version 100000",
+		},
+		{
+			name:     "modified key material",
+			before:   must(FromVersions(Version{KeyMaterial: newTestKey(0), CreationTimestamp: 100000})),
+			after:    must(FromVersions(Version{KeyMaterial: newTestKey(1), CreationTimestamp: 100000})),
+			wantDiff: "modified key material for version 100000",
+		},
+	} {
+		test := test
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+
+			// Check that diff is as expected.
+			gotDiff := test.after.Diff(test.before)
+			if test.wantDiff != gotDiff {
+				t.Errorf("Diff returned unexpected results. Wanted %q, got %q", test.wantDiff, gotDiff)
+			}
+
+			// Check that Equal is consistent with Diff for this test case.
+			wantEqual := (gotDiff == "")
+			if gotEqual := test.after.Equal(test.before); wantEqual != gotEqual {
+				t.Errorf("Equal not consistent with Diff. Want %v, got %v", wantEqual, gotEqual)
+			}
+		})
+	}
 }
 
 // k creates a new key or dies trying with the given version timestamps and
