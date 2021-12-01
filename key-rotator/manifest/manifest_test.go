@@ -608,6 +608,107 @@ func TestPostUpdateKeysValidations(t *testing.T) {
 	}
 }
 
+func TestDiff(t *testing.T) {
+	t.Parallel()
+
+	for _, test := range []struct {
+		name     string
+		before   DataShareProcessorSpecificManifest
+		after    DataShareProcessorSpecificManifest
+		wantDiff string
+	}{
+		{
+			name:     "empty manifest",
+			before:   DataShareProcessorSpecificManifest{},
+			after:    DataShareProcessorSpecificManifest{},
+			wantDiff: ``,
+		},
+		{
+			name:     "changed format",
+			before:   DataShareProcessorSpecificManifest{Format: 1},
+			after:    DataShareProcessorSpecificManifest{Format: 2},
+			wantDiff: `changed format 1 → 2`,
+		},
+		{
+			name:     "changed ingestion identity",
+			before:   DataShareProcessorSpecificManifest{IngestionIdentity: "foo"},
+			after:    DataShareProcessorSpecificManifest{IngestionIdentity: "bar"},
+			wantDiff: `changed ingestion identity "foo" → "bar"`,
+		},
+		{
+			name:     "changed ingestion bucket",
+			before:   DataShareProcessorSpecificManifest{IngestionBucket: "foo"},
+			after:    DataShareProcessorSpecificManifest{IngestionBucket: "bar"},
+			wantDiff: `changed ingestion bucket "foo" → "bar"`,
+		},
+		{
+			name:     "changed peer validation identity",
+			before:   DataShareProcessorSpecificManifest{PeerValidationIdentity: "foo"},
+			after:    DataShareProcessorSpecificManifest{PeerValidationIdentity: "bar"},
+			wantDiff: `changed peer validation identity "foo" → "bar"`,
+		},
+		{
+			name:     "changed peer validation bucket",
+			before:   DataShareProcessorSpecificManifest{PeerValidationBucket: "foo"},
+			after:    DataShareProcessorSpecificManifest{PeerValidationBucket: "bar"},
+			wantDiff: `changed peer validation bucket "foo" → "bar"`,
+		},
+		{
+			name:     "added batch signing key version",
+			before:   DataShareProcessorSpecificManifest{},
+			after:    DataShareProcessorSpecificManifest{BatchSigningPublicKeys: BatchSigningPublicKeys{"kid": BatchSigningPublicKey{PublicKey: "foo"}}},
+			wantDiff: `added batch signing key version "kid"`,
+		},
+		{
+			name:     "removed batch signing key version",
+			before:   DataShareProcessorSpecificManifest{BatchSigningPublicKeys: BatchSigningPublicKeys{"kid": BatchSigningPublicKey{PublicKey: "foo"}}},
+			after:    DataShareProcessorSpecificManifest{},
+			wantDiff: `removed batch signing key version "kid"`,
+		},
+		{
+			name:     "modified batch signing key material",
+			before:   DataShareProcessorSpecificManifest{BatchSigningPublicKeys: BatchSigningPublicKeys{"kid": BatchSigningPublicKey{PublicKey: "foo"}}},
+			after:    DataShareProcessorSpecificManifest{BatchSigningPublicKeys: BatchSigningPublicKeys{"kid": BatchSigningPublicKey{PublicKey: "bar"}}},
+			wantDiff: `modified key material for batch signing key version "kid"`,
+		},
+		{
+			name:     "added packet encryption key version",
+			before:   DataShareProcessorSpecificManifest{},
+			after:    DataShareProcessorSpecificManifest{PacketEncryptionKeyCSRs: PacketEncryptionKeyCSRs{"kid": PacketEncryptionCertificate{CertificateSigningRequest: "foo"}}},
+			wantDiff: `added packet encryption key version "kid"`,
+		},
+		{
+			name:     "removed packet encryption key version",
+			before:   DataShareProcessorSpecificManifest{PacketEncryptionKeyCSRs: PacketEncryptionKeyCSRs{"kid": PacketEncryptionCertificate{CertificateSigningRequest: "foo"}}},
+			after:    DataShareProcessorSpecificManifest{},
+			wantDiff: `removed packet encryption key version "kid"`,
+		},
+		{
+			name:     "modified packet encryption key material",
+			before:   DataShareProcessorSpecificManifest{PacketEncryptionKeyCSRs: PacketEncryptionKeyCSRs{"kid": PacketEncryptionCertificate{CertificateSigningRequest: "foo"}}},
+			after:    DataShareProcessorSpecificManifest{PacketEncryptionKeyCSRs: PacketEncryptionKeyCSRs{"kid": PacketEncryptionCertificate{CertificateSigningRequest: "bar"}}},
+			wantDiff: `modified key material for packet encryption key version "kid"`,
+		},
+	} {
+		test := test
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+
+			// Check that diff is as expected.
+			gotDiff := test.after.Diff(test.before)
+			if test.wantDiff != gotDiff {
+				t.Errorf("Diff returned unexpected results. Wanted %q, got %q", test.wantDiff, gotDiff)
+			}
+
+			// Check that Equal is consistent with Diff for this test case.
+			wantEqual := (gotDiff == "")
+			if gotEqual := test.after.Equal(test.before); wantEqual != gotEqual {
+				t.Errorf("Equal not consistent with Diff. Want %v, got %v", wantEqual, gotEqual)
+			}
+		})
+	}
+}
+
 // batchSigningPublicKey creates a BatchSigningPublicKey containing the public
 // portion of the given key material.
 func batchSigningPublicKey(m key.Material) BatchSigningPublicKey {
