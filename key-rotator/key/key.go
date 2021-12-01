@@ -79,12 +79,12 @@ func (k Key) Equal(o Key) bool {
 // string if and only if the two keys are equal.
 func (k Key) Diff(o Key) string {
 	// Build up structures allowing easy generation of diffs.
-	var newPKTS, oldPKTS *int64
+	var newPrimaryKeyTS, oldPrimaryKeyTS *int64
 	infos := map[int64]struct{ oldMat, newMat *Material }{}
 	for i, v := range k.v {
 		v := v
 		if i == 0 {
-			newPKTS = &v.CreationTimestamp
+			newPrimaryKeyTS = &v.CreationTimestamp
 		}
 		info := infos[v.CreationTimestamp]
 		info.newMat = &v.KeyMaterial
@@ -93,33 +93,33 @@ func (k Key) Diff(o Key) string {
 	for i, v := range o.v {
 		v := v
 		if i == 0 {
-			oldPKTS = &v.CreationTimestamp
+			oldPrimaryKeyTS = &v.CreationTimestamp
 		}
 		info := infos[v.CreationTimestamp]
 		info.oldMat = &v.KeyMaterial
 		infos[v.CreationTimestamp] = info
 	}
-	tss := make([]int64, 0, len(infos))
+	timestamps := make([]int64, 0, len(infos))
 	for ts := range infos {
-		tss = append(tss, ts)
+		timestamps = append(timestamps, ts)
 	}
-	sort.Slice(tss, func(i, j int) bool { return tss[i] < tss[j] })
+	sort.Slice(timestamps, func(i, j int) bool { return timestamps[i] < timestamps[j] })
 
 	// Generate primary-version diffs.
 	var diffs []string
 	switch {
-	case newPKTS == nil && oldPKTS == nil:
+	case newPrimaryKeyTS == nil && oldPrimaryKeyTS == nil:
 		// no diff if both keys are empty
-	case oldPKTS == nil:
-		diffs = append(diffs, fmt.Sprintf("changed primary version none → %d", *newPKTS))
-	case newPKTS == nil:
-		diffs = append(diffs, fmt.Sprintf("changed primary version %d → none", *oldPKTS))
-	case *oldPKTS != *newPKTS:
-		diffs = append(diffs, fmt.Sprintf("changed primary version %d → %d", *oldPKTS, *newPKTS))
+	case oldPrimaryKeyTS == nil:
+		diffs = append(diffs, fmt.Sprintf("changed primary version none → %d", *newPrimaryKeyTS))
+	case newPrimaryKeyTS == nil:
+		diffs = append(diffs, fmt.Sprintf("changed primary version %d → none", *oldPrimaryKeyTS))
+	case *oldPrimaryKeyTS != *newPrimaryKeyTS:
+		diffs = append(diffs, fmt.Sprintf("changed primary version %d → %d", *oldPrimaryKeyTS, *newPrimaryKeyTS))
 	}
 
 	// Generate key version diffs.
-	for _, ts := range tss {
+	for _, ts := range timestamps {
 		info := infos[ts]
 		switch {
 		case info.oldMat == nil:
