@@ -236,6 +236,7 @@ resource "kubernetes_config_map" "intake_batch_config_map" {
     AWS_SQS_REGION                                  = var.use_aws ? var.aws_region : ""
     GCP_PROJECT_ID                                  = var.use_aws ? "" : data.google_project.project.project_id
     GCP_WORKLOAD_IDENTITY_POOL_PROVIDER             = var.gcp_workload_identity_pool_provider
+    WORKER_MAXIMUM_LIFETIME                         = "3600"
   }
 }
 
@@ -269,6 +270,7 @@ resource "kubernetes_config_map" "aggregate_config_map" {
     GCP_PROJECT_ID                       = var.use_aws ? "" : data.google_project.project.project_id
     PERMIT_MALFORMED_BATCH               = "true"
     GCP_WORKLOAD_IDENTITY_POOL_PROVIDER  = var.gcp_workload_identity_pool_provider
+    WORKER_MAXIMUM_LIFETIME              = "3600"
   }
 }
 

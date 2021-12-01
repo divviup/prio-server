@@ -223,7 +223,8 @@ resource "kubernetes_deployment" "integration-tester" {
             "--batch-end-time", "1000000100",
             "--dimension", "123",
             "--epsilon", "0.23",
-            "--generation-interval", "60"
+            "--generation-interval", "60",
+            "--worker-maximum-lifetime", "3600"
           ]
         }
       }
