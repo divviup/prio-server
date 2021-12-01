@@ -90,6 +90,8 @@ trait AppArgumentAdder {
     fn add_common_sample_maker_arguments(self) -> Self;
 
     fn add_permit_malformed_batch_argument(self) -> Self;
+
+    fn add_worker_lifetime_argument(self) -> Self;
 }
 
 const SHARED_HELP: &str = "Storage arguments: Any flag ending in -input or -output can take an \
@@ -659,6 +661,25 @@ impl<'a, 'b> AppArgumentAdder for App<'a, 'b> {
                 .default_value("false"),
         )
     }
+
+    fn add_worker_lifetime_argument(self) -> Self {
+        self.arg(
+            Arg::with_name("worker-maximum-lifetime")
+                .long("worker-maximum-lifetime")
+                .env("WORKER_MAXIMUM_LIFETIME")
+                .value_name("SECONDS")
+                .help("Specifies the maximum lifetime of a worker in seconds.")
+                .validator(num_validator::<u64>)
+                .long_help(
+                    "Specifies the maximum lifetime of a worker in seconds. \
+                    After this amount of time, workers will terminate \
+                    successfully. Termination may not be immediate: workers \
+                    may choose to complete their current work item before \
+                    terminating, but in all cases workers will not start a \
+                    new work item after their lifetime is complete.",
+                ),
+        )
+    }
 }
 
 fn main() -> Result<(), anyhow::Error> {
@@ -689,6 +710,7 @@ fn main() -> Result<(), anyhow::Error> {
             SubCommand::with_name("generate-ingestion-sample-worker")
                 .about("Spawn a worker to generate sample data files")
                 .add_common_sample_maker_arguments()
+                .add_worker_lifetime_argument()
                 .arg(
                     Arg::with_name("kube-namespace")
                         .long("kube-namespace")
@@ -886,6 +908,7 @@ fn main() -> Result<(), anyhow::Error> {
                 .add_use_bogus_packet_file_digest_argument()
                 .add_permit_malformed_batch_argument()
                 .add_gcp_workload_identity_pool_provider_argument()
+                .add_worker_lifetime_argument()
         )
         .subcommand(
             SubCommand::with_name("aggregate-worker")
@@ -907,6 +930,7 @@ fn main() -> Result<(), anyhow::Error> {
                 .add_metrics_scrape_port_argument()
                 .add_permit_malformed_batch_argument()
                 .add_gcp_workload_identity_pool_provider_argument()
+                .add_worker_lifetime_argument()
         )
         .get_matches();
 
@@ -1007,9 +1031,10 @@ fn generate_sample_worker(
     runtime_handle: &Handle,
     root_logger: &Logger,
 ) -> Result<(), anyhow::Error> {
+    let termination_instant = termination_instant_from_args(sub_matches)?;
     let interval = value_t!(sub_matches.value_of("generation-interval"), u64)?;
 
-    loop {
+    while !should_terminate(termination_instant) {
         let trace_id = Uuid::new_v4();
         let result = generate_sample(&trace_id, sub_matches, runtime_handle, root_logger);
 
@@ -1019,8 +1044,9 @@ fn generate_sample_worker(
                 event::TRACE_ID => trace_id.to_string(),
             );
         }
-        std::thread::sleep(Duration::from_secs(interval))
+        std::thread::sleep(Duration::from_secs(interval));
     }
+    Ok(())
 }
 
 fn get_ecies_public_key(
@@ -1414,6 +1440,7 @@ fn intake_batch_worker(
     runtime_handle: &Handle,
     parent_logger: &Logger,
 ) -> Result<(), anyhow::Error> {
+    let termination_instant = termination_instant_from_args(sub_matches)?;
     let metrics_collector = IntakeMetricsCollector::new()?;
     let scrape_port = value_t!(sub_matches.value_of("metrics-scrape-port"), u16)?;
     start_metrics_scrape_endpoint(scrape_port, runtime_handle, parent_logger)?;
@@ -1421,7 +1448,7 @@ fn intake_batch_worker(
 
     crypto_self_check(sub_matches, parent_logger).context("crypto self check failed")?;
 
-    loop {
+    while !should_terminate(termination_instant) {
         if let Some(task_handle) = queue.dequeue()? {
             info!(parent_logger, "dequeued intake task";
                 event::TASK_HANDLE => task_handle.clone(),
@@ -1465,8 +1492,7 @@ fn intake_batch_worker(
             }
         }
     }
-
-    // unreachable
+    Ok(())
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -1664,13 +1690,14 @@ fn aggregate_worker(
     runtime_handle: &Handle,
     parent_logger: &Logger,
 ) -> Result<(), anyhow::Error> {
+    let termination_instant = termination_instant_from_args(sub_matches)?;
     let queue = aggregation_task_queue_from_args(sub_matches, runtime_handle, parent_logger)?;
     let metrics_collector = AggregateMetricsCollector::new()?;
     let scrape_port = value_t!(sub_matches.value_of("metrics-scrape-port"), u16)?;
     start_metrics_scrape_endpoint(scrape_port, runtime_handle, parent_logger)?;
     crypto_self_check(sub_matches, parent_logger).context("crypto self check failed")?;
 
-    loop {
+    while !should_terminate(termination_instant) {
         if let Some(task_handle) = queue.dequeue()? {
             info!(
                 parent_logger, "dequeued aggregate task";
@@ -1723,8 +1750,7 @@ fn aggregate_worker(
             }
         }
     }
-
-    // unreachable
+    Ok(())
 }
 
 fn lint_manifest(sub_matches: &ArgMatches, logger: &Logger) -> Result<(), anyhow::Error> {
@@ -2135,4 +2161,19 @@ fn aggregation_task_queue_from_args(
             )?))
         }
     }
+}
+
+fn termination_instant_from_args(
+    sub_matches: &ArgMatches,
+) -> Result<Option<Instant>, anyhow::Error> {
+    Ok(sub_matches
+        .value_of("worker-maximum-lifetime")
+        .map(str::parse)
+        .transpose()?
+        .map(Duration::from_secs)
+        .map(|d| Instant::now() + d))
+}
+
+fn should_terminate(termination_instant: Option<Instant>) -> bool {
+    termination_instant.map_or(false, |end| Instant::now() > end)
 }
