@@ -315,6 +315,20 @@ impl<'a, 'b> AppArgumentAdder for App<'a, 'b> {
                     corresponding to an entry in this server's global \
                     or specific manifest. Used to construct \
                     PrioBatchSignature messages.",
+                ),
+        )
+        .arg(
+            Arg::with_name("batch-signing-private-key-default-identifier")
+                .long("batch-signing-private-key-default-identifier")
+                .env("BATCH_SIGNING_PRIVATE_KEY_DEFAULT_IDENTIFIER")
+                .value_name("ID")
+                .help("Batch signing private key default identifier")
+                .long_help(
+                    "Identifier for the default batch signing keypair to use, \
+                    corresponding to an entry in this server's global or \
+                    specific manifest. Used only if \
+                    --batch-signing-private-key-identifier is not specified. \
+                    Used to construct PrioBatchSignature messages.",
                 )
                 .required(required),
         )
@@ -1862,7 +1876,11 @@ fn batch_signing_key_from_arg(matches: &ArgMatches) -> Result<BatchSigningKey> {
     let key_bytes = decode_base64_key(matches.value_of("batch-signing-private-key").unwrap())?;
     let key_identifier = matches
         .value_of("batch-signing-private-key-identifier")
-        .unwrap();
+        .unwrap_or_else(|| {
+            matches
+                .value_of("batch-signing-private-key-default-identifier")
+                .unwrap()
+        });
     Ok(BatchSigningKey {
         key: EcdsaKeyPair::from_pkcs8(&ECDSA_P256_SHA256_ASN1_SIGNING, &key_bytes)
             .context("failed to parse pkcs8 key for batch signing key")?,
