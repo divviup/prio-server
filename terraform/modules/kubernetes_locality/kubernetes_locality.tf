@@ -54,6 +54,10 @@ variable "certificate_fqdn" {
   type = string
 }
 
+variable "pushgateway" {
+  type = string
+}
+
 variable "batch_signing_key_rotation_policy" {
   type = object({
     create_min_age   = string
@@ -204,6 +208,7 @@ resource "kubernetes_cron_job" "key_rotator" {
                 "--ingestors=${join(",", var.ingestors)}",
                 "--csr-fqdn=${var.certificate_fqdn}",
                 "--aws-region=${var.manifest_bucket.aws_region}",
+                "--push-gateway=${var.pushgateway}",
                 "--dry-run=${!(contains(var.enable_key_rotator_localities, "*") || contains(var.enable_key_rotator_localities, var.locality))}",
 
                 "--batch-signing-key-create-min-age=${var.batch_signing_key_rotation_policy.create_min_age}",

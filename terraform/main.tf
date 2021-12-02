@@ -551,6 +551,7 @@ module "kubernetes_locality" {
   locality                              = each.key
   ingestors                             = keys(var.ingestors)
   certificate_fqdn                      = "${kubernetes_namespace.namespaces[each.key].metadata[0].name}.${var.environment}.certificates.${var.manifest_domain}"
+  pushgateway                           = var.pushgateway
   batch_signing_key_rotation_policy     = var.batch_signing_key_rotation_policy
   packet_encryption_key_rotation_policy = var.packet_encryption_key_rotation_policy
   enable_key_rotator_localities         = toset(var.enable_key_rotation_localities)
