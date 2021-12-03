@@ -163,7 +163,7 @@ func main() {
 	if err != nil {
 		fail("Couldn't create Kubernetes client: %v", err)
 	}
-	keyStore, err := storage.NewKey(k8s.CoreV1().Secrets(*namespace), *prioEnv)
+	keyStore, err := storage.NewKubernetesKey(k8s.CoreV1().Secrets(*namespace), *prioEnv)
 	if err != nil {
 		fail("Couldn't create key store: %v", err)
 	}
