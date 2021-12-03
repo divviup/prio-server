@@ -49,8 +49,10 @@ type k8sKey struct {
 }
 
 const (
-	liveVersionsSecretKey  = "secret_key"
-	keyVersionsSecretKey   = "key_versions"
+	liveVersionsSecretKey = "secret_key"
+	keyVersionsSecretKey  = "key_versions"
+	primaryKIDSecretKey   = "primary_kid"
+
 	secretKeyUnfilledValue = "not-a-real-key" // used in the secret_key secret key to denote no data
 )
 
@@ -71,7 +73,7 @@ func (k k8sKey) putKey(ctx context.Context, secretKind, secretName string, key k
 		Str("secret", secretName).
 		Msgf("Writing key to secret %q", secretName)
 
-	// Serialize key_versions & secret_key data.
+	// Serialize data to be included in secret.
 	keyVersionsBytes, err := json.Marshal(key)
 	if err != nil {
 		return fmt.Errorf("couldn't serialize key versions: %w", err)
@@ -80,9 +82,11 @@ func (k k8sKey) putKey(ctx context.Context, secretKind, secretName string, key k
 	if err != nil {
 		return fmt.Errorf("couldn't serialize secret key: %w", err)
 	}
+	primaryKID := primaryKID(secretName, key)
 	secretData := map[string][]byte{
 		keyVersionsSecretKey:  keyVersionsBytes,
 		liveVersionsSecretKey: liveVersionsBytes,
+		primaryKIDSecretKey:   []byte(primaryKID),
 	}
 
 	// Write update back to Kubernetes secret store.
@@ -147,6 +151,13 @@ func (k k8sKey) batchSigningKeyName(locality, ingestor string) string {
 
 func (k k8sKey) packetEncryptionKeyName(locality string) string {
 	return fmt.Sprintf("%s-%s-ingestion-packet-decryption-key", k.env, locality)
+}
+
+func primaryKID(secretName string, key key.Key) string {
+	if key.IsEmpty() || key.Primary().CreationTimestamp == 0 {
+		return secretName
+	}
+	return fmt.Sprintf("%s-%d", secretName, key.Primary().CreationTimestamp)
 }
 
 func serializeBatchSigningSecretKey(k key.Key) ([]byte, error) {

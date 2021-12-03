@@ -30,6 +30,7 @@ func TestKubernetesKey(t *testing.T) {
 
 		// wantSecretKey taken directly from a dev environment secret
 		// store. Other values derived from wantSecretKey.
+		const secretName = "$ENV-$LOCALITY-$INGESTOR-batch-signing-key"
 		wantKey := k(kv(0, mustP256From(&ecdsa.PrivateKey{
 			PublicKey: ecdsa.PublicKey{
 				Curve: elliptic.P256(),
@@ -43,13 +44,13 @@ func TestKubernetesKey(t *testing.T) {
 
 		t.Run("Put", func(t *testing.T) {
 			t.Parallel()
-			wantSD := map[string][]byte{"secret_key": []byte(wantSecretKey), "key_versions": []byte(wantKeyVersions)}
+			wantSD := map[string][]byte{"secret_key": []byte(wantSecretKey), "key_versions": []byte(wantKeyVersions), "primary_kid": []byte(secretName)}
 			store, sd := newK8sKey(env)
-			putEmpty(sd, "$ENV-$LOCALITY-$INGESTOR-batch-signing-key")
+			putEmpty(sd, secretName)
 			if err := store.PutBatchSigningKey(ctx, locality, ingestor, wantKey); err != nil {
 				t.Fatalf("Unexpected error from PutBatchSigningKey: %v", err)
 			}
-			gotSD := sd["$ENV-$LOCALITY-$INGESTOR-batch-signing-key"]
+			gotSD := sd[secretName]
 			if diff := cmp.Diff(wantSD, gotSD); diff != "" {
 				t.Errorf("Batch signing key secret data differs from expected (-want +got):\n%s", diff)
 			}
@@ -60,7 +61,7 @@ func TestKubernetesKey(t *testing.T) {
 			t.Run("FromSecretKey", func(t *testing.T) {
 				t.Parallel()
 				store, sd := newK8sKey(env)
-				putSecretKey(sd, "$ENV-$LOCALITY-$INGESTOR-batch-signing-key", []byte(wantSecretKey))
+				putSecretKey(sd, secretName, []byte(wantSecretKey))
 				gotKey, err := store.GetBatchSigningKey(ctx, locality, ingestor)
 				if err != nil {
 					t.Fatalf("Unexpected error from GetBatchSigningKey: %v", err)
@@ -73,7 +74,7 @@ func TestKubernetesKey(t *testing.T) {
 			t.Run("FromKeyVersions", func(t *testing.T) {
 				t.Parallel()
 				store, sd := newK8sKey(env)
-				putKeyVersions(sd, "$ENV-$LOCALITY-$INGESTOR-batch-signing-key", []byte(wantKeyVersions))
+				putKeyVersions(sd, secretName, []byte(wantKeyVersions))
 				gotKey, err := store.GetBatchSigningKey(ctx, locality, ingestor)
 				if err != nil {
 					t.Fatalf("Unexpected error from GetBatchSigningKey: %v", err)
@@ -87,7 +88,7 @@ func TestKubernetesKey(t *testing.T) {
 				t.Parallel()
 				var wantKey key.Key // empty key
 				store, sd := newK8sKey(env)
-				putEmpty(sd, "$ENV-$LOCALITY-$INGESTOR-batch-signing-key")
+				putEmpty(sd, secretName)
 				gotKey, err := store.GetBatchSigningKey(ctx, locality, ingestor)
 				if err != nil {
 					t.Fatalf("Unexpected error from GetBatchSigningKey: %v", err)
@@ -102,7 +103,7 @@ func TestKubernetesKey(t *testing.T) {
 		t.Run("RoundTrip", func(t *testing.T) {
 			t.Parallel()
 			store, sd := newK8sKey(env)
-			putEmpty(sd, "$ENV-$LOCALITY-$INGESTOR-batch-signing-key")
+			putEmpty(sd, secretName)
 			if err := store.PutBatchSigningKey(ctx, locality, ingestor, wantKey); err != nil {
 				t.Fatalf("Unexpected error from PutBatchSigningKey: %v", err)
 			}
@@ -122,6 +123,7 @@ func TestKubernetesKey(t *testing.T) {
 
 		// wantSecretKey taken directly from a dev environment secret
 		// store. Other values derived from wantSecretKey.
+		const secretName = "$ENV-$LOCALITY-ingestion-packet-decryption-key"
 		wantKey := k(kv(0, mustP256From(&ecdsa.PrivateKey{
 			PublicKey: ecdsa.PublicKey{
 				Curve: elliptic.P256(),
@@ -135,13 +137,13 @@ func TestKubernetesKey(t *testing.T) {
 
 		t.Run("Put", func(t *testing.T) {
 			t.Parallel()
-			wantSD := map[string][]byte{"secret_key": []byte(wantSecretKey), "key_versions": []byte(wantKeyVersions)}
+			wantSD := map[string][]byte{"secret_key": []byte(wantSecretKey), "key_versions": []byte(wantKeyVersions), "primary_kid": []byte(secretName)}
 			store, sd := newK8sKey(env)
-			putEmpty(sd, "$ENV-$LOCALITY-ingestion-packet-decryption-key")
+			putEmpty(sd, secretName)
 			if err := store.PutPacketEncryptionKey(ctx, locality, wantKey); err != nil {
 				t.Fatalf("Unexpected error from PutPacketEncryptionKey: %v", err)
 			}
-			gotSD := sd["$ENV-$LOCALITY-ingestion-packet-decryption-key"]
+			gotSD := sd[secretName]
 			if diff := cmp.Diff(wantSD, gotSD); diff != "" {
 				t.Errorf("Packet encryption key secret data differs from expected (-want +got):\n%s", diff)
 			}
@@ -152,7 +154,7 @@ func TestKubernetesKey(t *testing.T) {
 			t.Run("FromSecretKey", func(t *testing.T) {
 				t.Parallel()
 				store, sd := newK8sKey(env)
-				putSecretKey(sd, "$ENV-$LOCALITY-ingestion-packet-decryption-key", []byte(wantSecretKey))
+				putSecretKey(sd, secretName, []byte(wantSecretKey))
 				gotKey, err := store.GetPacketEncryptionKey(ctx, locality)
 				if err != nil {
 					t.Fatalf("Unexpected error from GetPacketEncryptionKey: %v", err)
@@ -165,7 +167,7 @@ func TestKubernetesKey(t *testing.T) {
 			t.Run("FromKeyVersions", func(t *testing.T) {
 				t.Parallel()
 				store, sd := newK8sKey(env)
-				putKeyVersions(sd, "$ENV-$LOCALITY-ingestion-packet-decryption-key", []byte(wantKeyVersions))
+				putKeyVersions(sd, secretName, []byte(wantKeyVersions))
 				gotKey, err := store.GetPacketEncryptionKey(ctx, locality)
 				if err != nil {
 					t.Fatalf("Unexpected error from GetPacketEncryptionKey: %v", err)
@@ -179,7 +181,7 @@ func TestKubernetesKey(t *testing.T) {
 				t.Parallel()
 				var wantKey key.Key // empty key
 				store, sd := newK8sKey(env)
-				putEmpty(sd, "$ENV-$LOCALITY-ingestion-packet-decryption-key")
+				putEmpty(sd, secretName)
 				gotKey, err := store.GetPacketEncryptionKey(ctx, locality)
 				if err != nil {
 					t.Fatalf("Unexpected error from GetPacketEncryptionKey: %v", err)
@@ -194,7 +196,7 @@ func TestKubernetesKey(t *testing.T) {
 		t.Run("RoundTrip", func(t *testing.T) {
 			t.Parallel()
 			store, sd := newK8sKey(env)
-			putEmpty(sd, "$ENV-$LOCALITY-ingestion-packet-decryption-key")
+			putEmpty(sd, secretName)
 			if err := store.PutPacketEncryptionKey(ctx, locality, wantKey); err != nil {
 				t.Fatalf("Unexpected error from PutPacketEncryptionKey: %v", err)
 			}

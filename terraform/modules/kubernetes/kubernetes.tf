@@ -221,7 +221,7 @@ resource "kubernetes_config_map" "intake_batch_config_map" {
     # PACKET_DECRYPTION_KEYS is a Kubernetes secret
     # BATCH_SIGNING_PRIVATE_KEY is a Kubernetes secret
     IS_FIRST                                        = var.is_first ? "true" : "false"
-    BATCH_SIGNING_PRIVATE_KEY_IDENTIFIER            = kubernetes_secret.batch_signing_key.metadata[0].name
+    BATCH_SIGNING_PRIVATE_KEY_DEFAULT_IDENTIFIER    = kubernetes_secret.batch_signing_key.metadata[0].name
     INGESTOR_INPUT                                  = var.ingestion_bucket
     INGESTOR_MANIFEST_BASE_URL                      = "https://${var.ingestor_manifest_base_url}"
     INSTANCE_NAME                                   = var.data_share_processor_name
@@ -251,26 +251,26 @@ resource "kubernetes_config_map" "aggregate_config_map" {
   data = {
     # PACKET_DECRYPTION_KEYS is a Kubernetes secret
     # BATCH_SIGNING_PRIVATE_KEY is a Kubernetes secret
-    IS_FIRST                             = var.is_first ? "true" : "false"
-    BATCH_SIGNING_PRIVATE_KEY_IDENTIFIER = kubernetes_secret.batch_signing_key.metadata[0].name
-    INGESTOR_INPUT                       = var.ingestion_bucket
-    INGESTOR_MANIFEST_BASE_URL           = "https://${var.ingestor_manifest_base_url}"
-    INSTANCE_NAME                        = var.data_share_processor_name
-    PEER_INPUT                           = var.peer_validation_bucket
-    PEER_MANIFEST_BASE_URL               = "https://${var.peer_manifest_base_url}"
-    PORTAL_IDENTITY                      = var.sum_part_bucket_service_account_email
-    PORTAL_MANIFEST_BASE_URL             = "https://${var.portal_server_manifest_base_url}"
-    RUST_LOG                             = "info"
-    RUST_BACKTRACE                       = "1"
-    PUSHGATEWAY                          = var.pushgateway
-    TASK_QUEUE_KIND                      = var.aggregate_queue.subscription_kind
-    TASK_QUEUE_NAME                      = var.aggregate_queue.subscription
-    GCP_PROJECT_ID                       = data.google_project.project.project_id
-    AWS_SQS_REGION                       = var.use_aws ? var.aws_region : ""
-    GCP_PROJECT_ID                       = var.use_aws ? "" : data.google_project.project.project_id
-    PERMIT_MALFORMED_BATCH               = "true"
-    GCP_WORKLOAD_IDENTITY_POOL_PROVIDER  = var.gcp_workload_identity_pool_provider
-    WORKER_MAXIMUM_LIFETIME              = "3600"
+    IS_FIRST                                     = var.is_first ? "true" : "false"
+    BATCH_SIGNING_PRIVATE_KEY_DEFAULT_IDENTIFIER = kubernetes_secret.batch_signing_key.metadata[0].name
+    INGESTOR_INPUT                               = var.ingestion_bucket
+    INGESTOR_MANIFEST_BASE_URL                   = "https://${var.ingestor_manifest_base_url}"
+    INSTANCE_NAME                                = var.data_share_processor_name
+    PEER_INPUT                                   = var.peer_validation_bucket
+    PEER_MANIFEST_BASE_URL                       = "https://${var.peer_manifest_base_url}"
+    PORTAL_IDENTITY                              = var.sum_part_bucket_service_account_email
+    PORTAL_MANIFEST_BASE_URL                     = "https://${var.portal_server_manifest_base_url}"
+    RUST_LOG                                     = "info"
+    RUST_BACKTRACE                               = "1"
+    PUSHGATEWAY                                  = var.pushgateway
+    TASK_QUEUE_KIND                              = var.aggregate_queue.subscription_kind
+    TASK_QUEUE_NAME                              = var.aggregate_queue.subscription
+    GCP_PROJECT_ID                               = data.google_project.project.project_id
+    AWS_SQS_REGION                               = var.use_aws ? var.aws_region : ""
+    GCP_PROJECT_ID                               = var.use_aws ? "" : data.google_project.project.project_id
+    PERMIT_MALFORMED_BATCH                       = "true"
+    GCP_WORKLOAD_IDENTITY_POOL_PROVIDER          = var.gcp_workload_identity_pool_provider
+    WORKER_MAXIMUM_LIFETIME                      = "3600"
   }
 }
 
@@ -437,6 +437,16 @@ resource "kubernetes_deployment" "intake_batch" {
                 name     = kubernetes_secret.batch_signing_key.metadata[0].name
                 key      = "secret_key"
                 optional = false
+              }
+            }
+          }
+          env {
+            name = "BATCH_SIGNING_PRIVATE_KEY_IDENTIFIER"
+            value_from {
+              secret_key_ref {
+                name     = kubernetes_secret.batch_signing_key.metadata[0].name
+                key      = "primary_kid"
+                optional = true
               }
             }
           }
@@ -633,6 +643,16 @@ resource "kubernetes_deployment" "aggregate" {
                 name     = kubernetes_secret.batch_signing_key.metadata[0].name
                 key      = "secret_key"
                 optional = false
+              }
+            }
+          }
+          env {
+            name = "BATCH_SIGNING_PRIVATE_KEY_IDENTIFIER"
+            value_from {
+              secret_key_ref {
+                name     = kubernetes_secret.batch_signing_key.metadata[0].name
+                key      = "primary_kid"
+                optional = true
               }
             }
           }
