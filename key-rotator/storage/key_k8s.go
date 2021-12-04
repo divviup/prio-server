@@ -19,12 +19,11 @@ import (
 	"github.com/abetterinternet/prio-server/key-rotator/key"
 )
 
-// NewKubernetesKey returns a new Key implementation, using the given
-// Kubernetes secret interface for backing storage. This key store writes keys
-// in a way that can be read by other components of the system (e.g. the
-// facilitator).
-func NewKubernetesKey(k8s k8s.SecretInterface, prioEnv string) (Key, error) {
-	return k8sKey{k8s, prioEnv}, nil
+// NewKubernetesKey returns a Key implementation using the given Kubernetes
+// secret interface for backing storage. This key store writes keys in a way
+// that can be read by other components of the system (e.g. the facilitator).
+func NewKubernetesKey(k8s k8s.SecretInterface, prioEnv string) Key {
+	return k8sKey{k8s, prioEnv}
 }
 
 type k8sKey struct {
@@ -43,11 +42,11 @@ const (
 var _ Key = k8sKey{} // verify k8skey satisfies Key
 
 func (k k8sKey) PutBatchSigningKey(ctx context.Context, locality, ingestor string, key key.Key) error {
-	return k.putKey(ctx, "batch-signing", k.batchSigningKeyName(locality, ingestor), key, serializeBatchSigningSecretKey)
+	return k.putKey(ctx, "batch-signing", batchSigningKeyName(k.env, locality, ingestor), key, serializeBatchSigningSecretKey)
 }
 
 func (k k8sKey) PutPacketEncryptionKey(ctx context.Context, locality string, key key.Key) error {
-	return k.putKey(ctx, "packet-encryption", k.packetEncryptionKeyName(locality), key, serializePacketEncryptionSecretKey)
+	return k.putKey(ctx, "packet-encryption", packetEncryptionKeyName(k.env, locality), key, serializePacketEncryptionSecretKey)
 }
 
 func (k k8sKey) putKey(ctx context.Context, secretKind, secretName string, key key.Key, serializeLiveVersions func(key.Key) ([]byte, error)) error {
@@ -86,11 +85,11 @@ func (k k8sKey) putKey(ctx context.Context, secretKind, secretName string, key k
 }
 
 func (k k8sKey) GetBatchSigningKey(ctx context.Context, locality, ingestor string) (key.Key, error) {
-	return k.getKey(ctx, k.batchSigningKeyName(locality, ingestor), parseBatchSigningSecretKey)
+	return k.getKey(ctx, batchSigningKeyName(k.env, locality, ingestor), parseBatchSigningSecretKey)
 }
 
 func (k k8sKey) GetPacketEncryptionKey(ctx context.Context, locality string) (key.Key, error) {
-	return k.getKey(ctx, k.packetEncryptionKeyName(locality), parsePacketEncryptionSecretKey)
+	return k.getKey(ctx, packetEncryptionKeyName(k.env, locality), parsePacketEncryptionSecretKey)
 }
 
 func (k k8sKey) getKey(ctx context.Context, secretName string, parseSecretKey func([]byte) (key.Material, error)) (key.Key, error) {
@@ -127,14 +126,6 @@ func (k k8sKey) getKey(ctx context.Context, secretName string, parseSecretKey fu
 	}
 
 	return key.Key{}, nil
-}
-
-func (k k8sKey) batchSigningKeyName(locality, ingestor string) string {
-	return fmt.Sprintf("%s-%s-%s-batch-signing-key", k.env, locality, ingestor)
-}
-
-func (k k8sKey) packetEncryptionKeyName(locality string) string {
-	return fmt.Sprintf("%s-%s-ingestion-packet-decryption-key", k.env, locality)
 }
 
 func primaryKID(secretName string, key key.Key) string {

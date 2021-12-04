@@ -2,6 +2,7 @@ package storage
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/abetterinternet/prio-server/key-rotator/key"
 )
@@ -24,4 +25,12 @@ type Key interface {
 	// GetPacketEncryptionKey gets the packet encryption key for the given
 	// locality, or returns an error on failure.
 	GetPacketEncryptionKey(ctx context.Context, locality string) (key.Key, error)
+}
+
+func batchSigningKeyName(env, locality, ingestor string) string {
+	return fmt.Sprintf("%s-%s-%s-batch-signing-key", env, locality, ingestor)
+}
+
+func packetEncryptionKeyName(env, locality string) string {
+	return fmt.Sprintf("%s-%s-ingestion-packet-decryption-key", env, locality)
 }
