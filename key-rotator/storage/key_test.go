@@ -10,6 +10,9 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/aws/aws-sdk-go/aws/awserr"
+	"github.com/aws/aws-sdk-go/aws/request"
+	"github.com/aws/aws-sdk-go/service/secretsmanager"
 	"github.com/google/go-cmp/cmp"
 	"github.com/googleapis/gax-go/v2"
 	smpb "google.golang.org/genproto/googleapis/cloud/secretmanager/v1"
@@ -194,6 +197,140 @@ func TestKubernetesKey(t *testing.T) {
 			t.Parallel()
 			store, k8s := newK8sKey()
 			k8s.putEmpty(pekSecretName)
+			if err := store.PutPacketEncryptionKey(ctx, locality, wantKey); err != nil {
+				t.Fatalf("Unexpected error from PutPacketEncryptionKey: %v", err)
+			}
+			gotKey, err := store.GetPacketEncryptionKey(ctx, locality)
+			if err != nil {
+				t.Fatalf("Unexpected error from GetPacketEncryptionKey: %v", err)
+			}
+			if !wantKey.Equal(gotKey) {
+				diff := cmp.Diff(wantKey, gotKey)
+				t.Errorf("Key differs from expected (-want +got):\n%s", diff)
+			}
+		})
+	})
+}
+
+func TestAWSKey(t *testing.T) {
+	t.Parallel()
+
+	t.Run("BatchSigning", func(t *testing.T) {
+		t.Parallel()
+
+		t.Run("Put", func(t *testing.T) {
+			t.Parallel()
+
+			t.Run("key already exists", func(t *testing.T) {
+				t.Parallel()
+				wantSD := []byte(wantKeyVersions)
+				store, aws := newAWSKey()
+				aws.put(bskSecretName, []byte("arbitrary existing key material"))
+				if err := store.PutBatchSigningKey(ctx, locality, ingestor, wantKey); err != nil {
+					t.Fatalf("Unexpected error from PutBatchSigningKey: %v", err)
+				}
+				gotSD := aws.sd[bskSecretName]
+				if diff := cmp.Diff(wantSD, gotSD); diff != "" {
+					t.Errorf("Batch signing key secret data differs from expected (-want +got):\n%s", diff)
+				}
+			})
+
+			t.Run("key does not already exist", func(t *testing.T) {
+				t.Parallel()
+				wantSD := []byte(wantKeyVersions)
+				store, aws := newAWSKey()
+				if err := store.PutBatchSigningKey(ctx, locality, ingestor, wantKey); err != nil {
+					t.Fatalf("Unexpected error from PutBatchSigningKey: %v", err)
+				}
+				gotSD := aws.sd[bskSecretName]
+				if diff := cmp.Diff(wantSD, gotSD); diff != "" {
+					t.Errorf("Batch signing key secret data differs from expected (-want +got):\n%s", diff)
+				}
+			})
+		})
+
+		t.Run("Get", func(t *testing.T) {
+			t.Parallel()
+			store, aws := newAWSKey()
+			aws.put(bskSecretName, []byte(wantKeyVersions))
+			gotKey, err := store.GetBatchSigningKey(ctx, locality, ingestor)
+			if err != nil {
+				t.Fatalf("Unexpected error from GetBatchSigningKey: %v", err)
+			}
+			if !wantKey.Equal(gotKey) {
+				diff := cmp.Diff(wantKey, gotKey)
+				t.Errorf("Key differs from expected (-want +got):\n%s", diff)
+			}
+		})
+
+		t.Run("RoundTrip", func(t *testing.T) {
+			t.Parallel()
+			store, _ := newAWSKey()
+			if err := store.PutBatchSigningKey(ctx, locality, ingestor, wantKey); err != nil {
+				t.Fatalf("Unexpected error from PutBatchSigningKey: %v", err)
+			}
+			gotKey, err := store.GetBatchSigningKey(ctx, locality, ingestor)
+			if err != nil {
+				t.Fatalf("Unexpected error from GetBatchSigningKey: %v", err)
+			}
+			if !wantKey.Equal(gotKey) {
+				diff := cmp.Diff(wantKey, gotKey)
+				t.Errorf("Key differs from expected (-want +got):\n%s", diff)
+			}
+		})
+	})
+
+	t.Run("PacketEncryption", func(t *testing.T) {
+		t.Parallel()
+
+		t.Run("Put", func(t *testing.T) {
+			t.Parallel()
+
+			t.Run("key already exists", func(t *testing.T) {
+				t.Parallel()
+				wantSD := []byte(wantKeyVersions)
+				store, aws := newAWSKey()
+				aws.put(bskSecretName, []byte("arbitrary existing key material"))
+				if err := store.PutPacketEncryptionKey(ctx, locality, wantKey); err != nil {
+					t.Fatalf("Unexpected error from PutPacketEncryptionKey: %v", err)
+				}
+				gotSD := aws.sd[pekSecretName]
+				if diff := cmp.Diff(wantSD, gotSD); diff != "" {
+					t.Errorf("Packet encryption key secret data differs from expected (-want +got):\n%s", diff)
+				}
+			})
+
+			t.Run("key does not already exist", func(t *testing.T) {
+				t.Parallel()
+				wantSD := []byte(wantKeyVersions)
+				store, aws := newAWSKey()
+				if err := store.PutPacketEncryptionKey(ctx, locality, wantKey); err != nil {
+					t.Fatalf("Unexpected error from PutPacketEncryptionKey: %v", err)
+				}
+				gotSD := aws.sd[pekSecretName]
+				if diff := cmp.Diff(wantSD, gotSD); diff != "" {
+					t.Errorf("Packet encryption key secret data differs from expected (-want +got):\n%s", diff)
+				}
+			})
+		})
+
+		t.Run("Get", func(t *testing.T) {
+			t.Parallel()
+			store, aws := newAWSKey()
+			aws.put(pekSecretName, []byte(wantKeyVersions))
+			gotKey, err := store.GetPacketEncryptionKey(ctx, locality)
+			if err != nil {
+				t.Fatalf("Unexpected error from GetPacketEncryptionKey: %v", err)
+			}
+			if !wantKey.Equal(gotKey) {
+				diff := cmp.Diff(wantKey, gotKey)
+				t.Errorf("Key differs from expected (-want +got):\n%s", diff)
+			}
+		})
+
+		t.Run("RoundTrip", func(t *testing.T) {
+			t.Parallel()
+			store, _ := newAWSKey()
 			if err := store.PutPacketEncryptionKey(ctx, locality, wantKey); err != nil {
 				t.Fatalf("Unexpected error from PutPacketEncryptionKey: %v", err)
 			}
@@ -432,6 +569,57 @@ func (s fakeK8sSecret) putSecretKey(name string, value []byte) {
 func (s fakeK8sSecret) putKeyVersions(name string, value []byte) {
 	s.sd[name] = map[string][]byte{"key_versions": value}
 }
+
+func newAWSKey() (Key, fakeAWSSecretManager) {
+	aws := fakeAWSSecretManager{sd: map[string][]byte{}}
+	return awsKey{aws, env}, aws
+}
+
+type fakeAWSSecretManager struct{ sd map[string][]byte }
+
+func (m fakeAWSSecretManager) CreateSecretWithContext(_ context.Context, req *secretsmanager.CreateSecretInput, _ ...request.Option) (*secretsmanager.CreateSecretOutput, error) {
+	if req.Name == nil {
+		return nil, errors.New("Name is nil")
+	}
+	secretName := *req.Name
+	if _, ok := m.sd[secretName]; ok {
+		return nil, awserr.New(secretsmanager.ErrCodeResourceExistsException, fmt.Sprintf("secret %q already exists", secretName), nil)
+	}
+	m.sd[secretName] = nil
+	return nil, nil
+}
+
+func (m fakeAWSSecretManager) GetSecretValueWithContext(_ context.Context, req *secretsmanager.GetSecretValueInput, _ ...request.Option) (*secretsmanager.GetSecretValueOutput, error) {
+	if req.SecretId == nil {
+		return nil, errors.New("SecretId is nil")
+	}
+	secretName := *req.SecretId
+	secretBytes, ok := m.sd[secretName]
+	switch {
+	case !ok:
+		return nil, fmt.Errorf("no such secret %q", secretName)
+	case secretBytes == nil:
+		return nil, fmt.Errorf("secret %q has no versions", secretName)
+	}
+	return &secretsmanager.GetSecretValueOutput{SecretBinary: secretBytes}, nil
+}
+
+func (m fakeAWSSecretManager) PutSecretValueWithContext(_ context.Context, req *secretsmanager.PutSecretValueInput, _ ...request.Option) (*secretsmanager.PutSecretValueOutput, error) {
+	switch {
+	case req.SecretId == nil:
+		return nil, errors.New("SecretId is nil")
+	case req.SecretBinary == nil:
+		return nil, errors.New("SecretBinary is nil")
+	}
+	secretName := *req.SecretId
+	if _, ok := m.sd[secretName]; !ok {
+		return nil, fmt.Errorf("no such secret %q", secretName)
+	}
+	m.sd[secretName] = req.SecretBinary
+	return nil, nil
+}
+
+func (m fakeAWSSecretManager) put(name string, value []byte) { m.sd[name] = value }
 
 func newGCPKey() (Key, fakeGCPSecretManager) {
 	gcp := fakeGCPSecretManager{sd: map[string][]byte{}}
