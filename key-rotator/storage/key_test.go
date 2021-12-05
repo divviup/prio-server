@@ -16,6 +16,8 @@ import (
 	"github.com/google/go-cmp/cmp"
 	"github.com/googleapis/gax-go/v2"
 	smpb "google.golang.org/genproto/googleapis/cloud/secretmanager/v1"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 	k8sapi "k8s.io/api/core/v1"
 	k8smeta "k8s.io/apimachinery/pkg/apis/meta/v1"
 	k8s "k8s.io/client-go/kubernetes/typed/core/v1"
@@ -668,9 +670,8 @@ func (m fakeGCPSecretManager) CreateSecret(_ context.Context, req *smpb.CreateSe
 	if req.Parent != wantParent {
 		return nil, fmt.Errorf("unexpected Parent (got %q, want %q)", req.Parent, wantParent)
 	}
-	// XXX: if secret already exists, return an appropriate error instead of no-op (need to figure out correct error to return & update main-program logic first)
 	if _, ok := m.sd[req.SecretId]; ok {
-		return nil, nil
+		return nil, status.Newf(codes.AlreadyExists, "secret %q already exists", req.SecretId).Err()
 	}
 	m.sd[req.SecretId] = nil
 	return nil, nil

@@ -9,6 +9,8 @@ import (
 	"github.com/googleapis/gax-go/v2"
 	"github.com/rs/zerolog/log"
 	smpb "google.golang.org/genproto/googleapis/cloud/secretmanager/v1"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 
 	"github.com/abetterinternet/prio-server/key-rotator/key"
 )
@@ -70,8 +72,9 @@ func (k gcpKey) putKey(ctx context.Context, secretKind, secretName string, key k
 			},
 		},
 	}); err != nil {
-		// XXX: handle "already exists" error
-		return fmt.Errorf("couldn't create GCP secret: %w", err)
+		if s, ok := status.FromError(err); !ok || s.Code() != codes.AlreadyExists {
+			return fmt.Errorf("couldn't create GCP secret: %w", err)
+		}
 	}
 
 	// Add a version to the secret.
