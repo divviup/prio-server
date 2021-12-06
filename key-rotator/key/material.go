@@ -179,6 +179,13 @@ type material interface {
 
 type p256 struct{ privKey *ecdsa.PrivateKey }
 
+const (
+	// P256 uses 256-bit = 32 byte points, and 256-bit = 32 byte private key (D) values.
+	p256PubkeyUncompressedLen = 65 // elliptic.Marshal produces results of 1 + 2*sizeof(point) = 65 bytes in length.
+	p256PubkeyCompressedLen   = 33 // elliptic.MarshalCompressed produces results of 1 + sizeof(point) = 33 bytes in length.
+	p256PrivateKeyLen         = 32
+)
+
 var _ material = &p256{} // verify p256 implements material
 
 // P256From returns a new Material of type P256 based on the given P256 private
@@ -232,7 +239,14 @@ func (m p256) publicAsPKIX() (string, error) {
 }
 
 func (m p256) asX962Uncompressed() (string, error) {
-	return base64.StdEncoding.EncodeToString(append(elliptic.Marshal(elliptic.P256(), m.privKey.X, m.privKey.Y), m.privKey.D.Bytes()...)), nil
+	var keyBytes [p256PubkeyUncompressedLen + p256PrivateKeyLen]byte
+	pubkeyBytes := elliptic.Marshal(elliptic.P256(), m.privKey.PublicKey.X, m.privKey.PublicKey.Y)
+	if len(pubkeyBytes) != p256PubkeyUncompressedLen {
+		panic(fmt.Sprintf("Unexpected length from elliptic.Marshal: wanted %d, got %d", p256PubkeyUncompressedLen, len(pubkeyBytes)))
+	}
+	copy(keyBytes[:p256PubkeyUncompressedLen], pubkeyBytes)
+	m.privKey.D.FillBytes(keyBytes[p256PubkeyUncompressedLen:])
+	return base64.StdEncoding.EncodeToString(keyBytes[:]), nil
 }
 
 func (m p256) asPKCS8() (string, error) {
@@ -246,17 +260,19 @@ func (m p256) asPKCS8() (string, error) {
 func (m p256) MarshalBinary() ([]byte, error) {
 	// P256's raw key format is the X9.62 compressed encoding of the public
 	// portion of the key, concatenated with the secret "D" scalar.
-	return append(elliptic.MarshalCompressed(elliptic.P256(), m.privKey.X, m.privKey.Y), m.privKey.D.Bytes()...), nil
+	var keyBytes [p256PubkeyCompressedLen + p256PrivateKeyLen]byte
+	pubkeyBytes := elliptic.MarshalCompressed(elliptic.P256(), m.privKey.PublicKey.X, m.privKey.PublicKey.Y)
+	if len(pubkeyBytes) != p256PubkeyCompressedLen {
+		panic(fmt.Sprintf("Unexpected length from elliptic.MarshalCompressed: wanted %d, got %d", p256PubkeyCompressedLen, len(pubkeyBytes)))
+	}
+	copy(keyBytes[:p256PubkeyCompressedLen], pubkeyBytes)
+	m.privKey.D.FillBytes(keyBytes[p256PubkeyCompressedLen:])
+	return keyBytes[:], nil
 }
 
 func (m *p256) UnmarshalBinary(data []byte) error {
-	const (
-		p256PubkeyCompressedLen = 33 // P256 uses 256-bit = 32-byte points; the length of MarshalCompressed is 1 + point_byte_length.
-		p256PrivateKeySize      = 32 // P256 private key (D) values are 256-bit = 32 bytes in length.
-	)
-
 	// Deserialize bytes back into X/Y/D values.
-	if wantLen := p256PubkeyCompressedLen + p256PrivateKeySize; len(data) != wantLen {
+	if wantLen := p256PubkeyCompressedLen + p256PrivateKeyLen; len(data) != wantLen {
 		return fmt.Errorf("serialized data has wrong length (want %d, got %d)", wantLen, len(data))
 	}
 	c := elliptic.P256()
