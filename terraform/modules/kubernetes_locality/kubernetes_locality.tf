@@ -76,6 +76,10 @@ variable "packet_encryption_key_rotation_policy" {
   })
 }
 
+variable "key_rotator_schedule" {
+  type = string
+}
+
 variable "enable_key_rotator_localities" {
   type        = set(string)
   description = <<DESCRIPTION
@@ -175,7 +179,7 @@ resource "kubernetes_cron_job" "key_rotator" {
   }
 
   spec {
-    schedule                      = "0 20 * * MON-THU" # 8 PM (UTC) daily, Monday thru Thursday
+    schedule                      = var.key_rotator_schedule
     concurrency_policy            = "Forbid"
     successful_jobs_history_limit = 5
     failed_jobs_history_limit     = 5
