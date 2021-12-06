@@ -29,6 +29,8 @@ type gcpKey struct {
 	gcpProjectID string
 }
 
+var _ Key = gcpKey{} // verify gcpKey satisfies Key
+
 // gcpSecretManager is an internal interface used, intended to be satisfied by
 // the "real" GCP secret manager client API (*secretmanager.Client). It exists
 // to enable testability.

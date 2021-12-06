@@ -25,6 +25,8 @@ type awsKey struct {
 	env string
 }
 
+var _ Key = awsKey{} // verify awsKey satisfies Key
+
 // awsSecretManager is an internal interface, intended to be satisfied by the
 // "real" AWS secret manager client API (*secretsmanager.SecretsManager). It
 // exists to enable testability.
