@@ -31,19 +31,23 @@ func TestRotateKeys(t *testing.T) {
 		ingestors:       []string{"ingestor-1", "ingestor-2"},
 		prioEnvironment: "prio-env",
 		csrFQDN:         "some.fqdn",
-		batchRotationCFG: key.RotationConfig{
-			CreateKeyFunc:     key.P256.New,
-			CreateMinAge:      10000 * time.Second,
-			PrimaryMinAge:     1000 * time.Second,
-			DeleteMinAge:      20000 * time.Second,
-			DeleteMinKeyCount: 2,
+		batchCFG: rotateKeyConfig{
+			rotationCFG: key.RotationConfig{
+				CreateKeyFunc:     key.P256.New,
+				CreateMinAge:      10000 * time.Second,
+				PrimaryMinAge:     1000 * time.Second,
+				DeleteMinAge:      20000 * time.Second,
+				DeleteMinKeyCount: 2,
+			},
 		},
-		packetRotationCFG: key.RotationConfig{
-			CreateKeyFunc:     key.P256.New,
-			CreateMinAge:      1000 * time.Second,
-			PrimaryMinAge:     0,
-			DeleteMinAge:      2000 * time.Second,
-			DeleteMinKeyCount: 3,
+		packetCFG: rotateKeyConfig{
+			rotationCFG: key.RotationConfig{
+				CreateKeyFunc:     key.P256.New,
+				CreateMinAge:      1000 * time.Second,
+				PrimaryMinAge:     0,
+				DeleteMinAge:      2000 * time.Second,
+				DeleteMinKeyCount: 3,
+			},
 		},
 	}
 

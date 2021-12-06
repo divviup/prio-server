@@ -40,11 +40,13 @@ var (
 	batchSigningKeyPrimaryMinAge  = flag.Duration("batch-signing-key-primary-min-age", 7*24*time.Hour, "How old a batch signing key version must be before it can become primary") // default: 1 week
 	batchSigningKeyDeleteMinAge   = flag.Duration("batch-signing-key-delete-min-age", 13*30*24*time.Hour, "How old a batch signing key version must be before it can be deleted")  // default: 13 months
 	batchSigningKeyDeleteMinCount = flag.Int("batch-signing-key-delete-min-count", 2, "The minimum number of batch signing key versions left undeleted after rotation")
+	batchSigningKeyAlwaysWrite    = flag.Bool("batch-signing-key-always-write", false, "If set, always write batch signing key to backing storage, even if no changes are detected")
 
 	packetEncryptionKeyCreateMinAge   = flag.Duration("packet-encryption-key-create-min-age", 9*30*24*time.Hour, "How frequently to create a new packet encryption key version")              // default: 9 months
 	packetEncryptionKeyPrimaryMinAge  = flag.Duration("packet-encryption-key-primary-min-age", 0, "How old a packet encryption key version must be before it can become primary")             // default: 0
 	packetEncryptionKeyDeleteMinAge   = flag.Duration("packet-encryption-key-delete-min-age", 13*30*24*time.Hour, "How old a packet encryption key version must be before it can be deleted") // default: 13 months
 	packetEncryptionKeyDeleteMinCount = flag.Int("packet-encryption-key-delete-min-count", 2, "The minimum number of packet encryption key versions left undeleted after rotation")
+	packetEncryptionKeyAlwaysWrite    = flag.Bool("packet-encryption-key-always-write", false, "If set, always write packet encryption key to backing storage, even if no changes are detected")
 
 	// Other flags.
 	dryRun      = flag.Bool("dry-run", true, "If set, do not actually write any keys or manifests back (only report what would have changed)")
@@ -193,19 +195,25 @@ func main() {
 		ingestors:       ingestorLst,
 		prioEnvironment: *prioEnv,
 		csrFQDN:         *csrFQDN,
-		batchRotationCFG: key.RotationConfig{
-			CreateKeyFunc:     key.P256.New,
-			CreateMinAge:      *batchSigningKeyCreateMinAge,
-			PrimaryMinAge:     *batchSigningKeyPrimaryMinAge,
-			DeleteMinAge:      *batchSigningKeyDeleteMinAge,
-			DeleteMinKeyCount: *batchSigningKeyDeleteMinCount,
+		batchCFG: rotateKeyConfig{
+			rotationCFG: key.RotationConfig{
+				CreateKeyFunc:     key.P256.New,
+				CreateMinAge:      *batchSigningKeyCreateMinAge,
+				PrimaryMinAge:     *batchSigningKeyPrimaryMinAge,
+				DeleteMinAge:      *batchSigningKeyDeleteMinAge,
+				DeleteMinKeyCount: *batchSigningKeyDeleteMinCount,
+			},
+			alwaysWrite: *batchSigningKeyAlwaysWrite,
 		},
-		packetRotationCFG: key.RotationConfig{
-			CreateKeyFunc:     key.P256.New,
-			CreateMinAge:      *packetEncryptionKeyCreateMinAge,
-			PrimaryMinAge:     *packetEncryptionKeyPrimaryMinAge,
-			DeleteMinAge:      *packetEncryptionKeyDeleteMinAge,
-			DeleteMinKeyCount: *packetEncryptionKeyDeleteMinCount,
+		packetCFG: rotateKeyConfig{
+			rotationCFG: key.RotationConfig{
+				CreateKeyFunc:     key.P256.New,
+				CreateMinAge:      *packetEncryptionKeyCreateMinAge,
+				PrimaryMinAge:     *packetEncryptionKeyPrimaryMinAge,
+				DeleteMinAge:      *packetEncryptionKeyDeleteMinAge,
+				DeleteMinKeyCount: *packetEncryptionKeyDeleteMinCount,
+			},
+			alwaysWrite: *packetEncryptionKeyAlwaysWrite,
 		},
 	}); err != nil {
 		fail("Couldn't rotate keys: %v", err)
@@ -224,13 +232,18 @@ type rotateKeysConfig struct {
 	manifestStore storage.Manifest
 
 	// Configuration.
-	now               time.Time
-	locality          string
-	ingestors         []string
-	prioEnvironment   string
-	csrFQDN           string
-	batchRotationCFG  key.RotationConfig
-	packetRotationCFG key.RotationConfig
+	now             time.Time
+	locality        string
+	ingestors       []string
+	prioEnvironment string
+	csrFQDN         string
+	batchCFG        rotateKeyConfig
+	packetCFG       rotateKeyConfig
+}
+
+type rotateKeyConfig struct {
+	rotationCFG key.RotationConfig
+	alwaysWrite bool
 }
 
 func rotateKeys(ctx context.Context, cfg rotateKeysConfig) error {
@@ -244,13 +257,13 @@ func rotateKeys(ctx context.Context, cfg rotateKeysConfig) error {
 
 	// Rotate keys.
 	log.Info().Msgf("Rotating keys & updating manifests")
-	newPacketEncryptionKey, err := oldPacketEncryptionKey.Rotate(cfg.now, cfg.packetRotationCFG)
+	newPacketEncryptionKey, err := oldPacketEncryptionKey.Rotate(cfg.now, cfg.packetCFG.rotationCFG)
 	if err != nil {
 		return fmt.Errorf("couldn't rotate packet encryption key for %q: %w", cfg.locality, err)
 	}
 	newBatchSigningKeyByIngestor := map[string]key.Key{}
 	for ingestor, oldKey := range oldBatchSigningKeyByIngestor {
-		newKey, err := oldKey.Rotate(cfg.now, cfg.batchRotationCFG)
+		newKey, err := oldKey.Rotate(cfg.now, cfg.batchCFG.rotationCFG)
 		if err != nil {
 			return fmt.Errorf("couldn't rotate batch signing key for (%q, %q): %w",
 				cfg.locality, ingestor, err)
@@ -289,15 +302,14 @@ func rotateKeys(ctx context.Context, cfg rotateKeysConfig) error {
 	// written the associated private key to a secret (which would then be
 	// lost).
 	log.Info().Msgf("Writing keys")
-	if err := writeKeys(
-		ctx, cfg.keyStore, cfg.locality,
+	if err := writeKeys(ctx, cfg,
 		oldPacketEncryptionKey, oldBatchSigningKeyByIngestor,
 		newPacketEncryptionKey, newBatchSigningKeyByIngestor); err != nil {
 		return fmt.Errorf("couldn't write keys: %w", err)
 	}
 	log.Info().Msgf("Writing manifests")
 	if err := writeManifests(
-		ctx, cfg.manifestStore, cfg.locality,
+		ctx, cfg,
 		oldManifestByIngestor, newManifestByIngestor); err != nil {
 		return fmt.Errorf("couldn't write manifests: %w", err)
 	}
@@ -362,20 +374,26 @@ func readKeysAndManifests(
 	return packetEncryptionKey, batchSigningKeyByIngestor, manifestByIngestor, nil
 }
 
-func writeKeys(ctx context.Context, keyStore storage.Key, locality string,
+func writeKeys(ctx context.Context, cfg rotateKeysConfig,
 	oldPacketEncryptionKey key.Key, oldBatchSigningKeyByIngestor map[string]key.Key,
 	newPacketEncryptionKey key.Key, newBatchSigningKeyByIngestor map[string]key.Key) error {
 	eg, ctx := errgroup.WithContext(ctx)
 
 	// Write packet encryption key.
 	eg.Go(func() error {
-		if oldPacketEncryptionKey.Equal(newPacketEncryptionKey) {
-			log.Debug().Str("locality", locality).Msgf("Skipping write for packet encryption key for %q: key unchanged", locality)
+		if !cfg.packetCFG.alwaysWrite && oldPacketEncryptionKey.Equal(newPacketEncryptionKey) {
+			log.Debug().Str("locality", cfg.locality).Msgf("Skipping write for packet encryption key for %q: key unchanged", cfg.locality)
 			return nil
 		}
-		log.Info().Str("locality", locality).Msgf("Writing packet encryption key for %q due to changes to key: %s", locality, newPacketEncryptionKey.Diff(oldPacketEncryptionKey))
-		if err := keyStore.PutPacketEncryptionKey(ctx, locality, newPacketEncryptionKey); err != nil {
-			return fmt.Errorf("couldn't write packet encryption key for %q: %w", locality, err)
+
+		diffs := newPacketEncryptionKey.Diff(oldPacketEncryptionKey)
+		if cfg.packetCFG.alwaysWrite {
+			diffs = semicolonJoin("--packet-encryption-key-always-write is specified", diffs)
+		}
+		log.Info().Str("locality", cfg.locality).Msgf("Writing packet encryption key for %q because: %s", cfg.locality, diffs)
+
+		if err := cfg.keyStore.PutPacketEncryptionKey(ctx, cfg.locality, newPacketEncryptionKey); err != nil {
+			return fmt.Errorf("couldn't write packet encryption key for %q: %w", cfg.locality, err)
 		}
 		keysWritten.Inc()
 		return nil
@@ -385,13 +403,19 @@ func writeKeys(ctx context.Context, keyStore storage.Key, locality string,
 	for ingestor, oldKey := range oldBatchSigningKeyByIngestor {
 		ingestor, oldKey, newKey := ingestor, oldKey, newBatchSigningKeyByIngestor[ingestor]
 		eg.Go(func() error {
-			if oldKey.Equal(newKey) {
-				log.Debug().Str("locality", locality).Str("ingestor", ingestor).Msgf("Skipping write for batch signing key for (%q, %q): key unchanged", locality, ingestor)
+			if !cfg.batchCFG.alwaysWrite && oldKey.Equal(newKey) {
+				log.Debug().Str("locality", cfg.locality).Str("ingestor", ingestor).Msgf("Skipping write for batch signing key for (%q, %q): key unchanged", cfg.locality, ingestor)
 				return nil
 			}
-			log.Info().Str("locality", locality).Str("ingestor", ingestor).Msgf("Writing batch signing key for (%q, %q) due to changes to key: %s", locality, ingestor, newKey.Diff(oldKey))
-			if err := keyStore.PutBatchSigningKey(ctx, locality, ingestor, newKey); err != nil {
-				return fmt.Errorf("couldn't write batch signing key for (%q, %q): %w", locality, ingestor, err)
+
+			diffs := newKey.Diff(oldKey)
+			if cfg.batchCFG.alwaysWrite {
+				diffs = semicolonJoin("--batch-signing-key-always-write is specified", diffs)
+			}
+			log.Info().Str("locality", cfg.locality).Str("ingestor", ingestor).Msgf("Writing batch signing key for (%q, %q) because: %s", cfg.locality, ingestor, diffs)
+
+			if err := cfg.keyStore.PutBatchSigningKey(ctx, cfg.locality, ingestor, newKey); err != nil {
+				return fmt.Errorf("couldn't write batch signing key for (%q, %q): %w", cfg.locality, ingestor, err)
 			}
 			keysWritten.Inc()
 			return nil
@@ -402,7 +426,7 @@ func writeKeys(ctx context.Context, keyStore storage.Key, locality string,
 }
 
 func writeManifests(
-	ctx context.Context, manifestStore storage.Manifest, locality string,
+	ctx context.Context, cfg rotateKeysConfig,
 	oldManifestByIngestor, newManifestByIngestor map[string]manifest.DataShareProcessorSpecificManifest) error {
 	eg, ctx := errgroup.WithContext(ctx)
 
@@ -410,12 +434,12 @@ func writeManifests(
 		ingestor, oldManifest, newManifest := ingestor, oldManifest, newManifestByIngestor[ingestor]
 		eg.Go(func() error {
 			if oldManifest.Equal(newManifest) {
-				log.Debug().Str("locality", locality).Str("ingestor", ingestor).Msgf("Skipping write for manifest for (%q, %q): key unchanged", locality, ingestor)
+				log.Debug().Str("locality", cfg.locality).Str("ingestor", ingestor).Msgf("Skipping write for manifest for (%q, %q): key unchanged", cfg.locality, ingestor)
 				return nil
 			}
-			log.Info().Str("locality", locality).Str("ingestor", ingestor).Msgf("Writing manifest for (%q, %q): %s", locality, ingestor, newManifest.Diff(oldManifest))
-			if err := manifestStore.PutDataShareProcessorSpecificManifest(ctx, dspName(locality, ingestor), newManifest); err != nil {
-				return fmt.Errorf("couldn't write manifest for (%q, %q): %w", locality, ingestor, err)
+			log.Info().Str("locality", cfg.locality).Str("ingestor", ingestor).Msgf("Writing manifest for (%q, %q): %s", cfg.locality, ingestor, newManifest.Diff(oldManifest))
+			if err := cfg.manifestStore.PutDataShareProcessorSpecificManifest(ctx, dspName(cfg.locality, ingestor), newManifest); err != nil {
+				return fmt.Errorf("couldn't write manifest for (%q, %q): %w", cfg.locality, ingestor, err)
 			}
 			manifestsWritten.Inc()
 			return nil
@@ -440,6 +464,21 @@ func tryPushMetrics() error {
 		return pusher.Push()
 	}
 	return nil
+}
+
+// semicolonJoin joins the given values with "; ", dropping any empty values.
+func semicolonJoin(vals ...string) string {
+	var sb strings.Builder
+	for _, v := range vals {
+		if len(v) == 0 {
+			continue
+		}
+		if sb.Len() > 0 {
+			sb.WriteString("; ")
+		}
+		sb.WriteString(v)
+	}
+	return sb.String()
 }
 
 // dryRunKeyStore logs (but otherwise ignores) puts, and allows gets by
