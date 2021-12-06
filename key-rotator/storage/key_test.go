@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"math/big"
+	"strings"
 	"testing"
 
 	"github.com/google/go-cmp/cmp"
@@ -162,6 +163,16 @@ func TestKubernetesKey(t *testing.T) {
 				if !wantKey.Equal(gotKey) {
 					diff := cmp.Diff(wantKey, gotKey)
 					t.Errorf("Key differs from expected (-want +got):\n%s", diff)
+				}
+			})
+			t.Run("FromSecretKey: wrong length", func(t *testing.T) {
+				t.Parallel()
+				store, sd := newK8sKey(env)
+				badSecretKey := wantSecretKey[:len(wantSecretKey)-4] // shave off a few bytes
+				putSecretKey(sd, secretName, []byte(badSecretKey))
+				const wantErrStr = "key was wrong length"
+				if _, err := store.GetPacketEncryptionKey(ctx, locality); err == nil || !strings.Contains(err.Error(), wantErrStr) {
+					t.Errorf("Wanted error from GetPacketEncryptionKey containing %q, got: %v", wantErrStr, err)
 				}
 			})
 			t.Run("FromKeyVersions", func(t *testing.T) {
