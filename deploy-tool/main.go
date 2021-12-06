@@ -87,8 +87,19 @@ type privateKeyMarshaler func(*ecdsa.PrivateKey) ([]byte, error)
 // expected by libprio-rs encrypt::PrivateKey, which is the X9.62 uncompressed
 // public key concatenated with the secret scalar.
 func marshalX962UncompressedPrivateKey(ecdsaKey *ecdsa.PrivateKey) ([]byte, error) {
-	marshaledPublicKey := elliptic.Marshal(elliptic.P256(), ecdsaKey.PublicKey.X, ecdsaKey.PublicKey.Y)
-	return append(marshaledPublicKey, ecdsaKey.D.Bytes()...), nil
+	const (
+		// P256 uses 256-bit = 32 byte points, and 256-bit = 32 byte private key (D) values.
+		pubkeyLen  = 65 // elliptic.Marshal produces results of 1 + 2*sizeof(point) = 65 bytes in length.
+		privkeyLen = 32
+	)
+	var keyBytes [pubkeyLen + privkeyLen]byte
+	pubkeyBytes := elliptic.Marshal(elliptic.P256(), ecdsaKey.PublicKey.X, ecdsaKey.PublicKey.Y)
+	if len(pubkeyBytes) != pubkeyLen {
+		panic(fmt.Sprintf("Unexpected length from elliptic.Marshal: wanted %d, got %d", pubkeyLen, len(pubkeyBytes)))
+	}
+	copy(keyBytes[:pubkeyLen], pubkeyBytes)
+	ecdsaKey.D.FillBytes(keyBytes[pubkeyLen:])
+	return keyBytes[:], nil
 }
 
 // marshalPKCS8PrivateKey encodes a P-256 private key into a PKCS#8 document.

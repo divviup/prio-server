@@ -166,6 +166,16 @@ func TestKubernetesKey(t *testing.T) {
 					t.Errorf("Key differs from expected (-want +got):\n%s", diff)
 				}
 			})
+			t.Run("FromSecretKey: wrong length", func(t *testing.T) {
+				t.Parallel()
+				store, k8s := newK8sKey()
+				badSecretKey := wantPEKSecretKey[:len(wantPEKSecretKey)-4] // shave off a few bytes
+				k8s.putSecretKey(pekSecretName, []byte(badSecretKey))
+				const wantErrStr = "key was wrong length"
+				if _, err := store.GetPacketEncryptionKey(ctx, locality); err == nil || !strings.Contains(err.Error(), wantErrStr) {
+					t.Errorf("Wanted error from GetPacketEncryptionKey containing %q, got: %v", wantErrStr, err)
+				}
+			})
 			t.Run("FromKeyVersions", func(t *testing.T) {
 				t.Parallel()
 				store, k8s := newK8sKey()

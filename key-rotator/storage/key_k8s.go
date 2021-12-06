@@ -179,12 +179,20 @@ func serializePacketEncryptionSecretKey(k key.Key) ([]byte, error) {
 }
 
 func parsePacketEncryptionSecretKey(keyMaterialBytes []byte) (key.Material, error) {
-	const marshalledPubkeyLength = 65 // P256 uses 256 bit = 32 byte points. elliptic.Marshal produces results of 1 + 2*sizeof(point) = 65 bytes in length.
-	x, y := elliptic.Unmarshal(elliptic.P256(), keyMaterialBytes[:marshalledPubkeyLength])
+	const (
+		pubkeyLen  = 65                     // P256 uses 256 bit = 32 byte points. elliptic.Marshal produces results of 1 + 2*sizeof(point) = 65 bytes in length.
+		privkeyLen = 32                     // P256 uses 256 bit = 32 byte private key values.
+		keyLen     = pubkeyLen + privkeyLen // a packet encryption key secret_key value is a pubkey concatenated with a privkey
+	)
+
+	if len(keyMaterialBytes) != keyLen {
+		return key.Material{}, fmt.Errorf("key was wrong length (wanted %d, got %d)", keyLen, len(keyMaterialBytes))
+	}
+	x, y := elliptic.Unmarshal(elliptic.P256(), keyMaterialBytes[:pubkeyLen])
 	if x == nil {
 		return key.Material{}, errors.New("couldn't unmarshal as X9.62 public key")
 	}
-	d := new(big.Int).SetBytes(keyMaterialBytes[marshalledPubkeyLength:])
+	d := new(big.Int).SetBytes(keyMaterialBytes[pubkeyLen:])
 	return key.P256MaterialFrom(&ecdsa.PrivateKey{
 		PublicKey: ecdsa.PublicKey{
 			Curve: elliptic.P256(),
