@@ -249,6 +249,11 @@ variable "packet_encryption_key_rotation_policy" {
   }
 }
 
+variable "key_rotator_schedule" {
+  type    = string
+  default = "0 20 * * MON-THU" # 8 PM (UTC) daily, Monday thru Thursday
+}
+
 variable "enable_key_rotation_localities" {
   type    = list(string)
   default = []
@@ -555,6 +560,7 @@ module "kubernetes_locality" {
   batch_signing_key_rotation_policy     = var.batch_signing_key_rotation_policy
   packet_encryption_key_rotation_policy = var.packet_encryption_key_rotation_policy
   enable_key_rotator_localities         = toset(var.enable_key_rotation_localities)
+  key_rotator_schedule                  = var.key_rotator_schedule
 }
 
 module "data_share_processors" {

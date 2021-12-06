@@ -67,3 +67,12 @@ default_aggregation_period = "30m"
 
 default_peer_share_processor_manifest_base_url = "storage.googleapis.com/prio-staging-pha-manifests"
 default_portal_server_manifest_base_url        = "storage.googleapis.com/prio-staging-facil-manifests/portal-server"
+
+key_rotator_schedule           = "*/10 * * * *" // once per ten minutes
+enable_key_rotation_localities = ["*"]
+batch_signing_key_rotation_policy = {
+  create_min_age   = "6480h" // 6480 hours = 9 months (w/ 30-day months, 24-hour days)
+  primary_min_age  = "6h"    // 6 hours
+  delete_min_age   = "9360h" // 9360 hours = 13 months (w/ 30-day months, 24-hour days)
+  delete_min_count = 2
+}
