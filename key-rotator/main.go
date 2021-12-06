@@ -163,10 +163,7 @@ func main() {
 	if err != nil {
 		fail("Couldn't create Kubernetes client: %v", err)
 	}
-	keyStore, err := storage.NewKey(k8s.CoreV1().Secrets(*namespace), *prioEnv)
-	if err != nil {
-		fail("Couldn't create key store: %v", err)
-	}
+	keyStore := storage.NewKubernetesKey(k8s.CoreV1().Secrets(*namespace), *prioEnv)
 
 	// Get Manifest storage client.
 	log.Info().Msgf("Creating manifest store")
