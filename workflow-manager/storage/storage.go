@@ -257,7 +257,7 @@ func (b *S3Bucket) ListAggregateTaskMarkers(aggregationID string) ([]string, err
 }
 
 func (b *S3Bucket) listObjects(trimObjectPrefix string, listInput s3.ListObjectsV2Input) (*listResult, error) {
-	log.Info().Msgf("listing files in s3://%s as %q", b.bucketName, b.identity)
+	log.Debug().Msgf("listing files in s3://%s as %q", b.bucketName, b.identity)
 
 	svc, err := b.service()
 	if err != nil {
@@ -424,7 +424,7 @@ func (b *GCSBucket) listObjects(trimObjectPrefix string, query storage.Query) (*
 		return nil, fmt.Errorf("query.SetAttrSelection: %w", err)
 	}
 
-	log.Info().Msgf("listing bucket gs://%s as (ambient service account)", b.bucketName)
+	log.Debug().Msgf("listing bucket gs://%s as (ambient service account)", b.bucketName)
 	var output listResult
 	it := bkt.Objects(ctx, &query)
 
