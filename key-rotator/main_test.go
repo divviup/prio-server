@@ -52,7 +52,8 @@ func TestRotateKeys(t *testing.T) {
 	}
 
 	for _, test := range []struct {
-		name string
+		name            string
+		disableRotation bool
 
 		// Initial state.
 		preBSKVersions  map[LI][]int64      // batch signing keys; (locality, ingestor) -> version timestamps; the first version is considered primary
@@ -301,6 +302,47 @@ func TestRotateKeys(t *testing.T) {
 				},
 			},
 		},
+
+		{
+			name:            "rotation disabled",
+			disableRotation: true,
+
+			preBSKVersions: map[LI][]int64{
+				li("asgard", "ingestor-1"): {50000},
+				li("asgard", "ingestor-2"): {51000},
+			},
+			prePEKVersions: map[string][]int64{
+				"asgard": {52000},
+			},
+			preManifestInfo: map[LI]manifestInfo{
+				li("asgard", "ingestor-1"): {
+					batchSigningKeyVersions:     []int64{50000},
+					packetEncryptionKeyVersions: []int64{52000},
+				},
+				li("asgard", "ingestor-2"): {
+					batchSigningKeyVersions:     []int64{51000},
+					packetEncryptionKeyVersions: []int64{52000},
+				},
+			},
+
+			postBSKVersions: map[LI][]int64{
+				li("asgard", "ingestor-1"): {50000},
+				li("asgard", "ingestor-2"): {51000},
+			},
+			postPEKVersions: map[string][]int64{
+				"asgard": {52000},
+			},
+			postManifestInfo: map[LI]manifestInfo{
+				li("asgard", "ingestor-1"): {
+					batchSigningKeyVersions:     []int64{50000},
+					packetEncryptionKeyVersions: []int64{52000},
+				},
+				li("asgard", "ingestor-2"): {
+					batchSigningKeyVersions:     []int64{51000},
+					packetEncryptionKeyVersions: []int64{52000},
+				},
+			},
+		},
 	} {
 		test := test
 		t.Run(test.name, func(t *testing.T) {
@@ -316,6 +358,7 @@ func TestRotateKeys(t *testing.T) {
 
 			cfg := rotateKeysCFG
 			cfg.keyStore, cfg.manifestStore = keyStore, manifestStore
+			cfg.batchCFG.enableRotation, cfg.packetCFG.enableRotation = !test.disableRotation, !test.disableRotation
 			if err := rotateKeys(ctx, cfg); err != nil {
 				t.Fatalf("Unexpected error from rotateKeys: %v", err)
 			}
