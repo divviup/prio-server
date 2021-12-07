@@ -215,11 +215,13 @@ resource "kubernetes_cron_job" "key_rotator" {
                 "--push-gateway=${var.pushgateway}",
                 "--dry-run=${!(contains(var.enable_key_rotator_localities, "*") || contains(var.enable_key_rotator_localities, var.locality))}",
 
+                "--batch-signing-key-enable-rotation=false",
                 "--batch-signing-key-create-min-age=${var.batch_signing_key_rotation_policy.create_min_age}",
                 "--batch-signing-key-primary-min-age=${var.batch_signing_key_rotation_policy.primary_min_age}",
                 "--batch-signing-key-delete-min-age=${var.batch_signing_key_rotation_policy.delete_min_age}",
                 "--batch-signing-key-delete-min-count=${var.batch_signing_key_rotation_policy.delete_min_count}",
 
+                "--packet-encryption-key-enable-rotation=true",
                 "--packet-encryption-key-create-min-age=${var.packet_encryption_key_rotation_policy.create_min_age}",
                 "--packet-encryption-key-primary-min-age=${var.packet_encryption_key_rotation_policy.primary_min_age}",
                 "--packet-encryption-key-delete-min-age=${var.packet_encryption_key_rotation_policy.delete_min_age}",
