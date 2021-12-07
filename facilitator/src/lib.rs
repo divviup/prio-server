@@ -6,7 +6,7 @@ pub mod aggregation;
 pub mod aws_credentials;
 pub mod batch;
 pub mod config;
-mod gcp_oauth;
+pub mod gcp_oauth;
 pub mod http;
 pub mod idl;
 pub mod intake;
