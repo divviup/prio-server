@@ -36,12 +36,14 @@ var (
 	csrFQDN           = flag.String("csr-fqdn", "", "Required. FQDN to use as common name in generated CSRs")
 
 	// Rotation configuration.
+	batchSigningKeyEnableRotation = flag.Bool("batch-signing-key-enable-rotation", true, "Determines if batch signing keys are rotated")
 	batchSigningKeyCreateMinAge   = flag.Duration("batch-signing-key-create-min-age", 9*30*24*time.Hour, "How frequently to create a new batch signing key version")               // default: 9 months
 	batchSigningKeyPrimaryMinAge  = flag.Duration("batch-signing-key-primary-min-age", 7*24*time.Hour, "How old a batch signing key version must be before it can become primary") // default: 1 week
 	batchSigningKeyDeleteMinAge   = flag.Duration("batch-signing-key-delete-min-age", 13*30*24*time.Hour, "How old a batch signing key version must be before it can be deleted")  // default: 13 months
 	batchSigningKeyDeleteMinCount = flag.Int("batch-signing-key-delete-min-count", 2, "The minimum number of batch signing key versions left undeleted after rotation")
 	batchSigningKeyAlwaysWrite    = flag.Bool("batch-signing-key-always-write", false, "If set, always write batch signing key to backing storage, even if no changes are detected")
 
+	packetEncryptionKeyEnableRotation = flag.Bool("packet-encryption-key-enable-rotation", true, "Determines if packet encryption keys are rotated")
 	packetEncryptionKeyCreateMinAge   = flag.Duration("packet-encryption-key-create-min-age", 9*30*24*time.Hour, "How frequently to create a new packet encryption key version")              // default: 9 months
 	packetEncryptionKeyPrimaryMinAge  = flag.Duration("packet-encryption-key-primary-min-age", 0, "How old a packet encryption key version must be before it can become primary")             // default: 0
 	packetEncryptionKeyDeleteMinAge   = flag.Duration("packet-encryption-key-delete-min-age", 13*30*24*time.Hour, "How old a packet encryption key version must be before it can be deleted") // default: 13 months
@@ -193,6 +195,8 @@ func main() {
 		prioEnvironment: *prioEnv,
 		csrFQDN:         *csrFQDN,
 		batchCFG: rotateKeyConfig{
+			enableRotation: *batchSigningKeyEnableRotation,
+			alwaysWrite:    *batchSigningKeyAlwaysWrite,
 			rotationCFG: key.RotationConfig{
 				CreateKeyFunc:     key.P256.New,
 				CreateMinAge:      *batchSigningKeyCreateMinAge,
@@ -200,9 +204,10 @@ func main() {
 				DeleteMinAge:      *batchSigningKeyDeleteMinAge,
 				DeleteMinKeyCount: *batchSigningKeyDeleteMinCount,
 			},
-			alwaysWrite: *batchSigningKeyAlwaysWrite,
 		},
 		packetCFG: rotateKeyConfig{
+			enableRotation: *packetEncryptionKeyEnableRotation,
+			alwaysWrite:    *packetEncryptionKeyAlwaysWrite,
 			rotationCFG: key.RotationConfig{
 				CreateKeyFunc:     key.P256.New,
 				CreateMinAge:      *packetEncryptionKeyCreateMinAge,
@@ -210,7 +215,6 @@ func main() {
 				DeleteMinAge:      *packetEncryptionKeyDeleteMinAge,
 				DeleteMinKeyCount: *packetEncryptionKeyDeleteMinCount,
 			},
-			alwaysWrite: *packetEncryptionKeyAlwaysWrite,
 		},
 	}); err != nil {
 		fail("Couldn't rotate keys: %v", err)
@@ -239,8 +243,9 @@ type rotateKeysConfig struct {
 }
 
 type rotateKeyConfig struct {
-	rotationCFG key.RotationConfig
-	alwaysWrite bool
+	enableRotation bool // determines if rotation occurs at all
+	alwaysWrite    bool // determines if keys are written back to storage, even if they have not changed
+	rotationCFG    key.RotationConfig
 }
 
 func rotateKeys(ctx context.Context, cfg rotateKeysConfig) error {
@@ -254,18 +259,31 @@ func rotateKeys(ctx context.Context, cfg rotateKeysConfig) error {
 
 	// Rotate keys.
 	log.Info().Msgf("Rotating keys & updating manifests")
-	newPacketEncryptionKey, err := oldPacketEncryptionKey.Rotate(cfg.now, cfg.packetCFG.rotationCFG)
-	if err != nil {
-		return fmt.Errorf("couldn't rotate packet encryption key for %q: %w", cfg.locality, err)
+	var newPacketEncryptionKey key.Key
+	if cfg.packetCFG.enableRotation {
+		k, err := oldPacketEncryptionKey.Rotate(cfg.now, cfg.packetCFG.rotationCFG)
+		if err != nil {
+			return fmt.Errorf("couldn't rotate packet encryption key for %q: %w", cfg.locality, err)
+		}
+		newPacketEncryptionKey = k
+	} else {
+		log.Info().Str("locality", cfg.locality).Msgf("Skipping rotation of packet encryption key for %q: --packet-encryption-key-enable-rotation set to false", cfg.locality)
+		newPacketEncryptionKey = oldPacketEncryptionKey
 	}
+
 	newBatchSigningKeyByIngestor := map[string]key.Key{}
 	for ingestor, oldKey := range oldBatchSigningKeyByIngestor {
-		newKey, err := oldKey.Rotate(cfg.now, cfg.batchCFG.rotationCFG)
-		if err != nil {
-			return fmt.Errorf("couldn't rotate batch signing key for (%q, %q): %w",
-				cfg.locality, ingestor, err)
+		if cfg.batchCFG.enableRotation {
+			newKey, err := oldKey.Rotate(cfg.now, cfg.batchCFG.rotationCFG)
+			if err != nil {
+				return fmt.Errorf("couldn't rotate batch signing key for (%q, %q): %w",
+					cfg.locality, ingestor, err)
+			}
+			newBatchSigningKeyByIngestor[ingestor] = newKey
+		} else {
+			log.Info().Str("locality", cfg.locality).Str("ingestor", ingestor).Msgf("Skipping rotation of batch signing key for (%q, %q): --batch-signing-key-enable-rotation set to false", cfg.locality, ingestor)
+			newBatchSigningKeyByIngestor[ingestor] = oldKey
 		}
-		newBatchSigningKeyByIngestor[ingestor] = newKey
 	}
 
 	// Update manifests.
