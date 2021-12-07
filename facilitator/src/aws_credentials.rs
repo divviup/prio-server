@@ -4,6 +4,7 @@ use crate::{
         AccessScope, GcpAccessTokenProvider, GkeMetadataServiceIdentityTokenProvider,
         ImpersonatedServiceAccountIdentityTokenProvider, ProvideGcpIdentityToken,
     },
+    metrics::ApiClientMetricsCollector,
     retries,
 };
 use anyhow::{anyhow, Context, Result};
@@ -27,7 +28,6 @@ use rusoto_mock::MockCredentialsProvider;
 use rusoto_sts::WebIdentityProvider;
 use sha2::{Digest, Sha256};
 use slog::{o, Logger};
-use std::str;
 #[cfg(test)]
 use std::sync::Arc;
 use std::{
@@ -35,6 +35,8 @@ use std::{
     convert::From,
     default::Default,
     fmt::{self, Debug, Display},
+    str,
+    time::Instant,
 };
 use tokio::runtime::Handle;
 use url::Url;
@@ -76,19 +78,25 @@ pub enum Provider {
     /// Suitable for use when running on a development environment or most AWS
     /// contexts.
     /// https://github.com/rusoto/rusoto/blob/master/AWS-CREDENTIALS.md
-    Default(DefaultCredentialsProvider),
+    Default(DefaultCredentialsProvider, ApiClientMetricsCollector),
     /// A Rusoto WebIdentityProvider configured to obtain AWS credentials from
     /// the Google Kubernetes Engine metadata service. Should only be used when
     /// running within GKE.
-    WebIdentityWithOidc(AutoRefreshingProvider<WebIdentityProvider>),
+    WebIdentityWithOidc(
+        AutoRefreshingProvider<WebIdentityProvider>,
+        ApiClientMetricsCollector,
+    ),
     /// A Rusoto WebIdentityProvider configured via environment variables set by
     /// AWS Elastic Kubernetes Service. Should only be used when running within
     /// EKS (+Fargate?).
-    WebIdentityFromKubernetesEnvironment(AutoRefreshingProvider<WebIdentityProvider>),
+    WebIdentityFromKubernetesEnvironment(
+        AutoRefreshingProvider<WebIdentityProvider>,
+        ApiClientMetricsCollector,
+    ),
     /// Rusoto's mock credentials provider, wrapped in an Arc to provide
     /// Send + Sync. Should only be used in tests.
     #[cfg(test)]
-    Mock(Arc<MockCredentialsProvider>),
+    Mock(Arc<(MockCredentialsProvider, ApiClientMetricsCollector)>),
 }
 
 impl Provider {
@@ -109,37 +117,44 @@ impl Provider {
         purpose: &str,
         runtime_handle: &Handle,
         logger: &Logger,
+        api_metrics: &ApiClientMetricsCollector,
     ) -> Result<Self> {
         match (use_default_provider, aws_identity.as_str()) {
-            (true, _) => Self::new_default(),
+            (true, _) => Self::new_default(api_metrics),
             (_, Some(identity)) => Self::new_web_identity_with_oidc(
                 identity,
                 purpose.to_owned(),
                 impersonate_gcp_service_account,
                 runtime_handle,
                 logger,
+                api_metrics,
             ),
-            (_, None) => Self::new_web_identity_from_kubernetes_environment(),
+            (_, None) => Self::new_web_identity_from_kubernetes_environment(api_metrics),
         }
-    }
-
-    fn new_default() -> Result<Self> {
-        Ok(Self::Default(DefaultCredentialsProvider::new().context(
-            "failed to create default AWS credentials provider",
-        )?))
     }
 
     /// Instantiates a mock credentials provider.
     #[cfg(test)]
-    pub(crate) fn new_mock() -> Self {
-        Self::Mock(Arc::new(MockCredentialsProvider))
+    pub(crate) fn new_mock(api_metrics: &ApiClientMetricsCollector) -> Self {
+        Self::Mock(Arc::new((MockCredentialsProvider, api_metrics.clone())))
     }
 
-    fn new_web_identity_from_kubernetes_environment() -> Result<Self> {
+    fn new_default(api_metrics: &ApiClientMetricsCollector) -> Result<Self> {
+        Ok(Self::Default(
+            DefaultCredentialsProvider::new()
+                .context("failed to create default AWS credentials provider")?,
+            api_metrics.clone(),
+        ))
+    }
+
+    fn new_web_identity_from_kubernetes_environment(
+        api_metrics: &ApiClientMetricsCollector,
+    ) -> Result<Self> {
         Ok(Self::WebIdentityFromKubernetesEnvironment(
             AutoRefreshingProvider::new(WebIdentityProvider::from_k8s_env()).context(
                 "failed to create autorefreshing web identity provider from kubernetes environment",
             )?,
+            api_metrics.clone(),
         ))
     }
 
@@ -149,6 +164,7 @@ impl Provider {
         impersonated_gcp_service_account: Identity,
         runtime_handle: &Handle,
         logger: &Logger,
+        api_metrics: &ApiClientMetricsCollector,
     ) -> Result<Self> {
         // When running in GKE, we obtain an identity token which we can then
         // present to sts.amazonaws.com to get credentials that can authenticate
@@ -172,12 +188,15 @@ impl Provider {
                             None,
                             runtime_handle,
                             &token_logger,
+                            api_metrics,
                         )?,
                         token_logger.clone(),
+                        api_metrics,
                     ))
                 }
                 None => Box::new(GkeMetadataServiceIdentityTokenProvider::new(
                     token_logger.clone(),
+                    api_metrics,
                 )),
             };
         let oidc_token_variable = Variable::dynamic(move || {
@@ -204,15 +223,28 @@ impl Provider {
         ))
         .context("failed to create auto refreshing credentials provider")?;
 
-        Ok(Self::WebIdentityWithOidc(provider))
+        Ok(Self::WebIdentityWithOidc(provider, api_metrics.clone()))
+    }
+
+    /// Returns a service name for purposes of metrics labeling. These are not
+    /// literally services, but this is as fine grained as we can get from
+    /// outside the AWS SDK.
+    fn metrics_service(&self) -> &'static str {
+        match self {
+            Self::Default(_, _) => "aws_credentials_from_environment",
+            Self::WebIdentityWithOidc(_, _) => "aws_web_identity_from_oidc",
+            Self::WebIdentityFromKubernetesEnvironment(_, _) => "aws_web_identity_from_kubernetes",
+            #[cfg(test)]
+            Self::Mock(_) => "aws_mock_credentials",
+        }
     }
 }
 
 impl Display for Provider {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
-            Self::Default(_) => write!(f, "ambient AWS credentials"),
-            Self::WebIdentityWithOidc(p) => {
+            Self::Default(_, _) => write!(f, "ambient AWS credentials"),
+            Self::WebIdentityWithOidc(p, _) => {
                 // std::fmt::Error does not allow wrapping an error so we must
                 // discard whatever Variable.resolve() might return. In
                 // practice, it will always be Variable::static and so no error
@@ -220,7 +252,7 @@ impl Display for Provider {
                 let role_arn = p.get_ref().role_arn.resolve().map_err(|_| fmt::Error)?;
                 write!(f, "{} via OIDC web identity", role_arn)
             }
-            Self::WebIdentityFromKubernetesEnvironment(p) => {
+            Self::WebIdentityFromKubernetesEnvironment(p, _) => {
                 let role_arn = p.get_ref().role_arn.resolve().map_err(|_| fmt::Error)?;
                 write!(
                     f,
@@ -245,25 +277,79 @@ impl Debug for Provider {
 #[async_trait]
 impl ProvideAwsCredentials for Provider {
     async fn credentials(&self) -> Result<AwsCredentials, CredentialsError> {
-        match self {
-            Self::Default(p) => p.credentials().await,
-            Self::WebIdentityWithOidc(p) => p.credentials().await,
-            Self::WebIdentityFromKubernetesEnvironment(p) => p.credentials().await,
+        let before = Instant::now();
+
+        let (result, api_metrics) = match self {
+            Self::Default(p, m) => (p.credentials().await, m),
+            Self::WebIdentityWithOidc(p, m) => (p.credentials().await, m),
+            Self::WebIdentityFromKubernetesEnvironment(p, m) => (p.credentials().await, m),
             #[cfg(test)]
-            Self::Mock(p) => p.credentials().await,
-        }
+            Self::Mock(p) => (p.0.credentials().await, &p.1),
+        };
+
+        let latency = before.elapsed().as_millis();
+
+        // Rusoto's CredentialsError doesn't let us see what if any HTTP code
+        // was returned by the server, so the best we can do is report success
+        // or failure
+        let status_label = if result.is_ok() {
+            "success "
+        } else {
+            "failure"
+        };
+
+        api_metrics
+            .latency
+            .with_label_values(&[self.metrics_service(), "provide_credentials", status_label])
+            .observe(latency as f64);
+
+        result
     }
 }
 
 /// Calls the provided closure, retrying with exponential backoff on failure if
 /// the error is retryable (see retryable() in this module and its comments for
-/// details).
-pub(crate) fn retry_request<F, T, E>(logger: &Logger, f: F) -> RusotoResult<T, E>
+/// details). The latency and status of each attempt is recorded in the provided
+/// metrics collector.
+pub(crate) fn retry_request<F, T, E>(
+    logger: &Logger,
+    api_metrics: &ApiClientMetricsCollector,
+    service: &str,
+    endpoint: &str,
+    mut f: F,
+) -> RusotoResult<T, E>
 where
     F: FnMut() -> RusotoResult<T, E>,
     E: Debug,
 {
-    retries::retry_request(logger, f, |rusoto_error| retryable(rusoto_error))
+    retries::retry_request(
+        logger,
+        || {
+            let before = Instant::now();
+            let result = f();
+            let latency = before.elapsed().as_millis();
+
+            api_metrics
+                .latency
+                .with_label_values(&[service, endpoint, status_label(&result)])
+                .observe(latency as f64);
+
+            result
+        },
+        |rusoto_error| retryable(rusoto_error),
+    )
+}
+
+/// Returns a label describing the status of the result, suitable for use in
+/// metrics.
+fn status_label<T, E>(result: &RusotoResult<T, E>) -> &str {
+    match result {
+        Ok(_) => "success",
+        Err(RusotoError::HttpDispatch(_)) => "http_dispatch",
+        Err(RusotoError::Credentials(_)) => "credentials",
+        Err(RusotoError::Unknown(response)) => response.status.as_str(),
+        Err(_) => "unknown",
+    }
 }
 
 /// Returns true if the error is transient and should be retried, false

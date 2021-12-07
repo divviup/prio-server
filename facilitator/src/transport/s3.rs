@@ -1,4 +1,5 @@
 use crate::aws_credentials;
+use crate::metrics::ApiClientMetricsCollector;
 use crate::{
     aws_credentials::retry_request,
     config::S3Path,
@@ -38,6 +39,7 @@ pub struct S3Transport {
     #[derivative(Debug = "ignore")]
     credentials_provider: aws_credentials::Provider,
     logger: Logger,
+    api_metrics: ApiClientMetricsCollector,
 }
 
 impl S3Transport {
@@ -46,6 +48,7 @@ impl S3Transport {
         credentials_provider: aws_credentials::Provider,
         runtime_handle: &Handle,
         parent_logger: &Logger,
+        api_metrics: &ApiClientMetricsCollector,
     ) -> Self {
         let logger = parent_logger.new(o!(
             event::STORAGE_PATH => path.to_string(),
@@ -56,6 +59,7 @@ impl S3Transport {
             runtime_handle: runtime_handle.clone(),
             credentials_provider,
             logger,
+            api_metrics: api_metrics.clone(),
         }
     }
 
@@ -85,6 +89,10 @@ impl S3Transport {
             self.path.region.clone(),
         ))
     }
+
+    fn service() -> &'static str {
+        "s3.amazonaws.com"
+    }
 }
 
 impl Transport for S3Transport {
@@ -101,14 +109,20 @@ impl Transport for S3Transport {
         info!(logger, "get");
         let client = self.client()?;
 
-        let get_output = retry_request(&logger, || {
-            self.runtime_handle
-                .block_on(client.get_object(GetObjectRequest {
-                    bucket: self.path.bucket.to_owned(),
-                    key: [&self.path.key, key].concat(),
-                    ..Default::default()
-                }))
-        })
+        let get_output = retry_request(
+            &logger,
+            &self.api_metrics,
+            Self::service(),
+            "GetObject",
+            || {
+                self.runtime_handle
+                    .block_on(client.get_object(GetObjectRequest {
+                        bucket: self.path.bucket.to_owned(),
+                        key: [&self.path.key, key].concat(),
+                        ..Default::default()
+                    }))
+            },
+        )
         .context("error getting S3 object")?;
 
         let body = get_output.body.context("no body in GetObjectResponse")?;
@@ -134,6 +148,7 @@ impl Transport for S3Transport {
             self.client()?,
             &self.runtime_handle,
             &logger,
+            &self.api_metrics,
         )?;
         Ok(Box::new(writer))
     }
@@ -184,6 +199,7 @@ struct MultipartUploadWriter {
     minimum_upload_part_size: usize,
     buffer: Vec<u8>,
     logger: Logger,
+    api_metrics: ApiClientMetricsCollector,
 }
 
 impl MultipartUploadWriter {
@@ -198,6 +214,7 @@ impl MultipartUploadWriter {
         client: S3Client,
         runtime_handle: &Handle,
         parent_logger: &Logger,
+        api_metrics: &ApiClientMetricsCollector,
     ) -> Result<MultipartUploadWriter> {
         let logger = parent_logger.new(o!());
         let runtime_handle = runtime_handle.clone();
@@ -207,6 +224,9 @@ impl MultipartUploadWriter {
         // https://docs.aws.amazon.com/AmazonS3/latest/dev/about-object-ownership.html
         let create_output = retry_request(
             &logger.new(o!(event::ACTION => "create multipart upload")),
+            api_metrics,
+            S3Transport::service(),
+            "CreateMultipartUpload",
             || {
                 runtime_handle.block_on(client.create_multipart_upload(
                     CreateMultipartUploadRequest {
@@ -238,6 +258,7 @@ impl MultipartUploadWriter {
             minimum_upload_part_size,
             buffer: Vec::with_capacity(minimum_upload_part_size * 2),
             logger,
+            api_metrics: api_metrics.clone(),
         })
     }
 
@@ -257,8 +278,12 @@ impl MultipartUploadWriter {
             Vec::with_capacity(self.minimum_upload_part_size * 2),
         );
 
-        let upload_output =
-            retry_request(&self.logger.new(o!(event::ACTION => "upload part")), || {
+        let upload_output = retry_request(
+            &self.logger.new(o!(event::ACTION => "upload part")),
+            &self.api_metrics,
+            S3Transport::service(),
+            "UploadPart",
+            || {
                 self.runtime_handle
                     .block_on(self.client.upload_part(UploadPartRequest {
                         bucket: self.bucket.to_string(),
@@ -268,15 +293,16 @@ impl MultipartUploadWriter {
                         body: Some(body.clone().into()),
                         ..Default::default()
                     }))
-            })
-            .context("failed to upload part")
-            .map_err(|e| {
-                // Clean up botched uploads
-                if let Err(cancel) = self.cancel_upload() {
-                    return cancel.context(e);
-                }
-                e
-            })?;
+            },
+        )
+        .context("failed to upload part")
+        .map_err(|e| {
+            // Clean up botched uploads
+            if let Err(cancel) = self.cancel_upload() {
+                return cancel.context(e);
+            }
+            e
+        })?;
 
         let e_tag = upload_output
             .e_tag
@@ -327,6 +353,9 @@ impl TransportWriter for MultipartUploadWriter {
         let completed_parts = mem::take(&mut self.completed_parts);
         retry_request(
             &self.logger.new(o!(event::ACTION => "complete upload")),
+            &self.api_metrics,
+            S3Transport::service(),
+            "CompleteMultipartUpload",
             || {
                 let output =
                     self.runtime_handle
@@ -391,6 +420,7 @@ mod tests {
     use super::*;
     use crate::{
         logging::setup_test_logging,
+        metrics::ApiClientMetricsCollector,
         test_utils::{test_runtime, DEFAULT_TRACE_ID},
     };
     use mockito::{mock, Matcher, Mock};
@@ -520,6 +550,10 @@ mod tests {
     fn multipart_upload_create_fails() {
         let logger = setup_test_logging();
         let runtime = test_runtime();
+        let api_metrics = ApiClientMetricsCollector::new_with_metric_name(
+            "mock_complete_multipart_upload_request",
+        )
+        .unwrap();
 
         let mocked_upload =
             mock_create_multipart_upload_request(TEST_BUCKET, TEST_KEY, TEST_UPLOAD_ID)
@@ -533,7 +567,7 @@ mod tests {
             50,
             S3Client::new_with(
                 HttpClient::new().unwrap(),
-                aws_credentials::Provider::new_mock(),
+                aws_credentials::Provider::new_mock(&api_metrics),
                 Region::Custom {
                     name: TEST_REGION.into(),
                     endpoint: mockito::server_url(),
@@ -541,6 +575,7 @@ mod tests {
             ),
             runtime.handle(),
             &logger,
+            &api_metrics,
         )
         .expect_err("expected error");
         assert!(
@@ -556,6 +591,9 @@ mod tests {
     fn multipart_upload_create_no_upload_id() {
         let logger = setup_test_logging();
         let runtime = test_runtime();
+        let api_metrics =
+            ApiClientMetricsCollector::new_with_metric_name("multipart_upload_create_no_upload_id")
+                .unwrap();
 
         let mocked_upload =
             mock_create_multipart_upload_request(TEST_BUCKET, TEST_KEY, TEST_UPLOAD_ID)
@@ -576,7 +614,7 @@ mod tests {
             50,
             S3Client::new_with(
                 HttpClient::new().unwrap(),
-                aws_credentials::Provider::new_mock(),
+                aws_credentials::Provider::new_mock(&api_metrics),
                 Region::Custom {
                     name: TEST_REGION.into(),
                     endpoint: mockito::server_url(),
@@ -584,6 +622,7 @@ mod tests {
             ),
             runtime.handle(),
             &logger,
+            &api_metrics,
         )
         .expect_err("expected error");
 
@@ -597,6 +636,10 @@ mod tests {
         // https://github.com/rusoto/rusoto/issues/1936
         let logger = setup_test_logging();
         let runtime = test_runtime();
+        let api_metrics = ApiClientMetricsCollector::new_with_metric_name(
+            "multipart_upload_fails_with_http_200_ok",
+        )
+        .unwrap();
 
         // Response body format from
         // https://docs.aws.amazon.com/AmazonS3/latest/API/API_Operations_Amazon_Simple_Storage_Service.html
@@ -638,7 +681,7 @@ mod tests {
             50,
             S3Client::new_with(
                 HttpClient::new().unwrap(),
-                aws_credentials::Provider::new_mock(),
+                aws_credentials::Provider::new_mock(&api_metrics),
                 Region::Custom {
                     name: TEST_REGION.into(),
                     endpoint: mockito::server_url(),
@@ -646,6 +689,7 @@ mod tests {
             ),
             runtime.handle(),
             &logger,
+            &api_metrics,
         )
         .unwrap();
 
@@ -661,6 +705,8 @@ mod tests {
     fn multipart_upload() {
         let logger = setup_test_logging();
         let runtime = test_runtime();
+        let api_metrics =
+            ApiClientMetricsCollector::new_with_metric_name("multipart_upload").unwrap();
 
         // Response body format from
         // https://docs.aws.amazon.com/AmazonS3/latest/API/API_Operations_Amazon_Simple_Storage_Service.html
@@ -705,7 +751,7 @@ mod tests {
             50,
             S3Client::new_with(
                 HttpClient::new().unwrap(),
-                aws_credentials::Provider::new_mock(),
+                aws_credentials::Provider::new_mock(&api_metrics),
                 Region::Custom {
                     name: TEST_REGION.into(),
                     endpoint: mockito::server_url(),
@@ -713,6 +759,7 @@ mod tests {
             ),
             runtime.handle(),
             &logger,
+            &api_metrics,
         )
         .expect("failed to create multipart upload writer");
 
@@ -742,6 +789,11 @@ mod tests {
     fn roundtrip_s3_transport_failed_get_object() {
         let logger = setup_test_logging();
         let runtime = test_runtime();
+        let api_metrics = ApiClientMetricsCollector::new_with_metric_name(
+            "roundtrip_s3_transport_failed_get_object",
+        )
+        .unwrap();
+
         let s3_path = S3Path {
             region: Region::Custom {
                 name: TEST_REGION.into(),
@@ -757,9 +809,10 @@ mod tests {
 
         let mut transport = S3Transport::new(
             s3_path,
-            aws_credentials::Provider::new_mock(),
+            aws_credentials::Provider::new_mock(&api_metrics),
             runtime.handle(),
             &logger,
+            &api_metrics,
         );
 
         let ret = transport.get(TEST_KEY, &DEFAULT_TRACE_ID);
@@ -772,6 +825,11 @@ mod tests {
     fn roundtrip_s3_transport_successful_get_object() {
         let logger = setup_test_logging();
         let runtime = test_runtime();
+        let api_metrics = ApiClientMetricsCollector::new_with_metric_name(
+            "roundtrip_s3_transport_successful_get_object",
+        )
+        .unwrap();
+
         let s3_path = S3Path {
             region: Region::Custom {
                 name: TEST_REGION.into(),
@@ -787,9 +845,10 @@ mod tests {
 
         let mut transport = S3Transport::new(
             s3_path,
-            aws_credentials::Provider::new_mock(),
+            aws_credentials::Provider::new_mock(&api_metrics),
             runtime.handle(),
             &logger,
+            &api_metrics,
         );
 
         let mut reader = transport
@@ -806,6 +865,11 @@ mod tests {
     fn roundtrip_s3_transport_create_multipart_upload() {
         let logger = setup_test_logging();
         let runtime = test_runtime();
+        let api_metrics = ApiClientMetricsCollector::new_with_metric_name(
+            "roundtrip_s3_transport_create_multipart_upload",
+        )
+        .unwrap();
+
         let s3_path = S3Path {
             region: Region::Custom {
                 name: TEST_REGION.into(),
@@ -833,9 +897,10 @@ mod tests {
 
         let mut transport = S3Transport::new(
             s3_path,
-            aws_credentials::Provider::new_mock(),
+            aws_credentials::Provider::new_mock(&api_metrics),
             runtime.handle(),
             &logger,
+            &api_metrics,
         );
 
         let mut writer = transport.put(TEST_KEY, &DEFAULT_TRACE_ID).unwrap();

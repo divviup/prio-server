@@ -36,6 +36,7 @@ pub struct BatchAggregator<'a> {
     aggregation_batch: BatchWriter<'a, SumPart, InvalidPacket>,
     share_processor_signing_key: &'a BatchSigningKey,
     total_individual_clients: i64,
+    bytes_processed: u64,
     metrics_collector: Option<&'a AggregateMetricsCollector>,
     logger: Logger,
 }
@@ -54,14 +55,14 @@ impl<'a> BatchAggregator<'a> {
         peer_validation_transport: &'a mut VerifiableTransport,
         aggregation_transport: &'a mut SignableTransport,
         parent_logger: &Logger,
-    ) -> Result<BatchAggregator<'a>> {
+    ) -> Result<Self> {
         let logger = parent_logger.new(o!(
             event::TRACE_ID => trace_id.to_string(),
             event::AGGREGATION_NAME => aggregation_name.to_owned(),
             event::INGESTION_PATH => ingestion_transport.transport.transport.path(),
             event::PEER_VALIDATION_PATH => peer_validation_transport.transport.path(),
         ));
-        Ok(BatchAggregator {
+        Ok(Self {
             trace_id,
             is_first,
             permit_malformed_batch,
@@ -83,6 +84,7 @@ impl<'a> BatchAggregator<'a> {
             ),
             share_processor_signing_key: &aggregation_transport.batch_signing_key,
             total_individual_clients: 0,
+            bytes_processed: 0,
             metrics_collector: None,
             logger,
         })
@@ -125,6 +127,23 @@ impl<'a> BatchAggregator<'a> {
             self.aggregate_share(&batch_id.0, &batch_id.1, &mut servers, &mut invalid_uuids)?;
             included_batch_uuids.push(batch_id.0);
             callback(&self.logger);
+        }
+
+        if let Some(collector) = self.metrics_collector {
+            collector
+                .packets_per_sum_part
+                .with_label_values(&[self.aggregation_name])
+                .set(self.total_individual_clients);
+
+            collector
+                .packets_processed
+                .with_label_values(&[self.aggregation_name])
+                .inc_by(self.total_individual_clients as u64);
+
+            collector
+                .bytes_processed
+                .with_label_values(&[self.aggregation_name])
+                .inc_by(self.bytes_processed);
         }
 
         // TODO(timg) what exactly do we write out when there are no invalid
@@ -327,6 +346,8 @@ impl<'a> BatchAggregator<'a> {
                             invalid_uuids.push(peer_validation_packet.uuid);
                         }
                         self.total_individual_clients += 1;
+                        self.bytes_processed += ingestion_packet.encrypted_payload.len() as u64;
+
                         did_aggregate_shares = true;
                         break;
                     }
@@ -347,6 +368,13 @@ impl<'a> BatchAggregator<'a> {
                         self.trace_id
                     ));
             }
+        }
+
+        if let Some(collector) = self.metrics_collector {
+            collector
+                .packets_per_batch
+                .with_label_values(&[self.aggregation_name])
+                .set(processed_ingestion_packets.len() as i64);
         }
 
         Ok(())

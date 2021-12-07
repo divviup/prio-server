@@ -5,6 +5,7 @@ use crate::{
         AccessTokenProvider, Method, RequestParameters, RetryingAgent, StaticAccessTokenProvider,
     },
     logging::event,
+    metrics::ApiClientMetricsCollector,
     transport::{Transport, TransportWriter},
     Error,
 };
@@ -66,6 +67,7 @@ impl GcsTransport {
         workload_identity_pool_params: Option<WorkloadIdentityPoolParameters>,
         runtime_handle: &Handle,
         parent_logger: &Logger,
+        api_metrics: &ApiClientMetricsCollector,
     ) -> Result<Self> {
         let logger = parent_logger.new(o!(
             event::STORAGE_PATH => path.to_string(),
@@ -77,12 +79,14 @@ impl GcsTransport {
             // https://cloud.google.com/storage/docs/best-practices#uploading
             .timeout(Duration::from_secs(120))
             .build();
-        let retrying_agent = RetryingAgent::new(
+        let retrying_agent = RetryingAgent::new_with_agent(
             ureq_agent,
             // Per Google documentation, HTTP 408 Request Timeout and HTTP 429
             // Too Many Requests shouldbe retried
             // https://cloud.google.com/storage/docs/retry-strategy
             vec![408, 429],
+            "storage.googleapis.com",
+            api_metrics,
         );
         Ok(GcsTransport {
             path: path.ensure_directory_prefix(),
@@ -93,6 +97,7 @@ impl GcsTransport {
                 workload_identity_pool_params,
                 runtime_handle,
                 &logger,
+                api_metrics,
             )?,
             agent: retrying_agent,
             logger,
@@ -132,7 +137,7 @@ impl Transport for GcsTransport {
 
         let response = self
             .agent
-            .call(&logger, &request)
+            .call(&logger, &request, "get")
             .context(format!("failed to fetch object {} from GCS", url))?;
 
         Ok(Box::new(response.into_reader()))
@@ -247,7 +252,7 @@ impl StreamingTransferWriter {
         })?;
 
         let http_response = agent
-            .send_bytes(parent_logger, &request, &[])
+            .send_bytes(parent_logger, &request, "insert", &[])
             .context(format!("uploading to gs://{} failed", bucket))?;
 
         // The upload session URI authenticates subsequent upload requests for
@@ -321,7 +326,7 @@ impl StreamingTransferWriter {
 
         let http_response = self
             .agent
-            .send_bytes(&self.logger, &request, body)
+            .send_bytes(&self.logger, &request, "insert-chunk", body)
             .context(format!(
                 "failed in sending bytes to gcs upload session: {}",
                 &self.upload_session_uri
@@ -428,9 +433,11 @@ impl TransportWriter for StreamingTransferWriter {
             ..Default::default()
         })?;
 
-        let http_response = self
-            .agent
-            .call(&self.logger, &request.set("Content-Length", "0"))?;
+        let http_response = self.agent.call(
+            &self.logger,
+            &request.set("Content-Length", "0"),
+            "cancel-upload",
+        )?;
         match http_response.status() {
             499 => Ok(()),
             _ => Err(anyhow!(
@@ -450,6 +457,8 @@ mod tests {
     #[test]
     fn simple_upload() {
         let logger = setup_test_logging();
+        let api_metrics = ApiClientMetricsCollector::new_with_metric_name("simple_upload").unwrap();
+
         let fake_upload_session_uri = format!("{}/fake-session-uri", mockito::server_url());
         let mocked_post = mock("POST", "/upload/storage/v1/b/fake-bucket/o/")
             .match_header("Authorization", "Bearer fake-token")
@@ -473,7 +482,7 @@ mod tests {
             "fake-token".to_string(),
             10,
             Url::parse(&mockito::server_url()).expect("unable to parse mockito server url"),
-            RetryingAgent::default(),
+            RetryingAgent::new("simple_upload", &api_metrics),
             &logger,
         )
         .unwrap();
@@ -497,6 +506,9 @@ mod tests {
     #[test]
     fn multi_chunk_upload() {
         let logger = setup_test_logging();
+        let api_metrics =
+            ApiClientMetricsCollector::new_with_metric_name("multi_chunk_upload").unwrap();
+
         let fake_upload_session_uri = format!("{}/fake-session-uri", mockito::server_url());
         let mocked_post = mock("POST", "/upload/storage/v1/b/fake-bucket/o/")
             .match_header("Authorization", "Bearer fake-token")
@@ -520,7 +532,7 @@ mod tests {
             "fake-token".to_string(),
             4,
             Url::parse(&mockito::server_url()).expect("unable to parse mockito server url"),
-            RetryingAgent::default(),
+            RetryingAgent::new("multi_chunk_upload", &api_metrics),
             &logger,
         )
         .unwrap();

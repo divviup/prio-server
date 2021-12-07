@@ -38,6 +38,7 @@ use crate::{
     http::{
         AccessTokenProvider, Method, RequestParameters, RetryingAgent, StaticAccessTokenProvider,
     },
+    metrics::ApiClientMetricsCollector,
 };
 
 const DEFAULT_METADATA_BASE_URL: &str = "http://metadata.google.internal:80";
@@ -211,7 +212,7 @@ impl ProvideDefaultAccessToken for GkeMetadataServiceDefaultAccessTokenProvider 
         request = request.set("Metadata-Flavor", "Google");
 
         self.agent
-            .call(&self.logger, &request)
+            .call(&self.logger, &request, DEFAULT_ACCESS_TOKEN_PATH)
             .context("failed to obtain default account access token from GKE metadata service")
     }
 }
@@ -266,6 +267,7 @@ impl ProvideDefaultAccessToken for ServiceAccountKeyFileDefaultAccessTokenProvid
             .send_form(
                 &self.logger,
                 &request,
+                "token-for-key-file",
                 &[
                     ("grant_type", "urn:ietf:params:oauth:grant-type:jwt-bearer"),
                     ("assertion", &token),
@@ -343,10 +345,12 @@ impl ProvideDefaultAccessToken
             "subjectTokenType": "urn:ietf:params:aws:token-type:aws4_request",
         });
 
+        let endpoint = "token";
+
         let request = self
             .agent
             .prepare_request(RequestParameters {
-                url: Url::parse("https://sts.googleapis.com/v1/token")
+                url: Url::parse(format!("https://sts.googleapis.com/v1/{}", endpoint).as_str())
                     .context("failed to construct sts.googleapis.com URL")?,
                 method: Method::Post,
                 // This request is unauthenticated, except for the signature and
@@ -356,7 +360,7 @@ impl ProvideDefaultAccessToken
             .set("Content-Type", "application/json; charset=utf-8");
 
         self.agent
-            .send_json_request(&self.logger, &request, &request_body)
+            .send_json_request(&self.logger, &request, endpoint, &request_body)
             .context("failed to obtain federated access token from sts.googleapis.com")
     }
 }
@@ -451,12 +455,12 @@ impl GcpAccessTokenProvider {
         workload_identity_pool_params: Option<WorkloadIdentityPoolParameters>,
         runtime_handle: &Handle,
         parent_logger: &Logger,
+        api_metrics: &ApiClientMetricsCollector,
     ) -> Result<Self> {
         let logger = parent_logger.new(o!(
             "scope" => scope.to_string(),
             "account_to_impersonate" => account_to_impersonate.to_string(),
         ));
-        let agent = RetryingAgent::default();
 
         let default_token_provider: Box<dyn ProvideDefaultAccessToken> =
             match (key_file_reader, workload_identity_pool_params) {
@@ -465,26 +469,36 @@ impl GcpAccessTokenProvider {
                         "either but not both of key_file_reader or aws_credentials may be provided"
                     ))
                 }
-                (Some(reader), None) => Box::new(ServiceAccountKeyFileDefaultAccessTokenProvider {
-                    key_file: serde_json::from_reader(reader)
-                        .context("failed to deserialize JSON key file")?,
-                    scope: scope.clone(),
-                    agent: agent.clone(),
-                    logger: logger.clone(),
-                }),
-                (None, Some(parameters)) => Box::new(
-                    AwsIamFederationViaWorkloadIdentityPoolDefaultAccessTokenProvider {
-                        aws_credentials_provider: parameters.aws_credentials_provider,
-                        workload_identity_pool_provider: parameters.workload_identity_pool_provider,
+                (Some(reader), None) => {
+                    let agent = RetryingAgent::new("iamcredentials.googleapis.com", api_metrics);
+                    let provider = ServiceAccountKeyFileDefaultAccessTokenProvider {
+                        key_file: serde_json::from_reader(reader)
+                            .context("failed to deserialize JSON key file")?,
+                        scope: scope.clone(),
+                        agent,
                         logger: logger.clone(),
-                        agent: agent.clone(),
-                        runtime_handle: runtime_handle.clone(),
-                    },
-                ),
-                (None, None) => Box::new(GkeMetadataServiceDefaultAccessTokenProvider::new(
-                    agent.clone(),
-                    logger.clone(),
-                )),
+                    };
+                    Box::new(provider)
+                }
+                (None, Some(parameters)) => {
+                    let agent = RetryingAgent::new("sts.googleapis.com", api_metrics);
+                    let provider =
+                        AwsIamFederationViaWorkloadIdentityPoolDefaultAccessTokenProvider {
+                            aws_credentials_provider: parameters.aws_credentials_provider,
+                            workload_identity_pool_provider: parameters
+                                .workload_identity_pool_provider,
+                            logger: logger.clone(),
+                            agent,
+                            runtime_handle: runtime_handle.clone(),
+                        };
+                    Box::new(provider)
+                }
+                (None, None) => {
+                    let agent = RetryingAgent::new("metadata.google.internal", api_metrics);
+                    let provider =
+                        GkeMetadataServiceDefaultAccessTokenProvider::new(agent, logger.clone());
+                    Box::new(provider)
+                }
             };
 
         Ok(Self {
@@ -493,7 +507,7 @@ impl GcpAccessTokenProvider {
             account_to_impersonate,
             default_access_token: Arc::new(RwLock::new(None)),
             impersonated_account_token: Arc::new(RwLock::new(None)),
-            agent,
+            agent: RetryingAgent::new("iamcredentials.googleapis.com", api_metrics),
             logger,
             iam_service_base_url: DEFAULT_IAM_BASE_URL,
         })
@@ -608,6 +622,7 @@ impl GcpAccessTokenProvider {
             .send_json_request(
                 &self.logger,
                 &request,
+                "generateAccessToken",
                 &ureq::json!({
                     "scope": [self.scope]
                 }),
@@ -648,10 +663,10 @@ pub(crate) struct GkeMetadataServiceIdentityTokenProvider {
 }
 
 impl GkeMetadataServiceIdentityTokenProvider {
-    pub(crate) fn new(logger: Logger) -> Self {
+    pub(crate) fn new(logger: Logger, api_metrics: &ApiClientMetricsCollector) -> Self {
         Self {
             metadata_service_base_url: DEFAULT_METADATA_BASE_URL,
-            agent: RetryingAgent::default(),
+            agent: RetryingAgent::new("metadata.google.internal", api_metrics),
             logger: logger.clone(),
         }
     }
@@ -689,7 +704,7 @@ impl ProvideGcpIdentityToken for GkeMetadataServiceIdentityTokenProvider {
             .set("Metadata-Flavor", "Google");
 
         self.agent
-            .call(&self.logger, &request)
+            .call(&self.logger, &request, DEFAULT_IDENTITY_TOKEN_PATH)
             .context("failed to fetch identity token from metadata service")?
             .into_string()
             .context("failed to get response body from metadata service response")
@@ -724,12 +739,13 @@ impl ImpersonatedServiceAccountIdentityTokenProvider {
         impersonated_service_account: String,
         access_token_provider: GcpAccessTokenProvider,
         logger: Logger,
+        api_metrics: &ApiClientMetricsCollector,
     ) -> Self {
         Self {
             impersonated_service_account,
             access_token_provider: Box::new(access_token_provider),
             iam_service_base_url: DEFAULT_IAM_BASE_URL,
-            agent: RetryingAgent::default(),
+            agent: RetryingAgent::new("iamcredentials.googleapis.com", api_metrics),
             logger,
         }
     }
@@ -776,6 +792,7 @@ impl ProvideGcpIdentityToken for ImpersonatedServiceAccountIdentityTokenProvider
             .send_json_request(
                 &self.logger,
                 &request,
+                "generateIdToken",
                 &ureq::json!({
                     "audience": IDENTITY_TOKEN_AUDIENCE,
                     // By inspection, the identity tokens obtained from GKE metadata
@@ -807,6 +824,9 @@ mod tests {
     #[test]
     fn metadata_service_token() {
         let logger = setup_test_logging();
+        let api_metrics =
+            ApiClientMetricsCollector::new_with_metric_name("metadata_service_token").unwrap();
+
         let mocked_get = mock("GET", DEFAULT_ACCESS_TOKEN_PATH)
             .match_header("Metadata-Flavor", "Google")
             .with_status(200)
@@ -823,7 +843,7 @@ mod tests {
             .create();
 
         let provider = GkeMetadataServiceDefaultAccessTokenProvider {
-            agent: RetryingAgent::default(),
+            agent: RetryingAgent::new("metadata_service_token", &api_metrics),
             logger,
             metadata_service_base_url: leak_string(mockito::server_url()),
         };
@@ -839,6 +859,8 @@ mod tests {
     #[test]
     fn get_token_with_key_file() {
         let logger = setup_test_logging();
+        let api_metrics =
+            ApiClientMetricsCollector::new_with_metric_name("get_token_with_key_file").unwrap();
 
         let key_file = ServiceAccountKeyFile {
             private_key: r#"
@@ -897,7 +919,7 @@ jbxbE/VdW03+iXZyrnDNFAFAsRR+XgjeYheAUVLelg9qBjM7jYNf
         let provider = ServiceAccountKeyFileDefaultAccessTokenProvider {
             key_file,
             scope: AccessScope::CloudPlatform,
-            agent: RetryingAgent::default(),
+            agent: RetryingAgent::new("iamcredentials.googleapis.com", &api_metrics),
             logger,
         };
         provider
@@ -932,6 +954,8 @@ jbxbE/VdW03+iXZyrnDNFAFAsRR+XgjeYheAUVLelg9qBjM7jYNf
     #[test]
     fn get_impersonated_token() {
         let logger = setup_test_logging();
+        let api_metrics =
+            ApiClientMetricsCollector::new_with_metric_name("get_impersonated_token").unwrap();
 
         let access_token_path: &str =
             &GcpAccessTokenProvider::access_token_path_for_service_account("fake-service-account");
@@ -958,7 +982,7 @@ jbxbE/VdW03+iXZyrnDNFAFAsRR+XgjeYheAUVLelg9qBjM7jYNf
             account_to_impersonate: Identity::from_str("fake-service-account").unwrap(),
             default_access_token: Arc::new(RwLock::new(None)),
             impersonated_account_token: Arc::new(RwLock::new(None)),
-            agent: RetryingAgent::default(),
+            agent: RetryingAgent::new("iamcredentials.googleapis.com", &api_metrics),
             logger,
             iam_service_base_url: leak_string(mockito::server_url()),
         };

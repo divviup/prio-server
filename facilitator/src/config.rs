@@ -11,7 +11,7 @@ use std::{
     str::FromStr,
 };
 
-use crate::aws_credentials;
+use crate::{aws_credentials, metrics::ApiClientMetricsCollector};
 
 /// Identity represents a cloud identity: Either an AWS IAM ARN (i.e. "arn:...")
 /// or a GCP ServiceAccount (i.e. "foo@bar.com"). It treats the empty string as
@@ -94,6 +94,7 @@ impl WorkloadIdentityPoolParameters {
         workload_identity_pool_provider_id: Option<&str>,
         use_default_aws_credentials_provider: bool,
         runtime_handle: &Handle,
+        api_metrics: &ApiClientMetricsCollector,
         logger: &Logger,
     ) -> Result<Option<Self>> {
         let parameters = match workload_identity_pool_provider_id {
@@ -114,6 +115,7 @@ impl WorkloadIdentityPoolParameters {
                     "IAM federation",
                     runtime_handle,
                     logger,
+                    api_metrics,
                 )?,
             }),
         };
