@@ -9,8 +9,10 @@ ingestors = {
     manifest_base_url = "storage.googleapis.com/prio-manifests"
     localities = {
       na-na = {
-        intake_worker_count    = 1
-        aggregate_worker_count = 1
+        min_intake_worker_count    = 1
+        max_intake_worker_count    = 3
+        min_aggregate_worker_count = 1
+        max_aggregate_worker_count = 3
       }
     }
   }
@@ -18,8 +20,10 @@ ingestors = {
     manifest_base_url = "exposure-notification.apple.com/manifest"
     localities = {
       na-na = {
-        intake_worker_count    = 1
-        aggregate_worker_count = 1
+        min_intake_worker_count    = 1
+        max_intake_worker_count    = 3
+        min_aggregate_worker_count = 1
+        max_aggregate_worker_count = 3
       }
     }
   }
@@ -34,8 +38,9 @@ cluster_settings = {
 is_first                 = false
 use_aws                  = true
 pure_gcp                 = true
-facilitator_version      = "0.6.18"
-workflow_manager_version = "0.6.18"
+workflow_manager_version = "0.6.19"
+facilitator_version      = "0.6.19"
+key_rotator_version      = "0.6.19"
 victorops_routing_key    = "prio-staging"
 
 default_aggregation_period       = "30m"
