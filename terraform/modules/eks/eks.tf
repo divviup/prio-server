@@ -280,6 +280,13 @@ resource "aws_eks_node_group" "node_group" {
     min_size     = var.cluster_settings.min_node_count
   }
 
+  tags = {
+    # These tags allow automatic discovery by the cluster autoscaler
+    # https://docs.aws.amazon.com/eks/latest/userguide/autoscaling.html#cluster-autoscaler
+    "k8s.io/cluster-autoscaler/${aws_eks_cluster.cluster.name}" = "owned",
+    "k8s.io/cluster-autoscaler/enabled"                         = true,
+  }
+
   lifecycle {
     ignore_changes = [
       # This will change as the node group autoscales. Ignore it so that

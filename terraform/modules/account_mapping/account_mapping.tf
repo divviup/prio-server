@@ -28,6 +28,11 @@ variable "kubernetes_service_account_name" {
   type = string
 }
 
+variable "kubernetes_service_account_labels" {
+  type    = map(any)
+  default = {}
+}
+
 variable "kubernetes_namespace" {
   type = string
 }
@@ -42,7 +47,8 @@ variable "allow_gcp_sa_token_creation" {
 }
 
 variable "gcp_project" {
-  type = string
+  type    = string
+  default = ""
 }
 
 resource "random_string" "account_id" {
@@ -122,6 +128,7 @@ resource "kubernetes_service_account" "account" {
       environment                  = var.environment
       "eks.amazonaws.com/role-arn" = aws_iam_role.iam_role[0].arn
     }
+    labels = var.kubernetes_service_account_labels
   }
 }
 
@@ -175,8 +182,10 @@ output "aws_iam_role" {
   value = var.aws_iam_role_name != "" ? {
     arn  = aws_iam_role.iam_role[0].arn
     name = aws_iam_role.iam_role[0].name
+    id   = aws_iam_role.iam_role[0].id
     } : {
     arn  = ""
     name = ""
+    id   = ""
   }
 }
