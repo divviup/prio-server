@@ -57,11 +57,13 @@ ingestors = {
   }
 }
 cluster_settings = {
-  initial_node_count = 9
-  min_node_count     = 9
-  max_node_count     = 9
-  gcp_machine_type   = "e2-standard-2"
-  aws_machine_types  = ["t3.large"]
+  initial_node_count = 3
+  # note that this size only applies to the spot node group and we will always
+  # have 3 nodes in the on demand node group
+  min_node_count    = 0
+  max_node_count    = 6
+  gcp_machine_type  = "e2-standard-2"
+  aws_machine_types = ["t3.large"]
 }
 is_first                 = false
 use_aws                  = true
