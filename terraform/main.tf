@@ -259,6 +259,28 @@ variable "enable_key_rotation_localities" {
   default = []
 }
 
+variable "prometheus_helm_chart_version" {
+  type = string
+  # The default is the empty string, which uses the latest available version at
+  # the time of apply
+  default = ""
+}
+
+variable "grafana_helm_chart_version" {
+  type    = string
+  default = ""
+}
+
+variable "cloudwatch_exporter_helm_chart_version" {
+  type    = string
+  default = ""
+}
+
+variable "stackdriver_exporter_helm_chart_version" {
+  type    = string
+  default = ""
+}
+
 terraform {
   backend "gcs" {}
 
@@ -742,6 +764,11 @@ module "monitoring" {
   eks_oidc_provider     = var.use_aws ? module.eks[0].oidc_provider : { url = "", arn = "" }
 
   prometheus_server_persistent_disk_size_gb = var.prometheus_server_persistent_disk_size_gb
+
+  prometheus_helm_chart_version           = var.prometheus_helm_chart_version
+  grafana_helm_chart_version              = var.grafana_helm_chart_version
+  cloudwatch_exporter_helm_chart_version  = var.cloudwatch_exporter_helm_chart_version
+  stackdriver_exporter_helm_chart_version = var.stackdriver_exporter_helm_chart_version
 }
 
 output "manifest_bucket" {

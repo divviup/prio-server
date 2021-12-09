@@ -168,3 +168,7 @@ victorops_routing_key                     = "prio-prod-us"
 
 default_peer_share_processor_manifest_base_url = "en-analytics.cancer.gov"
 default_portal_server_manifest_base_url        = "manifest.enpa-pha.io"
+
+prometheus_helm_chart_version           = "11.12.1"
+grafana_helm_chart_version              = "6.1.16"
+stackdriver_exporter_helm_chart_version = "1.8.0"
