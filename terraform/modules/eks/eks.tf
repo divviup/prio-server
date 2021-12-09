@@ -296,6 +296,25 @@ resource "aws_eks_node_group" "node_group" {
   }
 }
 
+# Create a second node group with "on demand" (not spot) nodes, to guarantee we
+# get at least one node per AZ even if spot nodes are not allocatable.
+resource "aws_eks_node_group" "on_demand_nodes" {
+  node_group_name = "${var.resource_prefix}-on-demand"
+  cluster_name    = aws_eks_cluster.cluster.name
+  node_role_arn   = aws_iam_role.worker_node_role.arn
+  subnet_ids      = module.subnets[*].id
+  capacity_type   = "ON_DEMAND"
+  instance_types  = var.cluster_settings.aws_machine_types
+
+  # Create one VM per cluster subnet, which correspond to the cluster AZs. This
+  # node group intentionally does not autoscale
+  scaling_config {
+    desired_size = length(module.subnets[*].id)
+    max_size     = length(module.subnets[*].id)
+    min_size     = length(module.subnets[*].id)
+  }
+}
+
 # The AWS VPC CNI plugin allows pods to have the same IP in the pod as they do
 # on the VPC network.
 # https://docs.aws.amazon.com/eks/latest/userguide/managing-vpc-cni.html
