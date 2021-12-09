@@ -36,6 +36,22 @@ variable "aggregation_period" {
   type = string
 }
 
+variable "prometheus_helm_chart_version" {
+  type = string
+}
+
+variable "grafana_helm_chart_version" {
+  type = string
+}
+
+variable "cloudwatch_exporter_helm_chart_version" {
+  type = string
+}
+
+variable "stackdriver_exporter_helm_chart_version" {
+  type = string
+}
+
 terraform {
   required_providers {
     helm = {
@@ -231,6 +247,7 @@ resource "helm_release" "prometheus" {
   chart      = "prometheus"
   repository = "https://prometheus-community.github.io/helm-charts"
   namespace  = kubernetes_namespace.monitoring.metadata[0].name
+  version    = var.prometheus_helm_chart_version
 
   set {
     name  = "alertmanager.configFromSecret"
@@ -316,6 +333,7 @@ resource "helm_release" "grafana" {
   chart      = "grafana"
   repository = "https://grafana.github.io/helm-charts"
   namespace  = kubernetes_namespace.monitoring.metadata[0].name
+  version    = var.grafana_helm_chart_version
 
   set {
     name  = "sidecar.datasources.enabled"
@@ -339,6 +357,7 @@ resource "helm_release" "cloudwatch_exporter" {
   chart      = "prometheus-cloudwatch-exporter"
   repository = "https://prometheus-community.github.io/helm-charts"
   namespace  = kubernetes_namespace.monitoring.metadata[0].name
+  version    = var.cloudwatch_exporter_helm_chart_version
 
   set {
     name  = "serviceAccount.create"
@@ -386,6 +405,7 @@ resource "helm_release" "stackdriver_exporter" {
   chart      = "prometheus-stackdriver-exporter"
   repository = "https://prometheus-community.github.io/helm-charts"
   namespace  = kubernetes_namespace.monitoring.metadata[0].name
+  version    = var.stackdriver_exporter_helm_chart_version
 
   set {
     name  = "stackdriver.projectId"
