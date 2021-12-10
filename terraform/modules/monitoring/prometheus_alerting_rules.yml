@@ -99,3 +99,13 @@ groups:
       summary: "Undelivered messages in dead letter queue {{ $labels.queue_name }}"
       description: "There are undelivered messages in the dead letter queue for
         SQS queue {{ $labels.queue_name }} in environment ${environment}."
+  - alert: prometheus_disk_utilization
+    expr: kubelet_volume_stats_available_bytes{persistentvolumeclaim="prometheus-server-claim"}
+      / kubelet_volume_stats_capacity_bytes{persistentvolumeclaim="prometheus-server-claim"} < 0.3
+    for: 5m
+    labels:
+      severity: page
+      environment: ${environment}
+    annotations:
+      summary: "prometheus-server low disk space"
+      description: "There is less than 30% available disk space on the prometheus-server PersistentVolumeClaim"
