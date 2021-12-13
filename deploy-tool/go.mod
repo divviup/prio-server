@@ -5,8 +5,8 @@ go 1.17
 require (
 	cloud.google.com/go/secretmanager v1.0.0
 	github.com/abetterinternet/prio-server/key-rotator v0.0.0-00010101000000-000000000000
-	google.golang.org/api v0.60.0
-	google.golang.org/genproto v0.0.0-20211021150943-2b146023228c
+	google.golang.org/api v0.62.0
+	google.golang.org/genproto v0.0.0-20211203200212-54befc351ae9
 	google.golang.org/grpc v1.42.0
 	k8s.io/api v0.23.0
 	k8s.io/apimachinery v0.23.0
@@ -14,7 +14,7 @@ require (
 )
 
 require (
-	cloud.google.com/go v0.97.0 // indirect
+	cloud.google.com/go v0.98.0 // indirect
 	cloud.google.com/go/storage v1.18.2 // indirect
 	github.com/aws/aws-sdk-go v1.42.0 // indirect
 	github.com/census-instrumentation/opencensus-proto v0.2.1 // indirect
@@ -42,8 +42,8 @@ require (
 	github.com/spf13/pflag v1.0.5 // indirect
 	go.opencensus.io v0.23.0 // indirect
 	golang.org/x/net v0.0.0-20210825183410-e898025ed96a // indirect
-	golang.org/x/oauth2 v0.0.0-20211005180243-6b3c2da341f1 // indirect
-	golang.org/x/sys v0.0.0-20211025201205-69cdffdb9359 // indirect
+	golang.org/x/oauth2 v0.0.0-20211104180415-d3ed0bb246c8 // indirect
+	golang.org/x/sys v0.0.0-20211205182925-97ca703d548d // indirect
 	golang.org/x/term v0.0.0-20210615171337-6886f2dfbf5b // indirect
 	golang.org/x/text v0.3.7 // indirect
 	golang.org/x/time v0.0.0-20210723032227-1f47c861a9ac // indirect
