@@ -627,6 +627,7 @@ dependencies = [
  "k8s-openapi",
  "kube",
  "kube-runtime",
+ "lazy_static",
  "mockito",
  "p256",
  "pem 1.0.1",

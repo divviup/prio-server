@@ -41,7 +41,7 @@ pub trait Packet: Sized {
     /// that unlike other structures, this does not take a primitive
     /// std::io::Read, because we do not want to create a new Avro schema and
     /// reader for each packet. The Reader must have been created with the
-    //// schema returned from Packet::schema.
+    /// schema returned from Packet::schema.
     fn read<R: Read>(reader: &mut Reader<R>) -> Result<Self, Error>;
 
     /// Serializes and writes a single Packet to the provided avro_rs::Writer.
@@ -1091,31 +1091,43 @@ impl Packet for InvalidPacket {
 mod tests {
     use super::*;
     use assert_matches::assert_matches;
+    use lazy_static::lazy_static;
 
-    #[test]
-    fn roundtrip_batch_signature() {
-        let signature1 = BatchSignature {
-            batch_header_signature: vec![1u8, 2u8, 3u8, 4u8],
-            key_identifier: "my-cool-key".to_owned(),
+    lazy_static! {
+        static ref GOLDEN_BATCH_SIGNATURES: Vec<(BatchSignature, Vec<u8>)> = {
+            let batch_signature_bytes: Vec<u8> = hex::decode("4f626a0104166176726f2e736368656d61fa027b2274797065223a227265636f7264222c226e616d657370616365223a226f72672e61626574746572696e7465726e65742e7072696f2e7631222c226e616d65223a225072696f42617463685369676e6174757265222c226669656c6473223a5b7b226e616d65223a2262617463685f6865616465725f7369676e6174757265222c2274797065223a226279746573227d2c7b226e616d65223a226b65795f6964656e746966696572222c2274797065223a22737472696e67227d5d7d146176726f2e636f646563086e756c6c00d0c5ed8df0137655e2aa2054a0c8c62902220801020304166d792d636f6f6c2d6b6579d0c5ed8df0137655e2aa2054a0c8c629").unwrap();
+            let batch_signature: BatchSignature = BatchSignature {
+                batch_header_signature: vec![1u8, 2u8, 3u8, 4u8],
+                key_identifier: "my-cool-key".to_owned(),
+            };
+
+            vec![(batch_signature, batch_signature_bytes)]
         };
-        let signature2 = BatchSignature {
-            batch_header_signature: vec![5u8, 6u8, 7u8, 9u8],
-            key_identifier: "my-other-key".to_owned(),
-        };
-
-        let mut record_vec = Vec::new();
-
-        signature1.write(&mut record_vec).unwrap();
-        let signature_again = BatchSignature::read(&record_vec[..]).unwrap();
-        assert_eq!(signature1, signature_again);
-        assert!(signature2 != signature_again);
     }
 
     #[test]
-    fn roundtrip_ingestion_header() {
-        let headers = &[
-            IngestionHeader {
-                batch_uuid: Uuid::new_v4(),
+    fn read_batch_signature() {
+        for (want_signature, signature_bytes) in &*GOLDEN_BATCH_SIGNATURES {
+            let batch_signature = BatchSignature::read(&signature_bytes[..]).unwrap();
+            assert_eq!(want_signature, &batch_signature)
+        }
+    }
+
+    #[test]
+    fn roundtrip_batch_signature() {
+        for (signature, _) in &*GOLDEN_BATCH_SIGNATURES {
+            let mut record_vec = Vec::new();
+            signature.write(&mut record_vec).unwrap();
+            let signature_again = BatchSignature::read(&record_vec[..]).unwrap();
+            assert_eq!(signature, &signature_again);
+        }
+    }
+
+    lazy_static! {
+        static ref GOLDEN_INGESTION_HEADERS: Vec<(IngestionHeader, Vec<u8>)> = {
+            let ingestion_header_1_bytes = hex::decode("4f626a0104146176726f2e636f646563086e756c6c166176726f2e736368656d61e8097b2274797065223a227265636f7264222c226e616d657370616365223a226f72672e61626574746572696e7465726e65742e7072696f2e7631222c226e616d65223a225072696f496e67657374696f6e486561646572222c226669656c6473223a5b7b226e616d65223a2262617463685f75756964222c2274797065223a7b2274797065223a22737472696e67222c226c6f676963616c54797065223a2275756964227d7d2c7b226e616d65223a226e616d65222c2274797065223a22737472696e67227d2c7b226e616d65223a2262696e73222c2274797065223a22696e74227d2c7b226e616d65223a22657073696c6f6e222c2274797065223a22646f75626c65227d2c7b226e616d65223a227072696d65222c2274797065223a226c6f6e67222c2264656661756c74223a343239333931383732317d2c7b226e616d65223a226e756d6265725f6f665f73657276657273222c2274797065223a22696e74222c2264656661756c74223a327d2c7b226e616d65223a2268616d6d696e675f776569676874222c2274797065223a5b22696e74222c226e756c6c225d7d2c7b226e616d65223a2262617463685f73746172745f74696d65222c2274797065223a7b2274797065223a226c6f6e67222c226c6f676963616c54797065223a2274696d657374616d702d6d696c6c6973227d7d2c7b226e616d65223a2262617463685f656e645f74696d65222c2274797065223a7b2274797065223a226c6f6e67222c226c6f676963616c54797065223a2274696d657374616d702d6d696c6c6973227d7d2c7b226e616d65223a227061636b65745f66696c655f646967657374222c2274797065223a226279746573227d5d7d0010f2cebbc55708399ccbf2a3eb7673400290014862653464663164362d656638362d346339312d383838302d6137393430303238613739341466616b652d62617463680404560e2db29df93f220402f693f1f0058297f1f005020110f2cebbc55708399ccbf2a3eb767340").unwrap();
+            let ingestion_header_1 = IngestionHeader {
+                batch_uuid: Uuid::parse_str("be4df1d6-ef86-4c91-8880-a7940028a794").unwrap(),
                 name: "fake-batch".to_owned(),
                 bins: 2,
                 epsilon: 1.601,
@@ -1125,9 +1137,11 @@ mod tests {
                 batch_start_time: 789456123,
                 batch_end_time: 789456321,
                 packet_file_digest: vec![1u8],
-            },
-            IngestionHeader {
-                batch_uuid: Uuid::new_v4(),
+            };
+
+            let ingestion_header_2_bytes = hex::decode("4f626a0104146176726f2e636f646563086e756c6c166176726f2e736368656d61e8097b2274797065223a227265636f7264222c226e616d657370616365223a226f72672e61626574746572696e7465726e65742e7072696f2e7631222c226e616d65223a225072696f496e67657374696f6e486561646572222c226669656c6473223a5b7b226e616d65223a2262617463685f75756964222c2274797065223a7b2274797065223a22737472696e67222c226c6f676963616c54797065223a2275756964227d7d2c7b226e616d65223a226e616d65222c2274797065223a22737472696e67227d2c7b226e616d65223a2262696e73222c2274797065223a22696e74227d2c7b226e616d65223a22657073696c6f6e222c2274797065223a22646f75626c65227d2c7b226e616d65223a227072696d65222c2274797065223a226c6f6e67222c2264656661756c74223a343239333931383732317d2c7b226e616d65223a226e756d6265725f6f665f73657276657273222c2274797065223a22696e74222c2264656661756c74223a327d2c7b226e616d65223a2268616d6d696e675f776569676874222c2274797065223a5b22696e74222c226e756c6c225d7d2c7b226e616d65223a2262617463685f73746172745f74696d65222c2274797065223a7b2274797065223a226c6f6e67222c226c6f676963616c54797065223a2274696d657374616d702d6d696c6c6973227d7d2c7b226e616d65223a2262617463685f656e645f74696d65222c2274797065223a7b2274797065223a226c6f6e67222c226c6f676963616c54797065223a2274696d657374616d702d6d696c6c6973227d7d2c7b226e616d65223a227061636b65745f66696c655f646967657374222c2274797065223a226279746573227d5d7d00e30977c811a59cb3e1c2043f8f93c1a30292014830336239646561312d623534382d343032622d393036312d3031333866376337323864621466616b652d62617463680404560e2db29df93f22040018f693f1f0058297f1f0050202e30977c811a59cb3e1c2043f8f93c1a3").unwrap();
+            let ingestion_header_2 = IngestionHeader {
+                batch_uuid: Uuid::parse_str("03b9dea1-b548-402b-9061-0138f7c728db").unwrap(),
                 name: "fake-batch".to_owned(),
                 bins: 2,
                 epsilon: 1.601,
@@ -1137,59 +1151,108 @@ mod tests {
                 batch_start_time: 789456123,
                 batch_end_time: 789456321,
                 packet_file_digest: vec![2u8],
-            },
-        ];
+            };
 
-        for header in headers {
-            let mut record_vec = Vec::new();
+            vec![
+                (ingestion_header_1, ingestion_header_1_bytes),
+                (ingestion_header_2, ingestion_header_2_bytes),
+            ]
+        };
+    }
 
-            header.write(&mut record_vec).expect("write error");
-            let header_again = IngestionHeader::read(&record_vec[..]).expect("read error");
-            assert_eq!(header_again, *header);
+    #[test]
+    fn read_ingestion_header() {
+        for (want_header, header_bytes) in &*GOLDEN_INGESTION_HEADERS {
+            let ingestion_header = IngestionHeader::read(&header_bytes[..]).unwrap();
+            assert_eq!(want_header, &ingestion_header);
         }
     }
 
     #[test]
-    fn roundtrip_data_share_packet() {
-        let packets = &[
-            IngestionDataSharePacket {
-                uuid: Uuid::new_v4(),
+    fn roundtrip_ingestion_header() {
+        for (header, _) in &*GOLDEN_INGESTION_HEADERS {
+            let mut record_vec = Vec::new();
+            header.write(&mut record_vec).expect("write error");
+            let header_again = IngestionHeader::read(&record_vec[..]).expect("read error");
+            assert_eq!(&header_again, header);
+        }
+    }
+
+    lazy_static! {
+        static ref GOLDEN_INGESTION_DATA_SHARE_PACKETS: Vec<(IngestionDataSharePacket, Vec<u8>)> = {
+            let ingestion_data_share_packet_1_bytes = hex::decode("4f626a0104146176726f2e636f646563086e756c6c166176726f2e736368656d6198067b2274797065223a227265636f7264222c226e616d657370616365223a226f72672e61626574746572696e7465726e65742e7072696f2e7631222c226e616d65223a225072696f4461746153686172655061636b6574222c226669656c6473223a5b7b226e616d65223a2275756964222c2274797065223a7b2274797065223a22737472696e67222c226c6f676963616c54797065223a2275756964227d7d2c7b226e616d65223a22656e637279707465645f7061796c6f6164222c2274797065223a226279746573227d2c7b226e616d65223a22656e6372797074696f6e5f6b65795f6964222c2274797065223a5b226e756c6c222c22737472696e67225d7d2c7b226e616d65223a22725f706974222c2274797065223a226c6f6e67227d2c7b226e616d65223a2276657273696f6e5f636f6e66696775726174696f6e222c2274797065223a5b226e756c6c222c22737472696e67225d7d2c7b226e616d65223a226465766963655f6e6f6e6365222c2274797065223a5b226e756c6c222c226279746573225d7d5d7d009c5da591513530367b96e748024edd3d0284014839363466373234302d643066662d343234642d383966362d3636366463306534626563630800010203021466616b652d6b65792d31020210636f6e6669672d31009c5da591513530367b96e748024edd3d").unwrap();
+            let ingestion_data_share_packet_1 = IngestionDataSharePacket {
+                uuid: Uuid::parse_str("964f7240-d0ff-424d-89f6-666dc0e4becc").unwrap(),
                 encrypted_payload: vec![0u8, 1u8, 2u8, 3u8],
                 encryption_key_id: Some("fake-key-1".to_owned()),
                 r_pit: 1,
                 version_configuration: Some("config-1".to_owned()),
                 device_nonce: None,
-            },
-            IngestionDataSharePacket {
-                uuid: Uuid::new_v4(),
+            };
+
+            let ingestion_data_share_packet_2_bytes = hex::decode("4f626a0104146176726f2e636f646563086e756c6c166176726f2e736368656d6198067b2274797065223a227265636f7264222c226e616d657370616365223a226f72672e61626574746572696e7465726e65742e7072696f2e7631222c226e616d65223a225072696f4461746153686172655061636b6574222c226669656c6473223a5b7b226e616d65223a2275756964222c2274797065223a7b2274797065223a22737472696e67222c226c6f676963616c54797065223a2275756964227d7d2c7b226e616d65223a22656e637279707465645f7061796c6f6164222c2274797065223a226279746573227d2c7b226e616d65223a22656e6372797074696f6e5f6b65795f6964222c2274797065223a5b226e756c6c222c22737472696e67225d7d2c7b226e616d65223a22725f706974222c2274797065223a226c6f6e67227d2c7b226e616d65223a2276657273696f6e5f636f6e66696775726174696f6e222c2274797065223a5b226e756c6c222c22737472696e67225d7d2c7b226e616d65223a226465766963655f6e6f6e6365222c2274797065223a5b226e756c6c222c226279746573225d7d5d7d005f3567685778ee120d743d690daaaa6502664830323034623036342d353865382d346666342d613635392d3164326466636334333232340804050607000400020808090a0b5f3567685778ee120d743d690daaaa65").unwrap();
+            let ingestion_data_share_packet_2 = IngestionDataSharePacket {
+                uuid: Uuid::parse_str("0204b064-58e8-4ff4-a659-1d2dfcc43224").unwrap(),
                 encrypted_payload: vec![4u8, 5u8, 6u8, 7u8],
                 encryption_key_id: None,
                 r_pit: 2,
                 version_configuration: None,
                 device_nonce: Some(vec![8u8, 9u8, 10u8, 11u8]),
-            },
-            IngestionDataSharePacket {
-                uuid: Uuid::new_v4(),
+            };
+
+            let ingestion_data_share_packet_3_bytes = hex::decode("4f626a0104166176726f2e736368656d6198067b2274797065223a227265636f7264222c226e616d657370616365223a226f72672e61626574746572696e7465726e65742e7072696f2e7631222c226e616d65223a225072696f4461746153686172655061636b6574222c226669656c6473223a5b7b226e616d65223a2275756964222c2274797065223a7b2274797065223a22737472696e67222c226c6f676963616c54797065223a2275756964227d7d2c7b226e616d65223a22656e637279707465645f7061796c6f6164222c2274797065223a226279746573227d2c7b226e616d65223a22656e6372797074696f6e5f6b65795f6964222c2274797065223a5b226e756c6c222c22737472696e67225d7d2c7b226e616d65223a22725f706974222c2274797065223a226c6f6e67227d2c7b226e616d65223a2276657273696f6e5f636f6e66696775726174696f6e222c2274797065223a5b226e756c6c222c22737472696e67225d7d2c7b226e616d65223a226465766963655f6e6f6e6365222c2274797065223a5b226e756c6c222c226279746573225d7d5d7d146176726f2e636f646563086e756c6c00ad4c03ddfc76ee72ebd1d1b9592a5d3a02724864383165646431322d376335302d343939362d613733622d3539303064333734303836620808090a0b021466616b652d6b65792d33060000ad4c03ddfc76ee72ebd1d1b9592a5d3a").unwrap();
+            let ingestion_data_share_packet_3 = IngestionDataSharePacket {
+                uuid: Uuid::parse_str("d81edd12-7c50-4996-a73b-5900d374086b").unwrap(),
                 encrypted_payload: vec![8u8, 9u8, 10u8, 11u8],
                 encryption_key_id: Some("fake-key-3".to_owned()),
                 r_pit: 3,
                 version_configuration: None,
                 device_nonce: None,
-            },
-        ];
+            };
 
+            vec![
+                (
+                    ingestion_data_share_packet_1,
+                    ingestion_data_share_packet_1_bytes,
+                ),
+                (
+                    ingestion_data_share_packet_2,
+                    ingestion_data_share_packet_2_bytes,
+                ),
+                (
+                    ingestion_data_share_packet_3,
+                    ingestion_data_share_packet_3_bytes,
+                ),
+            ]
+        };
+    }
+
+    #[test]
+    fn read_data_share_packet() {
+        let schema = IngestionDataSharePacket::schema();
+        for (want_data_share_packet, data_share_packet_bytes) in
+            &*GOLDEN_INGESTION_DATA_SHARE_PACKETS
+        {
+            let mut reader = Reader::with_schema(&schema, &data_share_packet_bytes[..]).unwrap();
+            let data_share_packet = IngestionDataSharePacket::read(&mut reader).unwrap();
+            assert_eq!(want_data_share_packet, &data_share_packet);
+        }
+    }
+
+    #[test]
+    fn roundtrip_data_share_packet() {
         let mut record_vec = Vec::new();
 
         let schema = IngestionDataSharePacket::schema();
         let mut writer = Writer::new(&schema, &mut record_vec);
 
-        for packet in packets {
+        for (packet, _) in &*GOLDEN_INGESTION_DATA_SHARE_PACKETS {
             packet.write(&mut writer).expect("write error");
         }
         writer.flush().unwrap();
 
         let mut reader = Reader::with_schema(&schema, &record_vec[..]).unwrap();
-        for packet in packets {
+        for (packet, _) in &*GOLDEN_INGESTION_DATA_SHARE_PACKETS {
             let packet_again = IngestionDataSharePacket::read(&mut reader).expect("read error");
             assert_eq!(packet_again, *packet);
         }
@@ -1201,11 +1264,11 @@ mod tests {
         );
     }
 
-    #[test]
-    fn roundtrip_validation_header() {
-        let headers = &[
-            ValidationHeader {
-                batch_uuid: Uuid::new_v4(),
+    lazy_static! {
+        static ref GOLDEN_VALIDATION_HEADERS: Vec<(ValidationHeader, Vec<u8>)> = {
+            let validation_header_1_bytes = hex::decode("4f626a0104166176726f2e736368656d619a077b2274797065223a227265636f7264222c226e616d657370616365223a226f72672e61626574746572696e7465726e65742e7072696f2e7631222c226e616d65223a225072696f56616c6964697479486561646572222c226669656c6473223a5b7b226e616d65223a2262617463685f75756964222c2274797065223a7b2274797065223a22737472696e67222c226c6f676963616c54797065223a2275756964227d7d2c7b226e616d65223a226e616d65222c2274797065223a22737472696e67227d2c7b226e616d65223a2262696e73222c2274797065223a22696e74227d2c7b226e616d65223a22657073696c6f6e222c2274797065223a22646f75626c65227d2c7b226e616d65223a227072696d65222c2274797065223a226c6f6e67222c2264656661756c74223a343239333931383732317d2c7b226e616d65223a226e756d6265725f6f665f73657276657273222c2274797065223a22696e74222c2264656661756c74223a327d2c7b226e616d65223a2268616d6d696e675f776569676874222c2274797065223a5b22696e74222c226e756c6c225d7d2c7b226e616d65223a227061636b65745f66696c655f646967657374222c2274797065223a226279746573227d5d7d146176726f2e636f646563086e756c6c009f8fc651b8e2191bdfa8ad453ea2b73c027c4838663566306637392d303838372d343332322d386238632d3634646165623765353138331466616b652d62617463680404560e2db29df93f22040202049f8fc651b8e2191bdfa8ad453ea2b73c").unwrap();
+            let validation_header_1 = ValidationHeader {
+                batch_uuid: Uuid::parse_str("8f5f0f79-0887-4322-8b8c-64daeb7e5183").unwrap(),
                 name: "fake-batch".to_owned(),
                 bins: 2,
                 epsilon: 1.601,
@@ -1213,9 +1276,11 @@ mod tests {
                 number_of_servers: 2,
                 hamming_weight: None,
                 packet_file_digest: vec![4u8],
-            },
-            ValidationHeader {
-                batch_uuid: Uuid::new_v4(),
+            };
+
+            let validation_header_2_bytes = hex::decode("4f626a0104166176726f2e736368656d619a077b2274797065223a227265636f7264222c226e616d657370616365223a226f72672e61626574746572696e7465726e65742e7072696f2e7631222c226e616d65223a225072696f56616c6964697479486561646572222c226669656c6473223a5b7b226e616d65223a2262617463685f75756964222c2274797065223a7b2274797065223a22737472696e67222c226c6f676963616c54797065223a2275756964227d7d2c7b226e616d65223a226e616d65222c2274797065223a22737472696e67227d2c7b226e616d65223a2262696e73222c2274797065223a22696e74227d2c7b226e616d65223a22657073696c6f6e222c2274797065223a22646f75626c65227d2c7b226e616d65223a227072696d65222c2274797065223a226c6f6e67222c2264656661756c74223a343239333931383732317d2c7b226e616d65223a226e756d6265725f6f665f73657276657273222c2274797065223a22696e74222c2264656661756c74223a327d2c7b226e616d65223a2268616d6d696e675f776569676874222c2274797065223a5b22696e74222c226e756c6c225d7d2c7b226e616d65223a227061636b65745f66696c655f646967657374222c2274797065223a226279746573227d5d7d146176726f2e636f646563086e756c6c00d45f391c5edf41c4b15025c8a6645177027e4834636464623330322d343462322d343565392d613164312d6438383464663862383765301466616b652d62617463680404560e2db29df93f220400180206d45f391c5edf41c4b15025c8a6645177").unwrap();
+            let validation_header_2 = ValidationHeader {
+                batch_uuid: Uuid::parse_str("4cddb302-44b2-45e9-a1d1-d884df8b87e0").unwrap(),
                 name: "fake-batch".to_owned(),
                 bins: 2,
                 epsilon: 1.601,
@@ -1223,53 +1288,91 @@ mod tests {
                 number_of_servers: 2,
                 hamming_weight: Some(12),
                 packet_file_digest: vec![6u8],
-            },
-        ];
+            };
 
-        for header in headers {
+            vec![
+                (validation_header_1, validation_header_1_bytes),
+                (validation_header_2, validation_header_2_bytes),
+            ]
+        };
+    }
+
+    #[test]
+    fn read_validation_header() {
+        for (want_header, header_bytes) in &*GOLDEN_VALIDATION_HEADERS {
+            let validation_header = ValidationHeader::read(&header_bytes[..]).unwrap();
+            assert_eq!(want_header, &validation_header);
+        }
+    }
+
+    #[test]
+    fn roundtrip_validation_header() {
+        for (header, _) in &*GOLDEN_VALIDATION_HEADERS {
             let mut record_vec = Vec::new();
-
             header.write(&mut record_vec).expect("write error");
             let header_again = ValidationHeader::read(&record_vec[..]).expect("read error");
             assert_eq!(header_again, *header);
         }
     }
 
-    #[test]
-    fn roundtrip_validation_packet() {
-        let packets = &[
-            ValidationPacket {
-                uuid: Uuid::new_v4(),
+    lazy_static! {
+        static ref GOLDEN_VALIDATION_PACKETS: Vec<(ValidationPacket, Vec<u8>)> = {
+            let validation_packet_1_bytes = hex::decode("4f626a0104166176726f2e736368656d61ee037b2274797065223a227265636f7264222c226e616d657370616365223a226f72672e61626574746572696e7465726e65742e7072696f2e7631222c226e616d65223a225072696f56616c69646974795061636b6574222c226669656c6473223a5b7b226e616d65223a2275756964222c2274797065223a7b2274797065223a22737472696e67222c226c6f676963616c54797065223a2275756964227d7d2c7b226e616d65223a22665f72222c2274797065223a226c6f6e67227d2c7b226e616d65223a22675f72222c2274797065223a226c6f6e67227d2c7b226e616d65223a22685f72222c2274797065223a226c6f6e67227d5d7d146176726f2e636f646563086e756c6c00368cb0feb3f809181cea03dcb7178a2502504835316239643938312d393537342d343466622d616533352d383463636631336366306639020406368cb0feb3f809181cea03dcb7178a25").unwrap();
+            let validation_packet_1 = ValidationPacket {
+                uuid: Uuid::parse_str("51b9d981-9574-44fb-ae35-84ccf13cf0f9").unwrap(),
                 f_r: 1,
                 g_r: 2,
                 h_r: 3,
-            },
-            ValidationPacket {
-                uuid: Uuid::new_v4(),
+            };
+
+            let validation_packet_2_bytes = hex::decode("4f626a0104146176726f2e636f646563086e756c6c166176726f2e736368656d61ee037b2274797065223a227265636f7264222c226e616d657370616365223a226f72672e61626574746572696e7465726e65742e7072696f2e7631222c226e616d65223a225072696f56616c69646974795061636b6574222c226669656c6473223a5b7b226e616d65223a2275756964222c2274797065223a7b2274797065223a22737472696e67222c226c6f676963616c54797065223a2275756964227d7d2c7b226e616d65223a22665f72222c2274797065223a226c6f6e67227d2c7b226e616d65223a22675f72222c2274797065223a226c6f6e67227d2c7b226e616d65223a22685f72222c2274797065223a226c6f6e67227d5d7d00ce6c0aad9e40580f01836ff18ffc13d302504863306532343832642d656533622d343864342d623333302d356566623464643035323638080a0cce6c0aad9e40580f01836ff18ffc13d3").unwrap();
+            let validation_packet_2 = ValidationPacket {
+                uuid: Uuid::parse_str("c0e2482d-ee3b-48d4-b330-5efb4dd05268").unwrap(),
                 f_r: 4,
                 g_r: 5,
                 h_r: 6,
-            },
-            ValidationPacket {
-                uuid: Uuid::new_v4(),
+            };
+
+            let validation_packet_3_bytes = hex::decode("4f626a0104166176726f2e736368656d61ee037b2274797065223a227265636f7264222c226e616d657370616365223a226f72672e61626574746572696e7465726e65742e7072696f2e7631222c226e616d65223a225072696f56616c69646974795061636b6574222c226669656c6473223a5b7b226e616d65223a2275756964222c2274797065223a7b2274797065223a22737472696e67222c226c6f676963616c54797065223a2275756964227d7d2c7b226e616d65223a22665f72222c2274797065223a226c6f6e67227d2c7b226e616d65223a22675f72222c2274797065223a226c6f6e67227d2c7b226e616d65223a22685f72222c2274797065223a226c6f6e67227d5d7d146176726f2e636f646563086e756c6c008f37d54782b5a4ba978ca4b04c41d54102504865656365653134622d613030642d343766622d613031382d3130643562316536303739370e10128f37d54782b5a4ba978ca4b04c41d541").unwrap();
+            let validation_packet_3 = ValidationPacket {
+                uuid: Uuid::parse_str("eecee14b-a00d-47fb-a018-10d5b1e60797").unwrap(),
                 f_r: 7,
                 g_r: 8,
                 h_r: 9,
-            },
-        ];
+            };
 
+            vec![
+                (validation_packet_1, validation_packet_1_bytes),
+                (validation_packet_2, validation_packet_2_bytes),
+                (validation_packet_3, validation_packet_3_bytes),
+            ]
+        };
+    }
+
+    #[test]
+    fn read_validation_packet() {
+        let schema = ValidationPacket::schema();
+        for (want_validation_packet, validation_packet_bytes) in &*GOLDEN_VALIDATION_PACKETS {
+            let mut reader = Reader::with_schema(&schema, &validation_packet_bytes[..]).unwrap();
+            let data_share_packet = ValidationPacket::read(&mut reader).unwrap();
+            assert_eq!(want_validation_packet, &data_share_packet);
+        }
+    }
+
+    #[test]
+    fn roundtrip_validation_packet() {
         let mut record_vec = Vec::new();
 
         let schema = ValidationPacket::schema();
         let mut writer = Writer::new(&schema, &mut record_vec);
 
-        for packet in packets {
+        for (packet, _) in &*GOLDEN_VALIDATION_PACKETS {
             packet.write(&mut writer).expect("write error");
         }
         writer.flush().unwrap();
 
         let mut reader = Reader::with_schema(&schema, &record_vec[..]).unwrap();
-        for packet in packets {
+        for (packet, _) in &*GOLDEN_VALIDATION_PACKETS {
             let packet_again = ValidationPacket::read(&mut reader).expect("read error");
             assert_eq!(packet_again, *packet);
         }
@@ -1278,11 +1381,14 @@ mod tests {
         assert_matches!(ValidationPacket::read(&mut reader), Err(Error::EofError));
     }
 
-    #[test]
-    fn roundtrip_sum_part() {
-        let headers = &[
-            SumPart {
-                batch_uuids: vec![Uuid::new_v4(), Uuid::new_v4()],
+    lazy_static! {
+        static ref GOLDEN_SUM_PARTS: Vec<(SumPart, Vec<u8>)> = {
+            let sum_part_1_bytes = hex::decode("4f626a0104166176726f2e736368656d61b20b7b2274797065223a227265636f7264222c226e616d657370616365223a226f72672e61626574746572696e7465726e65742e7072696f2e7631222c226e616d65223a225072696f53756d50617274222c226669656c6473223a5b7b226e616d65223a2262617463685f7575696473222c2274797065223a7b2274797065223a226172726179222c226974656d73223a7b2274797065223a22737472696e67222c226c6f676963616c54797065223a2275756964227d7d7d2c7b226e616d65223a226e616d65222c2274797065223a22737472696e67227d2c7b226e616d65223a2262696e73222c2274797065223a22696e74227d2c7b226e616d65223a22657073696c6f6e222c2274797065223a22646f75626c65227d2c7b226e616d65223a227072696d65222c2274797065223a226c6f6e67227d2c7b226e616d65223a226e756d6265725f6f665f73657276657273222c2274797065223a22696e74227d2c7b226e616d65223a2268616d6d696e675f776569676874222c2274797065223a5b22696e74222c226e756c6c225d7d2c7b226e616d65223a2273756d222c2274797065223a7b2274797065223a226172726179222c226974656d73223a226c6f6e67227d7d2c7b226e616d65223a226167677265676174696f6e5f73746172745f74696d65222c2274797065223a7b2274797065223a226c6f6e67222c226c6f676963616c54797065223a2274696d657374616d702d6d696c6c6973227d7d2c7b226e616d65223a226167677265676174696f6e5f656e645f74696d65222c2274797065223a7b2274797065223a226c6f6e67222c226c6f676963616c54797065223a2274696d657374616d702d6d696c6c6973227d7d2c7b226e616d65223a227061636b65745f66696c655f646967657374222c2274797065223a226279746573227d2c7b226e616d65223a22746f74616c5f696e646976696475616c5f636c69656e7473222c2274797065223a226c6f6e67227d5d7d146176726f2e636f646563086e756c6c00ae60e74a8b6b11559ed0c9e7de221c0102ee01044864623562316135632d623563362d346439332d623736392d3766353765366361663538644830363265373931622d396132312d343466332d383561352d656335323333643636383662001466616b652d62617463680404560e2db29df93f22040206181a1c00f693f1f0058297f1f0050601020304ae60e74a8b6b11559ed0c9e7de221c01").unwrap();
+            let sum_part_1 = SumPart {
+                batch_uuids: vec![
+                    Uuid::parse_str("db5b1a5c-b5c6-4d93-b769-7f57e6caf58d").unwrap(),
+                    Uuid::parse_str("062e791b-9a21-44f3-85a5-ec5233d6686b").unwrap(),
+                ],
                 name: "fake-batch".to_owned(),
                 bins: 2,
                 epsilon: 1.601,
@@ -1294,9 +1400,11 @@ mod tests {
                 aggregation_end_time: 789456321,
                 packet_file_digest: vec![1, 2, 3],
                 total_individual_clients: 2,
-            },
-            SumPart {
-                batch_uuids: vec![Uuid::new_v4()],
+            };
+
+            let sum_part_2_bytes = hex::decode("4f626a0104166176726f2e736368656d61b20b7b2274797065223a227265636f7264222c226e616d657370616365223a226f72672e61626574746572696e7465726e65742e7072696f2e7631222c226e616d65223a225072696f53756d50617274222c226669656c6473223a5b7b226e616d65223a2262617463685f7575696473222c2274797065223a7b2274797065223a226172726179222c226974656d73223a7b2274797065223a22737472696e67222c226c6f676963616c54797065223a2275756964227d7d7d2c7b226e616d65223a226e616d65222c2274797065223a22737472696e67227d2c7b226e616d65223a2262696e73222c2274797065223a22696e74227d2c7b226e616d65223a22657073696c6f6e222c2274797065223a22646f75626c65227d2c7b226e616d65223a227072696d65222c2274797065223a226c6f6e67227d2c7b226e616d65223a226e756d6265725f6f665f73657276657273222c2274797065223a22696e74227d2c7b226e616d65223a2268616d6d696e675f776569676874222c2274797065223a5b22696e74222c226e756c6c225d7d2c7b226e616d65223a2273756d222c2274797065223a7b2274797065223a226172726179222c226974656d73223a226c6f6e67227d7d2c7b226e616d65223a226167677265676174696f6e5f73746172745f74696d65222c2274797065223a7b2274797065223a226c6f6e67222c226c6f676963616c54797065223a2274696d657374616d702d6d696c6c6973227d7d2c7b226e616d65223a226167677265676174696f6e5f656e645f74696d65222c2274797065223a7b2274797065223a226c6f6e67222c226c6f676963616c54797065223a2274696d657374616d702d6d696c6c6973227d7d2c7b226e616d65223a227061636b65745f66696c655f646967657374222c2274797065223a226279746573227d2c7b226e616d65223a22746f74616c5f696e646976696475616c5f636c69656e7473222c2274797065223a226c6f6e67227d5d7d146176726f2e636f646563086e756c6c0043a570b58e473dfef2dfd26b0bff5e7902a601024835643662343237612d393932372d343137662d383035622d373765373666323663343738001466616b652d62617463680404560e2db29df93f2204001806181a1c00f693f1f0058297f1f005060708090443a570b58e473dfef2dfd26b0bff5e79").unwrap();
+            let sum_part_2 = SumPart {
+                batch_uuids: vec![Uuid::parse_str("5d6b427a-9927-417f-805b-77e76f26c478").unwrap()],
                 name: "fake-batch".to_owned(),
                 bins: 2,
                 epsilon: 1.601,
@@ -1308,44 +1416,82 @@ mod tests {
                 aggregation_end_time: 789456321,
                 packet_file_digest: vec![7, 8, 9],
                 total_individual_clients: 2,
-            },
-        ];
+            };
 
-        for header in headers {
+            vec![
+                (sum_part_1, sum_part_1_bytes),
+                (sum_part_2, sum_part_2_bytes),
+            ]
+        };
+    }
+
+    #[test]
+    fn read_sum_part() {
+        for (want_sum_part, sum_part_bytes) in &*GOLDEN_SUM_PARTS {
+            let sum_part = SumPart::read(&sum_part_bytes[..]).unwrap();
+            assert_eq!(want_sum_part, &sum_part);
+        }
+    }
+
+    #[test]
+    fn roundtrip_sum_part() {
+        for (sum_part, _) in &*GOLDEN_SUM_PARTS {
             let mut record_vec = Vec::new();
+            sum_part.write(&mut record_vec).expect("write error");
+            let sum_part_again = SumPart::read(&record_vec[..]).expect("read error");
+            assert_eq!(sum_part_again, *sum_part);
+        }
+    }
 
-            header.write(&mut record_vec).expect("write error");
-            let header_again = SumPart::read(&record_vec[..]).expect("read error");
-            assert_eq!(header_again, *header);
+    lazy_static! {
+        static ref GOLDEN_INVALID_PACKETS: Vec<(InvalidPacket, Vec<u8>)> = {
+            let invalid_packet_1_bytes = hex::decode("4f626a0104146176726f2e636f646563086e756c6c166176726f2e736368656d61be027b2274797065223a227265636f7264222c226e616d657370616365223a226f72672e61626574746572696e7465726e65742e7072696f2e7631222c226e616d65223a225072696f496e76616c69645061636b6574222c226669656c6473223a5b7b226e616d65223a2275756964222c2274797065223a7b2274797065223a22737472696e67222c226c6f676963616c54797065223a2275756964227d7d5d7d006de170c446ec2172338211e7aa0ad82f024a4861623763326435622d353633342d343730662d383162352d3063656164303639616162346de170c446ec2172338211e7aa0ad82f").unwrap();
+            let invalid_packet_1 = InvalidPacket {
+                uuid: Uuid::parse_str("ab7c2d5b-5634-470f-81b5-0cead069aab4").unwrap(),
+            };
+
+            let invalid_packet_2_bytes = hex::decode("4f626a0104166176726f2e736368656d61be027b2274797065223a227265636f7264222c226e616d657370616365223a226f72672e61626574746572696e7465726e65742e7072696f2e7631222c226e616d65223a225072696f496e76616c69645061636b6574222c226669656c6473223a5b7b226e616d65223a2275756964222c2274797065223a7b2274797065223a22737472696e67222c226c6f676963616c54797065223a2275756964227d7d5d7d146176726f2e636f646563086e756c6c0095969d036d8e3d0f39a1393b221e6aae024a4839356265386139302d313232642d343663632d396361372d66366535663934316161376295969d036d8e3d0f39a1393b221e6aae").unwrap();
+            let invalid_packet_2 = InvalidPacket {
+                uuid: Uuid::parse_str("95be8a90-122d-46cc-9ca7-f6e5f941aa7b").unwrap(),
+            };
+
+            let invalid_packet_3_bytes = hex::decode("4f626a0104166176726f2e736368656d61be027b2274797065223a227265636f7264222c226e616d657370616365223a226f72672e61626574746572696e7465726e65742e7072696f2e7631222c226e616d65223a225072696f496e76616c69645061636b6574222c226669656c6473223a5b7b226e616d65223a2275756964222c2274797065223a7b2274797065223a22737472696e67222c226c6f676963616c54797065223a2275756964227d7d5d7d146176726f2e636f646563086e756c6c00d8f3eec9d4c68061ec330d794ea704ad024a4837366162353839362d636132352d343432632d396338302d633463663766396164393835d8f3eec9d4c68061ec330d794ea704ad").unwrap();
+            let invalid_packet_3 = InvalidPacket {
+                uuid: Uuid::parse_str("76ab5896-ca25-442c-9c80-c4cf7f9ad985").unwrap(),
+            };
+
+            vec![
+                (invalid_packet_1, invalid_packet_1_bytes),
+                (invalid_packet_2, invalid_packet_2_bytes),
+                (invalid_packet_3, invalid_packet_3_bytes),
+            ]
+        };
+    }
+
+    #[test]
+    fn read_invalid_packet() {
+        let schema = InvalidPacket::schema();
+        for (want_invalid_packet, invalid_packet_bytes) in &*GOLDEN_INVALID_PACKETS {
+            let mut reader = Reader::with_schema(&schema, &invalid_packet_bytes[..]).unwrap();
+            let invalid_packet = InvalidPacket::read(&mut reader).unwrap();
+            assert_eq!(want_invalid_packet, &invalid_packet);
         }
     }
 
     #[test]
     fn roundtrip_invalid_packet() {
-        let packets = &[
-            InvalidPacket {
-                uuid: Uuid::new_v4(),
-            },
-            InvalidPacket {
-                uuid: Uuid::new_v4(),
-            },
-            InvalidPacket {
-                uuid: Uuid::new_v4(),
-            },
-        ];
-
         let mut record_vec = Vec::new();
 
         let schema = InvalidPacket::schema();
         let mut writer = Writer::new(&schema, &mut record_vec);
 
-        for packet in packets {
+        for (packet, _) in &*GOLDEN_INVALID_PACKETS {
             packet.write(&mut writer).expect("write error");
         }
         writer.flush().unwrap();
 
         let mut reader = Reader::with_schema(&schema, &record_vec[..]).unwrap();
-        for packet in packets {
+        for (packet, _) in &*GOLDEN_INVALID_PACKETS {
             let packet_again = InvalidPacket::read(&mut reader).expect("read error");
             assert_eq!(packet_again, *packet);
         }
