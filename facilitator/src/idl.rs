@@ -5,6 +5,7 @@ use avro_rs::{
     types::{Record, Value},
     Reader, Schema, Writer,
 };
+use lazy_static::lazy_static;
 use prio::{
     field::FieldPriov2,
     server::{Server, ServerError, VerificationMessage},
@@ -17,14 +18,44 @@ use std::{
 };
 use uuid::Uuid;
 
-const BATCH_SIGNATURE_SCHEMA: &str = include_str!("../../avro-schema/batch-signature.avsc");
-const INGESTION_HEADER_SCHEMA: &str = include_str!("../../avro-schema/ingestion-header.avsc");
-const INGESTION_DATA_SHARE_PACKET_SCHEMA: &str =
-    include_str!("../../avro-schema/ingestion-data-share-packet.avsc");
-const VALIDATION_HEADER_SCHEMA: &str = include_str!("../../avro-schema/validation-header.avsc");
-const VALIDATION_PACKET_SCHEMA: &str = include_str!("../../avro-schema/validation-packet.avsc");
-const SUM_PART_SCHEMA: &str = include_str!("../../avro-schema/sum-part.avsc");
-const INVALID_PACKET_SCHEMA: &str = include_str!("../../avro-schema/invalid-packet.avsc");
+lazy_static! {
+    // Schema::parse_list returns its schemas in the order they are provided;
+    // for ease-of-use, we pull these out into their own helpfully-named
+    // variables. `_SCHEMAS` should be referenced only within this
+    // `lazy_static` block (and ideally would not exist at all). Schema users
+    // should refer to the various `&'static Schema` exported below.
+    static ref _SCHEMAS: Vec<Schema> = {
+        const BATCH_SIGNATURE_SCHEMA: &str = include_str!("../../avro-schema/batch-signature.avsc");
+        const INGESTION_HEADER_SCHEMA: &str =
+            include_str!("../../avro-schema/ingestion-header.avsc");
+        const INGESTION_DATA_SHARE_PACKET_SCHEMA: &str =
+            include_str!("../../avro-schema/ingestion-data-share-packet.avsc");
+        const VALIDATION_HEADER_SCHEMA: &str =
+            include_str!("../../avro-schema/validation-header.avsc");
+        const VALIDATION_PACKET_SCHEMA: &str =
+            include_str!("../../avro-schema/validation-packet.avsc");
+        const SUM_PART_SCHEMA: &str = include_str!("../../avro-schema/sum-part.avsc");
+        const INVALID_PACKET_SCHEMA: &str = include_str!("../../avro-schema/invalid-packet.avsc");
+
+        Schema::parse_list(&[
+            BATCH_SIGNATURE_SCHEMA,
+            INGESTION_HEADER_SCHEMA,
+            INGESTION_DATA_SHARE_PACKET_SCHEMA,
+            VALIDATION_HEADER_SCHEMA,
+            VALIDATION_PACKET_SCHEMA,
+            SUM_PART_SCHEMA,
+            INVALID_PACKET_SCHEMA,
+        ])
+        .unwrap()
+    };
+    static ref BATCH_SIGNATURE_SCHEMA: &'static Schema = &_SCHEMAS[0];
+    static ref INGESTION_HEADER_SCHEMA: &'static Schema = &_SCHEMAS[1];
+    static ref INGESTION_DATA_SHARE_PACKET_SCHEMA: &'static Schema = &_SCHEMAS[2];
+    static ref VALIDATION_HEADER_SCHEMA: &'static Schema = &_SCHEMAS[3];
+    static ref VALIDATION_PACKET_SCHEMA: &'static Schema = &_SCHEMAS[4];
+    static ref SUM_PART_SCHEMA: &'static Schema = &_SCHEMAS[5];
+    static ref INVALID_PACKET_SCHEMA: &'static Schema = &_SCHEMAS[6];
+}
 
 pub trait Header: Sized {
     /// Returns the SHA256 digest of the packet file this header describes.
@@ -51,17 +82,9 @@ pub trait Packet: Sized {
     /// schema returned from Packet::schema.
     fn write<W: Write>(&self, writer: &mut Writer<W>) -> Result<(), Error>;
 
-    /// Implementations of Packet should return their Avro schemas as strings
-    /// from this method.
-    fn schema_raw() -> &'static str;
-
-    /// Creates an avro_rs::Schema from the packet schema. For constructing the
-    /// avro_rs::{Reader, Writer} to use in Packet::{read, write}. Since this
-    /// only ever uses a schema whose correctness we can guarantee, it panics on
-    /// failure.
-    fn schema() -> Schema {
-        Schema::parse_str(Self::schema_raw()).unwrap()
-    }
+    /// Provides the avro_rs::Schema used by the packet. For constructing the
+    /// avro_rs::{Reader, Writer} to use in Packet::{read, write}.
+    fn schema() -> &'static Schema;
 }
 
 /// The file containing signatures over the ingestion batch header and packet
@@ -76,10 +99,7 @@ impl BatchSignature {
     /// Reads and parses one BatchSignature from the provided std::io::Read
     /// instance.
     pub fn read<R: Read>(reader: R) -> Result<BatchSignature, Error> {
-        let schema = Schema::parse_str(BATCH_SIGNATURE_SCHEMA).map_err(|e| {
-            Error::AvroError("failed to parse ingestion signature schema".to_owned(), e)
-        })?;
-        let mut reader = Reader::with_schema(&schema, reader)
+        let mut reader = Reader::with_schema(&*BATCH_SIGNATURE_SCHEMA, reader)
             .map_err(|e| Error::AvroError("failed to create Avro reader".to_owned(), e))?;
 
         // We expect exactly one record and for it to be an ingestion signature
@@ -140,10 +160,7 @@ impl BatchSignature {
     /// Serializes this signature into Avro format and writes it to the provided
     /// std::io::Write instance.
     pub fn write<W: Write>(&self, writer: &mut W) -> Result<(), Error> {
-        let schema = Schema::parse_str(BATCH_SIGNATURE_SCHEMA).map_err(|e| {
-            Error::AvroError("failed to parse ingestion signature schema".to_owned(), e)
-        })?;
-        let mut writer = Writer::new(&schema, writer);
+        let mut writer = Writer::new(&*BATCH_SIGNATURE_SCHEMA, writer);
 
         let mut record = match Record::new(writer.schema()) {
             Some(r) => r,
@@ -208,10 +225,7 @@ impl Header for IngestionHeader {
     }
 
     fn read<R: Read>(reader: R) -> Result<IngestionHeader, Error> {
-        let schema = Schema::parse_str(INGESTION_HEADER_SCHEMA).map_err(|e| {
-            Error::AvroError("failed to parse ingestion header schema".to_owned(), e)
-        })?;
-        let mut reader = Reader::with_schema(&schema, reader).map_err(|e| {
+        let mut reader = Reader::with_schema(&*INGESTION_HEADER_SCHEMA, reader).map_err(|e| {
             Error::AvroError("failed to create reader for ingestion header".to_owned(), e)
         })?;
 
@@ -314,10 +328,7 @@ impl Header for IngestionHeader {
     }
 
     fn write<W: Write>(&self, writer: &mut W) -> Result<(), Error> {
-        let schema = Schema::parse_str(INGESTION_HEADER_SCHEMA).map_err(|e| {
-            Error::AvroError("failed to parse ingestion header schema".to_owned(), e)
-        })?;
-        let mut writer = Writer::new(&schema, writer);
+        let mut writer = Writer::new(&*INGESTION_HEADER_SCHEMA, writer);
 
         // Ideally we would just do `writer.append_ser(self)` to use Serde serialization to write
         // the record but there seems to be some problem with serializing UUIDs, so we have to
@@ -381,8 +392,8 @@ pub struct IngestionDataSharePacket {
 }
 
 impl Packet for IngestionDataSharePacket {
-    fn schema_raw() -> &'static str {
-        INGESTION_DATA_SHARE_PACKET_SCHEMA
+    fn schema() -> &'static Schema {
+        &*INGESTION_DATA_SHARE_PACKET_SCHEMA
     }
 
     fn read<R: Read>(reader: &mut Reader<R>) -> Result<IngestionDataSharePacket, Error> {
@@ -589,10 +600,7 @@ impl Header for ValidationHeader {
     }
 
     fn read<R: Read>(reader: R) -> Result<ValidationHeader, Error> {
-        let schema = Schema::parse_str(VALIDATION_HEADER_SCHEMA).map_err(|e| {
-            Error::AvroError("failed to parse validation header schema".to_owned(), e)
-        })?;
-        let mut reader = Reader::with_schema(&schema, reader).map_err(|e| {
+        let mut reader = Reader::with_schema(&*VALIDATION_HEADER_SCHEMA, reader).map_err(|e| {
             Error::AvroError(
                 "failed to create reader for validation header".to_owned(),
                 e,
@@ -690,10 +698,7 @@ impl Header for ValidationHeader {
     }
 
     fn write<W: Write>(&self, writer: &mut W) -> Result<(), Error> {
-        let schema = Schema::parse_str(VALIDATION_HEADER_SCHEMA).map_err(|e| {
-            Error::AvroError("failed to parse validation header schema".to_owned(), e)
-        })?;
-        let mut writer = Writer::new(&schema, writer);
+        let mut writer = Writer::new(&*VALIDATION_HEADER_SCHEMA, writer);
 
         let mut record = match Record::new(writer.schema()) {
             Some(r) => r,
@@ -740,8 +745,8 @@ pub struct ValidationPacket {
 }
 
 impl Packet for ValidationPacket {
-    fn schema_raw() -> &'static str {
-        VALIDATION_PACKET_SCHEMA
+    fn schema() -> &'static Schema {
+        &*VALIDATION_PACKET_SCHEMA
     }
 
     fn read<R: Read>(reader: &mut Reader<R>) -> Result<ValidationPacket, Error> {
@@ -830,9 +835,7 @@ impl Header for SumPart {
     }
 
     fn read<R: Read>(reader: R) -> Result<SumPart, Error> {
-        let schema = Schema::parse_str(SUM_PART_SCHEMA)
-            .map_err(|e| Error::AvroError("failed to parse sum part schema".to_owned(), e))?;
-        let mut reader = Reader::with_schema(&schema, reader)
+        let mut reader = Reader::with_schema(&*SUM_PART_SCHEMA, reader)
             .map_err(|e| Error::AvroError("failed to create reader for sum part".to_owned(), e))?;
 
         // We expect exactly one record in the reader and for it to be a sum
@@ -974,9 +977,7 @@ impl Header for SumPart {
     }
 
     fn write<W: Write>(&self, writer: &mut W) -> Result<(), Error> {
-        let schema = Schema::parse_str(SUM_PART_SCHEMA)
-            .map_err(|e| Error::AvroError("failed to parse sum part schema".to_owned(), e))?;
-        let mut writer = Writer::new(&schema, writer);
+        let mut writer = Writer::new(&*SUM_PART_SCHEMA, writer);
 
         // Ideally we would just do `writer.append_ser(self)` to use Serde serialization to write
         // the record but there seems to be some problem with serializing UUIDs, so we have to
@@ -1043,8 +1044,8 @@ pub struct InvalidPacket {
 }
 
 impl Packet for InvalidPacket {
-    fn schema_raw() -> &'static str {
-        INVALID_PACKET_SCHEMA
+    fn schema() -> &'static Schema {
+        &*INVALID_PACKET_SCHEMA
     }
 
     fn read<R: Read>(reader: &mut Reader<R>) -> Result<InvalidPacket, Error> {
