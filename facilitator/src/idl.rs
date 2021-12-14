@@ -122,10 +122,29 @@ impl BatchSignature {
             ));
         }
 
-        BatchSignature::from_value(value)
+        BatchSignature::try_from(value)
     }
 
-    fn from_value(value: Value) -> Result<Self, Error> {
+    /// Serializes this signature into Avro format and writes it to the provided
+    /// std::io::Write instance.
+    pub fn write<W: Write>(&self, writer: &mut W) -> Result<(), Error> {
+        let mut writer = Writer::new(&*BATCH_SIGNATURE_SCHEMA, writer);
+        writer.append(Value::from(self)).map_err(|e| {
+            Error::AvroError("failed to append record to Avro writer".to_owned(), e)
+        })?;
+
+        writer
+            .flush()
+            .map_err(|e| Error::AvroError("failed to flush Avro writer".to_owned(), e))?;
+
+        Ok(())
+    }
+}
+
+impl TryFrom<Value> for BatchSignature {
+    type Error = Error;
+
+    fn try_from(value: Value) -> Result<Self, Self::Error> {
         let fields = match value {
             Value::Record(fields) => fields,
             _ => {
@@ -159,23 +178,10 @@ impl BatchSignature {
                 .ok_or_else(|| Error::MalformedHeaderError("missing key_identifier".to_owned()))?,
         })
     }
+}
 
-    /// Serializes this signature into Avro format and writes it to the provided
-    /// std::io::Write instance.
-    pub fn write<W: Write>(&self, writer: &mut W) -> Result<(), Error> {
-        let mut writer = Writer::new(&*BATCH_SIGNATURE_SCHEMA, writer);
-        writer.append(self.as_value()).map_err(|e| {
-            Error::AvroError("failed to append record to Avro writer".to_owned(), e)
-        })?;
-
-        writer
-            .flush()
-            .map_err(|e| Error::AvroError("failed to flush Avro writer".to_owned(), e))?;
-
-        Ok(())
-    }
-
-    fn as_value(&self) -> Value {
+impl From<&BatchSignature> for Value {
+    fn from(sig: &BatchSignature) -> Value {
         // avro_rs docs say this can only happen "if the `Schema is not
         // a `Schema::Record` variant", which shouldn't ever happen, so
         // panic for debugging
@@ -184,9 +190,9 @@ impl BatchSignature {
             .expect("Unable to create record from ingestion signature schema");
         record.put(
             "batch_header_signature",
-            Value::Bytes(self.batch_header_signature.clone()),
+            Value::Bytes(sig.batch_header_signature.clone()),
         );
-        record.put("key_identifier", Value::String(self.key_identifier.clone()));
+        record.put("key_identifier", Value::String(sig.key_identifier.clone()));
         Value::Record(record.fields)
     }
 }
@@ -1117,10 +1123,27 @@ impl ValidationBatch {
             ));
         }
 
-        ValidationBatch::from_value(value)
+        ValidationBatch::try_from(value)
     }
 
-    fn from_value(value: Value) -> Result<Self, Error> {
+    /// Serializes this message into Avro format and writes it to the provided
+    /// std::io::Write instance.
+    pub fn write<W: Write>(&self, writer: &mut W) -> Result<(), Error> {
+        let mut writer = Writer::new(&*VALIDATION_BATCH_SCHEMA, writer);
+        writer.append(Value::from(self)).map_err(|e| {
+            Error::AvroError("failed to append record to Avro writer".to_owned(), e)
+        })?;
+        writer
+            .flush()
+            .map_err(|e| Error::AvroError("failed to flush".to_owned(), e))?;
+        Ok(())
+    }
+}
+
+impl TryFrom<Value> for ValidationBatch {
+    type Error = Error;
+
+    fn try_from(value: Value) -> Result<Self, Self::Error> {
         let fields = match value {
             Value::Record(fields) => fields,
             _ => {
@@ -1136,7 +1159,7 @@ impl ValidationBatch {
 
         for (field_name, field_value) in fields {
             match (field_name.as_str(), field_value) {
-                ("sig", field_value) => sig = Some(BatchSignature::from_value(field_value)?),
+                ("sig", field_value) => sig = Some(BatchSignature::try_from(field_value)?),
                 ("header", Value::Bytes(buf)) => header = Some(buf),
                 ("packets", Value::Bytes(buf)) => packets = Some(buf),
                 _ => (),
@@ -1151,26 +1174,15 @@ impl ValidationBatch {
                 .ok_or_else(|| Error::MalformedBatchError("missing packets".to_owned()))?,
         })
     }
+}
 
-    /// Serializes this message into Avro format and writes it to the provided
-    /// std::io::Write instance.
-    pub fn write<W: Write>(&self, writer: &mut W) -> Result<(), Error> {
-        let mut writer = Writer::new(&*VALIDATION_BATCH_SCHEMA, writer);
-        writer.append(self.as_value()).map_err(|e| {
-            Error::AvroError("failed to append record to Avro writer".to_owned(), e)
-        })?;
-        writer
-            .flush()
-            .map_err(|e| Error::AvroError("failed to flush".to_owned(), e))?;
-        Ok(())
-    }
-
-    fn as_value(&self) -> Value {
+impl From<&ValidationBatch> for Value {
+    fn from(batch: &ValidationBatch) -> Self {
         let mut record = Record::new(&*VALIDATION_BATCH_SCHEMA)
             .expect("Unable to create record from validation batch schema");
-        record.put("sig", self.sig.as_value());
-        record.put("header", Value::Bytes(self.header.clone()));
-        record.put("packets", Value::Bytes(self.packets.clone()));
+        record.put("sig", Value::from(&batch.sig));
+        record.put("header", Value::Bytes(batch.header.clone()));
+        record.put("packets", Value::Bytes(batch.packets.clone()));
         Value::Record(record.fields)
     }
 }
