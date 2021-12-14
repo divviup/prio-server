@@ -161,13 +161,16 @@ is_first                                  = false
 use_aws                                   = false
 default_aggregation_period                = "8h"
 default_aggregation_grace_period          = "4h"
-workflow_manager_version                  = "0.6.18"
-facilitator_version                       = "0.6.18"
+workflow_manager_version                  = "0.6.19"
+facilitator_version                       = "0.6.19"
+key_rotator_version                       = "0.6.19"
 prometheus_server_persistent_disk_size_gb = 1000
 victorops_routing_key                     = "prio-prod-us"
 
 default_peer_share_processor_manifest_base_url = "en-analytics.cancer.gov"
 default_portal_server_manifest_base_url        = "manifest.enpa-pha.io"
+
+enable_key_rotation_localities = ["ta-ta"]
 
 prometheus_helm_chart_version           = "11.12.1"
 grafana_helm_chart_version              = "6.1.16"
