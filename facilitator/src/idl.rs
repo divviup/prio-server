@@ -1328,11 +1328,14 @@ mod tests {
 
     #[test]
     fn read_data_share_packet() {
-        let schema = IngestionDataSharePacket::schema();
         for (want_data_share_packet, data_share_packet_bytes) in
             &*GOLDEN_INGESTION_DATA_SHARE_PACKETS
         {
-            let mut reader = Reader::with_schema(&schema, &data_share_packet_bytes[..]).unwrap();
+            let mut reader = Reader::with_schema(
+                IngestionDataSharePacket::schema(),
+                &data_share_packet_bytes[..],
+            )
+            .unwrap();
             let data_share_packet = IngestionDataSharePacket::read(&mut reader).unwrap();
             assert_eq!(want_data_share_packet, &data_share_packet);
         }
@@ -1342,15 +1345,15 @@ mod tests {
     fn roundtrip_data_share_packet() {
         let mut record_vec = Vec::new();
 
-        let schema = IngestionDataSharePacket::schema();
-        let mut writer = Writer::new(&schema, &mut record_vec);
+        let mut writer = Writer::new(IngestionDataSharePacket::schema(), &mut record_vec);
 
         for (packet, _) in &*GOLDEN_INGESTION_DATA_SHARE_PACKETS {
             packet.write(&mut writer).expect("write error");
         }
         writer.flush().unwrap();
 
-        let mut reader = Reader::with_schema(&schema, &record_vec[..]).unwrap();
+        let mut reader =
+            Reader::with_schema(IngestionDataSharePacket::schema(), &record_vec[..]).unwrap();
         for (packet, _) in &*GOLDEN_INGESTION_DATA_SHARE_PACKETS {
             let packet_again = IngestionDataSharePacket::read(&mut reader).expect("read error");
             assert_eq!(packet_again, *packet);
@@ -1450,9 +1453,10 @@ mod tests {
 
     #[test]
     fn read_validation_packet() {
-        let schema = ValidationPacket::schema();
         for (want_validation_packet, validation_packet_bytes) in &*GOLDEN_VALIDATION_PACKETS {
-            let mut reader = Reader::with_schema(&schema, &validation_packet_bytes[..]).unwrap();
+            let mut reader =
+                Reader::with_schema(ValidationPacket::schema(), &validation_packet_bytes[..])
+                    .unwrap();
             let data_share_packet = ValidationPacket::read(&mut reader).unwrap();
             assert_eq!(want_validation_packet, &data_share_packet);
         }
@@ -1462,15 +1466,14 @@ mod tests {
     fn roundtrip_validation_packet() {
         let mut record_vec = Vec::new();
 
-        let schema = ValidationPacket::schema();
-        let mut writer = Writer::new(&schema, &mut record_vec);
+        let mut writer = Writer::new(ValidationPacket::schema(), &mut record_vec);
 
         for (packet, _) in &*GOLDEN_VALIDATION_PACKETS {
             packet.write(&mut writer).expect("write error");
         }
         writer.flush().unwrap();
 
-        let mut reader = Reader::with_schema(&schema, &record_vec[..]).unwrap();
+        let mut reader = Reader::with_schema(ValidationPacket::schema(), &record_vec[..]).unwrap();
         for (packet, _) in &*GOLDEN_VALIDATION_PACKETS {
             let packet_again = ValidationPacket::read(&mut reader).expect("read error");
             assert_eq!(packet_again, *packet);
@@ -1569,9 +1572,9 @@ mod tests {
 
     #[test]
     fn read_invalid_packet() {
-        let schema = InvalidPacket::schema();
         for (want_invalid_packet, invalid_packet_bytes) in &*GOLDEN_INVALID_PACKETS {
-            let mut reader = Reader::with_schema(&schema, &invalid_packet_bytes[..]).unwrap();
+            let mut reader =
+                Reader::with_schema(InvalidPacket::schema(), &invalid_packet_bytes[..]).unwrap();
             let invalid_packet = InvalidPacket::read(&mut reader).unwrap();
             assert_eq!(want_invalid_packet, &invalid_packet);
         }
@@ -1581,15 +1584,14 @@ mod tests {
     fn roundtrip_invalid_packet() {
         let mut record_vec = Vec::new();
 
-        let schema = InvalidPacket::schema();
-        let mut writer = Writer::new(&schema, &mut record_vec);
+        let mut writer = Writer::new(InvalidPacket::schema(), &mut record_vec);
 
         for (packet, _) in &*GOLDEN_INVALID_PACKETS {
             packet.write(&mut writer).expect("write error");
         }
         writer.flush().unwrap();
 
-        let mut reader = Reader::with_schema(&schema, &record_vec[..]).unwrap();
+        let mut reader = Reader::with_schema(InvalidPacket::schema(), &record_vec[..]).unwrap();
         for (packet, _) in &*GOLDEN_INVALID_PACKETS {
             let packet_again = InvalidPacket::read(&mut reader).expect("read error");
             assert_eq!(packet_again, *packet);
