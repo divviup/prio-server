@@ -102,7 +102,7 @@ impl BatchSignature {
     /// Reads and parses one BatchSignature from the provided std::io::Read
     /// instance.
     pub fn read<R: Read>(reader: R) -> Result<BatchSignature, Error> {
-        let mut reader = Reader::with_schema(&*BATCH_SIGNATURE_SCHEMA, reader)
+        let mut reader = Reader::with_schema(*BATCH_SIGNATURE_SCHEMA, reader)
             .map_err(|e| Error::AvroError("failed to create Avro reader".to_owned(), e))?;
 
         // We expect exactly one record and for it to be an ingestion signature
@@ -128,7 +128,7 @@ impl BatchSignature {
     /// Serializes this signature into Avro format and writes it to the provided
     /// std::io::Write instance.
     pub fn write<W: Write>(&self, writer: &mut W) -> Result<(), Error> {
-        let mut writer = Writer::new(&*BATCH_SIGNATURE_SCHEMA, writer);
+        let mut writer = Writer::new(*BATCH_SIGNATURE_SCHEMA, writer);
         writer.append(Value::from(self)).map_err(|e| {
             Error::AvroError("failed to append record to Avro writer".to_owned(), e)
         })?;
@@ -186,7 +186,7 @@ impl From<&BatchSignature> for Value {
         // a `Schema::Record` variant", which shouldn't ever happen, so
         // panic for debugging
         // https://docs.rs/avro-rs/0.11.0/avro_rs/types/struct.Record.html#method.new
-        let mut record = Record::new(&*BATCH_SIGNATURE_SCHEMA)
+        let mut record = Record::new(*BATCH_SIGNATURE_SCHEMA)
             .expect("Unable to create record from ingestion signature schema");
         record.put(
             "batch_header_signature",
@@ -231,7 +231,7 @@ impl Header for IngestionHeader {
     }
 
     fn read<R: Read>(reader: R) -> Result<IngestionHeader, Error> {
-        let mut reader = Reader::with_schema(&*INGESTION_HEADER_SCHEMA, reader).map_err(|e| {
+        let mut reader = Reader::with_schema(*INGESTION_HEADER_SCHEMA, reader).map_err(|e| {
             Error::AvroError("failed to create reader for ingestion header".to_owned(), e)
         })?;
 
@@ -334,7 +334,7 @@ impl Header for IngestionHeader {
     }
 
     fn write<W: Write>(&self, writer: &mut W) -> Result<(), Error> {
-        let mut writer = Writer::new(&*INGESTION_HEADER_SCHEMA, writer);
+        let mut writer = Writer::new(*INGESTION_HEADER_SCHEMA, writer);
 
         // Ideally we would just do `writer.append_ser(self)` to use Serde serialization to write
         // the record but there seems to be some problem with serializing UUIDs, so we have to
@@ -399,7 +399,7 @@ pub struct IngestionDataSharePacket {
 
 impl Packet for IngestionDataSharePacket {
     fn schema() -> &'static Schema {
-        &*INGESTION_DATA_SHARE_PACKET_SCHEMA
+        *INGESTION_DATA_SHARE_PACKET_SCHEMA
     }
 
     fn read<R: Read>(reader: &mut Reader<R>) -> Result<IngestionDataSharePacket, Error> {
@@ -606,7 +606,7 @@ impl Header for ValidationHeader {
     }
 
     fn read<R: Read>(reader: R) -> Result<ValidationHeader, Error> {
-        let mut reader = Reader::with_schema(&*VALIDATION_HEADER_SCHEMA, reader).map_err(|e| {
+        let mut reader = Reader::with_schema(*VALIDATION_HEADER_SCHEMA, reader).map_err(|e| {
             Error::AvroError(
                 "failed to create reader for validation header".to_owned(),
                 e,
@@ -704,7 +704,7 @@ impl Header for ValidationHeader {
     }
 
     fn write<W: Write>(&self, writer: &mut W) -> Result<(), Error> {
-        let mut writer = Writer::new(&*VALIDATION_HEADER_SCHEMA, writer);
+        let mut writer = Writer::new(*VALIDATION_HEADER_SCHEMA, writer);
 
         let mut record = match Record::new(writer.schema()) {
             Some(r) => r,
@@ -752,7 +752,7 @@ pub struct ValidationPacket {
 
 impl Packet for ValidationPacket {
     fn schema() -> &'static Schema {
-        &*VALIDATION_PACKET_SCHEMA
+        *VALIDATION_PACKET_SCHEMA
     }
 
     fn read<R: Read>(reader: &mut Reader<R>) -> Result<ValidationPacket, Error> {
@@ -841,7 +841,7 @@ impl Header for SumPart {
     }
 
     fn read<R: Read>(reader: R) -> Result<SumPart, Error> {
-        let mut reader = Reader::with_schema(&*SUM_PART_SCHEMA, reader)
+        let mut reader = Reader::with_schema(*SUM_PART_SCHEMA, reader)
             .map_err(|e| Error::AvroError("failed to create reader for sum part".to_owned(), e))?;
 
         // We expect exactly one record in the reader and for it to be a sum
@@ -983,7 +983,7 @@ impl Header for SumPart {
     }
 
     fn write<W: Write>(&self, writer: &mut W) -> Result<(), Error> {
-        let mut writer = Writer::new(&*SUM_PART_SCHEMA, writer);
+        let mut writer = Writer::new(*SUM_PART_SCHEMA, writer);
 
         // Ideally we would just do `writer.append_ser(self)` to use Serde serialization to write
         // the record but there seems to be some problem with serializing UUIDs, so we have to
@@ -1051,7 +1051,7 @@ pub struct InvalidPacket {
 
 impl Packet for InvalidPacket {
     fn schema() -> &'static Schema {
-        &*INVALID_PACKET_SCHEMA
+        *INVALID_PACKET_SCHEMA
     }
 
     fn read<R: Read>(reader: &mut Reader<R>) -> Result<InvalidPacket, Error> {
@@ -1104,7 +1104,7 @@ pub struct ValidationBatch {
 impl ValidationBatch {
     /// Reads and parses one Header from the provided std::io::Read instance.
     pub fn read<R: Read>(reader: R) -> Result<Self, Error> {
-        let mut reader = Reader::with_schema(&*VALIDATION_BATCH_SCHEMA, reader)
+        let mut reader = Reader::with_schema(*VALIDATION_BATCH_SCHEMA, reader)
             .map_err(|e| Error::AvroError("failed to create Avro reader".to_owned(), e))?;
         // We expect exactly one record and for it to be an ingestion signature
         let value = match reader.next() {
@@ -1129,7 +1129,7 @@ impl ValidationBatch {
     /// Serializes this message into Avro format and writes it to the provided
     /// std::io::Write instance.
     pub fn write<W: Write>(&self, writer: &mut W) -> Result<(), Error> {
-        let mut writer = Writer::new(&*VALIDATION_BATCH_SCHEMA, writer);
+        let mut writer = Writer::new(*VALIDATION_BATCH_SCHEMA, writer);
         writer.append(Value::from(self)).map_err(|e| {
             Error::AvroError("failed to append record to Avro writer".to_owned(), e)
         })?;
@@ -1178,7 +1178,7 @@ impl TryFrom<Value> for ValidationBatch {
 
 impl From<&ValidationBatch> for Value {
     fn from(batch: &ValidationBatch) -> Self {
-        let mut record = Record::new(&*VALIDATION_BATCH_SCHEMA)
+        let mut record = Record::new(*VALIDATION_BATCH_SCHEMA)
             .expect("Unable to create record from validation batch schema");
         record.put("sig", Value::from(&batch.sig));
         record.put("header", Value::Bytes(batch.header.clone()));
