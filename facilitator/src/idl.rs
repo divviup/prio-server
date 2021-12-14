@@ -36,6 +36,7 @@ lazy_static! {
             include_str!("../../avro-schema/validation-packet.avsc");
         const SUM_PART_SCHEMA: &str = include_str!("../../avro-schema/sum-part.avsc");
         const INVALID_PACKET_SCHEMA: &str = include_str!("../../avro-schema/invalid-packet.avsc");
+        const VALIDATION_BATCH_SCHEMA: &str = include_str!("../../avro-schema/validation-batch.avsc");
 
         Schema::parse_list(&[
             BATCH_SIGNATURE_SCHEMA,
@@ -45,6 +46,7 @@ lazy_static! {
             VALIDATION_PACKET_SCHEMA,
             SUM_PART_SCHEMA,
             INVALID_PACKET_SCHEMA,
+            VALIDATION_BATCH_SCHEMA,
         ])
         .unwrap()
     };
@@ -55,6 +57,7 @@ lazy_static! {
     static ref VALIDATION_PACKET_SCHEMA: &'static Schema = &_SCHEMAS[4];
     static ref SUM_PART_SCHEMA: &'static Schema = &_SCHEMAS[5];
     static ref INVALID_PACKET_SCHEMA: &'static Schema = &_SCHEMAS[6];
+    static ref VALIDATION_BATCH_SCHEMA: &'static Schema = &_SCHEMAS[7];
 }
 
 pub trait Header: Sized {
@@ -103,13 +106,8 @@ impl BatchSignature {
             .map_err(|e| Error::AvroError("failed to create Avro reader".to_owned(), e))?;
 
         // We expect exactly one record and for it to be an ingestion signature
-        let record = match reader.next() {
-            Some(Ok(Value::Record(r))) => r,
-            Some(Ok(_)) => {
-                return Err(Error::MalformedHeaderError(
-                    "value is not a record".to_owned(),
-                ))
-            }
+        let value = match reader.next() {
+            Some(Ok(value)) => value,
             Some(Err(e)) => {
                 return Err(Error::AvroError(
                     "failed to read record from Avro reader".to_owned(),
@@ -124,6 +122,19 @@ impl BatchSignature {
             ));
         }
 
+        BatchSignature::from_value(value)
+    }
+
+    fn from_value(value: Value) -> Result<Self, Error> {
+        let fields = match value {
+            Value::Record(fields) => fields,
+            _ => {
+                return Err(Error::MalformedBatchError(
+                    "value is not a Record".to_owned(),
+                ))
+            }
+        };
+
         // Here we might wish to use from_value::<BatchSignature>(record) but
         // avro_rs does not seem to recognize it as a Bytes and fails to
         // deserialize it. The value we unwrapped from reader.next above is a
@@ -132,28 +143,20 @@ impl BatchSignature {
         let mut batch_header_signature = None;
         let mut key_identifier = None;
 
-        for tuple in record {
-            match (tuple.0.as_str(), tuple.1) {
+        for (field_name, field_value) in fields {
+            match (field_name.as_str(), field_value) {
                 ("batch_header_signature", Value::Bytes(v)) => batch_header_signature = Some(v),
                 ("key_identifier", Value::String(v)) => key_identifier = Some(v),
-                (f, _) => {
-                    return Err(Error::MalformedHeaderError(format!(
-                        "unexpected field {} in record",
-                        f
-                    )))
-                }
+                _ => (),
             }
         }
 
-        if batch_header_signature.is_none() || key_identifier.is_none() {
-            return Err(Error::MalformedHeaderError(
-                "missing fields in record".to_owned(),
-            ));
-        }
-
         Ok(BatchSignature {
-            batch_header_signature: batch_header_signature.unwrap(),
-            key_identifier: key_identifier.unwrap(),
+            batch_header_signature: batch_header_signature.ok_or_else(|| {
+                Error::MalformedHeaderError("missing batch_header_signature".to_owned())
+            })?,
+            key_identifier: key_identifier
+                .ok_or_else(|| Error::MalformedHeaderError("missing key_identifier".to_owned()))?,
         })
     }
 
@@ -161,25 +164,7 @@ impl BatchSignature {
     /// std::io::Write instance.
     pub fn write<W: Write>(&self, writer: &mut W) -> Result<(), Error> {
         let mut writer = Writer::new(&*BATCH_SIGNATURE_SCHEMA, writer);
-
-        let mut record = match Record::new(writer.schema()) {
-            Some(r) => r,
-            None => {
-                // avro_rs docs say this can only happen "if the `Schema is not
-                // a `Schema::Record` variant", which shouldn't ever happen, so
-                // panic for debugging
-                // https://docs.rs/avro-rs/0.11.0/avro_rs/types/struct.Record.html#method.new
-                panic!("Unable to create Record from ingestion signature schema");
-            }
-        };
-
-        record.put(
-            "batch_header_signature",
-            Value::Bytes(self.batch_header_signature.clone()),
-        );
-        record.put("key_identifier", Value::String(self.key_identifier.clone()));
-
-        writer.append(record).map_err(|e| {
+        writer.append(self.as_value()).map_err(|e| {
             Error::AvroError("failed to append record to Avro writer".to_owned(), e)
         })?;
 
@@ -188,6 +173,21 @@ impl BatchSignature {
             .map_err(|e| Error::AvroError("failed to flush Avro writer".to_owned(), e))?;
 
         Ok(())
+    }
+
+    fn as_value(&self) -> Value {
+        // avro_rs docs say this can only happen "if the `Schema is not
+        // a `Schema::Record` variant", which shouldn't ever happen, so
+        // panic for debugging
+        // https://docs.rs/avro-rs/0.11.0/avro_rs/types/struct.Record.html#method.new
+        let mut record = Record::new(&*BATCH_SIGNATURE_SCHEMA)
+            .expect("Unable to create record from ingestion signature schema");
+        record.put(
+            "batch_header_signature",
+            Value::Bytes(self.batch_header_signature.clone()),
+        );
+        record.put("key_identifier", Value::String(self.key_identifier.clone()));
+        Value::Record(record.fields)
     }
 }
 
@@ -1088,11 +1088,97 @@ impl Packet for InvalidPacket {
     }
 }
 
+#[derive(Debug, Serialize, Deserialize, PartialEq)]
+pub struct ValidationBatch {
+    pub sig: BatchSignature,
+    pub header: Vec<u8>,
+    pub packets: Vec<u8>,
+}
+
+impl ValidationBatch {
+    /// Reads and parses one Header from the provided std::io::Read instance.
+    pub fn read<R: Read>(reader: R) -> Result<Self, Error> {
+        let mut reader = Reader::with_schema(&*VALIDATION_BATCH_SCHEMA, reader)
+            .map_err(|e| Error::AvroError("failed to create Avro reader".to_owned(), e))?;
+        // We expect exactly one record and for it to be an ingestion signature
+        let value = match reader.next() {
+            Some(Ok(value)) => value,
+            Some(Err(e)) => {
+                return Err(Error::AvroError(
+                    "failed to read record from Avro reader".to_owned(),
+                    e,
+                ));
+            }
+            None => return Err(Error::EofError),
+        };
+        if reader.next().is_some() {
+            return Err(Error::MalformedBatchError(
+                "excess value in reader".to_owned(),
+            ));
+        }
+
+        ValidationBatch::from_value(value)
+    }
+
+    fn from_value(value: Value) -> Result<Self, Error> {
+        let fields = match value {
+            Value::Record(fields) => fields,
+            _ => {
+                return Err(Error::MalformedBatchError(
+                    "value is not a Record".to_owned(),
+                ))
+            }
+        };
+
+        let mut sig = None;
+        let mut header = None;
+        let mut packets = None;
+
+        for (field_name, field_value) in fields {
+            match (field_name.as_str(), field_value) {
+                ("sig", field_value) => sig = Some(BatchSignature::from_value(field_value)?),
+                ("header", Value::Bytes(buf)) => header = Some(buf),
+                ("packets", Value::Bytes(buf)) => packets = Some(buf),
+                _ => (),
+            }
+        }
+
+        Ok(ValidationBatch {
+            sig: sig.ok_or_else(|| Error::MalformedBatchError("missing sig".to_owned()))?,
+            header: header
+                .ok_or_else(|| Error::MalformedBatchError("missing header".to_owned()))?,
+            packets: packets
+                .ok_or_else(|| Error::MalformedBatchError("missing packets".to_owned()))?,
+        })
+    }
+
+    /// Serializes this message into Avro format and writes it to the provided
+    /// std::io::Write instance.
+    pub fn write<W: Write>(&self, writer: &mut W) -> Result<(), Error> {
+        let mut writer = Writer::new(&*VALIDATION_BATCH_SCHEMA, writer);
+        writer.append(self.as_value()).map_err(|e| {
+            Error::AvroError("failed to append record to Avro writer".to_owned(), e)
+        })?;
+        writer
+            .flush()
+            .map_err(|e| Error::AvroError("failed to flush".to_owned(), e))?;
+        Ok(())
+    }
+
+    fn as_value(&self) -> Value {
+        let mut record = Record::new(&*VALIDATION_BATCH_SCHEMA)
+            .expect("Unable to create record from validation batch schema");
+        record.put("sig", self.sig.as_value());
+        record.put("header", Value::Bytes(self.header.clone()));
+        record.put("packets", Value::Bytes(self.packets.clone()));
+        Value::Record(record.fields)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use assert_matches::assert_matches;
-    use lazy_static::lazy_static;
 
     lazy_static! {
         static ref GOLDEN_BATCH_SIGNATURES: Vec<(BatchSignature, Vec<u8>)> = {
@@ -1499,5 +1585,52 @@ mod tests {
 
         // Do one more read. This should yield EOF.
         assert_matches!(InvalidPacket::read(&mut reader), Err(Error::EofError));
+    }
+
+    lazy_static! {
+        static ref GOLDEN_VALIDATION_BATCHES: Vec<(ValidationBatch, Vec<u8>)> = {
+            let golden_validation_batch_1_bytes = hex::decode("4f626a0104166176726f2e736368656d61f0057b2274797065223a227265636f7264222c226e616d657370616365223a226f72672e61626574746572696e7465726e65742e7072696f2e7631222c226e616d65223a225072696f56616c69646974794261746368222c226669656c6473223a5b7b226e616d65223a22736967222c2274797065223a7b2274797065223a227265636f7264222c226e616d657370616365223a226f72672e61626574746572696e7465726e65742e7072696f2e7631222c226e616d65223a225072696f42617463685369676e6174757265222c226669656c6473223a5b7b226e616d65223a2262617463685f6865616465725f7369676e6174757265222c2274797065223a226279746573227d2c7b226e616d65223a226b65795f6964656e746966696572222c2274797065223a22737472696e67227d5d7d7d2c7b226e616d65223a22686561646572222c2274797065223a226279746573227d2c7b226e616d65223a227061636b657473222c2274797065223a226279746573227d5d7d146176726f2e636f646563086e756c6c005d68da833f0afa80e6cc62c07de60696023006010203166d792d636f6f6c2d6b657906040506060708095d68da833f0afa80e6cc62c07de60696").unwrap();
+            let golden_validation_batch_1 = ValidationBatch {
+                sig: BatchSignature {
+                    batch_header_signature: vec![1, 2, 3],
+                    key_identifier: "my-cool-key".to_owned(),
+                },
+                header: vec![4, 5, 6],
+                packets: vec![7, 8, 9],
+            };
+
+            let golden_validation_batch_2_bytes = hex::decode("4f626a0104146176726f2e636f646563086e756c6c166176726f2e736368656d61f0057b2274797065223a227265636f7264222c226e616d657370616365223a226f72672e61626574746572696e7465726e65742e7072696f2e7631222c226e616d65223a225072696f56616c69646974794261746368222c226669656c6473223a5b7b226e616d65223a22736967222c2274797065223a7b2274797065223a227265636f7264222c226e616d657370616365223a226f72672e61626574746572696e7465726e65742e7072696f2e7631222c226e616d65223a225072696f42617463685369676e6174757265222c226669656c6473223a5b7b226e616d65223a2262617463685f6865616465725f7369676e6174757265222c2274797065223a226279746573227d2c7b226e616d65223a226b65795f6964656e746966696572222c2274797065223a22737472696e67227d5d7d7d2c7b226e616d65223a22686561646572222c2274797065223a226279746573227d2c7b226e616d65223a227061636b657473222c2274797065223a226279746573227d5d7d006cc69b10d7b8900c362cd1f49e6b125a0230060a0b0c166d792d636f6f6c2d6b6579060d0e0f061011126cc69b10d7b8900c362cd1f49e6b125a").unwrap();
+            let golden_validation_batch_2 = ValidationBatch {
+                sig: BatchSignature {
+                    batch_header_signature: vec![10, 11, 12],
+                    key_identifier: "my-cool-key".to_owned(),
+                },
+                header: vec![13, 14, 15],
+                packets: vec![16, 17, 18],
+            };
+
+            vec![
+                (golden_validation_batch_1, golden_validation_batch_1_bytes),
+                (golden_validation_batch_2, golden_validation_batch_2_bytes),
+            ]
+        };
+    }
+
+    #[test]
+    fn read_validation_batch() {
+        for (want_batch, batch_bytes) in &*GOLDEN_VALIDATION_BATCHES {
+            let validation_batch = ValidationBatch::read(&batch_bytes[..]).unwrap();
+            assert_eq!(want_batch, &validation_batch);
+        }
+    }
+
+    #[test]
+    fn roundtrip_validation_batch() {
+        for (want_batch, _) in &*GOLDEN_VALIDATION_BATCHES {
+            let mut record_vec = Vec::new();
+            want_batch.write(&mut record_vec).expect("write error");
+            let got_batch = ValidationBatch::read(&record_vec[..]).expect("read error");
+            assert_eq!(want_batch, &got_batch);
+        }
     }
 }

@@ -33,6 +33,8 @@ pub enum Error {
     MalformedHeaderError(String),
     #[error("malformed data packet: {0}")]
     MalformedDataPacketError(String),
+    #[error("malformed batch: {0}")]
+    MalformedBatchError(String),
     #[error("end of file")]
     EofError,
     #[error("HTTP resource error")]
