@@ -9,24 +9,34 @@ ingestors = {
     manifest_base_url = "storage.googleapis.com/prio-manifests"
     localities = {
       mn = {
-        intake_worker_count    = 3
-        aggregate_worker_count = 3
+        min_intake_worker_count    = 1
+        max_intake_worker_count    = 3
+        min_aggregate_worker_count = 1
+        max_aggregate_worker_count = 3
       }
       mx-coa = {
-        intake_worker_count    = 3
-        aggregate_worker_count = 3
+        min_intake_worker_count    = 1
+        max_intake_worker_count    = 3
+        min_aggregate_worker_count = 1
+        max_aggregate_worker_count = 3
       }
       mx-jal = {
-        intake_worker_count    = 3
-        aggregate_worker_count = 3
+        min_intake_worker_count    = 1
+        max_intake_worker_count    = 3
+        min_aggregate_worker_count = 1
+        max_aggregate_worker_count = 3
       }
       mx-pue = {
-        intake_worker_count    = 3
-        aggregate_worker_count = 3
+        min_intake_worker_count    = 1
+        max_intake_worker_count    = 3
+        min_aggregate_worker_count = 1
+        max_aggregate_worker_count = 3
       }
       mx-yuc = {
-        intake_worker_count    = 3
-        aggregate_worker_count = 3
+        min_intake_worker_count    = 1
+        max_intake_worker_count    = 3
+        min_aggregate_worker_count = 1
+        max_aggregate_worker_count = 3
       }
     }
   }
@@ -34,24 +44,34 @@ ingestors = {
     manifest_base_url = "exposure-notification.apple.com/manifest"
     localities = {
       mn = {
-        intake_worker_count    = 3
-        aggregate_worker_count = 3
+        min_intake_worker_count    = 1
+        max_intake_worker_count    = 3
+        min_aggregate_worker_count = 1
+        max_aggregate_worker_count = 3
       }
       mx-coa = {
-        intake_worker_count    = 3
-        aggregate_worker_count = 3
+        min_intake_worker_count    = 1
+        max_intake_worker_count    = 3
+        min_aggregate_worker_count = 1
+        max_aggregate_worker_count = 3
       }
       mx-jal = {
-        intake_worker_count    = 3
-        aggregate_worker_count = 3
+        min_intake_worker_count    = 1
+        max_intake_worker_count    = 3
+        min_aggregate_worker_count = 1
+        max_aggregate_worker_count = 3
       }
       mx-pue = {
-        intake_worker_count    = 3
-        aggregate_worker_count = 3
+        min_intake_worker_count    = 1
+        max_intake_worker_count    = 3
+        min_aggregate_worker_count = 1
+        max_aggregate_worker_count = 3
       }
       mx-yuc = {
-        intake_worker_count    = 3
-        aggregate_worker_count = 3
+        min_intake_worker_count    = 1
+        max_intake_worker_count    = 3
+        min_aggregate_worker_count = 1
+        max_aggregate_worker_count = 3
       }
     }
   }
