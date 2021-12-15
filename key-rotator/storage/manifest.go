@@ -78,10 +78,13 @@ func NewManifest(ctx context.Context, bucket string, opts ...ManifestOption) (Ma
 	default:
 		return nil, fmt.Errorf("bad bucket URL %q", bucket)
 	}
-	return kvStoreManifest{kv, os.keyPrefix}, nil
+	return kvStoreManifest{kv, os.keyPrefix, os.defaultDSPManifest}, nil
 }
 
-type manifestOpts struct{ keyPrefix, awsRegion string }
+type manifestOpts struct {
+	keyPrefix, awsRegion string
+	defaultDSPManifest   *manifest.DataShareProcessorSpecificManifest
+}
 
 // ManifestOption represents an option that can be passed to NewManifest.
 type ManifestOption func(*manifestOpts)
@@ -98,11 +101,21 @@ func WithAWSRegion(awsRegion string) ManifestOption {
 	return func(opts *manifestOpts) { opts.awsRegion = awsRegion }
 }
 
+// WithDefaultDataShareProcessorSpecificManifest returns a manifest option that
+// defines the "default" data share processor-specific manifest that will be
+// returned if the underlying storage bucket does not contain a manifest. If
+// this option is specified, GetDataShareProcessorSpecificManifest will never
+// return an error wrapping ErrObjectNotExist.
+func WithDefaultDataShareProcessorSpecificManifest(defaultDSPManifest manifest.DataShareProcessorSpecificManifest) ManifestOption {
+	return func(opts *manifestOpts) { opts.defaultDSPManifest = &defaultDSPManifest }
+}
+
 // kvStoreManifest implements Manifest, and translates requests to some
 // underlying key-value system.
 type kvStoreManifest struct {
-	kv        kvStore
-	keyPrefix string
+	kv                 kvStore
+	keyPrefix          string
+	defaultDSPManifest *manifest.DataShareProcessorSpecificManifest // returned if no manifest exists
 }
 
 // ingestorGlobalManifestDataShareProcessorName is the special data share
@@ -139,6 +152,9 @@ func (m kvStoreManifest) GetDataShareProcessorSpecificManifest(ctx context.Conte
 	key := m.keyFor(dataShareProcessorName)
 	manifestBytes, err := m.kv.get(ctx, key)
 	if err != nil {
+		if m.defaultDSPManifest != nil && errors.Is(err, ErrObjectNotExist) {
+			return *m.defaultDSPManifest, nil
+		}
 		return manifest.DataShareProcessorSpecificManifest{}, fmt.Errorf("couldn't get manifest from %q: %w", key, err)
 	}
 	var dspsm manifest.DataShareProcessorSpecificManifest
