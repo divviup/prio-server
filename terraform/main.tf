@@ -562,6 +562,18 @@ locals {
   }
 }
 
+resource "google_project_iam_custom_role" "gcp_secret_writer" {
+  count = var.use_aws ? 0 : 1
+
+  role_id     = "secret_manager_secret_writer"
+  title       = "Secret Writer"
+  description = "Allowed to write secrets & secret versions."
+  permissions = [
+    "secretmanager.secrets.create",
+    "secretmanager.versions.add",
+  ]
+}
+
 module "kubernetes_locality" {
   for_each = toset(var.localities)
   source   = "./modules/kubernetes_locality"
@@ -572,6 +584,7 @@ module "kubernetes_locality" {
   key_rotator_version                   = var.key_rotator_version
   use_aws                               = var.use_aws
   gcp_project                           = var.gcp_project
+  gcp_secret_writer_role_id             = var.use_aws ? "" : google_project_iam_custom_role.gcp_secret_writer[0].id
   eks_oidc_provider                     = var.use_aws ? module.eks[0].oidc_provider : { url = "", arn = "" }
   manifest_bucket                       = local.manifest
   kubernetes_namespace                  = kubernetes_namespace.namespaces[each.key].metadata[0].name

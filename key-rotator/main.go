@@ -9,6 +9,9 @@ import (
 	"sync"
 	"time"
 
+	secretmanager "cloud.google.com/go/secretmanager/apiv1"
+	"github.com/aws/aws-sdk-go/aws/session"
+	"github.com/aws/aws-sdk-go/service/secretsmanager"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
 	"github.com/prometheus/client_golang/prometheus/push"
@@ -51,6 +54,7 @@ var (
 	packetEncryptionKeyAlwaysWrite    = flag.Bool("packet-encryption-key-always-write", false, "If set, always write packet encryption key to backing storage, even if no changes are detected")
 
 	// Other flags.
+	backup      = flag.String("backup", "", "Set to 'aws' or 'gcp:gcp-project-id' to back up secrets to the respective cloud's secrets manager")
 	dryRun      = flag.Bool("dry-run", true, "If set, do not actually write any keys or manifests back (only report what would have changed)")
 	timeout     = flag.Duration("timeout", 10*time.Minute, "The `deadline` before key-rotator terminates. Set to 0 to disable timeout")
 	awsRegion   = flag.String("aws-region", "", "If specified, the AWS `region` to use for manifest storage")
@@ -120,6 +124,8 @@ func main() {
 		fail("--packet-encryption-key-delete-min-age must be non-negative")
 	case *packetEncryptionKeyDeleteMinCount < 0:
 		fail("--packet-encryption-key-delete-min-count must be non-negative")
+	case *backup != "" && *backup != "aws" && !strings.HasPrefix(*backup, "gcp:"):
+		fail("--backup must be one of 'aws' or 'gcp:gcp-project-id' if specified")
 	case *timeout < 0:
 		fail("--timeout must be non-negative")
 	}
@@ -168,6 +174,24 @@ func main() {
 		fail("Couldn't create Kubernetes client: %v", err)
 	}
 	keyStore := storage.NewKubernetesKey(k8s.CoreV1().Secrets(*namespace), *prioEnv)
+
+	// Create backup key store if configured to do so.
+	switch {
+	case *backup == "aws":
+		sess, err := session.NewSession()
+		if err != nil {
+			fail("Couldn't create AWS session: %v", err)
+		}
+		keyStore = storage.NewBackupKey(keyStore, storage.NewAWSKey(secretsmanager.New(sess), *prioEnv))
+
+	case strings.HasPrefix(*backup, "gcp:"):
+		gcpProjectID := strings.TrimPrefix(*backup, "gcp:")
+		sm, err := secretmanager.NewClient(ctx)
+		if err != nil {
+			fail("Couldn't create GCP secret manager client: %v", err)
+		}
+		keyStore = storage.NewBackupKey(keyStore, storage.NewGCPKey(sm, *prioEnv, gcpProjectID))
+	}
 
 	// Get Manifest storage client.
 	log.Info().Msgf("Creating manifest store")

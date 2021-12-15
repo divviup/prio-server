@@ -22,6 +22,10 @@ variable "gcp_project" {
   type = string
 }
 
+variable "gcp_secret_writer_role_id" {
+  type = string
+}
+
 variable "eks_oidc_provider" {
   type = object({
     arn = string
@@ -164,12 +168,41 @@ resource "aws_iam_role_policy" "key_rotator_manifest_bucket_writer" {
   })
 }
 
+resource "aws_iam_role_policy" "key_rotator_secret_writer" {
+  count = var.use_aws ? 1 : 0
+
+  name = "prio-${var.environment}-${var.locality}-key-rotator-secret-writer"
+  role = module.key_rotator_account.aws_iam_role.name
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Sid    = "WriteSecret"
+        Effect = "Allow"
+        Action = [
+          "secretsmanager:CreateSecret",
+          "secretsmanager:PutSecretValue",
+        ]
+        Resource = "*",
+      }
+    ]
+  })
+}
+
 resource "google_storage_bucket_iam_member" "key_rotator_manifest_bucket_writer" {
   count = var.use_aws ? 0 : 1
 
   bucket = var.manifest_bucket.bucket
   role   = "roles/storage.legacyBucketWriter"
   member = "serviceAccount:${module.key_rotator_account.gcp_service_account_email}"
+}
+
+resource "google_project_iam_member" "key_rotator_in_secret_writer" {
+  count = var.use_aws ? 0 : 1
+
+  project = var.gcp_project
+  role    = var.gcp_secret_writer_role_id
+  member  = "serviceAccount:${module.key_rotator_account.gcp_service_account_email}"
 }
 
 resource "kubernetes_cron_job" "key_rotator" {
@@ -213,6 +246,7 @@ resource "kubernetes_cron_job" "key_rotator" {
                 "--csr-fqdn=${var.certificate_fqdn}",
                 "--aws-region=${var.manifest_bucket.aws_region}",
                 "--push-gateway=${var.pushgateway}",
+                "--backup=${var.use_aws ? "aws" : "gcp:${var.gcp_project}"}",
                 "--dry-run=${!(contains(var.enable_key_rotator_localities, "*") || contains(var.enable_key_rotator_localities, var.locality))}",
 
                 "--batch-signing-key-enable-rotation=false",
