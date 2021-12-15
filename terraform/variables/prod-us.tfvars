@@ -232,6 +232,6 @@ default_portal_server_manifest_base_url        = "manifest.enpa-pha.io"
 
 enable_key_rotation_localities = ["ta-ta"]
 
-prometheus_helm_chart_version           = "11.12.1"
-grafana_helm_chart_version              = "6.1.16"
-stackdriver_exporter_helm_chart_version = "1.8.0"
+prometheus_helm_chart_version           = "15.0.1"
+grafana_helm_chart_version              = "6.18.2"
+stackdriver_exporter_helm_chart_version = "1.12.0"
