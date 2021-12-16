@@ -92,7 +92,9 @@ func TestManifest(t *testing.T) {
 				t.Run("valid manifest (default specified)", func(t *testing.T) {
 					t.Parallel()
 					m, kvs := newKVStoreManifest(test.keyPrefix)
-					m.defaultDSPManifest = &manifest.DataShareProcessorSpecificManifest{Format: 13}
+					m.defaultManifestByDSP = map[string]manifest.DataShareProcessorSpecificManifest{
+						dspName: {Format: 13},
+					}
 					kvs[path.Join(test.keyPrefix, "dsp-manifest.json")] = dspManifestBytes
 					gotManifest, err := m.GetDataShareProcessorSpecificManifest(ctx, dspName)
 					if err != nil {
@@ -115,7 +117,9 @@ func TestManifest(t *testing.T) {
 					t.Parallel()
 					m, _ := newKVStoreManifest(test.keyPrefix)
 					wantManifest := manifest.DataShareProcessorSpecificManifest{Format: 13}
-					m.defaultDSPManifest = &wantManifest
+					m.defaultManifestByDSP = map[string]manifest.DataShareProcessorSpecificManifest{
+						dspName: wantManifest,
+					}
 					gotManifest, err := m.GetDataShareProcessorSpecificManifest(ctx, dspName)
 					if err != nil {
 						t.Fatalf("Unexpected error from GetDataShareProcessorSpecificManifest: %v", err)

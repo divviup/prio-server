@@ -78,12 +78,12 @@ func NewManifest(ctx context.Context, bucket string, opts ...ManifestOption) (Ma
 	default:
 		return nil, fmt.Errorf("bad bucket URL %q", bucket)
 	}
-	return kvStoreManifest{kv, os.keyPrefix, os.defaultDSPManifest}, nil
+	return kvStoreManifest{kv, os.keyPrefix, os.defaultManifestByDSP}, nil
 }
 
 type manifestOpts struct {
 	keyPrefix, awsRegion string
-	defaultDSPManifest   *manifest.DataShareProcessorSpecificManifest
+	defaultManifestByDSP map[string]manifest.DataShareProcessorSpecificManifest
 }
 
 // ManifestOption represents an option that can be passed to NewManifest.
@@ -101,21 +101,23 @@ func WithAWSRegion(awsRegion string) ManifestOption {
 	return func(opts *manifestOpts) { opts.awsRegion = awsRegion }
 }
 
-// WithDefaultDataShareProcessorSpecificManifest returns a manifest option that
-// defines the "default" data share processor-specific manifest that will be
-// returned if the underlying storage bucket does not contain a manifest. If
-// this option is specified, GetDataShareProcessorSpecificManifest will never
-// return an error wrapping ErrObjectNotExist.
-func WithDefaultDataShareProcessorSpecificManifest(defaultDSPManifest manifest.DataShareProcessorSpecificManifest) ManifestOption {
-	return func(opts *manifestOpts) { opts.defaultDSPManifest = &defaultDSPManifest }
+// WithDefaultDataShareProcessorManifests returns a manifest option that
+// defines the "default" data share processor-specific manifests that will be
+// returned if the underlying storage bucket does not contain a manifest for
+// certain data share processors. If this option is specified,
+// GetDataShareProcessorSpecificManifest will never return an error wrapping
+// ErrObjectDoesNotExist for the data share processors specified as keys in the
+// given map.
+func WithDefaultDataShareProcessorManifests(defaultManifestByDSP map[string]manifest.DataShareProcessorSpecificManifest) ManifestOption {
+	return func(opts *manifestOpts) { opts.defaultManifestByDSP = defaultManifestByDSP }
 }
 
 // kvStoreManifest implements Manifest, and translates requests to some
 // underlying key-value system.
 type kvStoreManifest struct {
-	kv                 kvStore
-	keyPrefix          string
-	defaultDSPManifest *manifest.DataShareProcessorSpecificManifest // returned if no manifest exists
+	kv                   kvStore
+	keyPrefix            string
+	defaultManifestByDSP map[string]manifest.DataShareProcessorSpecificManifest // returned if no manifest exists
 }
 
 // ingestorGlobalManifestDataShareProcessorName is the special data share
@@ -152,8 +154,10 @@ func (m kvStoreManifest) GetDataShareProcessorSpecificManifest(ctx context.Conte
 	key := m.keyFor(dataShareProcessorName)
 	manifestBytes, err := m.kv.get(ctx, key)
 	if err != nil {
-		if m.defaultDSPManifest != nil && errors.Is(err, ErrObjectNotExist) {
-			return *m.defaultDSPManifest, nil
+		if errors.Is(err, ErrObjectNotExist) {
+			if manifest, ok := m.defaultManifestByDSP[dataShareProcessorName]; ok {
+				return manifest, nil
+			}
 		}
 		return manifest.DataShareProcessorSpecificManifest{}, fmt.Errorf("couldn't get manifest from %q: %w", key, err)
 	}
