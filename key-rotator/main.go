@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"os"
@@ -54,12 +55,13 @@ var (
 	packetEncryptionKeyAlwaysWrite    = flag.Bool("packet-encryption-key-always-write", false, "If set, always write packet encryption key to backing storage, even if no changes are detected")
 
 	// Other flags.
-	backup      = flag.String("backup", "", "Set to 'aws' or 'gcp:gcp-project-id' to back up secrets to the respective cloud's secrets manager")
-	dryRun      = flag.Bool("dry-run", true, "If set, do not actually write any keys or manifests back (only report what would have changed)")
-	timeout     = flag.Duration("timeout", 10*time.Minute, "The `deadline` before key-rotator terminates. Set to 0 to disable timeout")
-	awsRegion   = flag.String("aws-region", "", "If specified, the AWS `region` to use for manifest storage")
-	pushGateway = flag.String("push-gateway", "", "Set this to the gateway to use with prometheus. If left empty, metrics will not be pushed to prometheus.")
-	kubeconfig  = flag.String("kubeconfig", "", "The `path` to user's kubeconfig file; if unspecified, assumed to be running in-cluster") // typical value is $HOME/.kube/config
+	backup                        = flag.String("backup", "", "Set to 'aws' or 'gcp:gcp-project-id' to back up secrets to the respective cloud's secrets manager")
+	dryRun                        = flag.Bool("dry-run", true, "If set, do not actually write any keys or manifests back (only report what would have changed)")
+	timeout                       = flag.Duration("timeout", 10*time.Minute, "The `deadline` before key-rotator terminates. Set to 0 to disable timeout")
+	defaultManifestByIngestorJSON = flag.String("default-manifest-by-ingestor", "", "If set to a JSON map from ingestor to manifest, the specified manifest will be used as a template if there is no pre-existing manifest (i.e. for newly-provisioned localities)")
+	awsRegion                     = flag.String("aws-region", "", "If specified, the AWS `region` to use for manifest storage")
+	pushGateway                   = flag.String("push-gateway", "", "Set this to the gateway to use with prometheus. If left empty, metrics will not be pushed to prometheus.")
+	kubeconfig                    = flag.String("kubeconfig", "", "The `path` to user's kubeconfig file; if unspecified, assumed to be running in-cluster") // typical value is $HOME/.kube/config
 
 	// Metrics.
 	pusher      *push.Pusher // populated only if --push-gateway is specified.
@@ -139,6 +141,18 @@ func main() {
 		ingestorLst[i] = v
 	}
 
+	var defaultManifestByDSP map[string]manifest.DataShareProcessorSpecificManifest
+	if *defaultManifestByIngestorJSON != "" {
+		var defaultManifestByIngestor map[string]manifest.DataShareProcessorSpecificManifest
+		if err := json.Unmarshal([]byte(*defaultManifestByIngestorJSON), &defaultManifestByIngestor); err != nil {
+			fail("--default-manifest cannot be deserialized: %v", err)
+		}
+		defaultManifestByDSP = map[string]manifest.DataShareProcessorSpecificManifest{}
+		for ingestor, manifest := range defaultManifestByIngestor {
+			defaultManifestByDSP[dspName(*locality, ingestor)] = manifest
+		}
+	}
+
 	log.Info().Msgf("Starting up")
 	ctx := context.Background()
 	if *timeout > 0 {
@@ -198,6 +212,9 @@ func main() {
 	var opts []storage.ManifestOption
 	if *awsRegion != "" {
 		opts = append(opts, storage.WithAWSRegion(*awsRegion))
+	}
+	if defaultManifestByDSP != nil {
+		opts = append(opts, storage.WithDefaultDataShareProcessorManifests(defaultManifestByDSP))
 	}
 	manifestStore, err := storage.NewManifest(ctx, *manifestBucketURL, opts...)
 	if err != nil {
