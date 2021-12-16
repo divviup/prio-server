@@ -40,14 +40,14 @@ var (
 	csrFQDN           = flag.String("csr-fqdn", "", "Required. FQDN to use as common name in generated CSRs")
 
 	// Rotation configuration.
-	batchSigningKeyEnableRotation = flag.Bool("batch-signing-key-enable-rotation", true, "Determines if batch signing keys are rotated")
+	batchSigningKeyEnableRotation = flag.Bool("batch-signing-key-enable-rotation", true, "Determines if batch signing keys are rotated. If no key versions exist, a new one will be created irrespective of this flag's value")
 	batchSigningKeyCreateMinAge   = flag.Duration("batch-signing-key-create-min-age", 9*30*24*time.Hour, "How frequently to create a new batch signing key version")               // default: 9 months
 	batchSigningKeyPrimaryMinAge  = flag.Duration("batch-signing-key-primary-min-age", 7*24*time.Hour, "How old a batch signing key version must be before it can become primary") // default: 1 week
 	batchSigningKeyDeleteMinAge   = flag.Duration("batch-signing-key-delete-min-age", 13*30*24*time.Hour, "How old a batch signing key version must be before it can be deleted")  // default: 13 months
 	batchSigningKeyDeleteMinCount = flag.Int("batch-signing-key-delete-min-count", 2, "The minimum number of batch signing key versions left undeleted after rotation")
 	batchSigningKeyAlwaysWrite    = flag.Bool("batch-signing-key-always-write", false, "If set, always write batch signing key to backing storage, even if no changes are detected")
 
-	packetEncryptionKeyEnableRotation = flag.Bool("packet-encryption-key-enable-rotation", true, "Determines if packet encryption keys are rotated")
+	packetEncryptionKeyEnableRotation = flag.Bool("packet-encryption-key-enable-rotation", true, "Determines if packet encryption keys are rotated. If no key versions exist, a new one will be created irrespective of this flag's value")
 	packetEncryptionKeyCreateMinAge   = flag.Duration("packet-encryption-key-create-min-age", 9*30*24*time.Hour, "How frequently to create a new packet encryption key version")              // default: 9 months
 	packetEncryptionKeyPrimaryMinAge  = flag.Duration("packet-encryption-key-primary-min-age", 0, "How old a packet encryption key version must be before it can become primary")             // default: 0
 	packetEncryptionKeyDeleteMinAge   = flag.Duration("packet-encryption-key-delete-min-age", 13*30*24*time.Hour, "How old a packet encryption key version must be before it can be deleted") // default: 13 months
@@ -301,7 +301,7 @@ func rotateKeys(ctx context.Context, cfg rotateKeysConfig) error {
 	// Rotate keys.
 	log.Info().Msgf("Rotating keys & updating manifests")
 	var newPacketEncryptionKey key.Key
-	if cfg.packetCFG.enableRotation {
+	if oldPacketEncryptionKey.IsEmpty() || cfg.packetCFG.enableRotation {
 		k, err := oldPacketEncryptionKey.Rotate(cfg.now, cfg.packetCFG.rotationCFG)
 		if err != nil {
 			return fmt.Errorf("couldn't rotate packet encryption key for %q: %w", cfg.locality, err)
@@ -314,7 +314,7 @@ func rotateKeys(ctx context.Context, cfg rotateKeysConfig) error {
 
 	newBatchSigningKeyByIngestor := map[string]key.Key{}
 	for ingestor, oldKey := range oldBatchSigningKeyByIngestor {
-		if cfg.batchCFG.enableRotation {
+		if oldKey.IsEmpty() || cfg.batchCFG.enableRotation {
 			newKey, err := oldKey.Rotate(cfg.now, cfg.batchCFG.rotationCFG)
 			if err != nil {
 				return fmt.Errorf("couldn't rotate batch signing key for (%q, %q): %w",
