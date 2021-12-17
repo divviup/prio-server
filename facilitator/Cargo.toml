@@ -18,7 +18,7 @@ derivative = "2.1.1"
 dyn-clone = "1.0.4"
 elliptic-curve = { version = "0.11.5", features = ["pem"] }
 hex = "0.4"
-hmac = "0.11"
+hmac = "0.12"
 http = "^0.2"
 hyper = "^0.14"
 hyper-rustls = "^0.22"
@@ -39,7 +39,7 @@ rusoto_core = { version = "^0.47", default_features = false, features = ["rustls
 rusoto_s3 = { version = "^0.47", default_features = false, features = ["rustls"] }
 rusoto_sqs = { version = "^0.47", default_features = false, features = ["rustls"] }
 rusoto_sts = { version = "^0.47", default_features = false, features = ["rustls"] }
-sha2 = "0.9"
+sha2 = "0.10"
 slog = { version = "2.7.0", features = ["max_level_trace"] }
 slog-async = "2.7.0"
 slog-json = "2.4.0"
