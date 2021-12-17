@@ -20,6 +20,19 @@ resource "google_compute_network" "network" {
   depends_on = [google_project_service.compute]
 }
 
+# Permit SSH into worker nodes. GKE does this by default for public clusters but
+# we must opt into it.
+# https://cloud.google.com/kubernetes-engine/docs/concepts/firewall-rules#cluster-fws
+resource "google_compute_firewall" "firewall" {
+  name    = "${var.environment}-firewall"
+  network = google_compute_network.network.name
+
+  allow {
+    protocol = "tcp"
+    ports    = ["22"]
+  }
+}
+
 module "subnets" {
   source  = "hashicorp/subnets/cidr"
   version = "1.0.0"
