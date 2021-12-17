@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"os"
@@ -39,14 +40,14 @@ var (
 	csrFQDN           = flag.String("csr-fqdn", "", "Required. FQDN to use as common name in generated CSRs")
 
 	// Rotation configuration.
-	batchSigningKeyEnableRotation = flag.Bool("batch-signing-key-enable-rotation", true, "Determines if batch signing keys are rotated")
+	batchSigningKeyEnableRotation = flag.Bool("batch-signing-key-enable-rotation", true, "Determines if batch signing keys are rotated. If no key versions exist, a new one will be created irrespective of this flag's value")
 	batchSigningKeyCreateMinAge   = flag.Duration("batch-signing-key-create-min-age", 9*30*24*time.Hour, "How frequently to create a new batch signing key version")               // default: 9 months
 	batchSigningKeyPrimaryMinAge  = flag.Duration("batch-signing-key-primary-min-age", 7*24*time.Hour, "How old a batch signing key version must be before it can become primary") // default: 1 week
 	batchSigningKeyDeleteMinAge   = flag.Duration("batch-signing-key-delete-min-age", 13*30*24*time.Hour, "How old a batch signing key version must be before it can be deleted")  // default: 13 months
 	batchSigningKeyDeleteMinCount = flag.Int("batch-signing-key-delete-min-count", 2, "The minimum number of batch signing key versions left undeleted after rotation")
 	batchSigningKeyAlwaysWrite    = flag.Bool("batch-signing-key-always-write", false, "If set, always write batch signing key to backing storage, even if no changes are detected")
 
-	packetEncryptionKeyEnableRotation = flag.Bool("packet-encryption-key-enable-rotation", true, "Determines if packet encryption keys are rotated")
+	packetEncryptionKeyEnableRotation = flag.Bool("packet-encryption-key-enable-rotation", true, "Determines if packet encryption keys are rotated. If no key versions exist, a new one will be created irrespective of this flag's value")
 	packetEncryptionKeyCreateMinAge   = flag.Duration("packet-encryption-key-create-min-age", 9*30*24*time.Hour, "How frequently to create a new packet encryption key version")              // default: 9 months
 	packetEncryptionKeyPrimaryMinAge  = flag.Duration("packet-encryption-key-primary-min-age", 0, "How old a packet encryption key version must be before it can become primary")             // default: 0
 	packetEncryptionKeyDeleteMinAge   = flag.Duration("packet-encryption-key-delete-min-age", 13*30*24*time.Hour, "How old a packet encryption key version must be before it can be deleted") // default: 13 months
@@ -54,12 +55,13 @@ var (
 	packetEncryptionKeyAlwaysWrite    = flag.Bool("packet-encryption-key-always-write", false, "If set, always write packet encryption key to backing storage, even if no changes are detected")
 
 	// Other flags.
-	backup      = flag.String("backup", "", "Set to 'aws' or 'gcp:gcp-project-id' to back up secrets to the respective cloud's secrets manager")
-	dryRun      = flag.Bool("dry-run", true, "If set, do not actually write any keys or manifests back (only report what would have changed)")
-	timeout     = flag.Duration("timeout", 10*time.Minute, "The `deadline` before key-rotator terminates. Set to 0 to disable timeout")
-	awsRegion   = flag.String("aws-region", "", "If specified, the AWS `region` to use for manifest storage")
-	pushGateway = flag.String("push-gateway", "", "Set this to the gateway to use with prometheus. If left empty, metrics will not be pushed to prometheus.")
-	kubeconfig  = flag.String("kubeconfig", "", "The `path` to user's kubeconfig file; if unspecified, assumed to be running in-cluster") // typical value is $HOME/.kube/config
+	backup                        = flag.String("backup", "", "Set to 'aws' or 'gcp:gcp-project-id' to back up secrets to the respective cloud's secrets manager")
+	dryRun                        = flag.Bool("dry-run", true, "If set, do not actually write any keys or manifests back (only report what would have changed)")
+	timeout                       = flag.Duration("timeout", 10*time.Minute, "The `deadline` before key-rotator terminates. Set to 0 to disable timeout")
+	defaultManifestByIngestorJSON = flag.String("default-manifest-by-ingestor", "", "If set to a JSON map from ingestor to manifest, the specified manifest will be used as a template if there is no pre-existing manifest (i.e. for newly-provisioned localities)")
+	awsRegion                     = flag.String("aws-region", "", "If specified, the AWS `region` to use for manifest storage")
+	pushGateway                   = flag.String("push-gateway", "", "Set this to the gateway to use with prometheus. If left empty, metrics will not be pushed to prometheus.")
+	kubeconfig                    = flag.String("kubeconfig", "", "The `path` to user's kubeconfig file; if unspecified, assumed to be running in-cluster") // typical value is $HOME/.kube/config
 
 	// Metrics.
 	pusher      *push.Pusher // populated only if --push-gateway is specified.
@@ -139,6 +141,18 @@ func main() {
 		ingestorLst[i] = v
 	}
 
+	var defaultManifestByDSP map[string]manifest.DataShareProcessorSpecificManifest
+	if *defaultManifestByIngestorJSON != "" {
+		var defaultManifestByIngestor map[string]manifest.DataShareProcessorSpecificManifest
+		if err := json.Unmarshal([]byte(*defaultManifestByIngestorJSON), &defaultManifestByIngestor); err != nil {
+			fail("--default-manifest cannot be deserialized: %v", err)
+		}
+		defaultManifestByDSP = map[string]manifest.DataShareProcessorSpecificManifest{}
+		for ingestor, manifest := range defaultManifestByIngestor {
+			defaultManifestByDSP[dspName(*locality, ingestor)] = manifest
+		}
+	}
+
 	log.Info().Msgf("Starting up")
 	ctx := context.Background()
 	if *timeout > 0 {
@@ -198,6 +212,9 @@ func main() {
 	var opts []storage.ManifestOption
 	if *awsRegion != "" {
 		opts = append(opts, storage.WithAWSRegion(*awsRegion))
+	}
+	if defaultManifestByDSP != nil {
+		opts = append(opts, storage.WithDefaultDataShareProcessorManifests(defaultManifestByDSP))
 	}
 	manifestStore, err := storage.NewManifest(ctx, *manifestBucketURL, opts...)
 	if err != nil {
@@ -284,7 +301,7 @@ func rotateKeys(ctx context.Context, cfg rotateKeysConfig) error {
 	// Rotate keys.
 	log.Info().Msgf("Rotating keys & updating manifests")
 	var newPacketEncryptionKey key.Key
-	if cfg.packetCFG.enableRotation {
+	if oldPacketEncryptionKey.IsEmpty() || cfg.packetCFG.enableRotation {
 		k, err := oldPacketEncryptionKey.Rotate(cfg.now, cfg.packetCFG.rotationCFG)
 		if err != nil {
 			return fmt.Errorf("couldn't rotate packet encryption key for %q: %w", cfg.locality, err)
@@ -297,7 +314,7 @@ func rotateKeys(ctx context.Context, cfg rotateKeysConfig) error {
 
 	newBatchSigningKeyByIngestor := map[string]key.Key{}
 	for ingestor, oldKey := range oldBatchSigningKeyByIngestor {
-		if cfg.batchCFG.enableRotation {
+		if oldKey.IsEmpty() || cfg.batchCFG.enableRotation {
 			newKey, err := oldKey.Rotate(cfg.now, cfg.batchCFG.rotationCFG)
 			if err != nil {
 				return fmt.Errorf("couldn't rotate batch signing key for (%q, %q): %w",

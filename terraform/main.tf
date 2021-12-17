@@ -596,6 +596,7 @@ module "kubernetes_locality" {
   packet_encryption_key_rotation_policy = var.packet_encryption_key_rotation_policy
   enable_key_rotator_localities         = toset(var.enable_key_rotation_localities)
   key_rotator_schedule                  = var.key_rotator_schedule
+  specific_manifest_templates           = { for v in module.data_share_processors : v.data_share_processor_name => v.specific_manifest }
 }
 
 module "data_share_processors" {
