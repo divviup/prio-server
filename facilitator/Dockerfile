@@ -1,11 +1,6 @@
 FROM rust:1.57.0-alpine as builder
 
-RUN apk add libc-dev openssl-dev && apk update
-
-# This is required so OpenSSL links properly. OpenSSL is required by reqwest, as used by
-# prometheus with the `push` option.
-# https://users.rust-lang.org/t/sigsegv-with-program-linked-against-openssl-in-an-alpine-container/52172
-ENV RUSTFLAGS='-C target-feature=-crt-static'
+RUN apk add libc-dev && apk update
 
 # Attempt to install a nonexistent package. This triggers
 # updating the crates.io index separately from building the
@@ -35,7 +30,6 @@ COPY ./avro-schema ./avro-schema
 COPY ./facilitator ./facilitator
 
 ARG BUILD_INFO=unspecified
-ENV OPENSSL_STATIC=true
 
 # This cargo build command must match the one above, or the build cache will not be reused.
 RUN cargo build --manifest-path ./facilitator/Cargo.toml --release
