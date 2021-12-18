@@ -63,7 +63,7 @@ where
                     logger, "encountered retryable error";
                     "error" => format!("{:?}", error),
                 );
-                backoff::Error::Transient(error)
+                backoff::Error::transient(error)
             } else {
                 debug!(logger, "encountered non-retryable error");
                 backoff::Error::Permanent(error)
@@ -74,7 +74,10 @@ where
     // in whatever they want
     .map_err(|e| match e {
         backoff::Error::Permanent(inner) => inner,
-        backoff::Error::Transient(inner) => inner,
+        backoff::Error::Transient {
+            err,
+            retry_after: _,
+        } => err,
     })
 }
 
