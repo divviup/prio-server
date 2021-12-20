@@ -341,6 +341,7 @@ resource "kubernetes_deployment" "intake_batch" {
           name  = "facile-container"
           image = "${var.container_registry}/${var.facilitator_image}:${var.facilitator_version}"
           args = [
+            "--pushgateway=${var.pushgateway}",
             "intake-batch-worker",
             "--is-first=${var.is_first ? "true" : "false"}",
             "--batch-signing-private-key-default-identifier=${kubernetes_secret.batch_signing_key.metadata[0].name}",
@@ -350,7 +351,6 @@ resource "kubernetes_deployment" "intake_batch" {
             "--peer-identity=${var.remote_peer_validation_bucket_identity.identity}",
             "--peer-manifest-base-url=https://${var.peer_manifest_base_url}",
             "--peer-gcp-sa-to-impersonate-before-assuming-role=${var.remote_peer_validation_bucket_identity.gcp_sa_to_impersonate_while_assuming_identity}",
-            "--pushgateway=${var.pushgateway}",
             "--task-queue-kind=${var.intake_queue.subscription_kind}",
             "--task-queue-name=${var.intake_queue.subscription}",
             "--aws-sqs-region=${var.use_aws ? var.aws_region : ""}",
@@ -570,6 +570,7 @@ resource "kubernetes_deployment" "aggregate" {
           name  = "facile-container"
           image = "${var.container_registry}/${var.facilitator_image}:${var.facilitator_version}"
           args = [
+            "--pushgateway=${var.pushgateway}",
             "aggregate-worker",
             "--is-first=${var.is_first ? "true" : "false"}",
             "--batch-signing-private-key-default-identifier=${kubernetes_secret.batch_signing_key.metadata[0].name}",
@@ -580,7 +581,6 @@ resource "kubernetes_deployment" "aggregate" {
             "--peer-manifest-base-url=https://${var.peer_manifest_base_url}",
             "--portal-identity=${var.sum_part_bucket_service_account_email}",
             "--portal-manifest-base-url=https://${var.portal_server_manifest_base_url}",
-            "--pushgateway=${var.pushgateway}",
             "--task-queue-kind=${var.aggregate_queue.subscription_kind}",
             "--task-queue-name=${var.aggregate_queue.subscription}",
             "--gcp-project-id=${var.use_aws ? "" : data.google_project.project.project_id}",
