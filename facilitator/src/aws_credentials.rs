@@ -10,7 +10,7 @@ use crate::{
 use anyhow::{anyhow, Context, Result};
 use async_trait::async_trait;
 use chrono::{prelude::Utc, DateTime};
-use hmac::{Hmac, Mac, NewMac};
+use hmac::{Hmac, Mac};
 use http::header::{HeaderMap, HeaderName};
 use rusoto_core::{
     credential::{

@@ -6,7 +6,7 @@ use crate::{
     DigestWriter, DATE_FORMAT,
 };
 use anyhow::{anyhow, Context, Result};
-use avro_rs::{Reader, Schema, Writer};
+use avro_rs::{Reader, Writer};
 use chrono::NaiveDateTime;
 use ring::{
     digest::Digest,
@@ -112,7 +112,6 @@ pub struct BatchReader<'a, H, P> {
     trace_id: &'a Uuid,
     batch: Batch,
     transport: &'a mut dyn Transport,
-    packet_schema: Schema,
     permit_malformed_batch: bool,
     metrics_collector: Option<&'a BatchReaderMetricsCollector>,
     logger: Logger,
@@ -142,7 +141,6 @@ impl<'a, H: Header, P: Packet> BatchReader<'a, H, P> {
             trace_id,
             batch,
             transport,
-            packet_schema: P::schema(),
             permit_malformed_batch,
             metrics_collector: None,
             logger,
@@ -254,7 +252,7 @@ impl<'a, H: Header, P: Packet> BatchReader<'a, H, P> {
         }
 
         // ... then return a packet reader.
-        Reader::with_schema(&self.packet_schema, Cursor::new(entire_packet_file))
+        Reader::with_schema(P::schema(), Cursor::new(entire_packet_file))
             .context("failed to create Avro reader for packets")
     }
 }
@@ -265,7 +263,6 @@ impl<'a, H: Header, P: Packet> BatchReader<'a, H, P> {
 pub struct BatchWriter<'a, H, P> {
     batch: Batch,
     transport: &'a mut dyn Transport,
-    packet_schema: Schema,
     trace_id: &'a Uuid,
     phantom_header: PhantomData<*const H>,
     phantom_packet: PhantomData<*const P>,
@@ -276,7 +273,6 @@ impl<'a, H: Header, P: Packet> BatchWriter<'a, H, P> {
         BatchWriter {
             batch,
             transport,
-            packet_schema: P::schema(),
             trace_id,
             phantom_header: PhantomData,
             phantom_packet: PhantomData,
@@ -320,7 +316,7 @@ impl<'a, H: Header, P: Packet> BatchWriter<'a, H, P> {
             .transport
             .put(self.batch.packet_file_key(), self.trace_id)?;
         let mut digest_writer = DigestWriter::new(&mut transport_writer);
-        let mut writer = Writer::new(&self.packet_schema, &mut digest_writer);
+        let mut writer = Writer::new(P::schema(), &mut digest_writer);
 
         let result = operation(&mut writer);
         writer

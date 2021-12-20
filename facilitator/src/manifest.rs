@@ -1,6 +1,9 @@
 use anyhow::{anyhow, Context, Result};
-use elliptic_curve::sec1::{EncodedPoint, ToEncodedPoint};
-use p256::{pkcs8::FromPublicKey, NistP256};
+use elliptic_curve::{
+    pkcs8::DecodePublicKey,
+    sec1::{EncodedPoint, ToEncodedPoint},
+};
+use p256::NistP256;
 use pkix::{
     pem::{pem_to_der, PEM_CERTIFICATE_REQUEST},
     pkcs10::DerCertificationRequest,

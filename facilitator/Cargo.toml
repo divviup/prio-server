@@ -9,16 +9,16 @@ anyhow = "1.0"
 async-trait = "0.1"
 atty = "0.2"
 avro-rs = { version = "0.13.0", features = ["snappy"] }
-backoff = "0.3.0"
+backoff = "0.4.0"
 base64 = "0.13.0"
 bytes = "1.1.0"
 chrono = { version = "0.4", features = ["serde"] }
 clap = "2.34.0"
 derivative = "2.1.1"
 dyn-clone = "1.0.4"
-elliptic-curve = { version = "0.10.6", features = ["pem"] }
+elliptic-curve = { version = "0.11.5", features = ["pem"] }
 hex = "0.4"
-hmac = "0.11"
+hmac = "0.12"
 http = "^0.2"
 hyper = "^0.14"
 hyper-rustls = "^0.22"
@@ -26,7 +26,8 @@ jsonwebtoken = "7"
 k8s-openapi = { version = "0.12.0", default-features = false, features = ["v1_20"] }
 kube = "0.57.0"
 kube-runtime = "0.57.0"
-p256 = "0.9.0"
+lazy_static = "1"
+p256 = "0.10.0"
 pem = "1.0"
 pkix = "0.1.1"
 prio = "0.5.0"
@@ -38,7 +39,7 @@ rusoto_core = { version = "^0.47", default_features = false, features = ["rustls
 rusoto_s3 = { version = "^0.47", default_features = false, features = ["rustls"] }
 rusoto_sqs = { version = "^0.47", default_features = false, features = ["rustls"] }
 rusoto_sts = { version = "^0.47", default_features = false, features = ["rustls"] }
-sha2 = "0.9"
+sha2 = "0.10"
 slog = { version = "2.7.0", features = ["max_level_trace"] }
 slog-async = "2.7.0"
 slog-json = "2.4.0"
@@ -47,7 +48,7 @@ serde = { version = "^1.0", features = ["derive"] }
 serde_json = "1.0"
 tempfile = "3.1.0"
 thiserror = "1.0"
-tokio = { version = "^1.14", features = ["full"] }
+tokio = { version = "^1.15", features = ["full"] }
 ureq = { version = "^2.3", features = ["json"] }
 url = "2.2.2"
 urlencoding = "2.1.0"

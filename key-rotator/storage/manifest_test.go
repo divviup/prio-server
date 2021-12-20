@@ -89,11 +89,43 @@ func TestManifest(t *testing.T) {
 					}
 				})
 
+				t.Run("valid manifest (default specified)", func(t *testing.T) {
+					t.Parallel()
+					m, kvs := newKVStoreManifest(test.keyPrefix)
+					m.defaultManifestByDSP = map[string]manifest.DataShareProcessorSpecificManifest{
+						dspName: {Format: 13},
+					}
+					kvs[path.Join(test.keyPrefix, "dsp-manifest.json")] = dspManifestBytes
+					gotManifest, err := m.GetDataShareProcessorSpecificManifest(ctx, dspName)
+					if err != nil {
+						t.Fatalf("Unexpected error from GetDataShareProcessorSpecificManifest: %v", err)
+					}
+					if diff := cmp.Diff(dspManifest, gotManifest); diff != "" {
+						t.Errorf("Unexpected manifest (-want +got):\n%s", diff)
+					}
+				})
+
 				t.Run("no manifest", func(t *testing.T) {
 					t.Parallel()
 					m, _ := newKVStoreManifest(test.keyPrefix)
 					if _, err := m.GetDataShareProcessorSpecificManifest(ctx, dspName); !errors.Is(err, ErrObjectNotExist) {
 						t.Errorf("Unexpected error from GetDataShareProcessorSpecificManifest: %v", err)
+					}
+				})
+
+				t.Run("no manifest (default specified)", func(t *testing.T) {
+					t.Parallel()
+					m, _ := newKVStoreManifest(test.keyPrefix)
+					wantManifest := manifest.DataShareProcessorSpecificManifest{Format: 13}
+					m.defaultManifestByDSP = map[string]manifest.DataShareProcessorSpecificManifest{
+						dspName: wantManifest,
+					}
+					gotManifest, err := m.GetDataShareProcessorSpecificManifest(ctx, dspName)
+					if err != nil {
+						t.Fatalf("Unexpected error from GetDataShareProcessorSpecificManifest: %v", err)
+					}
+					if diff := cmp.Diff(wantManifest, gotManifest); diff != "" {
+						t.Errorf("Unexpected manifest (-want +got):\n%s", diff)
 					}
 				})
 
@@ -152,7 +184,10 @@ func TestManifest(t *testing.T) {
 // map, and modifications to the map will be reflected by the manifest.
 func newKVStoreManifest(keyPrefix string) (_ kvStoreManifest, kvs map[string][]byte) {
 	kvs = map[string][]byte{}
-	return kvStoreManifest{memKV{kvs}, keyPrefix}, kvs
+	return kvStoreManifest{
+		kv:        memKV{kvs},
+		keyPrefix: keyPrefix,
+	}, kvs
 }
 
 // memKV is an in-memory implementation of kvStore, suitable for testing.

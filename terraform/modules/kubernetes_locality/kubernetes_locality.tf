@@ -92,8 +92,21 @@ A set of localities where the key rotator is allowed to run. The special value
 DESCRIPTION
 }
 
+variable "specific_manifest_templates" {
+  type = map(any)
+}
+
+
 locals {
   iam_entity_name = "${var.environment}-${var.locality}-key-rotator"
+
+  relevant_keyless_manifest_templates = {
+    for ingestor in var.ingestors :
+    ingestor => {
+      for k, v in var.specific_manifest_templates["${var.locality}-${ingestor}"] :
+      k => v if k != "batch-signing-public-keys" && k != "packet-encryption-keys"
+    }
+  }
 }
 
 module "key_rotator_account" {
@@ -247,6 +260,7 @@ resource "kubernetes_cron_job" "key_rotator" {
                 "--aws-region=${var.manifest_bucket.aws_region}",
                 "--push-gateway=${var.pushgateway}",
                 "--backup=${var.use_aws ? "aws" : "gcp:${var.gcp_project}"}",
+                "--default-manifest-by-ingestor=${jsonencode(local.relevant_keyless_manifest_templates)}",
                 "--dry-run=${!(contains(var.enable_key_rotator_localities, "*") || contains(var.enable_key_rotator_localities, var.locality))}",
 
                 "--batch-signing-key-enable-rotation=false",
