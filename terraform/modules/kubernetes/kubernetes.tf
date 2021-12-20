@@ -206,74 +206,6 @@ resource "kubernetes_secret" "batch_signing_key" {
   }
 }
 
-# ConfigMap containing the parameters that are common to every intake-batch task
-# that will be handled in this data share processor, except for secrets.
-resource "kubernetes_config_map" "intake_batch_config_map" {
-  metadata {
-    name      = "${var.data_share_processor_name}-intake-batch-config"
-    namespace = var.kubernetes_namespace
-  }
-
-  # These key-value pairs will be plopped directly into the container
-  # environment, so they MUST match the environment variables set in various
-  # Arg::env calls in src/bin/facilitator.rs.
-  data = {
-    # PACKET_DECRYPTION_KEYS is a Kubernetes secret
-    # BATCH_SIGNING_PRIVATE_KEY is a Kubernetes secret
-    IS_FIRST                                        = var.is_first ? "true" : "false"
-    BATCH_SIGNING_PRIVATE_KEY_DEFAULT_IDENTIFIER    = kubernetes_secret.batch_signing_key.metadata[0].name
-    INGESTOR_INPUT                                  = var.ingestion_bucket
-    INGESTOR_MANIFEST_BASE_URL                      = "https://${var.ingestor_manifest_base_url}"
-    INSTANCE_NAME                                   = var.data_share_processor_name
-    PEER_IDENTITY                                   = var.remote_peer_validation_bucket_identity.identity
-    PEER_MANIFEST_BASE_URL                          = "https://${var.peer_manifest_base_url}"
-    PEER_GCP_SA_TO_IMPERSONATE_BEFORE_ASSUMING_ROLE = var.remote_peer_validation_bucket_identity.gcp_sa_to_impersonate_while_assuming_identity
-    RUST_LOG                                        = "info"
-    RUST_BACKTRACE                                  = "1"
-    PUSHGATEWAY                                     = var.pushgateway
-    TASK_QUEUE_KIND                                 = var.intake_queue.subscription_kind
-    TASK_QUEUE_NAME                                 = var.intake_queue.subscription
-    AWS_SQS_REGION                                  = var.use_aws ? var.aws_region : ""
-    GCP_PROJECT_ID                                  = var.use_aws ? "" : data.google_project.project.project_id
-    GCP_WORKLOAD_IDENTITY_POOL_PROVIDER             = var.gcp_workload_identity_pool_provider
-    WORKER_MAXIMUM_LIFETIME                         = "3600"
-  }
-}
-
-# ConfigMap containing the parameters that are common to every aggregation task
-# that will be handled in this data share processor, except for secrets.
-resource "kubernetes_config_map" "aggregate_config_map" {
-  metadata {
-    name      = "${var.data_share_processor_name}-aggregate-config"
-    namespace = var.kubernetes_namespace
-  }
-
-  data = {
-    # PACKET_DECRYPTION_KEYS is a Kubernetes secret
-    # BATCH_SIGNING_PRIVATE_KEY is a Kubernetes secret
-    IS_FIRST                                     = var.is_first ? "true" : "false"
-    BATCH_SIGNING_PRIVATE_KEY_DEFAULT_IDENTIFIER = kubernetes_secret.batch_signing_key.metadata[0].name
-    INGESTOR_INPUT                               = var.ingestion_bucket
-    INGESTOR_MANIFEST_BASE_URL                   = "https://${var.ingestor_manifest_base_url}"
-    INSTANCE_NAME                                = var.data_share_processor_name
-    PEER_INPUT                                   = var.peer_validation_bucket
-    PEER_MANIFEST_BASE_URL                       = "https://${var.peer_manifest_base_url}"
-    PORTAL_IDENTITY                              = var.sum_part_bucket_service_account_email
-    PORTAL_MANIFEST_BASE_URL                     = "https://${var.portal_server_manifest_base_url}"
-    RUST_LOG                                     = "info"
-    RUST_BACKTRACE                               = "1"
-    PUSHGATEWAY                                  = var.pushgateway
-    TASK_QUEUE_KIND                              = var.aggregate_queue.subscription_kind
-    TASK_QUEUE_NAME                              = var.aggregate_queue.subscription
-    GCP_PROJECT_ID                               = data.google_project.project.project_id
-    AWS_SQS_REGION                               = var.use_aws ? var.aws_region : ""
-    GCP_PROJECT_ID                               = var.use_aws ? "" : data.google_project.project.project_id
-    PERMIT_MALFORMED_BATCH                       = "true"
-    GCP_WORKLOAD_IDENTITY_POOL_PROVIDER          = var.gcp_workload_identity_pool_provider
-    WORKER_MAXIMUM_LIFETIME                      = "3600"
-  }
-}
-
 data "google_project" "project" {}
 
 resource "kubernetes_cron_job" "workflow_manager" {
@@ -408,7 +340,24 @@ resource "kubernetes_deployment" "intake_batch" {
         container {
           name  = "facile-container"
           image = "${var.container_registry}/${var.facilitator_image}:${var.facilitator_version}"
-          args  = ["intake-batch-worker"]
+          args = [
+            "intake-batch-worker",
+            "--is-first=${var.is_first ? "true" : "false"}",
+            "--batch-signing-private-key-default-identifier=${kubernetes_secret.batch_signing_key.metadata[0].name}",
+            "--ingestor-input=${var.ingestion_bucket}",
+            "--ingestor-manifest-base-url=https://${var.ingestor_manifest_base_url}",
+            "--instance-name=${var.data_share_processor_name}",
+            "--peer-identity=${var.remote_peer_validation_bucket_identity.identity}",
+            "--peer-manifest-base-url=https://${var.peer_manifest_base_url}",
+            "--peer-gcp-sa-to-impersonate-before-assuming-role=${var.remote_peer_validation_bucket_identity.gcp_sa_to_impersonate_while_assuming_identity}",
+            "--pushgateway=${var.pushgateway}",
+            "--task-queue-kind=${var.intake_queue.subscription_kind}",
+            "--task-queue-name=${var.intake_queue.subscription}",
+            "--aws-sqs-region=${var.use_aws ? var.aws_region : ""}",
+            "--gcp-project-id=${var.use_aws ? "" : data.google_project.project.project_id}",
+            "--gcp-workload-identity-pool-provider=${var.gcp_workload_identity_pool_provider}",
+            "--worker-maximum-lifetime=3600"
+          ]
           # Prometheus metrics scrape endpoint
           port {
             container_port = 8080
@@ -429,6 +378,14 @@ resource "kubernetes_deployment" "intake_batch" {
               memory = "550Mi"
               cpu    = "1.5"
             }
+          }
+          env {
+            name  = "RUST_LOG"
+            value = "info"
+          }
+          env {
+            name  = "RUST_BACKTRACE"
+            value = "1"
           }
           env {
             name = "BATCH_SIGNING_PRIVATE_KEY"
@@ -458,12 +415,6 @@ resource "kubernetes_deployment" "intake_batch" {
                 key      = "secret_key"
                 optional = false
               }
-            }
-          }
-          env_from {
-            config_map_ref {
-              name     = kubernetes_config_map.intake_batch_config_map.metadata[0].name
-              optional = false
             }
           }
         }
@@ -618,7 +569,26 @@ resource "kubernetes_deployment" "aggregate" {
         container {
           name  = "facile-container"
           image = "${var.container_registry}/${var.facilitator_image}:${var.facilitator_version}"
-          args  = ["aggregate-worker"]
+          args = [
+            "aggregate-worker",
+            "--is-first=${var.is_first ? "true" : "false"}",
+            "--batch-signing-private-key-default-identifier=${kubernetes_secret.batch_signing_key.metadata[0].name}",
+            "--ingestor-input=${var.ingestion_bucket}",
+            "--ingestor-manifest-base-url=https://${var.ingestor_manifest_base_url}",
+            "--instance-name=${var.data_share_processor_name}",
+            "--peer-input=${var.peer_validation_bucket}",
+            "--peer-manifest-base-url=https://${var.peer_manifest_base_url}",
+            "--portal-identity=${var.sum_part_bucket_service_account_email}",
+            "--portal-manifest-base-url=https://${var.portal_server_manifest_base_url}",
+            "--pushgateway=${var.pushgateway}",
+            "--task-queue-kind=${var.aggregate_queue.subscription_kind}",
+            "--task-queue-name=${var.aggregate_queue.subscription}",
+            "--gcp-project-id=${var.use_aws ? "" : data.google_project.project.project_id}",
+            "--aws-sqs-region=${var.use_aws ? var.aws_region : ""}",
+            "--permit-malformed-batch=true",
+            "--gcp-workload-identity-pool-provider=${var.gcp_workload_identity_pool_provider}",
+            "--worker-maximum-lifetime=3600",
+          ]
           # Prometheus metrics scrape endpoint
           port {
             container_port = 8080
@@ -635,6 +605,14 @@ resource "kubernetes_deployment" "aggregate" {
               memory = "550Mi"
               cpu    = "1.5"
             }
+          }
+          env {
+            name  = "RUST_LOG"
+            value = "info"
+          }
+          env {
+            name  = "RUST_BACKTRACE"
+            value = "1"
           }
           env {
             name = "BATCH_SIGNING_PRIVATE_KEY"
@@ -664,12 +642,6 @@ resource "kubernetes_deployment" "aggregate" {
                 key      = "secret_key"
                 optional = false
               }
-            }
-          }
-          env_from {
-            config_map_ref {
-              name     = kubernetes_config_map.aggregate_config_map.metadata[0].name
-              optional = false
             }
           }
         }
