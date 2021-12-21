@@ -87,15 +87,6 @@ pub struct BatchSigningKey {
     pub identifier: String,
 }
 
-/// Pretty print a byte array as a hex string.
-fn hex_dump(bytes: &[u8]) -> String {
-    bytes
-        .iter()
-        .map(|b| format!("{:02x}", b))
-        .collect::<Vec<_>>()
-        .concat()
-}
-
 #[cfg(test)]
 mod tests {
     use crate::DigestWriter;

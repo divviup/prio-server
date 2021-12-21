@@ -1,5 +1,4 @@
 use crate::{
-    hex_dump,
     idl::{BatchSignature, Header, Packet},
     metrics::BatchReaderMetricsCollector,
     transport::{Transport, TransportWriter},
@@ -235,8 +234,8 @@ impl<'a, H: Header, P: Packet> BatchReader<'a, H, P> {
         if header.packet_file_digest().as_slice() != packet_file_digest.as_ref() {
             let message = format!(
                 "packet file digest in header {} does not match actual packet file digest {}",
-                hex_dump(header.packet_file_digest()),
-                hex_dump(packet_file_digest.as_ref())
+                hex::encode(header.packet_file_digest()),
+                hex::encode(packet_file_digest.as_ref())
             );
             if let Some(collector) = self.metrics_collector {
                 collector
