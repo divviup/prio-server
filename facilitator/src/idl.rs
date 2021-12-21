@@ -92,7 +92,7 @@ pub trait Packet: Sized {
 
 /// The file containing signatures over the ingestion batch header and packet
 /// file.
-#[derive(Debug, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Serialize, Deserialize, PartialEq, Clone)]
 pub struct BatchSignature {
     pub batch_header_signature: Vec<u8>,
     pub key_identifier: String,
@@ -129,7 +129,7 @@ impl BatchSignature {
     /// std::io::Write instance.
     pub fn write<W: Write>(&self, writer: &mut W) -> Result<(), Error> {
         let mut writer = Writer::new(*BATCH_SIGNATURE_SCHEMA, writer);
-        writer.append(Value::from(self)).map_err(|e| {
+        writer.append(Value::from(self.clone())).map_err(|e| {
             Error::AvroError("failed to append record to Avro writer".to_owned(), e)
         })?;
 
@@ -180,8 +180,8 @@ impl TryFrom<Value> for BatchSignature {
     }
 }
 
-impl From<&BatchSignature> for Value {
-    fn from(sig: &BatchSignature) -> Value {
+impl From<BatchSignature> for Value {
+    fn from(sig: BatchSignature) -> Value {
         // avro_rs docs say this can only happen "if the `Schema is not
         // a `Schema::Record` variant", which shouldn't ever happen, so
         // panic for debugging
@@ -190,9 +190,9 @@ impl From<&BatchSignature> for Value {
             .expect("Unable to create record from ingestion signature schema");
         record.put(
             "batch_header_signature",
-            Value::Bytes(sig.batch_header_signature.clone()),
+            Value::Bytes(sig.batch_header_signature),
         );
-        record.put("key_identifier", Value::String(sig.key_identifier.clone()));
+        record.put("key_identifier", Value::String(sig.key_identifier));
         Value::Record(record.fields)
     }
 }
@@ -1094,7 +1094,7 @@ impl Packet for InvalidPacket {
     }
 }
 
-#[derive(Debug, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Serialize, Deserialize, PartialEq, Clone)]
 pub struct ValidationBatch {
     pub sig: BatchSignature,
     pub header: Vec<u8>,
@@ -1130,7 +1130,7 @@ impl ValidationBatch {
     /// std::io::Write instance.
     pub fn write<W: Write>(&self, writer: &mut W) -> Result<(), Error> {
         let mut writer = Writer::new(*VALIDATION_BATCH_SCHEMA, writer);
-        writer.append(Value::from(self)).map_err(|e| {
+        writer.append(Value::from(self.clone())).map_err(|e| {
             Error::AvroError("failed to append record to Avro writer".to_owned(), e)
         })?;
         writer
@@ -1176,13 +1176,13 @@ impl TryFrom<Value> for ValidationBatch {
     }
 }
 
-impl From<&ValidationBatch> for Value {
-    fn from(batch: &ValidationBatch) -> Self {
+impl From<ValidationBatch> for Value {
+    fn from(batch: ValidationBatch) -> Self {
         let mut record = Record::new(*VALIDATION_BATCH_SCHEMA)
             .expect("Unable to create record from validation batch schema");
-        record.put("sig", Value::from(&batch.sig));
-        record.put("header", Value::Bytes(batch.header.clone()));
-        record.put("packets", Value::Bytes(batch.packets.clone()));
+        record.put("sig", Value::from(batch.sig));
+        record.put("header", Value::Bytes(batch.header));
+        record.put("packets", Value::Bytes(batch.packets));
         Value::Record(record.fields)
     }
 }
