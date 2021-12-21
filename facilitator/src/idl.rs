@@ -70,13 +70,25 @@ pub trait Header: Sized {
     fn write<W: Write>(&self, writer: &mut W) -> Result<(), Error>;
 }
 
-pub trait Packet: Sized {
+pub trait Packet: Sized + TryFrom<Value, Error = Error> {
     /// Reads and parses a single Packet from the provided avro_rs::Reader. Note
     /// that unlike other structures, this does not take a primitive
     /// std::io::Read, because we do not want to create a new Avro schema and
     /// reader for each packet. The Reader must have been created with the
     /// schema returned from Packet::schema.
-    fn read<R: Read>(reader: &mut Reader<R>) -> Result<Self, Error>;
+    fn read<R: Read>(reader: &mut Reader<R>) -> Result<Self, Error> {
+        let value = match reader.next() {
+            Some(Ok(value)) => value,
+            Some(Err(e)) => {
+                return Err(Error::AvroError(
+                    "failed to read record from Avro reader".to_owned(),
+                    e,
+                ));
+            }
+            None => return Err(Error::EofError),
+        };
+        Self::try_from(value)
+    }
 
     /// Serializes and writes a single Packet to the provided avro_rs::Writer.
     /// Note that unlike other structures, this does not take a primitive
@@ -402,92 +414,6 @@ impl Packet for IngestionDataSharePacket {
         *INGESTION_DATA_SHARE_PACKET_SCHEMA
     }
 
-    fn read<R: Read>(reader: &mut Reader<R>) -> Result<IngestionDataSharePacket, Error> {
-        let record = match reader.next() {
-            Some(Ok(Value::Record(r))) => r,
-            Some(Ok(_)) => {
-                return Err(Error::MalformedDataPacketError(
-                    "value is not a record".to_owned(),
-                ))
-            }
-            Some(Err(e)) => {
-                return Err(Error::AvroError(
-                    "failed to read record from Avro reader".to_owned(),
-                    e,
-                ));
-            }
-            None => return Err(Error::EofError),
-        };
-
-        // As in IngestionSignature::read_signature, , we can't just deserialize into a struct and
-        // must instead walk the vector of record fields.
-        let mut uuid = None;
-        let mut encrypted_payload = None;
-        let mut encryption_key_id = None;
-        let mut r_pit = None;
-        let mut version_configuration = None;
-        let mut device_nonce = None;
-
-        for tuple in record {
-            match (tuple.0.as_str(), tuple.1) {
-                ("uuid", Value::Uuid(v)) => uuid = Some(v),
-                ("encrypted_payload", Value::Bytes(v)) => encrypted_payload = Some(v),
-                ("encryption_key_id", Value::Union(boxed)) => match *boxed {
-                    Value::String(v) => encryption_key_id = Some(v),
-                    Value::Null => encryption_key_id = None,
-                    v => {
-                        return Err(Error::MalformedDataPacketError(format!(
-                            "unexpected boxed value {:?} in encryption_key_id",
-                            v
-                        )))
-                    }
-                },
-                ("r_pit", Value::Long(v)) => r_pit = Some(v),
-                ("version_configuration", Value::Union(boxed)) => match *boxed {
-                    Value::String(v) => version_configuration = Some(v),
-                    Value::Null => version_configuration = None,
-                    v => {
-                        return Err(Error::MalformedDataPacketError(format!(
-                            "unexpected boxed value {:?} in version_configuration",
-                            v
-                        )))
-                    }
-                },
-                ("device_nonce", Value::Union(boxed)) => match *boxed {
-                    Value::Bytes(v) => device_nonce = Some(v),
-                    Value::Null => device_nonce = None,
-                    v => {
-                        return Err(Error::MalformedDataPacketError(format!(
-                            "unexpected boxed value {:?} in device_nonce",
-                            v
-                        )))
-                    }
-                },
-                (f, _) => {
-                    return Err(Error::MalformedDataPacketError(format!(
-                        "unexpected field {} in record",
-                        f
-                    )))
-                }
-            }
-        }
-
-        if uuid.is_none() || encrypted_payload.is_none() || r_pit.is_none() {
-            return Err(Error::MalformedDataPacketError(
-                "missing fields in record".to_owned(),
-            ));
-        }
-
-        Ok(IngestionDataSharePacket {
-            uuid: uuid.unwrap(),
-            encrypted_payload: encrypted_payload.unwrap(),
-            encryption_key_id,
-            r_pit: r_pit.unwrap(),
-            version_configuration,
-            device_nonce,
-        })
-    }
-
     fn write<W: Write>(&self, writer: &mut Writer<W>) -> Result<(), Error> {
         // Ideally we would just do `writer.append_ser(self)` to use Serde
         // serialization to write the record but there seems to be some problem
@@ -532,6 +458,66 @@ impl Packet for IngestionDataSharePacket {
         })?;
 
         Ok(())
+    }
+}
+
+impl TryFrom<Value> for IngestionDataSharePacket {
+    type Error = Error;
+
+    fn try_from(value: Value) -> Result<Self, Self::Error> {
+        let fields = match value {
+            Value::Record(fields) => fields,
+            _ => {
+                return Err(Error::MalformedDataPacketError(
+                    "value is not a Record".to_owned(),
+                ))
+            }
+        };
+
+        // As in IngestionSignature::read_signature, we can't just deserialize
+        // into a struct and must instead walk the vector of record fields.
+        let mut uuid = None;
+        let mut encrypted_payload = None;
+        let mut encryption_key_id = None;
+        let mut r_pit = None;
+        let mut version_configuration = None;
+        let mut device_nonce = None;
+
+        for (field_name, field_value) in fields {
+            match (field_name.as_str(), field_value) {
+                ("uuid", Value::Uuid(v)) => uuid = Some(v),
+                ("encrypted_payload", Value::Bytes(v)) => encrypted_payload = Some(v),
+                ("encryption_key_id", Value::Union(boxed)) => {
+                    if let Value::String(v) = *boxed {
+                        encryption_key_id = Some(v);
+                    }
+                }
+                ("r_pit", Value::Long(v)) => r_pit = Some(v),
+                ("version_configuration", Value::Union(boxed)) => {
+                    if let Value::String(v) = *boxed {
+                        version_configuration = Some(v);
+                    }
+                }
+                ("device_nonce", Value::Union(boxed)) => {
+                    if let Value::Bytes(v) = *boxed {
+                        device_nonce = Some(v);
+                    }
+                }
+                _ => (),
+            }
+        }
+
+        Ok(IngestionDataSharePacket {
+            uuid: uuid.ok_or_else(|| Error::MalformedDataPacketError("missing uuid".to_owned()))?,
+            encrypted_payload: encrypted_payload.ok_or_else(|| {
+                Error::MalformedDataPacketError("missing encrypted_payload".to_owned())
+            })?,
+            encryption_key_id,
+            r_pit: r_pit
+                .ok_or_else(|| Error::MalformedDataPacketError("missing r_pit".to_owned()))?,
+            version_configuration,
+            device_nonce,
+        })
     }
 }
 
@@ -755,22 +741,6 @@ impl Packet for ValidationPacket {
         *VALIDATION_PACKET_SCHEMA
     }
 
-    fn read<R: Read>(reader: &mut Reader<R>) -> Result<ValidationPacket, Error> {
-        let header = match reader.next() {
-            Some(Ok(h)) => h,
-            Some(Err(e)) => {
-                return Err(Error::AvroError(
-                    "failed to read header from Avro reader".to_owned(),
-                    e,
-                ))
-            }
-            None => return Err(Error::EofError),
-        };
-
-        from_value::<ValidationPacket>(&header)
-            .map_err(|e| Error::AvroError("failed to parse validation header".to_owned(), e))
-    }
-
     fn write<W: Write>(&self, writer: &mut Writer<W>) -> Result<(), Error> {
         // Ideally we would just do `writer.append_ser(self)` to use Serde serialization to write
         // the record but there seems to be some problem with serializing UUIDs, so we have to
@@ -795,6 +765,15 @@ impl Packet for ValidationPacket {
         })?;
 
         Ok(())
+    }
+}
+
+impl TryFrom<Value> for ValidationPacket {
+    type Error = Error;
+
+    fn try_from(value: Value) -> Result<Self, Self::Error> {
+        from_value::<ValidationPacket>(&value)
+            .map_err(|e| Error::AvroError("failed to parse validation header".to_owned(), e))
     }
 }
 
@@ -1054,22 +1033,6 @@ impl Packet for InvalidPacket {
         *INVALID_PACKET_SCHEMA
     }
 
-    fn read<R: Read>(reader: &mut Reader<R>) -> Result<InvalidPacket, Error> {
-        let header = match reader.next() {
-            Some(Ok(h)) => h,
-            Some(Err(e)) => {
-                return Err(Error::AvroError(
-                    "failed to read invalid packet from Avro reader".to_owned(),
-                    e,
-                ))
-            }
-            None => return Err(Error::EofError),
-        };
-
-        from_value::<InvalidPacket>(&header)
-            .map_err(|e| Error::AvroError("failed to parse invalid packet".to_owned(), e))
-    }
-
     fn write<W: Write>(&self, writer: &mut Writer<W>) -> Result<(), Error> {
         // Ideally we would just do `writer.append_ser(self)` to use Serde serialization to write
         // the record but there seems to be some problem with serializing UUIDs, so we have to
@@ -1091,6 +1054,15 @@ impl Packet for InvalidPacket {
         })?;
 
         Ok(())
+    }
+}
+
+impl TryFrom<Value> for InvalidPacket {
+    type Error = Error;
+
+    fn try_from(value: Value) -> Result<Self, Self::Error> {
+        from_value::<InvalidPacket>(&value)
+            .map_err(|e| Error::AvroError("failed to parse invalid packet".to_owned(), e))
     }
 }
 
