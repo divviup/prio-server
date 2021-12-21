@@ -10,7 +10,7 @@ require (
 	google.golang.org/grpc v1.43.0
 	k8s.io/api v0.23.1
 	k8s.io/apimachinery v0.23.1
-	k8s.io/client-go v0.23.0
+	k8s.io/client-go v0.23.1
 )
 
 require (
