@@ -341,7 +341,6 @@ resource "kubernetes_deployment" "intake_batch" {
           name  = "facile-container"
           image = "${var.container_registry}/${var.facilitator_image}:${var.facilitator_version}"
           args = [
-            "--pushgateway=${var.pushgateway}",
             "intake-batch-worker",
             "--is-first=${var.is_first ? "true" : "false"}",
             "--batch-signing-private-key-default-identifier=${kubernetes_secret.batch_signing_key.metadata[0].name}",
@@ -570,7 +569,6 @@ resource "kubernetes_deployment" "aggregate" {
           name  = "facile-container"
           image = "${var.container_registry}/${var.facilitator_image}:${var.facilitator_version}"
           args = [
-            "--pushgateway=${var.pushgateway}",
             "aggregate-worker",
             "--is-first=${var.is_first ? "true" : "false"}",
             "--batch-signing-private-key-default-identifier=${kubernetes_secret.batch_signing_key.metadata[0].name}",

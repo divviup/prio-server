@@ -704,10 +704,12 @@ fn main() -> Result<(), anyhow::Error> {
     let matches = App::new("facilitator")
         .about("Prio data share processor")
         .arg(
+            // TODO(brandon): remove this flag once it is no longer specified anywhere
             Arg::with_name("pushgateway")
                 .long("pushgateway")
                 .env("PUSHGATEWAY")
-                .help("Address of a Prometheus pushgateway to push metrics to, in host:port form"),
+                .help("Deprecated: does nothing")
+                .hidden(true),
         )
         .arg(
             Arg::with_name("force-json-log-output")
