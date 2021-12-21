@@ -28,10 +28,6 @@ variable "aws_region" {
   type = string
 }
 
-variable "aws_profile" {
-  type = string
-}
-
 variable "localities" {
   type = list(string)
 }
@@ -209,16 +205,6 @@ variable "victorops_routing_key" {
   description = "VictorOps/Splunk OnCall routing key for prometheus-alertmanager"
 }
 
-variable "cluster_settings" {
-  type = object({
-    initial_node_count = number
-    min_node_count     = number
-    max_node_count     = number
-    gcp_machine_type   = string
-    aws_machine_types  = list(string)
-  })
-}
-
 variable "batch_signing_key_rotation_policy" {
   type = object({
     create_min_age   = string
@@ -352,12 +338,13 @@ provider "google" {
   project = var.gcp_project
 }
 
+# AWS provider credentials come from environment variables set by the `aws-mfa`
+# script
 provider "aws" {
   # aws_s3_bucket resources will be created in the region specified in this
   # provider.
   # https://github.com/hashicorp/terraform/issues/12512
-  region  = var.aws_region
-  profile = var.aws_profile
+  region = var.aws_region
 
   default_tags {
     tags = {
@@ -405,22 +392,11 @@ module "manifest_aws" {
   global_manifest_content = local.global_manifest
 }
 
-module "gke" {
-  source           = "./modules/gke"
-  count            = var.use_aws ? 0 : 1
-  environment      = var.environment
-  resource_prefix  = "prio-${var.environment}"
-  gcp_region       = var.gcp_region
-  gcp_project      = var.gcp_project
-  cluster_settings = var.cluster_settings
-}
-
 module "eks" {
-  source           = "./modules/eks"
-  count            = var.use_aws ? 1 : 0
-  environment      = var.environment
-  resource_prefix  = "prio-${var.environment}"
-  cluster_settings = var.cluster_settings
+  source      = "./modules/eks"
+  count       = var.use_aws ? 1 : 0
+  environment = var.environment
+  aws_region  = var.aws_region
 }
 
 # While we create a distinct data share processor for each (ingestor, locality)
@@ -548,14 +524,26 @@ locals {
     endpoint                   = module.eks[0].cluster_endpoint
     certificate_authority_data = module.eks[0].certificate_authority_data
     token                      = module.eks[0].token
-    kubectl_command            = "aws --profile ${var.aws_profile} eks update-kubeconfig --region ${var.aws_region} --name ${module.eks[0].cluster_name}"
     } : {
-    name                       = module.gke[0].cluster_name
-    endpoint                   = module.gke[0].cluster_endpoint
-    certificate_authority_data = module.gke[0].certificate_authority_data
-    token                      = module.gke[0].token
-    kubectl_command            = "gcloud container clusters get-credentials ${module.gke[0].cluster_name} --region ${var.gcp_region} --project ${var.gcp_project}"
+    name                       = data.google_container_cluster.cluster[0].name
+    endpoint                   = "https://${data.google_container_cluster.cluster[0].endpoint}"
+    certificate_authority_data = data.google_container_cluster.cluster[0].master_auth.0.cluster_ca_certificate
+    token                      = data.google_client_config.current.access_token
   }
+}
+
+data "google_container_cluster" "cluster" {
+  count = var.use_aws ? 0 : 1
+
+  name     = "prio-${var.environment}-cluster"
+  location = var.gcp_region
+}
+
+data "google_kms_key_ring" "keyring" {
+  count = var.use_aws ? 0 : 1
+
+  name     = "prio-${var.environment}-kms-keyring"
+  location = var.gcp_region
 }
 
 resource "google_project_iam_custom_role" "gcp_secret_writer" {
@@ -617,7 +605,7 @@ module "data_share_processors" {
   intake_max_age                                 = var.intake_max_age
   aggregation_period                             = each.value.aggregation_period
   aggregation_grace_period                       = each.value.aggregation_grace_period
-  kms_keyring                                    = var.use_aws ? "" : module.gke[0].kms_keyring
+  kms_keyring                                    = var.use_aws ? "" : data.google_kms_key_ring.keyring[0].id
   pushgateway                                    = var.pushgateway
   workflow_manager_image                         = var.workflow_manager_image
   workflow_manager_version                       = var.workflow_manager_version
@@ -734,8 +722,6 @@ module "fake_server_resources" {
   facilitator_image     = var.facilitator_image
   facilitator_version   = var.facilitator_version
   manifest_bucket       = local.manifest.bucket
-
-  depends_on = [module.gke]
 }
 
 module "portal_server_resources" {
@@ -746,8 +732,6 @@ module "portal_server_resources" {
   gcp_region                   = var.gcp_region
   environment                  = var.environment
   sum_part_bucket_writer_email = google_service_account.sum_part_bucket_writer.email
-
-  depends_on = [module.gke]
 }
 
 module "custom_metrics" {
@@ -780,8 +764,4 @@ module "monitoring" {
   grafana_helm_chart_version              = var.grafana_helm_chart_version
   cloudwatch_exporter_helm_chart_version  = var.cloudwatch_exporter_helm_chart_version
   stackdriver_exporter_helm_chart_version = var.stackdriver_exporter_helm_chart_version
-}
-
-output "kubeconfig" {
-  value = "Run this command to update your kubectl config: ${local.kubernetes_cluster.kubectl_command}"
 }

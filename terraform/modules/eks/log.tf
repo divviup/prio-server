@@ -19,12 +19,12 @@ resource "kubernetes_config_map" "cluster_info" {
   }
 
   data = {
-    "cluster.name" = aws_eks_cluster.cluster.name
+    "cluster.name" = data.aws_eks_cluster.cluster.name
     "http.server"  = "Off"
     "http.port"    = "2020"
     "read.head"    = "Off"
     "read.tail"    = "On"
-    "logs.region"  = data.aws_region.current.name
+    "logs.region"  = var.aws_region
   }
 }
 

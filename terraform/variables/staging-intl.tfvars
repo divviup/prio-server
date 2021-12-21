@@ -1,4 +1,5 @@
 environment     = "staging-intl"
+state_bucket    = "staging-intl-us-west1-prio-terraform"
 gcp_region      = "us-west1"
 gcp_project     = "prio-intl-staging"
 localities      = ["na-na"]

@@ -1,4 +1,5 @@
 environment     = "staging-facil"
+state_bucket    = "staging-facil-us-west1-prio-terraform"
 gcp_region      = "us-west1"
 gcp_project     = "prio-staging-300104"
 localities      = ["narnia", "gondor", "asgard"]
