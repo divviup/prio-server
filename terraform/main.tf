@@ -537,14 +537,12 @@ locals {
     base_url       = module.manifest_aws[0].base_url
     aws_bucket_arn = module.manifest_aws[0].bucket_arn
     aws_region     = var.aws_region
-    aws_profile    = var.aws_profile
     } : {
     bucket         = module.manifest_gcp[0].bucket
     bucket_url     = module.manifest_gcp[0].bucket_url
     base_url       = module.manifest_gcp[0].base_url
     aws_bucket_arn = ""
     aws_region     = ""
-    aws_profile    = ""
   }
 
   kubernetes_cluster = var.use_aws ? {
@@ -737,6 +735,7 @@ module "fake_server_resources" {
   container_registry    = var.container_registry
   facilitator_image     = var.facilitator_image
   facilitator_version   = var.facilitator_version
+  manifest_bucket       = local.manifest.bucket
 
   depends_on = [module.gke]
 }
@@ -785,42 +784,6 @@ module "monitoring" {
   stackdriver_exporter_helm_chart_version = var.stackdriver_exporter_helm_chart_version
 }
 
-output "manifest_bucket" {
-  value = {
-    bucket_url  = local.manifest.bucket_url
-    aws_region  = local.manifest.aws_region
-    aws_profile = local.manifest.aws_profile
-  }
-}
-
 output "kubeconfig" {
   value = "Run this command to update your kubectl config: ${local.kubernetes_cluster.kubectl_command}"
-}
-
-output "specific_manifests" {
-  value = { for v in module.data_share_processors : v.data_share_processor_name => {
-    ingestor-name        = v.ingestor_name
-    kubernetes-namespace = v.kubernetes_namespace
-    certificate-fqdn     = v.certificate_fqdn
-    specific-manifest    = v.specific_manifest
-    }
-  }
-}
-
-output "singleton_ingestor" {
-  value = local.is_env_with_ingestor ? {
-    aws_iam_entity              = module.fake_server_resources[0].aws_iam_entity
-    gcp_service_account_id      = module.fake_server_resources[0].gcp_service_account_id
-    gcp_service_account_email   = module.fake_server_resources[0].gcp_service_account_email
-    tester_kubernetes_namespace = module.fake_server_resources[0].test_kubernetes_namespace
-    batch_signing_key_name      = module.fake_server_resources[0].batch_signing_key_name
-  } : {}
-}
-
-output "use_test_pha_decryption_key" {
-  value = lookup(var.test_peer_environment, "env_without_ingestor", "") == var.environment
-}
-
-output "has_test_environment" {
-  value = length(module.fake_server_resources) != 0
 }
