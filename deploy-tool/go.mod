@@ -7,7 +7,7 @@ require (
 	github.com/abetterinternet/prio-server/key-rotator v0.0.0-00010101000000-000000000000
 	google.golang.org/api v0.63.0
 	google.golang.org/genproto v0.0.0-20211208223120-3a66f561d7aa
-	google.golang.org/grpc v1.42.0
+	google.golang.org/grpc v1.43.0
 	k8s.io/api v0.23.1
 	k8s.io/apimachinery v0.23.1
 	k8s.io/client-go v0.23.0
