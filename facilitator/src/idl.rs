@@ -210,7 +210,7 @@ impl From<BatchSignature> for Value {
 }
 
 /// The header on a Prio ingestion batch.
-#[derive(Debug, Deserialize, Serialize, PartialEq)]
+#[derive(Debug, Deserialize, Serialize, PartialEq, Clone)]
 pub struct IngestionHeader {
     pub batch_uuid: Uuid,
     pub name: String,

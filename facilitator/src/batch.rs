@@ -2,7 +2,7 @@ use crate::{
     idl::{BatchSignature, Header, Packet},
     metrics::BatchReaderMetricsCollector,
     transport::{Transport, TransportWriter},
-    DigestWriter, DATE_FORMAT,
+    DigestWriter, Error, DATE_FORMAT,
 };
 use anyhow::{anyhow, Context, Result};
 use avro_rs::{Reader, Writer};
@@ -156,93 +156,82 @@ impl<'a, H: Header, P: Packet> BatchReader<'a, H, P> {
         self.transport.path()
     }
 
-    /// Return the parsed header from this batch, but only if its signature is
-    /// valid. The signature is checked by getting the key_identifier value from
-    /// the signature message, using that to obtain a public key from the
-    /// provided public_keys map, and using that key to check the ECDSA P256
-    /// signature.
-    pub fn header(
+    // Returns the parsed header & packets from this batch, but only if the
+    // signature & digest are valid.
+    pub fn read(
         &mut self,
         public_keys: &HashMap<String, UnparsedPublicKey<Vec<u8>>>,
-    ) -> Result<H> {
+    ) -> Result<(H, Vec<P>)> {
+        // First, read the batch signature.
         let signature = BatchSignature::read(
             self.transport
                 .get(self.batch.signature_key(), self.trace_id)?,
         )?;
 
+        // Read the header, and check the header's signature.
         let mut header_buf = Vec::new();
         self.transport
             .get(self.batch.header_key(), self.trace_id)?
             .read_to_end(&mut header_buf)
             .context("failed to read header from transport")?;
 
-        let sig_valid = public_keys
+        if let Err(err) = public_keys
             .get(&signature.key_identifier)
-            .context(format!(
-                "key identifier {} not present in key map {:?}",
-                signature.key_identifier,
-                public_keys.keys(),
-            ))?
-            .verify(&header_buf, &signature.batch_header_signature);
-        if let Err(e) = sig_valid {
-            let message = format!(
-                "invalid signature on header with key {}: {:?}",
-                signature.key_identifier, e
-            );
+            .with_context(|| {
+                format!(
+                    "key identifier {} not present in key map {:?}",
+                    signature.key_identifier,
+                    public_keys.keys(),
+                )
+            })?
+            .verify(&header_buf, &signature.batch_header_signature)
+        {
             if let Some(collector) = self.metrics_collector {
                 collector
                     .invalid_validation_batches
                     .with_label_values(&["header"])
                     .inc();
             }
+            let message = format!(
+                "invalid signature on header with key {}: {:?}",
+                signature.key_identifier, err
+            );
             if self.permit_malformed_batch {
                 warn!(self.logger, "{}", message);
             } else {
                 return Err(anyhow!("{}", message));
             }
         }
-        Ok(H::read(Cursor::new(header_buf))?)
-    }
+        let header = H::read(Cursor::new(header_buf))?;
 
-    /// Return an avro_rs::Reader that yields the packets in the packet file,
-    /// but only if the whole file's digest matches the packet_file_digest field
-    /// in the provided header. The header is assumed to be trusted.
-    pub fn packet_file_reader(&mut self, header: &H) -> Result<Reader<Cursor<Vec<u8>>>> {
-        // Fetch packet file to validate its digest. It could be quite large so
-        // so our intuition would be to stream the packets from the transport
-        // and into a hasher and into the validation step, so that we wouldn't
-        // need the whole file in memory at once. We can't do this because:
-        //   (1) we don't want to do anything with any of the data in the packet
-        //       file until we've verified integrity+authenticity
-        //   (2) we need to copy the entire file into storage we control before
-        //       validating its digest to avoid TOCTOU vulnerabilities.
-        // We are assured by our friends writing ingestion servers that batches
-        // will be no more than 300-400 MB, which fits quite reasonably into the
-        // memory of anything we're going to run the facilitator on, so we load
-        // the entire packet file into memory ...
-        let mut packet_file_reader = self
+        // Read packets, after verifying that digest matches header.
+        // We read all of the packets, rather than streaming bytes as we
+        // need them to yield a packet, because we need to check that the
+        // header's recorded digest matches the actual content's digest. The
+        // ingestion server authors suggest that the maximum batch size will be
+        // ~400MiB, so this should work out okay.
+        let mut packet_reader = self
             .transport
             .get(self.batch.packet_file_key(), self.trace_id)?;
-        let mut entire_packet_file = Vec::new();
-        let mut digest_writer = DigestWriter::new(&mut entire_packet_file);
+        let mut packet_bytes = Vec::new();
+        let mut digest_writer = DigestWriter::new(&mut packet_bytes);
 
-        std::io::copy(&mut packet_file_reader, &mut digest_writer)
+        std::io::copy(&mut packet_reader, &mut digest_writer)
             .context("failed to load packet file")?;
 
-        // ... then verify the digest over it ...
-        let packet_file_digest = digest_writer.finish();
-        if header.packet_file_digest().as_slice() != packet_file_digest.as_ref() {
-            let message = format!(
-                "packet file digest in header {} does not match actual packet file digest {}",
-                hex::encode(header.packet_file_digest()),
-                hex::encode(packet_file_digest.as_ref())
-            );
+        let packet_digest = digest_writer.finish();
+        if header.packet_file_digest() != packet_digest.as_ref() {
             if let Some(collector) = self.metrics_collector {
                 collector
                     .invalid_validation_batches
                     .with_label_values(&["packet_file"])
                     .inc();
             }
+            let message = format!(
+                "packet file digest in header {} does not match actual packet file digest {}",
+                hex::encode(header.packet_file_digest()),
+                hex::encode(packet_digest)
+            );
             if self.permit_malformed_batch {
                 warn!(self.logger, "{}", message);
             } else {
@@ -250,9 +239,26 @@ impl<'a, H: Header, P: Packet> BatchReader<'a, H, P> {
             }
         }
 
-        // ... then return a packet reader.
-        Reader::with_schema(P::schema(), Cursor::new(entire_packet_file))
-            .context("failed to create Avro reader for packets")
+        // avro_rs readers will always attempt to read a header on creation;
+        // apparently, avro_rs writers don't bother writing a header unless at
+        // least one record is written. So we need to special-case zero bytes
+        // of content as returning an empty vector of packets, because trying
+        // to use a Reader will error out.
+        let packets =
+            if packet_bytes.is_empty() {
+                Vec::new()
+            } else {
+                Reader::with_schema(P::schema(), Cursor::new(&packet_bytes))
+                    .context("failed to create Avro reader for packets")?
+                    .map(|val| {
+                        P::try_from(val.map_err(|e| {
+                            Error::AvroError("couldn't read Avro value".to_owned(), e)
+                        })?)
+                    })
+                    .collect::<Result<Vec<P>, _>>()?
+            };
+
+        Ok((header, packets))
     }
 }
 
@@ -365,9 +371,7 @@ mod tests {
             default_ingestor_public_key, DEFAULT_TRACE_ID,
         },
         transport::LocalFileTransport,
-        Error,
     };
-    use assert_matches::assert_matches;
 
     #[allow(clippy::too_many_arguments)] // Grandfathered in
     fn roundtrip_batch<'a>(
@@ -452,38 +456,31 @@ mod tests {
 
         let mut key_map = HashMap::new();
         key_map.insert("key-identifier".to_owned(), read_key.clone());
-        let header_again = batch_reader.header(&key_map);
+        let read_result = batch_reader.read(&key_map);
         if !keys_match {
             assert!(
-                header_again.is_err(),
+                read_result.is_err(),
                 "read should fail with mismatched keys"
             );
             return;
         }
         assert!(
-            header_again.is_ok(),
+            read_result.is_ok(),
             "failed to read header from batch {:?}",
-            header_again.err()
+            read_result.err()
         );
-        let header_again = header_again.unwrap();
+        let (header_again, packets_again) = read_result.unwrap();
 
         assert_eq!(header, header_again, "header does not match");
 
-        let mut packet_file_reader = batch_reader
-            .packet_file_reader(&header_again)
-            .expect("failed to get packet file reader");
-
+        let mut packets_again_iter = packets_again.iter();
         for packet in packets {
-            let packet_again = IngestionDataSharePacket::read(&mut packet_file_reader)
-                .expect("failed to read packet");
-            assert_eq!(packet, &packet_again, "packet does not match");
+            let packet_again = packets_again_iter.next().expect("no packets remaining");
+            assert_eq!(packet, packet_again, "packet does not match");
         }
 
         // One more read should get EOF
-        assert_matches!(
-            IngestionDataSharePacket::read(&mut packet_file_reader),
-            Err(Error::EofError)
-        );
+        assert!(packets_again_iter.next().is_none());
     }
 
     #[test]
@@ -812,7 +809,7 @@ mod tests {
             0
         );
 
-        let header_again = batch_reader.header(&key_map).unwrap();
+        batch_reader.read(&key_map).unwrap();
 
         assert_eq!(
             metrics_collector
@@ -821,10 +818,6 @@ mod tests {
                 .get(),
             1
         );
-
-        batch_reader
-            .packet_file_reader(&header_again)
-            .expect("failed to get packet file reader");
 
         assert_eq!(
             metrics_collector

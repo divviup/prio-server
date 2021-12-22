@@ -2,7 +2,7 @@ use chrono::NaiveDateTime;
 use facilitator::{
     aggregation::BatchAggregator,
     batch::{Batch, BatchReader},
-    idl::{InvalidPacket, Packet, SumPart},
+    idl::{InvalidPacket, SumPart},
     intake::BatchIntaker,
     logging::setup_test_logging,
     sample::{SampleGenerator, SampleOutput},
@@ -17,7 +17,6 @@ use facilitator::{
         LocalFileTransport, SignableTransport, VerifiableAndDecryptableTransport,
         VerifiableTransport,
     },
-    Error,
 };
 use prio::{encrypt::PrivateKey, util::reconstruct_shares};
 use slog::info;
@@ -575,7 +574,8 @@ fn end_to_end_test(drop_nth_pha: Option<usize>, drop_nth_facilitator: Option<usi
             &TRACE_ID,
             &logger,
         );
-    let pha_sum_part = pha_aggregation_batch_reader.header(&pha_pub_keys).unwrap();
+    let (pha_sum_part, pha_invalid_packets) =
+        pha_aggregation_batch_reader.read(&pha_pub_keys).unwrap();
     assert_eq!(
         pha_sum_part.total_individual_clients,
         batch_1_reference_sum.contributions as i64 + batch_2_reference_sum.contributions as i64
@@ -597,8 +597,8 @@ fn end_to_end_test(drop_nth_pha: Option<usize>, drop_nth_facilitator: Option<usi
             &logger,
         );
 
-    let facilitator_sum_part = facilitator_aggregation_batch_reader
-        .header(&facilitator_pub_keys)
+    let (facilitator_sum_part, facilitator_invalid_packets) = facilitator_aggregation_batch_reader
+        .read(&facilitator_pub_keys)
         .unwrap();
     assert_eq!(
         facilitator_sum_part.total_individual_clients,
@@ -627,23 +627,20 @@ fn end_to_end_test(drop_nth_pha: Option<usize>, drop_nth_facilitator: Option<usi
     check_invalid_packets(
         &batch_1_reference_sum.facilitator_dropped_packets,
         &batch_2_reference_sum.facilitator_dropped_packets,
-        &mut pha_aggregation_batch_reader,
-        &pha_sum_part,
+        pha_invalid_packets,
     );
 
     check_invalid_packets(
         &batch_1_reference_sum.pha_dropped_packets,
         &batch_2_reference_sum.pha_dropped_packets,
-        &mut facilitator_aggregation_batch_reader,
-        &facilitator_sum_part,
+        facilitator_invalid_packets,
     );
 }
 
 fn check_invalid_packets(
     peer_dropped_packets_1: &[Uuid],
     peer_dropped_packets_2: &[Uuid],
-    batch_reader: &mut BatchReader<'_, SumPart, InvalidPacket>,
-    sum_part_header: &SumPart,
+    invalid_packets: Vec<InvalidPacket>,
 ) {
     if !peer_dropped_packets_1.is_empty() || !peer_dropped_packets_2.is_empty() {
         // Check the packets that were marked invalid by either data share
@@ -655,15 +652,10 @@ fn check_invalid_packets(
         for dropped in peer_dropped_packets_2 {
             dropped_packets.insert(dropped);
         }
-        let mut invalid_packet_reader = batch_reader.packet_file_reader(sum_part_header).unwrap();
-        loop {
-            match InvalidPacket::read(&mut invalid_packet_reader) {
-                Ok(packet) => assert!(dropped_packets.contains(&packet.uuid)),
-                Err(Error::EofError) => break,
-                Err(err) => panic!("error reading invalid packet {}", err),
-            }
+        for packet in invalid_packets {
+            assert!(dropped_packets.contains(&packet.uuid));
         }
     } else {
-        assert!(batch_reader.packet_file_reader(sum_part_header).is_err());
+        assert!(invalid_packets.is_empty());
     }
 }

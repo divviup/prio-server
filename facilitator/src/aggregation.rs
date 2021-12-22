@@ -7,10 +7,9 @@ use crate::{
     logging::event,
     metrics::AggregateMetricsCollector,
     transport::{SignableTransport, VerifiableAndDecryptableTransport, VerifiableTransport},
-    BatchSigningKey, Error,
+    BatchSigningKey,
 };
 use anyhow::{anyhow, Context, Result};
-use avro_rs::Reader;
 use chrono::NaiveDateTime;
 use prio::{
     field::FieldPriov2,
@@ -20,7 +19,6 @@ use slog::{info, o, Logger};
 use std::{
     collections::{HashMap, HashSet},
     convert::TryFrom,
-    io::Cursor,
 };
 use uuid::Uuid;
 
@@ -99,7 +97,7 @@ impl<'a> BatchAggregator<'a> {
     /// batch is aggregated.
     pub fn generate_sum_part<F>(
         &mut self,
-        batch_ids: &[(Uuid, NaiveDateTime)],
+        batch_ids_and_dates: &[(Uuid, NaiveDateTime)],
         mut callback: F,
     ) -> Result<()>
     where
@@ -109,7 +107,20 @@ impl<'a> BatchAggregator<'a> {
         let mut invalid_uuids = Vec::new();
         let mut included_batch_uuids = Vec::new();
 
-        let ingestion_header = self.ingestion_header(&batch_ids[0].0, &batch_ids[0].1)?;
+        let mut ingestion_batch_reader: BatchReader<'_, IngestionHeader, IngestionDataSharePacket> =
+            BatchReader::new(
+                Batch::new_ingestion(
+                    self.aggregation_name,
+                    &batch_ids_and_dates[0].0,
+                    &batch_ids_and_dates[0].1,
+                ),
+                &mut *self.ingestion_transport.transport.transport,
+                self.permit_malformed_batch,
+                self.trace_id,
+                &self.logger,
+            );
+        let (ingestion_header, ingestion_packets) = ingestion_batch_reader
+            .read(&self.ingestion_transport.transport.batch_signing_public_keys)?;
 
         // Ideally, we would use the encryption_key_id in the ingestion packet
         // to figure out which private key to use for decryption, but that field
@@ -123,9 +134,17 @@ impl<'a> BatchAggregator<'a> {
             .map(|k| Server::new(ingestion_header.bins as usize, self.is_first, k.clone()))
             .collect::<Result<_, _>>()?;
 
-        for batch_id in batch_ids {
-            self.aggregate_share(&batch_id.0, &batch_id.1, &mut servers, &mut invalid_uuids)?;
-            included_batch_uuids.push(batch_id.0);
+        let mut ingestion_batch = Some((ingestion_header.clone(), ingestion_packets));
+        for (batch_id, batch_date) in batch_ids_and_dates {
+            self.aggregate_share(
+                batch_id,
+                batch_date,
+                &mut servers,
+                &mut invalid_uuids,
+                ingestion_batch,
+            )?;
+            ingestion_batch = None;
+            included_batch_uuids.push(batch_id.to_owned());
             callback(&self.logger);
         }
 
@@ -203,26 +222,6 @@ impl<'a> BatchAggregator<'a> {
             .put_signature(&sum_signature, &self.share_processor_signing_key.identifier)
     }
 
-    /// Fetch the ingestion header from one of the batches so various parameters
-    /// may be read from it.
-    fn ingestion_header(
-        &mut self,
-        batch_id: &Uuid,
-        batch_date: &NaiveDateTime,
-    ) -> Result<IngestionHeader> {
-        let mut ingestion_batch: BatchReader<'_, IngestionHeader, IngestionDataSharePacket> =
-            BatchReader::new(
-                Batch::new_ingestion(self.aggregation_name, batch_id, batch_date),
-                &mut *self.ingestion_transport.transport.transport,
-                self.permit_malformed_batch,
-                self.trace_id,
-                &self.logger,
-            );
-        let ingestion_header = ingestion_batch
-            .header(&self.ingestion_transport.transport.batch_signing_public_keys)?;
-        Ok(ingestion_header)
-    }
-
     /// Aggregate the batch for the provided batch_id into the provided server.
     /// The UUIDs of packets for which aggregation fails are recorded in the
     /// provided invalid_uuids vector.
@@ -232,15 +231,20 @@ impl<'a> BatchAggregator<'a> {
         batch_date: &NaiveDateTime,
         servers: &mut Vec<Server<FieldPriov2>>,
         invalid_uuids: &mut Vec<Uuid>,
+        ingestion_batch: Option<(IngestionHeader, Vec<IngestionDataSharePacket>)>,
     ) -> Result<()> {
-        let mut ingestion_batch: BatchReader<'_, IngestionHeader, IngestionDataSharePacket> =
-            BatchReader::new(
+        let (ingestion_header, ingestion_packets) = match ingestion_batch {
+            Some(v) => v,
+            None => BatchReader::new(
                 Batch::new_ingestion(self.aggregation_name, batch_id, batch_date),
                 &mut *self.ingestion_transport.transport.transport,
                 self.permit_malformed_batch,
                 self.trace_id,
                 &self.logger,
-            );
+            )
+            .read(&self.ingestion_transport.transport.batch_signing_public_keys)?,
+        };
+
         let mut peer_validation_batch: BatchReader<'_, ValidationHeader, ValidationPacket> =
             BatchReader::new(
                 Batch::new_validation(self.aggregation_name, batch_id, batch_date, !self.is_first),
@@ -255,11 +259,8 @@ impl<'a> BatchAggregator<'a> {
                 .set_metrics_collector(&collector.peer_validation_batches_reader_metrics);
         }
 
-        let peer_validation_header = peer_validation_batch
-            .header(&self.peer_validation_transport.batch_signing_public_keys)?;
-
-        let ingestion_header = ingestion_batch
-            .header(&self.ingestion_transport.transport.batch_signing_public_keys)?;
+        let (peer_validation_header, peer_validation_packets) = peer_validation_batch
+            .read(&self.peer_validation_transport.batch_signing_public_keys)?;
 
         // Make sure all the parameters in the headers line up
         if !ingestion_header.check_parameters(&peer_validation_header) {
@@ -279,29 +280,21 @@ impl<'a> BatchAggregator<'a> {
         // iterate over the ingestion packets. For each ingestion packet, if we
         // have the corresponding validation packets and the proofs are good, we
         // accumulate. Otherwise we drop the packet and move on.
-        let mut peer_validation_packet_file_reader =
-            peer_validation_batch.packet_file_reader(&peer_validation_header)?;
-        let peer_validation_packets: HashMap<Uuid, ValidationPacket> =
-            validation_packet_map(&mut peer_validation_packet_file_reader)?;
+        let peer_validation_packets: HashMap<Uuid, ValidationPacket> = peer_validation_packets
+            .into_iter()
+            .map(|p| (p.uuid, p))
+            .collect();
 
         // Keep track of the ingestion packets we have seen so we can reject
         // duplicates.
         let mut processed_ingestion_packets = HashSet::new();
-        let mut ingestion_packet_reader = ingestion_batch.packet_file_reader(&ingestion_header)?;
 
         // Borrowing distinct parts of a struct works, but not under closures:
         // https://github.com/rust-lang/rust/issues/53488
         // The workaround is to borrow or copy fields outside the closure.
         let logger = &self.logger;
 
-        loop {
-            let ingestion_packet =
-                match IngestionDataSharePacket::read(&mut ingestion_packet_reader) {
-                    Ok(p) => p,
-                    Err(Error::EofError) => break,
-                    Err(e) => return Err(e.into()),
-                };
-
+        for ingestion_packet in ingestion_packets {
             // Ignore duplicate packets
             if processed_ingestion_packets.contains(&ingestion_packet.uuid) {
                 info!(
@@ -378,21 +371,6 @@ impl<'a> BatchAggregator<'a> {
         }
 
         Ok(())
-    }
-}
-
-fn validation_packet_map(
-    reader: &mut Reader<Cursor<Vec<u8>>>,
-) -> Result<HashMap<Uuid, ValidationPacket>> {
-    let mut map = HashMap::new();
-    loop {
-        match ValidationPacket::read(reader) {
-            Ok(p) => {
-                map.insert(p.uuid, p);
-            }
-            Err(Error::EofError) => return Ok(map),
-            Err(e) => return Err(e.into()),
-        }
     }
 }
 
