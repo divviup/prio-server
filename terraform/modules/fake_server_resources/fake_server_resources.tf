@@ -182,7 +182,7 @@ resource "google_storage_bucket_object" "global_manifest" {
       gcp-service-account-email = module.account_mapping.gcp_service_account_email
     }
     batch-signing-public-keys = {
-      kubernetes_secret.batch_signing_key.metadata[0].name = {
+      (kubernetes_secret.batch_signing_key.metadata[0].name) = {
         # This public key corresponds to the private key in kubernetes_secret.batch_signing_key
         public-key = "-----BEGIN PUBLIC KEY-----\nMFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAE6usinn3Wdrzp6ecXne+Dlrh4ZRlt\nu8DrzHvHFFSeV20t6K5YNT1Zh/pRxWcu1bXBsVfFlNWAMQ2smWxmdv03tw==\n-----END PUBLIC KEY-----\n"
         expiration = "2099-10-05T23:18:59Z"
