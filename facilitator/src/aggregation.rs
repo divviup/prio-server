@@ -1,8 +1,7 @@
 use crate::{
     batch::{Batch, BatchReader, BatchWriter},
     idl::{
-        IngestionDataSharePacket, IngestionHeader, InvalidPacket, Packet, SumPart,
-        ValidationHeader, ValidationPacket,
+        IngestionDataSharePacket, IngestionHeader, InvalidPacket, Packet, SumPart, ValidationPacket,
     },
     logging::event,
     metrics::AggregateMetricsCollector,
@@ -77,7 +76,7 @@ impl<'a> BatchAggregator<'a> {
                     aggregation_end,
                     is_first,
                 ),
-                &mut *aggregation_transport.transport,
+                &*aggregation_transport.transport,
                 trace_id,
             ),
             share_processor_signing_key: &aggregation_transport.batch_signing_key,
@@ -104,49 +103,72 @@ impl<'a> BatchAggregator<'a> {
         F: FnMut(&Logger),
     {
         info!(self.logger, "processing aggregation task");
+        if batch_ids_and_dates.is_empty() {
+            return Err(anyhow!("batch_ids_and_dates is empty"));
+        }
         let mut invalid_uuids = Vec::new();
         let mut included_batch_uuids = Vec::new();
 
-        let mut ingestion_batch_reader: BatchReader<'_, IngestionHeader, IngestionDataSharePacket> =
-            BatchReader::new(
-                Batch::new_ingestion(
-                    self.aggregation_name,
-                    &batch_ids_and_dates[0].0,
-                    &batch_ids_and_dates[0].1,
-                ),
-                &mut *self.ingestion_transport.transport.transport,
+        let mut servers = None;
+        let mut ingestion_header = None;
+        for (batch_id, batch_date) in batch_ids_and_dates {
+            let (ingestion_hdr, ingestion_packets): (IngestionHeader, _) = BatchReader::new(
+                Batch::new_ingestion(self.aggregation_name, batch_id, batch_date),
+                &*self.ingestion_transport.transport.transport,
+                self.permit_malformed_batch,
+                self.trace_id,
+                &self.logger,
+            )
+            .read(&self.ingestion_transport.transport.batch_signing_public_keys)?;
+            let mut peer_validation_batch_reader = BatchReader::new(
+                Batch::new_validation(self.aggregation_name, batch_id, batch_date, !self.is_first),
+                &*self.peer_validation_transport.transport,
                 self.permit_malformed_batch,
                 self.trace_id,
                 &self.logger,
             );
-        let (ingestion_header, ingestion_packets) = ingestion_batch_reader
-            .read(&self.ingestion_transport.transport.batch_signing_public_keys)?;
+            if let Some(collector) = self.metrics_collector {
+                peer_validation_batch_reader
+                    .set_metrics_collector(&collector.peer_validation_batches_reader_metrics);
+            }
+            let (peer_validation_hdr, peer_validation_packets) = peer_validation_batch_reader
+                .read(&self.peer_validation_transport.batch_signing_public_keys)?;
 
-        // Ideally, we would use the encryption_key_id in the ingestion packet
-        // to figure out which private key to use for decryption, but that field
-        // is optional. Instead we try all the keys we have available until one
-        // works.
-        // https://github.com/abetterinternet/prio-server/issues/73
-        let mut servers: Vec<Server<FieldPriov2>> = self
-            .ingestion_transport
-            .packet_decryption_keys
-            .iter()
-            .map(|k| Server::new(ingestion_header.bins as usize, self.is_first, k.clone()))
-            .collect::<Result<_, _>>()?;
+            if servers.is_none() {
+                // Ideally, we would use the encryption_key_id in the ingestion packet
+                // to figure out which private key to use for decryption, but that field
+                // is optional. Instead we try all the keys we have available until one
+                // works.
+                // https://github.com/abetterinternet/prio-server/issues/73
+                servers = Some(
+                    self.ingestion_transport
+                        .packet_decryption_keys
+                        .iter()
+                        .map(|k| Server::new(ingestion_hdr.bins as usize, self.is_first, k.clone()))
+                        .collect::<Result<_, _>>()?,
+                );
+            }
 
-        let mut ingestion_batch = Some((ingestion_header.clone(), ingestion_packets));
-        for (batch_id, batch_date) in batch_ids_and_dates {
+            // Make sure all the parameters in the headers line up.
+            if !ingestion_hdr.check_parameters(&peer_validation_hdr) {
+                return Err(anyhow!(
+                "ingestion header does not match peer validation header. Ingestion: {:?}\nPeer:{:?}",
+                ingestion_hdr,
+                peer_validation_hdr
+            ));
+            }
+
             self.aggregate_share(
-                batch_id,
-                batch_date,
-                &mut servers,
+                servers.as_mut().unwrap(),
                 &mut invalid_uuids,
-                ingestion_batch,
+                ingestion_packets,
+                peer_validation_packets,
             )?;
-            ingestion_batch = None;
             included_batch_uuids.push(batch_id.to_owned());
+            ingestion_header.get_or_insert(ingestion_hdr);
             callback(&self.logger);
         }
+        let ingestion_header = ingestion_header.unwrap();
 
         if let Some(collector) = self.metrics_collector {
             collector
@@ -188,7 +210,7 @@ impl<'a> BatchAggregator<'a> {
             self.ingestion_transport.packet_decryption_keys[0].clone(),
         )
         .context("failed to construct Prio server")?;
-        for server in servers.iter() {
+        for server in servers.unwrap().iter() {
             accumulator_server
                 .merge_total_shares(server.total_shares())
                 .context("failed to accumulate shares")?;
@@ -227,50 +249,11 @@ impl<'a> BatchAggregator<'a> {
     /// provided invalid_uuids vector.
     fn aggregate_share(
         &mut self,
-        batch_id: &Uuid,
-        batch_date: &NaiveDateTime,
         servers: &mut Vec<Server<FieldPriov2>>,
         invalid_uuids: &mut Vec<Uuid>,
-        ingestion_batch: Option<(IngestionHeader, Vec<IngestionDataSharePacket>)>,
+        ingestion_packets: Vec<IngestionDataSharePacket>,
+        peer_validation_packets: Vec<ValidationPacket>,
     ) -> Result<()> {
-        let (ingestion_header, ingestion_packets) = match ingestion_batch {
-            Some(v) => v,
-            None => BatchReader::new(
-                Batch::new_ingestion(self.aggregation_name, batch_id, batch_date),
-                &mut *self.ingestion_transport.transport.transport,
-                self.permit_malformed_batch,
-                self.trace_id,
-                &self.logger,
-            )
-            .read(&self.ingestion_transport.transport.batch_signing_public_keys)?,
-        };
-
-        let mut peer_validation_batch: BatchReader<'_, ValidationHeader, ValidationPacket> =
-            BatchReader::new(
-                Batch::new_validation(self.aggregation_name, batch_id, batch_date, !self.is_first),
-                &mut *self.peer_validation_transport.transport,
-                self.permit_malformed_batch,
-                self.trace_id,
-                &self.logger,
-            );
-
-        if let Some(collector) = self.metrics_collector {
-            peer_validation_batch
-                .set_metrics_collector(&collector.peer_validation_batches_reader_metrics);
-        }
-
-        let (peer_validation_header, peer_validation_packets) = peer_validation_batch
-            .read(&self.peer_validation_transport.batch_signing_public_keys)?;
-
-        // Make sure all the parameters in the headers line up
-        if !ingestion_header.check_parameters(&peer_validation_header) {
-            return Err(anyhow!(
-                "ingestion header does not match peer validation header. Ingestion: {:?}\nPeer:{:?}",
-                ingestion_header,
-                peer_validation_header
-            ));
-        }
-
         // We can't be sure that the peer validation, own validation and
         // ingestion batches contain all the same packets or that they are in
         // the same order. There could also be duplicate packets. Compared to

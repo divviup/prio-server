@@ -71,25 +71,6 @@ pub trait Header: Sized {
 }
 
 pub trait Packet: Sized + TryFrom<Value, Error = Error> {
-    /// Reads and parses a single Packet from the provided avro_rs::Reader. Note
-    /// that unlike other structures, this does not take a primitive
-    /// std::io::Read, because we do not want to create a new Avro schema and
-    /// reader for each packet. The Reader must have been created with the
-    /// schema returned from Packet::schema.
-    fn read<R: Read>(reader: &mut Reader<R>) -> Result<Self, Error> {
-        let value = match reader.next() {
-            Some(Ok(value)) => value,
-            Some(Err(e)) => {
-                return Err(Error::AvroError(
-                    "failed to read record from Avro reader".to_owned(),
-                    e,
-                ));
-            }
-            None => return Err(Error::EofError),
-        };
-        Self::try_from(value)
-    }
-
     /// Serializes and writes a single Packet to the provided avro_rs::Writer.
     /// Note that unlike other structures, this does not take a primitive
     /// std::io::Write, because we do not want to create a new Avro schema and
@@ -157,13 +138,12 @@ impl TryFrom<Value> for BatchSignature {
     type Error = Error;
 
     fn try_from(value: Value) -> Result<Self, Self::Error> {
-        let fields = match value {
-            Value::Record(fields) => fields,
-            _ => {
-                return Err(Error::MalformedBatchError(
-                    "value is not a Record".to_owned(),
-                ))
-            }
+        let fields = if let Value::Record(f) = value {
+            f
+        } else {
+            return Err(Error::MalformedBatchError(
+                "value is not a Record".to_owned(),
+            ));
         };
 
         // Here we might wish to use from_value::<BatchSignature>(record) but
@@ -269,7 +249,7 @@ impl Header for IngestionHeader {
             ));
         }
 
-        // Here we might wish to use from_value::<IngestionSignature>(record) but avro_rs does not
+        // Here we might wish to use from_value::<IngestionHeader>(record) but avro_rs does not
         // seem to recognize it as a Bytes and fails to deserialize it. The value we unwrapped from
         // reader.next above is a vector of (String, avro_rs::Value) tuples, which we now iterate to
         // find the struct members.
@@ -465,13 +445,12 @@ impl TryFrom<Value> for IngestionDataSharePacket {
     type Error = Error;
 
     fn try_from(value: Value) -> Result<Self, Self::Error> {
-        let fields = match value {
-            Value::Record(fields) => fields,
-            _ => {
-                return Err(Error::MalformedDataPacketError(
-                    "value is not a Record".to_owned(),
-                ))
-            }
+        let fields = if let Value::Record(f) = value {
+            f
+        } else {
+            return Err(Error::MalformedBatchError(
+                "value is not a Record".to_owned(),
+            ));
         };
 
         // As in IngestionSignature::read_signature, we can't just deserialize
@@ -561,7 +540,7 @@ impl IngestionDataSharePacket {
 
 /// The header on a Prio validation (sometimes referred to as verification)
 /// batch.
-#[derive(Debug, Deserialize, Serialize, PartialEq)]
+#[derive(Debug, Deserialize, Serialize, PartialEq, Clone)]
 pub struct ValidationHeader {
     pub batch_uuid: Uuid,
     pub name: String,
@@ -772,7 +751,7 @@ impl TryFrom<Value> for ValidationPacket {
     type Error = Error;
 
     fn try_from(value: Value) -> Result<Self, Self::Error> {
-        from_value::<ValidationPacket>(&value)
+        from_value(&value)
             .map_err(|e| Error::AvroError("failed to parse validation header".to_owned(), e))
     }
 }
@@ -789,7 +768,7 @@ impl TryFrom<&ValidationPacket> for VerificationMessage<FieldPriov2> {
     }
 }
 
-#[derive(Debug, Deserialize, Serialize, PartialEq)]
+#[derive(Debug, Deserialize, Serialize, PartialEq, Clone)]
 pub struct SumPart {
     pub batch_uuids: Vec<Uuid>,
     pub name: String,
@@ -810,7 +789,7 @@ impl SumPart {
         self.sum
             .iter()
             .map(|i| Ok(FieldPriov2::from(u32::try_from(*i)?)))
-            .collect::<Result<Vec<_>, _>>()
+            .collect()
     }
 }
 
@@ -1061,7 +1040,7 @@ impl TryFrom<Value> for InvalidPacket {
     type Error = Error;
 
     fn try_from(value: Value) -> Result<Self, Self::Error> {
-        from_value::<InvalidPacket>(&value)
+        from_value(&value)
             .map_err(|e| Error::AvroError("failed to parse invalid packet".to_owned(), e))
     }
 }
@@ -1116,13 +1095,12 @@ impl TryFrom<Value> for ValidationBatch {
     type Error = Error;
 
     fn try_from(value: Value) -> Result<Self, Self::Error> {
-        let fields = match value {
-            Value::Record(fields) => fields,
-            _ => {
-                return Err(Error::MalformedBatchError(
-                    "value is not a Record".to_owned(),
-                ))
-            }
+        let fields = if let Value::Record(f) = value {
+            f
+        } else {
+            return Err(Error::MalformedBatchError(
+                "value is not a Record".to_owned(),
+            ));
         };
 
         let mut sig = None;
@@ -1308,7 +1286,8 @@ mod tests {
                 &data_share_packet_bytes[..],
             )
             .unwrap();
-            let data_share_packet = IngestionDataSharePacket::read(&mut reader).unwrap();
+            let data_share_packet =
+                IngestionDataSharePacket::try_from(reader.next().unwrap().unwrap()).unwrap();
             assert_eq!(want_data_share_packet, &data_share_packet);
         }
     }
@@ -1327,15 +1306,13 @@ mod tests {
         let mut reader =
             Reader::with_schema(IngestionDataSharePacket::schema(), &record_vec[..]).unwrap();
         for (packet, _) in &*GOLDEN_INGESTION_DATA_SHARE_PACKETS {
-            let packet_again = IngestionDataSharePacket::read(&mut reader).expect("read error");
+            let packet_again = IngestionDataSharePacket::try_from(reader.next().unwrap().unwrap())
+                .expect("read error");
             assert_eq!(packet_again, *packet);
         }
 
         // Do one more read. This should yield EOF.
-        assert_matches!(
-            IngestionDataSharePacket::read(&mut reader),
-            Err(Error::EofError)
-        );
+        assert_matches!(reader.next(), None);
     }
 
     lazy_static! {
@@ -1429,7 +1406,8 @@ mod tests {
             let mut reader =
                 Reader::with_schema(ValidationPacket::schema(), &validation_packet_bytes[..])
                     .unwrap();
-            let data_share_packet = ValidationPacket::read(&mut reader).unwrap();
+            let data_share_packet =
+                ValidationPacket::try_from(reader.next().unwrap().unwrap()).unwrap();
             assert_eq!(want_validation_packet, &data_share_packet);
         }
     }
@@ -1447,12 +1425,13 @@ mod tests {
 
         let mut reader = Reader::with_schema(ValidationPacket::schema(), &record_vec[..]).unwrap();
         for (packet, _) in &*GOLDEN_VALIDATION_PACKETS {
-            let packet_again = ValidationPacket::read(&mut reader).expect("read error");
+            let packet_again =
+                ValidationPacket::try_from(reader.next().unwrap().unwrap()).expect("read error");
             assert_eq!(packet_again, *packet);
         }
 
         // Do one more read. This should yield EOF.
-        assert_matches!(ValidationPacket::read(&mut reader), Err(Error::EofError));
+        assert_matches!(reader.next(), None);
     }
 
     lazy_static! {
@@ -1547,7 +1526,7 @@ mod tests {
         for (want_invalid_packet, invalid_packet_bytes) in &*GOLDEN_INVALID_PACKETS {
             let mut reader =
                 Reader::with_schema(InvalidPacket::schema(), &invalid_packet_bytes[..]).unwrap();
-            let invalid_packet = InvalidPacket::read(&mut reader).unwrap();
+            let invalid_packet = InvalidPacket::try_from(reader.next().unwrap().unwrap()).unwrap();
             assert_eq!(want_invalid_packet, &invalid_packet);
         }
     }
@@ -1565,12 +1544,13 @@ mod tests {
 
         let mut reader = Reader::with_schema(InvalidPacket::schema(), &record_vec[..]).unwrap();
         for (packet, _) in &*GOLDEN_INVALID_PACKETS {
-            let packet_again = InvalidPacket::read(&mut reader).expect("read error");
+            let packet_again =
+                InvalidPacket::try_from(reader.next().unwrap().unwrap()).expect("read error");
             assert_eq!(packet_again, *packet);
         }
 
         // Do one more read. This should yield EOF.
-        assert_matches!(InvalidPacket::read(&mut reader), Err(Error::EofError));
+        assert_matches!(reader.next(), None);
     }
 
     lazy_static! {

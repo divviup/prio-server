@@ -150,7 +150,7 @@ impl<'a> SampleGenerator<'a> {
     ///
     /// Returns a `ReferenceSum` containing the sum over the unshared data.
     pub fn generate_ingestion_sample(
-        &mut self,
+        &self,
         trace_id: &Uuid,
         batch_uuid: &Uuid,
         date: &NaiveDateTime,
@@ -169,19 +169,14 @@ impl<'a> SampleGenerator<'a> {
             return Err(anyhow!("dimension must be an integer greater than zero"));
         }
 
-        let mut pha_ingestion_batch: BatchWriter<'_, IngestionHeader, IngestionDataSharePacket> =
-            BatchWriter::new(
-                Batch::new_ingestion(self.aggregation_name, batch_uuid, date),
-                &mut *self.pha_output.transport.transport,
-                trace_id,
-            );
-        let mut facilitator_ingestion_batch: BatchWriter<
-            '_,
-            IngestionHeader,
-            IngestionDataSharePacket,
-        > = BatchWriter::new(
+        let pha_ingestion_batch = BatchWriter::new(
             Batch::new_ingestion(self.aggregation_name, batch_uuid, date),
-            &mut *self.facilitator_output.transport.transport,
+            &*self.pha_output.transport.transport,
+            trace_id,
+        );
+        let facilitator_ingestion_batch = BatchWriter::new(
+            Batch::new_ingestion(self.aggregation_name, batch_uuid, date),
+            &*self.facilitator_output.transport.transport,
             trace_id,
         );
 
@@ -414,7 +409,7 @@ mod tests {
             drop_nth_packet: None,
         };
 
-        let mut sample_generator = SampleGenerator::new(
+        let sample_generator = SampleGenerator::new(
             "fake-aggregation",
             10,
             0.11,

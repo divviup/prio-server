@@ -74,10 +74,10 @@ impl<T: TransportWriter + ?Sized> TransportWriter for Box<T> {
 pub trait Transport: Debug + DynClone + Send {
     /// Returns an std::io::Read instance from which the contents of the value
     /// of the provided key may be read.
-    fn get(&mut self, key: &str, trace_id: &Uuid) -> Result<Box<dyn Read>>;
+    fn get(&self, key: &str, trace_id: &Uuid) -> Result<Box<dyn Read>>;
     /// Returns an std::io::Write instance into which the contents of the value
     /// may be written.
-    fn put(&mut self, key: &str, trace_id: &Uuid) -> Result<Box<dyn TransportWriter>>;
+    fn put(&self, key: &str, trace_id: &Uuid) -> Result<Box<dyn TransportWriter>>;
 
     fn path(&self) -> String;
 }

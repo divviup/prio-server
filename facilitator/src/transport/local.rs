@@ -35,14 +35,14 @@ impl Transport for LocalFileTransport {
         self.directory.to_string_lossy().to_string()
     }
 
-    fn get(&mut self, key: &str, _trace_id: &Uuid) -> Result<Box<dyn Read>> {
+    fn get(&self, key: &str, _trace_id: &Uuid) -> Result<Box<dyn Read>> {
         let path = self.directory.join(LocalFileTransport::relative_path(key));
         let f =
             File::open(path.as_path()).with_context(|| format!("opening {}", path.display()))?;
         Ok(Box::new(f))
     }
 
-    fn put(&mut self, key: &str, _trace_id: &Uuid) -> Result<Box<dyn TransportWriter>> {
+    fn put(&self, key: &str, _trace_id: &Uuid) -> Result<Box<dyn TransportWriter>> {
         let path = self.directory.join(LocalFileTransport::relative_path(key));
         if let Some(parent) = path.parent() {
             create_dir_all(parent)
@@ -74,7 +74,7 @@ mod tests {
     #[test]
     fn roundtrip_file_transport() {
         let tempdir = tempfile::TempDir::new().unwrap();
-        let mut file_transport = LocalFileTransport::new(tempdir.path().to_path_buf());
+        let file_transport = LocalFileTransport::new(tempdir.path().to_path_buf());
         let content = vec![1, 2, 3, 4, 5, 6, 7, 8];
 
         {

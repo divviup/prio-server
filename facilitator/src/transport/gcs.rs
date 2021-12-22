@@ -106,7 +106,7 @@ impl Transport for GcsTransport {
         self.path.to_string()
     }
 
-    fn get(&mut self, key: &str, trace_id: &Uuid) -> Result<Box<dyn Read>> {
+    fn get(&self, key: &str, trace_id: &Uuid) -> Result<Box<dyn Read>> {
         let logger = self.logger.new(o!(
             event::TRACE_ID => trace_id.to_string(),
             event::STORAGE_KEY => key.to_owned(),
@@ -139,7 +139,7 @@ impl Transport for GcsTransport {
         Ok(Box::new(response.into_reader()))
     }
 
-    fn put(&mut self, key: &str, trace_id: &Uuid) -> Result<Box<dyn TransportWriter>> {
+    fn put(&self, key: &str, trace_id: &Uuid) -> Result<Box<dyn TransportWriter>> {
         let logger = self.logger.new(o!(
             event::TRACE_ID => trace_id.to_string(),
             event::STORAGE_KEY => key.to_owned(),

@@ -98,7 +98,7 @@ fn aggregation_including_invalid_batch() {
 
     let mut reference_sums = vec![];
 
-    let mut sample_generator = SampleGenerator::new(
+    let sample_generator = SampleGenerator::new(
         aggregation_name,
         10,
         0.11,
@@ -355,7 +355,7 @@ fn end_to_end_test(drop_nth_pha: Option<usize>, drop_nth_facilitator: Option<usi
 
     let first_batch_packet_count = 16;
 
-    let mut sample_generator = SampleGenerator::new(
+    let sample_generator = SampleGenerator::new(
         &aggregation_name,
         10,
         0.11,
@@ -560,20 +560,19 @@ fn end_to_end_test(drop_nth_pha: Option<usize>, drop_nth_facilitator: Option<usi
 
     assert_eq!(aggregation_callback_count, 2);
 
-    let mut pha_aggregation_batch_reader: BatchReader<'_, SumPart, InvalidPacket> =
-        BatchReader::new(
-            Batch::new_sum(
-                instance_name,
-                &aggregation_name,
-                &start_date,
-                &end_date,
-                true,
-            ),
-            &mut *pha_aggregation_transport.transport,
-            false,
-            &TRACE_ID,
-            &logger,
-        );
+    let pha_aggregation_batch_reader: BatchReader<'_, SumPart, InvalidPacket> = BatchReader::new(
+        Batch::new_sum(
+            instance_name,
+            &aggregation_name,
+            &start_date,
+            &end_date,
+            true,
+        ),
+        &*pha_aggregation_transport.transport,
+        false,
+        &TRACE_ID,
+        &logger,
+    );
     let (pha_sum_part, pha_invalid_packets) =
         pha_aggregation_batch_reader.read(&pha_pub_keys).unwrap();
     assert_eq!(
@@ -582,7 +581,7 @@ fn end_to_end_test(drop_nth_pha: Option<usize>, drop_nth_facilitator: Option<usi
     );
     let pha_sum_fields = pha_sum_part.sum().unwrap();
 
-    let mut facilitator_aggregation_batch_reader: BatchReader<'_, SumPart, InvalidPacket> =
+    let facilitator_aggregation_batch_reader: BatchReader<'_, SumPart, InvalidPacket> =
         BatchReader::new(
             Batch::new_sum(
                 instance_name,
@@ -591,7 +590,7 @@ fn end_to_end_test(drop_nth_pha: Option<usize>, drop_nth_facilitator: Option<usi
                 &end_date,
                 false,
             ),
-            &mut *facilitator_aggregation_transport.transport,
+            &*facilitator_aggregation_transport.transport,
             false, // permissive
             &TRACE_ID,
             &logger,

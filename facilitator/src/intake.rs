@@ -60,7 +60,7 @@ impl<'a> BatchIntaker<'a> {
         Ok(BatchIntaker {
             intake_batch: BatchReader::new(
                 Batch::new_ingestion(aggregation_name, batch_id, date),
-                &mut *ingestion_transport.transport.transport,
+                &*ingestion_transport.transport.transport,
                 permit_malformed_batch,
                 trace_id,
                 &logger,
@@ -69,7 +69,7 @@ impl<'a> BatchIntaker<'a> {
             packet_decryption_keys: &ingestion_transport.packet_decryption_keys,
             peer_validation_batch: BatchWriter::new(
                 Batch::new_validation(aggregation_name, batch_id, date, is_first),
-                &mut *peer_validation_transport.transport,
+                &*peer_validation_transport.transport,
                 trace_id,
             ),
             peer_validation_batch_signing_key: &peer_validation_transport.batch_signing_key,
@@ -278,7 +278,7 @@ mod tests {
             drop_nth_packet: None,
         };
 
-        let mut sample_generator = SampleGenerator::new(
+        let sample_generator = SampleGenerator::new(
             &aggregation_name,
             10,
             0.11,
@@ -407,7 +407,7 @@ mod tests {
             drop_nth_packet: None,
         };
 
-        let mut sample_generator = SampleGenerator::new(
+        let sample_generator = SampleGenerator::new(
             &aggregation_name,
             10,
             0.11,
