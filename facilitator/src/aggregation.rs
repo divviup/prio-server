@@ -16,7 +16,7 @@ use prio::{
     field::FieldPriov2,
     server::{Server, VerificationMessage},
 };
-use slog::{info, o, Logger};
+use slog::{info, o, warn, Logger};
 use std::{
     collections::{HashMap, HashSet},
     convert::TryFrom,
@@ -289,11 +289,11 @@ impl<'a> BatchAggregator<'a> {
         let mut processed_ingestion_packets = HashSet::new();
         let mut ingestion_packet_reader = ingestion_batch.packet_file_reader(&ingestion_header)?;
 
-        // Borrowing distinct parts of a struct works, but not under closures:
-        // https://github.com/rust-lang/rust/issues/53488
-        // The workaround is to borrow or copy fields outside the closure.
-        let logger = &self.logger;
-
+        // Convert ingestion packets into validation packets; if we can't
+        // decrypt a packet, drop/skip the entire ingestion batch without
+        // error. (Other errors are reported to the caller as normal & will
+        // cause the entire aggregation batch to fail.)
+        let mut ingestion_and_own_validation_packets = Vec::new();
         loop {
             let ingestion_packet =
                 match IngestionDataSharePacket::read(&mut ingestion_packet_reader) {
@@ -301,31 +301,51 @@ impl<'a> BatchAggregator<'a> {
                     Err(Error::EofError) => break,
                     Err(e) => return Err(e.into()),
                 };
+            match ingestion_packet.generate_validation_packet(servers) {
+                Ok(p) => ingestion_and_own_validation_packets.push((ingestion_packet, p)),
+                Err(e) => {
+                    if let Some(Error::PacketDecryptionError(packet_uuid)) = e.downcast_ref() {
+                        // This ingestion batch contains a packet that can't be
+                        // decrypted. Ignore the entire ingestion batch, on the
+                        // assumption that our peer will do the same, since we
+                        // also wouldn't have been able to produce a peer
+                        // validation batch from this ingestion batch.
+                        warn!(self.logger, "Skipping ingestion batch due to undecryptable packet";
+                            event::PACKET_UUID => packet_uuid.to_string());
+                        return Ok(());
+                    }
+                    return Err(e);
+                }
+            }
+        }
 
+        // Borrowing distinct parts of a struct works, but not under closures:
+        // https://github.com/rust-lang/rust/issues/53488
+        // The workaround is to borrow or copy fields outside the closure.
+        let logger = &self.logger;
+
+        for (ingestion_packet, own_validation_packet) in ingestion_and_own_validation_packets {
             // Ignore duplicate packets
             if processed_ingestion_packets.contains(&ingestion_packet.uuid) {
-                info!(
-                    logger, "ignoring duplicate packet";
+                warn!(
+                    logger, "Ignoring duplicate packet";
                     event::PACKET_UUID => ingestion_packet.uuid.to_string()
                 );
                 continue;
             }
 
-            // Make sure we have own validation and peer validation packets
-            // matching the ingestion packet.
-            let peer_validation_packet = get_validation_packet(
-                &ingestion_packet.uuid,
-                &peer_validation_packets,
-                "peer",
-                invalid_uuids,
-                logger,
-            );
-            let peer_validation_packet = match peer_validation_packet {
+            // Make sure we a peer validation packet matching the ingestion packet.
+            let peer_validation_packet = match peer_validation_packets.get(&ingestion_packet.uuid) {
                 Some(p) => p,
-                None => continue,
+                None => {
+                    warn!(
+                        logger, "No peer validation packet";
+                        event::PACKET_UUID => ingestion_packet.uuid.to_string()
+                    );
+                    invalid_uuids.push(ingestion_packet.uuid);
+                    continue;
+                }
             };
-
-            let own_validation_packet = ingestion_packet.generate_validation_packet(servers)?;
 
             processed_ingestion_packets.insert(ingestion_packet.uuid);
 
@@ -339,8 +359,8 @@ impl<'a> BatchAggregator<'a> {
                 ) {
                     Ok(valid) => {
                         if !valid {
-                            info!(
-                                logger, "rejecting packet due to invalid proof";
+                            warn!(
+                                logger, "Rejecting packet due to invalid proof";
                                 event::PACKET_UUID => peer_validation_packet.uuid.to_string(),
                             );
                             invalid_uuids.push(peer_validation_packet.uuid);
@@ -393,25 +413,5 @@ fn validation_packet_map(
             Err(Error::EofError) => return Ok(map),
             Err(e) => return Err(e.into()),
         }
-    }
-}
-
-fn get_validation_packet<'a>(
-    uuid: &Uuid,
-    validation_packets: &'a HashMap<Uuid, ValidationPacket>,
-    kind: &str,
-    invalid_uuids: &mut Vec<Uuid>,
-    logger: &Logger,
-) -> Option<&'a ValidationPacket> {
-    match validation_packets.get(uuid) {
-        None => {
-            info!(
-                logger, "no {} validation packet", kind;
-                event::PACKET_UUID => uuid.to_string()
-            );
-            invalid_uuids.push(*uuid);
-            None
-        }
-        result => result,
     }
 }
