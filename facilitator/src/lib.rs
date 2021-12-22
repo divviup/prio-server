@@ -1,6 +1,7 @@
 use anyhow::Result;
 use ring::{digest, signature::EcdsaKeyPair};
 use std::io::Write;
+use uuid::Uuid;
 
 pub mod aggregation;
 pub mod aws_credentials;
@@ -39,6 +40,8 @@ pub enum Error {
     EofError,
     #[error("HTTP resource error")]
     HttpError(#[from] ureq::Error),
+    #[error("packet decryption failure for packet {0}")]
+    PacketDecryptionError(Uuid),
 }
 
 /// A wrapper-writer that computes a SHA256 digest over the content it is provided.
