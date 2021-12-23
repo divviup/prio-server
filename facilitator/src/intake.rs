@@ -236,6 +236,7 @@ mod tests {
             DEFAULT_PHA_ECIES_PRIVATE_KEY, DEFAULT_TRACE_ID,
         },
         transport::{LocalFileTransport, SignableTransport, VerifiableTransport},
+        Error,
     };
     use assert_matches::assert_matches;
     use prio::{encrypt::PublicKey, server::ServerError, util::SerializeError};
@@ -456,9 +457,10 @@ mod tests {
         .unwrap();
 
         let err = pha_ingestor.generate_validation_share(|_| {}).unwrap_err();
-        assert!(err
-            .to_string()
-            .contains("failed to construct validation message for packet",));
+        assert_matches!(
+            err.downcast_ref::<Error>(),
+            Some(Error::PacketDecryptionError(_))
+        );
     }
 
     #[test]

@@ -1,5 +1,5 @@
 use crate::Error;
-use anyhow::{anyhow, Context, Result};
+use anyhow::{Context, Result};
 use avro_rs::{
     from_value,
     types::{Record, Value},
@@ -534,7 +534,9 @@ impl IngestionDataSharePacket {
                 h_r: u32::from(validation_message.h_r) as i64,
             });
         }
-        return Err(anyhow!("failed to construct validation message for packet {} because all decryption attempts failed (key mismatch?)", self.uuid));
+        // If we arrive here, this packet could not be decrypted by any key we have.
+        // All we can do is report this to the caller.
+        Err(Error::PacketDecryptionError(self.uuid).into())
     }
 }
 
