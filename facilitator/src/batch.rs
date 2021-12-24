@@ -33,8 +33,8 @@ pub struct Batch<H: Header, P: Packet> {
 
     // These next two fields are not real and are used because not using H and P
     // in the struct definition is an error.
-    phantom_header: PhantomData<*const H>,
-    phantom_packet: PhantomData<*const P>,
+    phantom_header: PhantomData<H>,
+    phantom_packet: PhantomData<P>,
 }
 
 impl Batch<IngestionHeader, IngestionDataSharePacket> {

@@ -2,7 +2,7 @@ use chrono::NaiveDateTime;
 use facilitator::{
     aggregation::BatchAggregator,
     batch::{Batch, BatchReader},
-    idl::{InvalidPacket, SumPart},
+    idl::InvalidPacket,
     intake::BatchIntaker,
     logging::setup_test_logging,
     sample::{SampleGenerator, SampleOutput},
@@ -560,7 +560,7 @@ fn end_to_end_test(drop_nth_pha: Option<usize>, drop_nth_facilitator: Option<usi
 
     assert_eq!(aggregation_callback_count, 2);
 
-    let pha_aggregation_batch_reader: BatchReader<'_, SumPart, InvalidPacket> = BatchReader::new(
+    let pha_aggregation_batch_reader = BatchReader::new(
         Batch::new_sum(
             instance_name,
             &aggregation_name,
@@ -581,20 +581,19 @@ fn end_to_end_test(drop_nth_pha: Option<usize>, drop_nth_facilitator: Option<usi
     );
     let pha_sum_fields = pha_sum_part.sum().unwrap();
 
-    let facilitator_aggregation_batch_reader: BatchReader<'_, SumPart, InvalidPacket> =
-        BatchReader::new(
-            Batch::new_sum(
-                instance_name,
-                &aggregation_name,
-                &start_date,
-                &end_date,
-                false,
-            ),
-            &*facilitator_aggregation_transport.transport,
-            false, // permissive
-            &TRACE_ID,
-            &logger,
-        );
+    let facilitator_aggregation_batch_reader = BatchReader::new(
+        Batch::new_sum(
+            instance_name,
+            &aggregation_name,
+            &start_date,
+            &end_date,
+            false,
+        ),
+        &*facilitator_aggregation_transport.transport,
+        false, // permissive
+        &TRACE_ID,
+        &logger,
+    );
 
     let (facilitator_sum_part, facilitator_invalid_packets) = facilitator_aggregation_batch_reader
         .read(&facilitator_pub_keys)
