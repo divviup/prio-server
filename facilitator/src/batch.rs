@@ -355,6 +355,8 @@ impl<'a, H: Header, P: Packet> BatchWriter<'a, H, P> {
         let batch_signature = BatchSignature {
             batch_header_signature: signature.as_ref().to_vec(),
             key_identifier: key_identifier.to_string(),
+            batch_header_bytes: None,
+            packet_bytes: None,
         };
         let mut writer = self
             .transport
