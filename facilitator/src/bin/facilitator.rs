@@ -1398,7 +1398,7 @@ fn generate_sample(
         drop_nth_packet: None,
     };
 
-    let mut sample_generator = SampleGenerator::new(
+    let sample_generator = SampleGenerator::new(
         sub_matches.value_of("aggregation-id").unwrap(),
         value_t!(sub_matches.value_of("dimension"), i32)?,
         value_t!(sub_matches.value_of("epsilon"), f64)?,

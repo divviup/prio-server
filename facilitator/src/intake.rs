@@ -4,7 +4,7 @@ use crate::{
     logging::event,
     metrics::IntakeMetricsCollector,
     transport::{SignableTransport, VerifiableAndDecryptableTransport},
-    BatchSigningKey, Error, DATE_FORMAT,
+    BatchSigningKey, DATE_FORMAT,
 };
 use anyhow::{ensure, Context, Result};
 use chrono::NaiveDateTime;
@@ -60,7 +60,7 @@ impl<'a> BatchIntaker<'a> {
         Ok(BatchIntaker {
             intake_batch: BatchReader::new(
                 Batch::new_ingestion(aggregation_name, batch_id, date),
-                &mut *ingestion_transport.transport.transport,
+                &*ingestion_transport.transport.transport,
                 permit_malformed_batch,
                 trace_id,
                 &logger,
@@ -69,7 +69,7 @@ impl<'a> BatchIntaker<'a> {
             packet_decryption_keys: &ingestion_transport.packet_decryption_keys,
             peer_validation_batch: BatchWriter::new(
                 Batch::new_validation(aggregation_name, batch_id, date, is_first),
-                &mut *peer_validation_transport.transport,
+                &*peer_validation_transport.transport,
                 trace_id,
             ),
             peer_validation_batch_signing_key: &peer_validation_transport.batch_signing_key,
@@ -115,7 +115,8 @@ impl<'a> BatchIntaker<'a> {
     {
         info!(self.logger, "processing batch intake task");
 
-        let ingestion_header = self.intake_batch.header(self.intake_public_keys)?;
+        let (ingestion_header, ingestion_packets) =
+            self.intake_batch.read(self.intake_public_keys)?;
         ensure!(
             ingestion_header.bins > 0,
             "invalid bin count {}",
@@ -144,9 +145,7 @@ impl<'a> BatchIntaker<'a> {
         debug!(self.logger, "We have {} servers.", &servers.len());
 
         // Read all the ingestion packets, generate a verification message for
-        // each, and write them to the validation batch.
-        let mut ingestion_packet_reader =
-            self.intake_batch.packet_file_reader(&ingestion_header)?;
+        // each ingestion packet, writing them to the validation batch.
 
         let mut processed_packets = 0;
         let mut processed_bytes = 0;
@@ -158,22 +157,18 @@ impl<'a> BatchIntaker<'a> {
 
         let packet_file_digest =
             self.peer_validation_batch
-                .packet_file_writer(|mut packet_writer| loop {
-                    let packet = match IngestionDataSharePacket::read(&mut ingestion_packet_reader)
-                    {
-                        Ok(p) => p,
-                        Err(Error::EofError) => return Ok(()),
-                        Err(e) => return Err(e.into()),
-                    };
+                .packet_file_writer(|mut packet_writer| {
+                    for packet in ingestion_packets {
+                        processed_bytes += packet.encrypted_payload.len() as u64;
 
-                    processed_bytes += packet.encrypted_payload.len() as u64;
-
-                    let validation_packet = packet.generate_validation_packet(&mut servers)?;
-                    validation_packet.write(&mut packet_writer)?;
-                    processed_packets += 1;
-                    if processed_packets % callback_cadence == 0 {
-                        callback(logger);
+                        let validation_packet = packet.generate_validation_packet(&mut servers)?;
+                        validation_packet.write(&mut packet_writer)?;
+                        processed_packets += 1;
+                        if processed_packets % callback_cadence == 0 {
+                            callback(logger);
+                        }
                     }
+                    Ok(())
                 })?;
 
         if let Some(collector) = self.metrics_collector {
@@ -241,6 +236,7 @@ mod tests {
             DEFAULT_PHA_ECIES_PRIVATE_KEY, DEFAULT_TRACE_ID,
         },
         transport::{LocalFileTransport, SignableTransport, VerifiableTransport},
+        Error,
     };
     use assert_matches::assert_matches;
     use prio::{encrypt::PublicKey, server::ServerError, util::SerializeError};
@@ -283,7 +279,7 @@ mod tests {
             drop_nth_packet: None,
         };
 
-        let mut sample_generator = SampleGenerator::new(
+        let sample_generator = SampleGenerator::new(
             &aggregation_name,
             10,
             0.11,
@@ -412,7 +408,7 @@ mod tests {
             drop_nth_packet: None,
         };
 
-        let mut sample_generator = SampleGenerator::new(
+        let sample_generator = SampleGenerator::new(
             &aggregation_name,
             10,
             0.11,

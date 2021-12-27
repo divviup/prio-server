@@ -100,7 +100,7 @@ impl Transport for S3Transport {
         self.path.to_string()
     }
 
-    fn get(&mut self, key: &str, trace_id: &Uuid) -> Result<Box<dyn Read>> {
+    fn get(&self, key: &str, trace_id: &Uuid) -> Result<Box<dyn Read>> {
         let logger = self.logger.new(o!(
             event::STORAGE_KEY => key.to_owned(),
             event::TRACE_ID => trace_id.to_string(),
@@ -133,7 +133,7 @@ impl Transport for S3Transport {
         )))
     }
 
-    fn put(&mut self, key: &str, trace_id: &Uuid) -> Result<Box<dyn TransportWriter>> {
+    fn put(&self, key: &str, trace_id: &Uuid) -> Result<Box<dyn TransportWriter>> {
         let logger = self.logger.new(o!(
             event::STORAGE_KEY => key.to_owned(),
             event::TRACE_ID => trace_id.to_string(),
@@ -807,7 +807,7 @@ mod tests {
             .with_status(404)
             .create();
 
-        let mut transport = S3Transport::new(
+        let transport = S3Transport::new(
             s3_path,
             aws_credentials::Provider::new_mock(&api_metrics),
             runtime.handle(),
@@ -843,7 +843,7 @@ mod tests {
             .with_body("fake-content")
             .create();
 
-        let mut transport = S3Transport::new(
+        let transport = S3Transport::new(
             s3_path,
             aws_credentials::Provider::new_mock(&api_metrics),
             runtime.handle(),
@@ -895,7 +895,7 @@ mod tests {
         .map(Mock::create)
         .collect();
 
-        let mut transport = S3Transport::new(
+        let transport = S3Transport::new(
             s3_path,
             aws_credentials::Provider::new_mock(&api_metrics),
             runtime.handle(),

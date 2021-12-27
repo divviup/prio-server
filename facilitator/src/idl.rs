@@ -70,14 +70,7 @@ pub trait Header: Sized {
     fn write<W: Write>(&self, writer: &mut W) -> Result<(), Error>;
 }
 
-pub trait Packet: Sized {
-    /// Reads and parses a single Packet from the provided avro_rs::Reader. Note
-    /// that unlike other structures, this does not take a primitive
-    /// std::io::Read, because we do not want to create a new Avro schema and
-    /// reader for each packet. The Reader must have been created with the
-    /// schema returned from Packet::schema.
-    fn read<R: Read>(reader: &mut Reader<R>) -> Result<Self, Error>;
-
+pub trait Packet: Sized + TryFrom<Value, Error = Error> {
     /// Serializes and writes a single Packet to the provided avro_rs::Writer.
     /// Note that unlike other structures, this does not take a primitive
     /// std::io::Write, because we do not want to create a new Avro schema and
@@ -92,7 +85,7 @@ pub trait Packet: Sized {
 
 /// The file containing signatures over the ingestion batch header and packet
 /// file.
-#[derive(Debug, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Serialize, Deserialize, PartialEq, Clone)]
 pub struct BatchSignature {
     pub batch_header_signature: Vec<u8>,
     pub key_identifier: String,
@@ -129,7 +122,7 @@ impl BatchSignature {
     /// std::io::Write instance.
     pub fn write<W: Write>(&self, writer: &mut W) -> Result<(), Error> {
         let mut writer = Writer::new(*BATCH_SIGNATURE_SCHEMA, writer);
-        writer.append(Value::from(self)).map_err(|e| {
+        writer.append(Value::from(self.clone())).map_err(|e| {
             Error::AvroError("failed to append record to Avro writer".to_owned(), e)
         })?;
 
@@ -145,13 +138,12 @@ impl TryFrom<Value> for BatchSignature {
     type Error = Error;
 
     fn try_from(value: Value) -> Result<Self, Self::Error> {
-        let fields = match value {
-            Value::Record(fields) => fields,
-            _ => {
-                return Err(Error::MalformedBatchError(
-                    "value is not a Record".to_owned(),
-                ))
-            }
+        let fields = if let Value::Record(f) = value {
+            f
+        } else {
+            return Err(Error::MalformedBatchError(
+                "value is not a Record".to_owned(),
+            ));
         };
 
         // Here we might wish to use from_value::<BatchSignature>(record) but
@@ -180,8 +172,8 @@ impl TryFrom<Value> for BatchSignature {
     }
 }
 
-impl From<&BatchSignature> for Value {
-    fn from(sig: &BatchSignature) -> Value {
+impl From<BatchSignature> for Value {
+    fn from(sig: BatchSignature) -> Value {
         // avro_rs docs say this can only happen "if the `Schema is not
         // a `Schema::Record` variant", which shouldn't ever happen, so
         // panic for debugging
@@ -190,15 +182,15 @@ impl From<&BatchSignature> for Value {
             .expect("Unable to create record from ingestion signature schema");
         record.put(
             "batch_header_signature",
-            Value::Bytes(sig.batch_header_signature.clone()),
+            Value::Bytes(sig.batch_header_signature),
         );
-        record.put("key_identifier", Value::String(sig.key_identifier.clone()));
+        record.put("key_identifier", Value::String(sig.key_identifier));
         Value::Record(record.fields)
     }
 }
 
 /// The header on a Prio ingestion batch.
-#[derive(Debug, Deserialize, Serialize, PartialEq)]
+#[derive(Debug, Deserialize, Serialize, PartialEq, Clone)]
 pub struct IngestionHeader {
     pub batch_uuid: Uuid,
     pub name: String,
@@ -257,7 +249,7 @@ impl Header for IngestionHeader {
             ));
         }
 
-        // Here we might wish to use from_value::<IngestionSignature>(record) but avro_rs does not
+        // Here we might wish to use from_value::<IngestionHeader>(record) but avro_rs does not
         // seem to recognize it as a Bytes and fails to deserialize it. The value we unwrapped from
         // reader.next above is a vector of (String, avro_rs::Value) tuples, which we now iterate to
         // find the struct members.
@@ -402,92 +394,6 @@ impl Packet for IngestionDataSharePacket {
         *INGESTION_DATA_SHARE_PACKET_SCHEMA
     }
 
-    fn read<R: Read>(reader: &mut Reader<R>) -> Result<IngestionDataSharePacket, Error> {
-        let record = match reader.next() {
-            Some(Ok(Value::Record(r))) => r,
-            Some(Ok(_)) => {
-                return Err(Error::MalformedDataPacketError(
-                    "value is not a record".to_owned(),
-                ))
-            }
-            Some(Err(e)) => {
-                return Err(Error::AvroError(
-                    "failed to read record from Avro reader".to_owned(),
-                    e,
-                ));
-            }
-            None => return Err(Error::EofError),
-        };
-
-        // As in IngestionSignature::read_signature, , we can't just deserialize into a struct and
-        // must instead walk the vector of record fields.
-        let mut uuid = None;
-        let mut encrypted_payload = None;
-        let mut encryption_key_id = None;
-        let mut r_pit = None;
-        let mut version_configuration = None;
-        let mut device_nonce = None;
-
-        for tuple in record {
-            match (tuple.0.as_str(), tuple.1) {
-                ("uuid", Value::Uuid(v)) => uuid = Some(v),
-                ("encrypted_payload", Value::Bytes(v)) => encrypted_payload = Some(v),
-                ("encryption_key_id", Value::Union(boxed)) => match *boxed {
-                    Value::String(v) => encryption_key_id = Some(v),
-                    Value::Null => encryption_key_id = None,
-                    v => {
-                        return Err(Error::MalformedDataPacketError(format!(
-                            "unexpected boxed value {:?} in encryption_key_id",
-                            v
-                        )))
-                    }
-                },
-                ("r_pit", Value::Long(v)) => r_pit = Some(v),
-                ("version_configuration", Value::Union(boxed)) => match *boxed {
-                    Value::String(v) => version_configuration = Some(v),
-                    Value::Null => version_configuration = None,
-                    v => {
-                        return Err(Error::MalformedDataPacketError(format!(
-                            "unexpected boxed value {:?} in version_configuration",
-                            v
-                        )))
-                    }
-                },
-                ("device_nonce", Value::Union(boxed)) => match *boxed {
-                    Value::Bytes(v) => device_nonce = Some(v),
-                    Value::Null => device_nonce = None,
-                    v => {
-                        return Err(Error::MalformedDataPacketError(format!(
-                            "unexpected boxed value {:?} in device_nonce",
-                            v
-                        )))
-                    }
-                },
-                (f, _) => {
-                    return Err(Error::MalformedDataPacketError(format!(
-                        "unexpected field {} in record",
-                        f
-                    )))
-                }
-            }
-        }
-
-        if uuid.is_none() || encrypted_payload.is_none() || r_pit.is_none() {
-            return Err(Error::MalformedDataPacketError(
-                "missing fields in record".to_owned(),
-            ));
-        }
-
-        Ok(IngestionDataSharePacket {
-            uuid: uuid.unwrap(),
-            encrypted_payload: encrypted_payload.unwrap(),
-            encryption_key_id,
-            r_pit: r_pit.unwrap(),
-            version_configuration,
-            device_nonce,
-        })
-    }
-
     fn write<W: Write>(&self, writer: &mut Writer<W>) -> Result<(), Error> {
         // Ideally we would just do `writer.append_ser(self)` to use Serde
         // serialization to write the record but there seems to be some problem
@@ -535,6 +441,65 @@ impl Packet for IngestionDataSharePacket {
     }
 }
 
+impl TryFrom<Value> for IngestionDataSharePacket {
+    type Error = Error;
+
+    fn try_from(value: Value) -> Result<Self, Self::Error> {
+        let fields = if let Value::Record(f) = value {
+            f
+        } else {
+            return Err(Error::MalformedBatchError(
+                "value is not a Record".to_owned(),
+            ));
+        };
+
+        // As in IngestionSignature::read_signature, we can't just deserialize
+        // into a struct and must instead walk the vector of record fields.
+        let mut uuid = None;
+        let mut encrypted_payload = None;
+        let mut encryption_key_id = None;
+        let mut r_pit = None;
+        let mut version_configuration = None;
+        let mut device_nonce = None;
+
+        for (field_name, field_value) in fields {
+            match (field_name.as_str(), field_value) {
+                ("uuid", Value::Uuid(v)) => uuid = Some(v),
+                ("encrypted_payload", Value::Bytes(v)) => encrypted_payload = Some(v),
+                ("encryption_key_id", Value::Union(boxed)) => {
+                    if let Value::String(v) = *boxed {
+                        encryption_key_id = Some(v);
+                    }
+                }
+                ("r_pit", Value::Long(v)) => r_pit = Some(v),
+                ("version_configuration", Value::Union(boxed)) => {
+                    if let Value::String(v) = *boxed {
+                        version_configuration = Some(v);
+                    }
+                }
+                ("device_nonce", Value::Union(boxed)) => {
+                    if let Value::Bytes(v) = *boxed {
+                        device_nonce = Some(v);
+                    }
+                }
+                _ => (),
+            }
+        }
+
+        Ok(IngestionDataSharePacket {
+            uuid: uuid.ok_or_else(|| Error::MalformedDataPacketError("missing uuid".to_owned()))?,
+            encrypted_payload: encrypted_payload.ok_or_else(|| {
+                Error::MalformedDataPacketError("missing encrypted_payload".to_owned())
+            })?,
+            encryption_key_id,
+            r_pit: r_pit
+                .ok_or_else(|| Error::MalformedDataPacketError("missing r_pit".to_owned()))?,
+            version_configuration,
+            device_nonce,
+        })
+    }
+}
+
 impl IngestionDataSharePacket {
     pub(crate) fn generate_validation_packet(
         &self,
@@ -577,7 +542,7 @@ impl IngestionDataSharePacket {
 
 /// The header on a Prio validation (sometimes referred to as verification)
 /// batch.
-#[derive(Debug, Deserialize, Serialize, PartialEq)]
+#[derive(Debug, Deserialize, Serialize, PartialEq, Clone)]
 pub struct ValidationHeader {
     pub batch_uuid: Uuid,
     pub name: String,
@@ -757,22 +722,6 @@ impl Packet for ValidationPacket {
         *VALIDATION_PACKET_SCHEMA
     }
 
-    fn read<R: Read>(reader: &mut Reader<R>) -> Result<ValidationPacket, Error> {
-        let header = match reader.next() {
-            Some(Ok(h)) => h,
-            Some(Err(e)) => {
-                return Err(Error::AvroError(
-                    "failed to read header from Avro reader".to_owned(),
-                    e,
-                ))
-            }
-            None => return Err(Error::EofError),
-        };
-
-        from_value::<ValidationPacket>(&header)
-            .map_err(|e| Error::AvroError("failed to parse validation header".to_owned(), e))
-    }
-
     fn write<W: Write>(&self, writer: &mut Writer<W>) -> Result<(), Error> {
         // Ideally we would just do `writer.append_ser(self)` to use Serde serialization to write
         // the record but there seems to be some problem with serializing UUIDs, so we have to
@@ -800,6 +749,15 @@ impl Packet for ValidationPacket {
     }
 }
 
+impl TryFrom<Value> for ValidationPacket {
+    type Error = Error;
+
+    fn try_from(value: Value) -> Result<Self, Self::Error> {
+        from_value(&value)
+            .map_err(|e| Error::AvroError("failed to parse validation header".to_owned(), e))
+    }
+}
+
 impl TryFrom<&ValidationPacket> for VerificationMessage<FieldPriov2> {
     type Error = TryFromIntError;
 
@@ -812,7 +770,7 @@ impl TryFrom<&ValidationPacket> for VerificationMessage<FieldPriov2> {
     }
 }
 
-#[derive(Debug, Deserialize, Serialize, PartialEq)]
+#[derive(Debug, Deserialize, Serialize, PartialEq, Clone)]
 pub struct SumPart {
     pub batch_uuids: Vec<Uuid>,
     pub name: String,
@@ -833,7 +791,7 @@ impl SumPart {
         self.sum
             .iter()
             .map(|i| Ok(FieldPriov2::from(u32::try_from(*i)?)))
-            .collect::<Result<Vec<_>, _>>()
+            .collect()
     }
 }
 
@@ -1056,22 +1014,6 @@ impl Packet for InvalidPacket {
         *INVALID_PACKET_SCHEMA
     }
 
-    fn read<R: Read>(reader: &mut Reader<R>) -> Result<InvalidPacket, Error> {
-        let header = match reader.next() {
-            Some(Ok(h)) => h,
-            Some(Err(e)) => {
-                return Err(Error::AvroError(
-                    "failed to read invalid packet from Avro reader".to_owned(),
-                    e,
-                ))
-            }
-            None => return Err(Error::EofError),
-        };
-
-        from_value::<InvalidPacket>(&header)
-            .map_err(|e| Error::AvroError("failed to parse invalid packet".to_owned(), e))
-    }
-
     fn write<W: Write>(&self, writer: &mut Writer<W>) -> Result<(), Error> {
         // Ideally we would just do `writer.append_ser(self)` to use Serde serialization to write
         // the record but there seems to be some problem with serializing UUIDs, so we have to
@@ -1096,7 +1038,16 @@ impl Packet for InvalidPacket {
     }
 }
 
-#[derive(Debug, Serialize, Deserialize, PartialEq)]
+impl TryFrom<Value> for InvalidPacket {
+    type Error = Error;
+
+    fn try_from(value: Value) -> Result<Self, Self::Error> {
+        from_value(&value)
+            .map_err(|e| Error::AvroError("failed to parse invalid packet".to_owned(), e))
+    }
+}
+
+#[derive(Debug, Serialize, Deserialize, PartialEq, Clone)]
 pub struct ValidationBatch {
     pub sig: BatchSignature,
     pub header: Vec<u8>,
@@ -1132,7 +1083,7 @@ impl ValidationBatch {
     /// std::io::Write instance.
     pub fn write<W: Write>(&self, writer: &mut W) -> Result<(), Error> {
         let mut writer = Writer::new(*VALIDATION_BATCH_SCHEMA, writer);
-        writer.append(Value::from(self)).map_err(|e| {
+        writer.append(Value::from(self.clone())).map_err(|e| {
             Error::AvroError("failed to append record to Avro writer".to_owned(), e)
         })?;
         writer
@@ -1146,13 +1097,12 @@ impl TryFrom<Value> for ValidationBatch {
     type Error = Error;
 
     fn try_from(value: Value) -> Result<Self, Self::Error> {
-        let fields = match value {
-            Value::Record(fields) => fields,
-            _ => {
-                return Err(Error::MalformedBatchError(
-                    "value is not a Record".to_owned(),
-                ))
-            }
+        let fields = if let Value::Record(f) = value {
+            f
+        } else {
+            return Err(Error::MalformedBatchError(
+                "value is not a Record".to_owned(),
+            ));
         };
 
         let mut sig = None;
@@ -1178,13 +1128,13 @@ impl TryFrom<Value> for ValidationBatch {
     }
 }
 
-impl From<&ValidationBatch> for Value {
-    fn from(batch: &ValidationBatch) -> Self {
+impl From<ValidationBatch> for Value {
+    fn from(batch: ValidationBatch) -> Self {
         let mut record = Record::new(*VALIDATION_BATCH_SCHEMA)
             .expect("Unable to create record from validation batch schema");
-        record.put("sig", Value::from(&batch.sig));
-        record.put("header", Value::Bytes(batch.header.clone()));
-        record.put("packets", Value::Bytes(batch.packets.clone()));
+        record.put("sig", Value::from(batch.sig));
+        record.put("header", Value::Bytes(batch.header));
+        record.put("packets", Value::Bytes(batch.packets));
         Value::Record(record.fields)
     }
 }
@@ -1338,7 +1288,8 @@ mod tests {
                 &data_share_packet_bytes[..],
             )
             .unwrap();
-            let data_share_packet = IngestionDataSharePacket::read(&mut reader).unwrap();
+            let data_share_packet =
+                IngestionDataSharePacket::try_from(reader.next().unwrap().unwrap()).unwrap();
             assert_eq!(want_data_share_packet, &data_share_packet);
         }
     }
@@ -1357,15 +1308,13 @@ mod tests {
         let mut reader =
             Reader::with_schema(IngestionDataSharePacket::schema(), &record_vec[..]).unwrap();
         for (packet, _) in &*GOLDEN_INGESTION_DATA_SHARE_PACKETS {
-            let packet_again = IngestionDataSharePacket::read(&mut reader).expect("read error");
+            let packet_again = IngestionDataSharePacket::try_from(reader.next().unwrap().unwrap())
+                .expect("read error");
             assert_eq!(packet_again, *packet);
         }
 
         // Do one more read. This should yield EOF.
-        assert_matches!(
-            IngestionDataSharePacket::read(&mut reader),
-            Err(Error::EofError)
-        );
+        assert_matches!(reader.next(), None);
     }
 
     lazy_static! {
@@ -1459,7 +1408,8 @@ mod tests {
             let mut reader =
                 Reader::with_schema(ValidationPacket::schema(), &validation_packet_bytes[..])
                     .unwrap();
-            let data_share_packet = ValidationPacket::read(&mut reader).unwrap();
+            let data_share_packet =
+                ValidationPacket::try_from(reader.next().unwrap().unwrap()).unwrap();
             assert_eq!(want_validation_packet, &data_share_packet);
         }
     }
@@ -1477,12 +1427,13 @@ mod tests {
 
         let mut reader = Reader::with_schema(ValidationPacket::schema(), &record_vec[..]).unwrap();
         for (packet, _) in &*GOLDEN_VALIDATION_PACKETS {
-            let packet_again = ValidationPacket::read(&mut reader).expect("read error");
+            let packet_again =
+                ValidationPacket::try_from(reader.next().unwrap().unwrap()).expect("read error");
             assert_eq!(packet_again, *packet);
         }
 
         // Do one more read. This should yield EOF.
-        assert_matches!(ValidationPacket::read(&mut reader), Err(Error::EofError));
+        assert_matches!(reader.next(), None);
     }
 
     lazy_static! {
@@ -1577,7 +1528,7 @@ mod tests {
         for (want_invalid_packet, invalid_packet_bytes) in &*GOLDEN_INVALID_PACKETS {
             let mut reader =
                 Reader::with_schema(InvalidPacket::schema(), &invalid_packet_bytes[..]).unwrap();
-            let invalid_packet = InvalidPacket::read(&mut reader).unwrap();
+            let invalid_packet = InvalidPacket::try_from(reader.next().unwrap().unwrap()).unwrap();
             assert_eq!(want_invalid_packet, &invalid_packet);
         }
     }
@@ -1595,12 +1546,13 @@ mod tests {
 
         let mut reader = Reader::with_schema(InvalidPacket::schema(), &record_vec[..]).unwrap();
         for (packet, _) in &*GOLDEN_INVALID_PACKETS {
-            let packet_again = InvalidPacket::read(&mut reader).expect("read error");
+            let packet_again =
+                InvalidPacket::try_from(reader.next().unwrap().unwrap()).expect("read error");
             assert_eq!(packet_again, *packet);
         }
 
         // Do one more read. This should yield EOF.
-        assert_matches!(InvalidPacket::read(&mut reader), Err(Error::EofError));
+        assert_matches!(reader.next(), None);
     }
 
     lazy_static! {

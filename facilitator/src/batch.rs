@@ -1,9 +1,11 @@
 use crate::{
-    hex_dump,
-    idl::{BatchSignature, Header, Packet},
+    idl::{
+        BatchSignature, Header, IngestionDataSharePacket, IngestionHeader, InvalidPacket, Packet,
+        SumPart, ValidationHeader, ValidationPacket,
+    },
     metrics::BatchReaderMetricsCollector,
     transport::{Transport, TransportWriter},
-    DigestWriter, DATE_FORMAT,
+    DigestWriter, Error, DATE_FORMAT,
 };
 use anyhow::{anyhow, Context, Result};
 use avro_rs::{Reader, Writer};
@@ -24,33 +26,42 @@ use uuid::Uuid;
 pub const AGGREGATION_DATE_FORMAT: &str = "%Y%m%d%H%M";
 
 /// Manages the paths to the different files in a batch
-pub struct Batch {
+pub struct Batch<H: Header, P: Packet> {
     header_path: String,
     signature_path: String,
     packet_file_path: String,
+
+    // These next two fields are not real and are used because not using H and P
+    // in the struct definition is an error.
+    phantom_header: PhantomData<H>,
+    phantom_packet: PhantomData<P>,
 }
 
-impl Batch {
+impl Batch<IngestionHeader, IngestionDataSharePacket> {
     /// Creates a Batch representing an ingestion batch
-    pub fn new_ingestion(aggregation_name: &str, batch_id: &Uuid, date: &NaiveDateTime) -> Batch {
-        Batch::new(aggregation_name, batch_id, date, "batch")
+    pub fn new_ingestion(aggregation_name: &str, batch_id: &Uuid, date: &NaiveDateTime) -> Self {
+        Self::new(aggregation_name, batch_id, date, "batch")
     }
+}
 
+impl Batch<ValidationHeader, ValidationPacket> {
     /// Creates a Batch representing a validation batch
     pub fn new_validation(
         aggregation_name: &str,
         batch_id: &Uuid,
         date: &NaiveDateTime,
         is_first: bool,
-    ) -> Batch {
-        Batch::new(
+    ) -> Self {
+        Self::new(
             aggregation_name,
             batch_id,
             date,
             &format!("validity_{}", if is_first { 0 } else { 1 }),
         )
     }
+}
 
+impl Batch<SumPart, InvalidPacket> {
     // Creates a batch representing a sum part batch
     pub fn new_sum(
         instance_name: &str,
@@ -58,7 +69,7 @@ impl Batch {
         aggregation_start: &NaiveDateTime,
         aggregation_end: &NaiveDateTime,
         is_first: bool,
-    ) -> Batch {
+    ) -> Self {
         let batch_path = format!(
             "{}/{}/{}-{}",
             instance_name,
@@ -68,7 +79,7 @@ impl Batch {
         );
         let filename = format!("sum_{}", if is_first { 0 } else { 1 });
 
-        Batch {
+        Self {
             header_path: format!("{}.{}", batch_path, filename),
             signature_path: format!("{}.{}.sig", batch_path, filename),
             packet_file_path: format!(
@@ -76,20 +87,27 @@ impl Batch {
                 batch_path,
                 if is_first { 0 } else { 1 }
             ),
+
+            phantom_header: PhantomData,
+            phantom_packet: PhantomData,
         }
     }
+}
 
-    fn new(aggregation_name: &str, batch_id: &Uuid, date: &NaiveDateTime, filename: &str) -> Batch {
+impl<H: Header, P: Packet> Batch<H, P> {
+    fn new(aggregation_name: &str, batch_id: &Uuid, date: &NaiveDateTime, filename: &str) -> Self {
         let batch_path = format!(
             "{}/{}/{}",
             aggregation_name,
             date.format(DATE_FORMAT),
             batch_id.to_hyphenated()
         );
-        Batch {
+        Self {
             header_path: format!("{}.{}", batch_path, filename),
             signature_path: format!("{}.{}.sig", batch_path, filename),
             packet_file_path: format!("{}.{}.avro", batch_path, filename),
+            phantom_header: PhantomData,
+            phantom_packet: PhantomData,
         }
     }
 
@@ -108,18 +126,13 @@ impl Batch {
 
 /// Allows reading files, including signature validation, from an ingestion or
 /// validation batch containing a header, a packet file and a signature.
-pub struct BatchReader<'a, H, P> {
+pub struct BatchReader<'a, H: Header, P: Packet> {
     trace_id: &'a Uuid,
-    batch: Batch,
-    transport: &'a mut dyn Transport,
+    batch: Batch<H, P>,
+    transport: &'a dyn Transport,
     permit_malformed_batch: bool,
     metrics_collector: Option<&'a BatchReaderMetricsCollector>,
     logger: Logger,
-
-    // These next two fields are not real and are used because not using H and P
-    // in the struct definition is an error.
-    phantom_header: PhantomData<*const H>,
-    phantom_packet: PhantomData<*const P>,
 }
 
 impl<'a, H: Header, P: Packet> BatchReader<'a, H, P> {
@@ -127,8 +140,8 @@ impl<'a, H: Header, P: Packet> BatchReader<'a, H, P> {
     /// provided transport. If permissive is true, then invalid signatures or
     /// packet file digest mismatches will be ignored.
     pub fn new(
-        batch: Batch,
-        transport: &'a mut dyn Transport,
+        batch: Batch<H, P>,
+        transport: &'a dyn Transport,
         permit_malformed_batch: bool,
         trace_id: &'a Uuid,
         parent_logger: &Logger,
@@ -144,8 +157,6 @@ impl<'a, H: Header, P: Packet> BatchReader<'a, H, P> {
             permit_malformed_batch,
             metrics_collector: None,
             logger,
-            phantom_header: PhantomData,
-            phantom_packet: PhantomData,
         }
     }
 
@@ -157,93 +168,82 @@ impl<'a, H: Header, P: Packet> BatchReader<'a, H, P> {
         self.transport.path()
     }
 
-    /// Return the parsed header from this batch, but only if its signature is
-    /// valid. The signature is checked by getting the key_identifier value from
-    /// the signature message, using that to obtain a public key from the
-    /// provided public_keys map, and using that key to check the ECDSA P256
-    /// signature.
-    pub fn header(
-        &mut self,
+    // Returns the parsed header & packets from this batch, but only if the
+    // signature & digest are valid.
+    pub fn read(
+        &self,
         public_keys: &HashMap<String, UnparsedPublicKey<Vec<u8>>>,
-    ) -> Result<H> {
+    ) -> Result<(H, Vec<P>)> {
+        // First, read the batch signature.
         let signature = BatchSignature::read(
             self.transport
                 .get(self.batch.signature_key(), self.trace_id)?,
         )?;
 
+        // Read the header, and check the header's signature.
         let mut header_buf = Vec::new();
         self.transport
             .get(self.batch.header_key(), self.trace_id)?
             .read_to_end(&mut header_buf)
             .context("failed to read header from transport")?;
 
-        let sig_valid = public_keys
+        if let Err(err) = public_keys
             .get(&signature.key_identifier)
-            .context(format!(
-                "key identifier {} not present in key map {:?}",
-                signature.key_identifier,
-                public_keys.keys(),
-            ))?
-            .verify(&header_buf, &signature.batch_header_signature);
-        if let Err(e) = sig_valid {
-            let message = format!(
-                "invalid signature on header with key {}: {:?}",
-                signature.key_identifier, e
-            );
+            .with_context(|| {
+                format!(
+                    "key identifier {} not present in key map {:?}",
+                    signature.key_identifier,
+                    public_keys.keys(),
+                )
+            })?
+            .verify(&header_buf, &signature.batch_header_signature)
+        {
             if let Some(collector) = self.metrics_collector {
                 collector
                     .invalid_validation_batches
                     .with_label_values(&["header"])
                     .inc();
             }
+            let message = format!(
+                "invalid signature on header with key {}: {:?}",
+                signature.key_identifier, err
+            );
             if self.permit_malformed_batch {
                 warn!(self.logger, "{}", message);
             } else {
                 return Err(anyhow!("{}", message));
             }
         }
-        Ok(H::read(Cursor::new(header_buf))?)
-    }
+        let header = H::read(Cursor::new(header_buf))?;
 
-    /// Return an avro_rs::Reader that yields the packets in the packet file,
-    /// but only if the whole file's digest matches the packet_file_digest field
-    /// in the provided header. The header is assumed to be trusted.
-    pub fn packet_file_reader(&mut self, header: &H) -> Result<Reader<Cursor<Vec<u8>>>> {
-        // Fetch packet file to validate its digest. It could be quite large so
-        // so our intuition would be to stream the packets from the transport
-        // and into a hasher and into the validation step, so that we wouldn't
-        // need the whole file in memory at once. We can't do this because:
-        //   (1) we don't want to do anything with any of the data in the packet
-        //       file until we've verified integrity+authenticity
-        //   (2) we need to copy the entire file into storage we control before
-        //       validating its digest to avoid TOCTOU vulnerabilities.
-        // We are assured by our friends writing ingestion servers that batches
-        // will be no more than 300-400 MB, which fits quite reasonably into the
-        // memory of anything we're going to run the facilitator on, so we load
-        // the entire packet file into memory ...
-        let mut packet_file_reader = self
+        // Read packets, after verifying that digest matches header.
+        // We read all of the packets, rather than streaming bytes as we
+        // need them to yield a packet, because we need to check that the
+        // header's recorded digest matches the actual content's digest. The
+        // ingestion server authors suggest that the maximum batch size will be
+        // ~400MiB, so this should work out okay.
+        let mut packet_reader = self
             .transport
             .get(self.batch.packet_file_key(), self.trace_id)?;
-        let mut entire_packet_file = Vec::new();
-        let mut digest_writer = DigestWriter::new(&mut entire_packet_file);
+        let mut packet_bytes = Vec::new();
+        let mut digest_writer = DigestWriter::new(&mut packet_bytes);
 
-        std::io::copy(&mut packet_file_reader, &mut digest_writer)
+        std::io::copy(&mut packet_reader, &mut digest_writer)
             .context("failed to load packet file")?;
 
-        // ... then verify the digest over it ...
-        let packet_file_digest = digest_writer.finish();
-        if header.packet_file_digest().as_slice() != packet_file_digest.as_ref() {
-            let message = format!(
-                "packet file digest in header {} does not match actual packet file digest {}",
-                hex_dump(header.packet_file_digest()),
-                hex_dump(packet_file_digest.as_ref())
-            );
+        let packet_digest = digest_writer.finish();
+        if header.packet_file_digest() != packet_digest.as_ref() {
             if let Some(collector) = self.metrics_collector {
                 collector
                     .invalid_validation_batches
                     .with_label_values(&["packet_file"])
                     .inc();
             }
+            let message = format!(
+                "packet file digest in header {} does not match actual packet file digest {}",
+                hex::encode(header.packet_file_digest()),
+                hex::encode(packet_digest)
+            );
             if self.permit_malformed_batch {
                 warn!(self.logger, "{}", message);
             } else {
@@ -251,31 +251,44 @@ impl<'a, H: Header, P: Packet> BatchReader<'a, H, P> {
             }
         }
 
-        // ... then return a packet reader.
-        Reader::with_schema(P::schema(), Cursor::new(entire_packet_file))
-            .context("failed to create Avro reader for packets")
+        // avro_rs readers will always attempt to read a header on creation;
+        // apparently, avro_rs writers don't bother writing a header unless at
+        // least one record is written. So we need to special-case zero bytes
+        // of content as returning an empty vector of packets, because trying
+        // to use a Reader will error out.
+        let packets =
+            if packet_bytes.is_empty() {
+                Vec::new()
+            } else {
+                Reader::with_schema(P::schema(), Cursor::new(&packet_bytes))
+                    .context("failed to create Avro reader for packets")?
+                    .map(|val| {
+                        P::try_from(val.map_err(|e| {
+                            Error::AvroError("couldn't read Avro value".to_owned(), e)
+                        })?)
+                    })
+                    .collect::<Result<Vec<P>, _>>()?
+            };
+
+        Ok((header, packets))
     }
 }
 
 /// Allows writing files, including signature file construction, from an
 /// ingestion or validation batch containing a header, a packet file and a
 /// signature.
-pub struct BatchWriter<'a, H, P> {
-    batch: Batch,
-    transport: &'a mut dyn Transport,
+pub struct BatchWriter<'a, H: Header, P: Packet> {
+    batch: Batch<H, P>,
+    transport: &'a dyn Transport,
     trace_id: &'a Uuid,
-    phantom_header: PhantomData<*const H>,
-    phantom_packet: PhantomData<*const P>,
 }
 
 impl<'a, H: Header, P: Packet> BatchWriter<'a, H, P> {
-    pub fn new(batch: Batch, transport: &'a mut dyn Transport, trace_id: &'a Uuid) -> Self {
+    pub fn new(batch: Batch<H, P>, transport: &'a dyn Transport, trace_id: &'a Uuid) -> Self {
         BatchWriter {
             batch,
             transport,
             trace_id,
-            phantom_header: PhantomData,
-            phantom_packet: PhantomData,
         }
     }
 
@@ -286,7 +299,7 @@ impl<'a, H: Header, P: Packet> BatchWriter<'a, H, P> {
     /// Encode the provided header into Avro, sign that representation with the
     /// provided key and write the header into the batch. Returns the signature
     /// on success.
-    pub fn put_header(&mut self, header: &H, key: &EcdsaKeyPair) -> Result<Signature> {
+    pub fn put_header(&self, header: &H, key: &EcdsaKeyPair) -> Result<Signature> {
         let mut transport_writer = self.transport.put(self.batch.header_key(), self.trace_id)?;
         let mut header_buf = Vec::new();
         header.write(&mut header_buf)?;
@@ -308,7 +321,7 @@ impl<'a, H: Header, P: Packet> BatchWriter<'a, H, P> {
     /// The operation should return Ok(()) when it has finished successfully or
     /// some Err() otherwise. packet_file_writer returns the digest of all the
     /// content written by the operation.
-    pub fn packet_file_writer<F>(&mut self, operation: F) -> Result<Digest>
+    pub fn packet_file_writer<F>(&self, operation: F) -> Result<Digest>
     where
         F: FnOnce(&mut Writer<&mut DigestWriter<&mut Box<dyn TransportWriter>>>) -> Result<()>,
     {
@@ -338,7 +351,7 @@ impl<'a, H: Header, P: Packet> BatchWriter<'a, H, P> {
 
     /// Constructs a signature structure from the provided buffers and writes it
     /// to the batch's signature file
-    pub fn put_signature(&mut self, signature: &Signature, key_identifier: &str) -> Result<()> {
+    pub fn put_signature(&self, signature: &Signature, key_identifier: &str) -> Result<()> {
         let batch_signature = BatchSignature {
             batch_header_signature: signature.as_ref().to_vec(),
             key_identifier: key_identifier.to_string(),
@@ -366,31 +379,33 @@ mod tests {
             default_ingestor_public_key, DEFAULT_TRACE_ID,
         },
         transport::LocalFileTransport,
-        Error,
     };
-    use assert_matches::assert_matches;
+    use lazy_static::lazy_static;
+    use std::fmt::Debug;
 
-    #[allow(clippy::too_many_arguments)] // Grandfathered in
-    fn roundtrip_batch<'a>(
-        aggregation_name: String,
-        batch_id: Uuid,
-        base_path: String,
-        filenames: &[String],
-        batch_writer: &mut BatchWriter<'a, IngestionHeader, IngestionDataSharePacket>,
-        batch_reader: &mut BatchReader<'a, IngestionHeader, IngestionDataSharePacket>,
-        transport: &mut LocalFileTransport,
-        write_key: &EcdsaKeyPair,
-        read_key: &UnparsedPublicKey<Vec<u8>>,
-        keys_match: bool,
-    ) {
-        // These tests cheat by using IngestionHeader and
-        // IngestionDataSharePacket regardless of what kind of batch it is, but
-        // since BatchReader and BatchWriter are generic in H and P, this
-        // exercises what we care about in this module while saving us a bit of
-        // typing.
-        let packets = &[
+    const INSTANCE_NAME: &str = "fake-instance";
+    const AGGREGATION_NAME: &str = "fake-aggregation";
+    const BATCH_ID: Uuid = Uuid::from_bytes([0; 16]);
+
+    lazy_static! {
+        static ref START_TIMESTAMP: NaiveDateTime = NaiveDateTime::from_timestamp(1234567890, 654321);
+        static ref END_TIMESTAMP: NaiveDateTime = NaiveDateTime::from_timestamp(2234567890, 654321);
+
+        static ref INGESTION_HEADER: IngestionHeader = IngestionHeader {
+            batch_uuid: BATCH_ID,
+            name: AGGREGATION_NAME.to_owned(),
+            bins: 2,
+            epsilon: 1.601,
+            prime: 17,
+            number_of_servers: 2,
+            hamming_weight: None,
+            batch_start_time: 789456123,
+            batch_end_time: 789456321,
+            packet_file_digest: Vec::new(),
+        };
+        static ref INGESTION_DATA_SHARE_PACKETS: Vec<IngestionDataSharePacket> = vec![
             IngestionDataSharePacket {
-                uuid: Uuid::new_v4(),
+                uuid: Uuid::from_bytes([1; 16]),
                 encrypted_payload: vec![0u8, 1u8, 2u8, 3u8],
                 encryption_key_id: Some("fake-key-1".to_owned()),
                 r_pit: 1,
@@ -398,7 +413,7 @@ mod tests {
                 device_nonce: None,
             },
             IngestionDataSharePacket {
-                uuid: Uuid::new_v4(),
+                uuid: Uuid::from_bytes([2; 16]),
                 encrypted_payload: vec![4u8, 5u8, 6u8, 7u8],
                 encryption_key_id: None,
                 r_pit: 2,
@@ -406,7 +421,7 @@ mod tests {
                 device_nonce: Some(vec![8u8, 9u8, 10u8, 11u8]),
             },
             IngestionDataSharePacket {
-                uuid: Uuid::new_v4(),
+                uuid: Uuid::from_bytes([2; 16]),
                 encrypted_payload: vec![8u8, 9u8, 10u8, 11u8],
                 encryption_key_id: Some("fake-key-3".to_owned()),
                 r_pit: 3,
@@ -415,27 +430,91 @@ mod tests {
             },
         ];
 
-        let packet_file_digest = batch_writer
-            .packet_file_writer(|mut packet_writer| {
-                packets[0].write(&mut packet_writer)?;
-                packets[1].write(&mut packet_writer)?;
-                packets[2].write(&mut packet_writer)?;
-                Ok(())
-            })
-            .expect("failed to write packets");
-
-        let header = IngestionHeader {
-            batch_uuid: batch_id,
-            name: aggregation_name,
+        static ref VALIDATION_HEADER: ValidationHeader = ValidationHeader {
+            batch_uuid: BATCH_ID,
+            name: AGGREGATION_NAME.to_owned(),
             bins: 2,
             epsilon: 1.601,
             prime: 17,
             number_of_servers: 2,
-            hamming_weight: None,
-            batch_start_time: 789456123,
-            batch_end_time: 789456321,
-            packet_file_digest: packet_file_digest.as_ref().to_vec(),
+            hamming_weight: Some(12),
+            packet_file_digest: Vec::new(), // set by test code
         };
+        static ref VALIDATION_PACKETS: Vec<ValidationPacket> = vec![
+            ValidationPacket {
+                uuid: Uuid::from_bytes([3; 16]),
+                f_r: 1,
+                g_r: 2,
+                h_r: 3,
+            },
+            ValidationPacket {
+                uuid: Uuid::from_bytes([4; 16]),
+                f_r: 4,
+                g_r: 5,
+                h_r: 6,
+            },
+            ValidationPacket {
+                uuid: Uuid::from_bytes([5; 16]),
+                f_r: 7,
+                g_r: 8,
+                h_r: 9,
+            },
+        ];
+
+        static ref SUM_PART: SumPart = SumPart {
+            batch_uuids: vec![BATCH_ID],
+            name: AGGREGATION_NAME.to_owned(),
+            bins: 2,
+            epsilon: 1.601,
+            prime: 17,
+            number_of_servers: 2,
+            hamming_weight: Some(12),
+            sum: vec![12, 13, 14],
+            aggregation_start_time: 789456123,
+            aggregation_end_time: 789456321,
+            packet_file_digest: Vec::new(), // set by test code
+            total_individual_clients: 2,
+        };
+        static ref INVALID_PACKETS: Vec<InvalidPacket> = vec![
+            InvalidPacket {
+                uuid: Uuid::from_bytes([6; 16]),
+            },
+            InvalidPacket {
+                uuid: Uuid::from_bytes([7; 16]),
+            },
+            InvalidPacket {
+                uuid: Uuid::from_bytes([8; 16]),
+            },
+        ];
+    }
+
+    #[allow(clippy::too_many_arguments)] // Grandfathered in
+    fn roundtrip_batch<'a, H, P>(
+        header: &H,
+        packets: &[P],
+        base_path: String,
+        filenames: &[String],
+        batch_writer: &BatchWriter<'a, H, P>,
+        batch_reader: &BatchReader<'a, H, P>,
+        transport: &LocalFileTransport,
+        write_key: &EcdsaKeyPair,
+        read_key: &UnparsedPublicKey<Vec<u8>>,
+        keys_match: bool,
+    ) where
+        H: Header + DigestSetter + Clone + PartialEq + Debug,
+        P: Packet + PartialEq + Debug,
+    {
+        let packet_file_digest = batch_writer
+            .packet_file_writer(|mut packet_writer| {
+                for packet in packets {
+                    packet.write(&mut packet_writer)?;
+                }
+                Ok(())
+            })
+            .expect("failed to write packets");
+
+        let mut header = header.clone();
+        header.set_packet_file_digest(packet_file_digest.as_ref().to_vec());
 
         let header_signature = batch_writer
             .put_header(&header, write_key)
@@ -453,38 +532,31 @@ mod tests {
 
         let mut key_map = HashMap::new();
         key_map.insert("key-identifier".to_owned(), read_key.clone());
-        let header_again = batch_reader.header(&key_map);
+        let read_result = batch_reader.read(&key_map);
         if !keys_match {
             assert!(
-                header_again.is_err(),
+                read_result.is_err(),
                 "read should fail with mismatched keys"
             );
             return;
         }
         assert!(
-            header_again.is_ok(),
+            read_result.is_ok(),
             "failed to read header from batch {:?}",
-            header_again.err()
+            read_result.err()
         );
-        let header_again = header_again.unwrap();
+        let (header_again, packets_again) = read_result.unwrap();
 
         assert_eq!(header, header_again, "header does not match");
 
-        let mut packet_file_reader = batch_reader
-            .packet_file_reader(&header_again)
-            .expect("failed to get packet file reader");
-
+        let mut packets_again_iter = packets_again.iter();
         for packet in packets {
-            let packet_again = IngestionDataSharePacket::read(&mut packet_file_reader)
-                .expect("failed to read packet");
-            assert_eq!(packet, &packet_again, "packet does not match");
+            let packet_again = packets_again_iter.next().expect("no packets remaining");
+            assert_eq!(packet, packet_again, "packet does not match");
         }
 
         // One more read should get EOF
-        assert_matches!(
-            IngestionDataSharePacket::read(&mut packet_file_reader),
-            Err(Error::EofError)
-        );
+        assert!(packets_again_iter.next().is_none());
     }
 
     #[test]
@@ -500,33 +572,27 @@ mod tests {
     fn roundtrip_ingestion_batch(keys_match: bool) {
         let logger = setup_test_logging();
         let tempdir = tempfile::TempDir::new().unwrap();
-        let mut write_transport = LocalFileTransport::new(tempdir.path().to_path_buf());
-        let mut read_transport = LocalFileTransport::new(tempdir.path().to_path_buf());
-        let mut verify_transport = LocalFileTransport::new(tempdir.path().to_path_buf());
+        let write_transport = LocalFileTransport::new(tempdir.path().to_path_buf());
+        let read_transport = LocalFileTransport::new(tempdir.path().to_path_buf());
+        let verify_transport = LocalFileTransport::new(tempdir.path().to_path_buf());
 
-        let aggregation_name = "fake-aggregation";
-        let batch_id = Uuid::new_v4();
-        let date = NaiveDateTime::from_timestamp(2234567890, 654321);
-
-        let mut batch_writer: BatchWriter<'_, IngestionHeader, IngestionDataSharePacket> =
-            BatchWriter::new(
-                Batch::new_ingestion(aggregation_name, &batch_id, &date),
-                &mut write_transport,
-                &DEFAULT_TRACE_ID,
-            );
-        let mut batch_reader: BatchReader<'_, IngestionHeader, IngestionDataSharePacket> =
-            BatchReader::new(
-                Batch::new_ingestion(aggregation_name, &batch_id, &date),
-                &mut read_transport,
-                false,
-                &DEFAULT_TRACE_ID,
-                &logger,
-            );
+        let batch_writer = BatchWriter::new(
+            Batch::new_ingestion(AGGREGATION_NAME, &BATCH_ID, &END_TIMESTAMP),
+            &write_transport,
+            &DEFAULT_TRACE_ID,
+        );
+        let batch_reader = BatchReader::new(
+            Batch::new_ingestion(AGGREGATION_NAME, &BATCH_ID, &END_TIMESTAMP),
+            &read_transport,
+            false,
+            &DEFAULT_TRACE_ID,
+            &logger,
+        );
         let base_path = format!(
             "{}/{}/{}",
-            aggregation_name,
-            date.format(DATE_FORMAT),
-            batch_id.to_hyphenated()
+            AGGREGATION_NAME,
+            END_TIMESTAMP.format(DATE_FORMAT),
+            BATCH_ID.to_hyphenated()
         );
         let read_key = if keys_match {
             default_ingestor_public_key()
@@ -534,17 +600,17 @@ mod tests {
             default_facilitator_signing_public_key()
         };
         roundtrip_batch(
-            aggregation_name.to_string(),
-            batch_id,
+            &*INGESTION_HEADER,
+            &*INGESTION_DATA_SHARE_PACKETS,
             base_path,
             &[
                 "batch".to_owned(),
                 "batch.avro".to_owned(),
                 "batch.sig".to_owned(),
             ],
-            &mut batch_writer,
-            &mut batch_reader,
-            &mut verify_transport,
+            &batch_writer,
+            &batch_reader,
+            &verify_transport,
             &default_ingestor_private_key().key,
             &read_key,
             keys_match,
@@ -574,61 +640,54 @@ mod tests {
     fn roundtrip_validation_batch(is_first: bool, keys_match: bool) {
         let logger = setup_test_logging();
         let tempdir = tempfile::TempDir::new().unwrap();
-        let mut write_transport = LocalFileTransport::new(tempdir.path().to_path_buf());
-        let mut read_transport = LocalFileTransport::new(tempdir.path().to_path_buf());
-        let mut verify_transport = LocalFileTransport::new(tempdir.path().to_path_buf());
+        let write_transport = LocalFileTransport::new(tempdir.path().to_path_buf());
+        let read_transport = LocalFileTransport::new(tempdir.path().to_path_buf());
+        let verify_transport = LocalFileTransport::new(tempdir.path().to_path_buf());
 
-        let aggregation_name = "fake-aggregation";
-        let batch_id = Uuid::new_v4();
-        let date = NaiveDateTime::from_timestamp(2234567890, 654321);
-
-        let mut batch_writer: BatchWriter<'_, IngestionHeader, IngestionDataSharePacket> =
-            BatchWriter::new(
-                Batch::new_validation(aggregation_name, &batch_id, &date, is_first),
-                &mut write_transport,
-                &DEFAULT_TRACE_ID,
-            );
-        let mut batch_reader: BatchReader<'_, IngestionHeader, IngestionDataSharePacket> =
-            BatchReader::new(
-                Batch::new_validation(aggregation_name, &batch_id, &date, is_first),
-                &mut read_transport,
-                false,
-                &DEFAULT_TRACE_ID,
-                &logger,
-            );
+        let batch_writer = BatchWriter::new(
+            Batch::new_validation(AGGREGATION_NAME, &BATCH_ID, &END_TIMESTAMP, is_first),
+            &write_transport,
+            &DEFAULT_TRACE_ID,
+        );
+        let batch_reader = BatchReader::new(
+            Batch::new_validation(AGGREGATION_NAME, &BATCH_ID, &END_TIMESTAMP, is_first),
+            &read_transport,
+            false,
+            &DEFAULT_TRACE_ID,
+            &logger,
+        );
         let base_path = format!(
             "{}/{}/{}",
-            aggregation_name,
-            date.format(DATE_FORMAT),
-            batch_id.to_hyphenated()
+            AGGREGATION_NAME,
+            END_TIMESTAMP.format(DATE_FORMAT),
+            BATCH_ID.to_hyphenated()
         );
-        let first_filenames = &[
-            "validity_0".to_owned(),
-            "validity_0.avro".to_owned(),
-            "validity_0.sig".to_owned(),
-        ];
-        let second_filenames = &[
-            "validity_1".to_owned(),
-            "validity_1.avro".to_owned(),
-            "validity_1.sig".to_owned(),
-        ];
+        let filenames = if is_first {
+            [
+                "validity_0".to_owned(),
+                "validity_0.avro".to_owned(),
+                "validity_0.sig".to_owned(),
+            ]
+        } else {
+            [
+                "validity_1".to_owned(),
+                "validity_1.avro".to_owned(),
+                "validity_1.sig".to_owned(),
+            ]
+        };
         let read_key = if keys_match {
             default_ingestor_public_key()
         } else {
             default_facilitator_signing_public_key()
         };
         roundtrip_batch(
-            aggregation_name.to_string(),
-            batch_id,
+            &*VALIDATION_HEADER,
+            &*VALIDATION_PACKETS,
             base_path,
-            if is_first {
-                first_filenames
-            } else {
-                second_filenames
-            },
-            &mut batch_writer,
-            &mut batch_reader,
-            &mut verify_transport,
+            &filenames,
+            &batch_writer,
+            &batch_reader,
+            &verify_transport,
             &default_ingestor_private_key().key,
             &read_key,
             keys_match,
@@ -658,64 +717,67 @@ mod tests {
     fn roundtrip_sum_batch(is_first: bool, keys_match: bool) {
         let logger = setup_test_logging();
         let tempdir = tempfile::TempDir::new().unwrap();
-        let mut write_transport = LocalFileTransport::new(tempdir.path().to_path_buf());
-        let mut read_transport = LocalFileTransport::new(tempdir.path().to_path_buf());
-        let mut verify_transport = LocalFileTransport::new(tempdir.path().to_path_buf());
+        let write_transport = LocalFileTransport::new(tempdir.path().to_path_buf());
+        let read_transport = LocalFileTransport::new(tempdir.path().to_path_buf());
+        let verify_transport = LocalFileTransport::new(tempdir.path().to_path_buf());
 
-        let instance_name = "fake-instance";
-        let aggregation_name = "fake-aggregation";
-        let batch_id = Uuid::new_v4();
-        let start = NaiveDateTime::from_timestamp(1234567890, 654321);
-        let end = NaiveDateTime::from_timestamp(2234567890, 654321);
-
-        let mut batch_writer: BatchWriter<'_, IngestionHeader, IngestionDataSharePacket> =
-            BatchWriter::new(
-                Batch::new_sum(instance_name, aggregation_name, &start, &end, is_first),
-                &mut write_transport,
-                &DEFAULT_TRACE_ID,
-            );
-        let mut batch_reader: BatchReader<'_, IngestionHeader, IngestionDataSharePacket> =
-            BatchReader::new(
-                Batch::new_sum(instance_name, aggregation_name, &start, &end, is_first),
-                &mut read_transport,
-                false,
-                &DEFAULT_TRACE_ID,
-                &logger,
-            );
+        let batch_writer = BatchWriter::new(
+            Batch::new_sum(
+                INSTANCE_NAME,
+                AGGREGATION_NAME,
+                &START_TIMESTAMP,
+                &END_TIMESTAMP,
+                is_first,
+            ),
+            &write_transport,
+            &DEFAULT_TRACE_ID,
+        );
+        let batch_reader = BatchReader::new(
+            Batch::new_sum(
+                INSTANCE_NAME,
+                AGGREGATION_NAME,
+                &START_TIMESTAMP,
+                &END_TIMESTAMP,
+                is_first,
+            ),
+            &read_transport,
+            false,
+            &DEFAULT_TRACE_ID,
+            &logger,
+        );
         let batch_path = format!(
             "{}/{}/{}-{}",
-            instance_name,
-            aggregation_name,
-            start.format(AGGREGATION_DATE_FORMAT),
-            end.format(AGGREGATION_DATE_FORMAT)
+            INSTANCE_NAME,
+            AGGREGATION_NAME,
+            START_TIMESTAMP.format(AGGREGATION_DATE_FORMAT),
+            END_TIMESTAMP.format(AGGREGATION_DATE_FORMAT)
         );
-        let first_filenames = &[
-            "sum_0".to_owned(),
-            "invalid_uuid_0.avro".to_owned(),
-            "sum_0.sig".to_owned(),
-        ];
-        let second_filenames = &[
-            "sum_1".to_owned(),
-            "invalid_uuid_1.avro".to_owned(),
-            "sum_1.sig".to_owned(),
-        ];
+        let filenames = if is_first {
+            [
+                "sum_0".to_owned(),
+                "invalid_uuid_0.avro".to_owned(),
+                "sum_0.sig".to_owned(),
+            ]
+        } else {
+            [
+                "sum_1".to_owned(),
+                "invalid_uuid_1.avro".to_owned(),
+                "sum_1.sig".to_owned(),
+            ]
+        };
         let read_key = if keys_match {
             default_ingestor_public_key()
         } else {
             default_facilitator_signing_public_key()
         };
         roundtrip_batch(
-            aggregation_name.to_string(),
-            batch_id,
+            &*SUM_PART,
+            &*INVALID_PACKETS,
             batch_path,
-            if is_first {
-                first_filenames
-            } else {
-                second_filenames
-            },
-            &mut batch_writer,
-            &mut batch_reader,
-            &mut verify_transport,
+            &filenames,
+            &batch_writer,
+            &batch_reader,
+            &verify_transport,
             &default_ingestor_private_key().key,
             &read_key,
             keys_match,
@@ -726,29 +788,21 @@ mod tests {
     fn permit_malformed_batch() {
         let logger = setup_test_logging();
         let tempdir = tempfile::TempDir::new().unwrap();
-        let mut write_transport = LocalFileTransport::new(tempdir.path().to_path_buf());
-        let mut read_transport = LocalFileTransport::new(tempdir.path().to_path_buf());
+        let write_transport = LocalFileTransport::new(tempdir.path().to_path_buf());
+        let read_transport = LocalFileTransport::new(tempdir.path().to_path_buf());
 
-        let instance_name = "fake-instance";
-        let aggregation_name = "fake-aggregation";
-        let batch_id = Uuid::new_v4();
-        let start = NaiveDateTime::from_timestamp(1234567890, 654321);
-        let end = NaiveDateTime::from_timestamp(2234567890, 654321);
-
-        let mut batch_writer: BatchWriter<'_, IngestionHeader, IngestionDataSharePacket> =
-            BatchWriter::new(
-                Batch::new_sum(instance_name, aggregation_name, &start, &end, true),
-                &mut write_transport,
-                &DEFAULT_TRACE_ID,
-            );
-        let mut batch_reader: BatchReader<'_, IngestionHeader, IngestionDataSharePacket> =
-            BatchReader::new(
-                Batch::new_sum(instance_name, aggregation_name, &start, &end, true),
-                &mut read_transport,
-                true, // permit_malformed_batch
-                &DEFAULT_TRACE_ID,
-                &logger,
-            );
+        let batch_writer = BatchWriter::new(
+            Batch::new_ingestion(AGGREGATION_NAME, &BATCH_ID, &END_TIMESTAMP),
+            &write_transport,
+            &DEFAULT_TRACE_ID,
+        );
+        let mut batch_reader = BatchReader::new(
+            Batch::new_ingestion(AGGREGATION_NAME, &BATCH_ID, &END_TIMESTAMP),
+            &read_transport,
+            true, // permit_malformed_batch
+            &DEFAULT_TRACE_ID,
+            &logger,
+        );
 
         let metrics_collector = BatchReaderMetricsCollector::new("test").unwrap();
         batch_reader.set_metrics_collector(&metrics_collector);
@@ -770,8 +824,8 @@ mod tests {
             .expect("failed to write packets");
 
         let header = IngestionHeader {
-            batch_uuid: batch_id,
-            name: aggregation_name.to_string(),
+            batch_uuid: BATCH_ID,
+            name: AGGREGATION_NAME.to_string(),
             bins: 2,
             epsilon: 1.601,
             prime: 17,
@@ -813,7 +867,7 @@ mod tests {
             0
         );
 
-        let header_again = batch_reader.header(&key_map).unwrap();
+        batch_reader.read(&key_map).unwrap();
 
         assert_eq!(
             metrics_collector
@@ -823,10 +877,6 @@ mod tests {
             1
         );
 
-        batch_reader
-            .packet_file_reader(&header_again)
-            .expect("failed to get packet file reader");
-
         assert_eq!(
             metrics_collector
                 .invalid_validation_batches
@@ -834,5 +884,27 @@ mod tests {
                 .get(),
             1
         );
+    }
+
+    trait DigestSetter {
+        fn set_packet_file_digest(&mut self, digest: Vec<u8>);
+    }
+
+    impl DigestSetter for IngestionHeader {
+        fn set_packet_file_digest(&mut self, digest: Vec<u8>) {
+            self.packet_file_digest = digest;
+        }
+    }
+
+    impl DigestSetter for ValidationHeader {
+        fn set_packet_file_digest(&mut self, digest: Vec<u8>) {
+            self.packet_file_digest = digest;
+        }
+    }
+
+    impl DigestSetter for SumPart {
+        fn set_packet_file_digest(&mut self, digest: Vec<u8>) {
+            self.packet_file_digest = digest;
+        }
     }
 }
