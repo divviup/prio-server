@@ -179,8 +179,8 @@ impl TryFrom<Value> for BatchSignature {
             })?,
             key_identifier: key_identifier
                 .ok_or_else(|| Error::MalformedHeaderError("missing key_identifier".to_owned()))?,
-            batch_header_bytes: batch_header_bytes,
-            packet_bytes: packet_bytes,
+            batch_header_bytes,
+            packet_bytes,
         })
     }
 }
