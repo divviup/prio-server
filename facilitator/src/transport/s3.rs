@@ -17,7 +17,7 @@ use rusoto_s3::{
     AbortMultipartUploadRequest, CompleteMultipartUploadRequest, CompletedMultipartUpload,
     CompletedPart, CreateMultipartUploadRequest, GetObjectRequest, S3Client, UploadPartRequest, S3,
 };
-use slog::{debug, info, o, Logger};
+use slog::{debug, info, o, warn, Logger};
 use std::{
     io::{Read, Write},
     mem,
@@ -200,6 +200,7 @@ struct MultipartUploadWriter {
     buffer: Vec<u8>,
     logger: Logger,
     api_metrics: ApiClientMetricsCollector,
+    is_finished: bool,
 }
 
 impl MultipartUploadWriter {
@@ -259,6 +260,7 @@ impl MultipartUploadWriter {
             buffer: Vec::with_capacity(minimum_upload_part_size * 2),
             logger,
             api_metrics: api_metrics.clone(),
+            is_finished: false,
         })
     }
 
@@ -395,10 +397,13 @@ impl TransportWriter for MultipartUploadWriter {
         )
         .context("error completing upload")?;
 
+        self.is_finished = true;
         Ok(())
     }
 
     fn cancel_upload(&mut self) -> Result<()> {
+        self.is_finished = true;
+
         debug!(self.logger, "canceling upload");
         // There's nothing useful in the output so discard it
         self.runtime_handle
@@ -412,6 +417,17 @@ impl TransportWriter for MultipartUploadWriter {
                     }),
             )?;
         Ok(())
+    }
+}
+
+impl Drop for MultipartUploadWriter {
+    fn drop(&mut self) {
+        if !self.is_finished {
+            self.is_finished = true;
+            if let Err(err) = self.cancel_upload() {
+                warn!(self.logger, "Couldn't cancel upload: {}", err);
+            }
+        }
     }
 }
 

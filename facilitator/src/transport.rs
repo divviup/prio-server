@@ -44,13 +44,16 @@ pub struct SignableTransport {
 /// allow callers to complete or cancel an upload.
 pub trait TransportWriter: Write {
     /// Complete an upload operation, flushing any buffered writes and cleaning
-    /// up any related resources. Callers must call this method or cancel_upload
-    /// when they are done with the TransportWriter.
+    /// up any related resources. Callers must call this method to successfully
+    /// finish an upload. If this method is not called, the upload will be
+    /// canceled when the TransportWriter value is dropped.
     fn complete_upload(&mut self) -> Result<()>;
 
-    /// Cancel an upload operation, cleaning up any related resources. Callers
-    /// must call this method or complete_upload when  they are done with the
-    /// Transportwriter.
+    /// Cancel an upload operation, cleaning up any related resources. This
+    /// method will be called automatically when the TransportWriter is dropped
+    /// if complete_upload was not called successfully; errors will be logged.
+    /// Callers may call this method manually in order to handle the case that
+    /// an error occurs.
     fn cancel_upload(&mut self) -> Result<()>;
 }
 

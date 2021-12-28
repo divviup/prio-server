@@ -10,7 +10,7 @@ use crate::{
     Error,
 };
 use anyhow::{anyhow, Context, Result};
-use slog::{debug, info, o, Logger};
+use slog::{debug, info, o, warn, Logger};
 use std::{
     io::{self, Read, Write},
     time::Duration,
@@ -195,6 +195,7 @@ struct StreamingTransferWriter {
     buffer: Vec<u8>,
     agent: RetryingAgent,
     logger: Logger,
+    is_finished: bool,
 }
 
 impl StreamingTransferWriter {
@@ -270,6 +271,7 @@ impl StreamingTransferWriter {
             ))?,
             agent,
             logger: parent_logger.clone(),
+            is_finished: false,
         })
     }
 
@@ -413,10 +415,13 @@ impl TransportWriter for StreamingTransferWriter {
         while !self.buffer.is_empty() {
             self.upload_chunk(true)?;
         }
+        self.is_finished = true;
         Ok(())
     }
 
     fn cancel_upload(&mut self) -> Result<()> {
+        self.is_finished = true;
+
         debug!(
             self.logger, "canceling upload";
             "upload_session_uri" => self.upload_session_uri.to_string(),
@@ -440,6 +445,17 @@ impl TransportWriter for StreamingTransferWriter {
                 "failed to cancel streaming transfer to GCS: {:?}",
                 http_response
             )),
+        }
+    }
+}
+
+impl Drop for StreamingTransferWriter {
+    fn drop(&mut self) {
+        if !self.is_finished {
+            self.is_finished = true;
+            if let Err(err) = self.cancel_upload() {
+                warn!(self.logger, "Couldn't cancel upload: {}", err);
+            }
         }
     }
 }

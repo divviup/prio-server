@@ -61,6 +61,8 @@ lazy_static! {
 }
 
 pub trait Header: Sized {
+    /// Sets the SHA256 digest of the packet file this header describes.
+    fn set_packet_file_digest(&mut self, digest: impl Into<Vec<u8>>);
     /// Returns the SHA256 digest of the packet file this header describes.
     fn packet_file_digest(&self) -> &Vec<u8>;
     /// Reads and parses one Header from the provided std::io::Read instance.
@@ -218,6 +220,10 @@ impl IngestionHeader {
 }
 
 impl Header for IngestionHeader {
+    fn set_packet_file_digest(&mut self, digest: impl Into<Vec<u8>>) {
+        self.packet_file_digest = digest.into();
+    }
+
     fn packet_file_digest(&self) -> &Vec<u8> {
         &self.packet_file_digest
     }
@@ -379,7 +385,7 @@ impl Header for IngestionHeader {
 /// A single packet from an ingestion batch file. Note that unlike the header
 /// and signature, which are files containing a single record, the data share
 /// file will contain many IngestionDataSharePacket records.
-#[derive(Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[derive(Debug, Deserialize, Serialize, PartialEq, Eq, Clone)]
 pub struct IngestionDataSharePacket {
     pub uuid: Uuid,
     pub encrypted_payload: Vec<u8>,
@@ -568,6 +574,10 @@ impl ValidationHeader {
 }
 
 impl Header for ValidationHeader {
+    fn set_packet_file_digest(&mut self, digest: impl Into<Vec<u8>>) {
+        self.packet_file_digest = digest.into();
+    }
+
     fn packet_file_digest(&self) -> &Vec<u8> {
         &self.packet_file_digest
     }
@@ -709,7 +719,7 @@ impl Header for ValidationHeader {
     }
 }
 
-#[derive(Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[derive(Debug, Deserialize, Serialize, PartialEq, Eq, Clone)]
 pub struct ValidationPacket {
     pub uuid: Uuid,
     pub f_r: i64,
@@ -796,6 +806,10 @@ impl SumPart {
 }
 
 impl Header for SumPart {
+    fn set_packet_file_digest(&mut self, digest: impl Into<Vec<u8>>) {
+        self.packet_file_digest = digest.into();
+    }
+
     fn packet_file_digest(&self) -> &Vec<u8> {
         &self.packet_file_digest
     }
@@ -1004,7 +1018,7 @@ impl Header for SumPart {
     }
 }
 
-#[derive(Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[derive(Debug, Deserialize, Serialize, PartialEq, Eq, Clone)]
 pub struct InvalidPacket {
     pub uuid: Uuid,
 }
