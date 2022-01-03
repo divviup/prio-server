@@ -7,7 +7,7 @@ use std::{
     fmt::Debug,
     time::{Duration, Instant},
 };
-use ureq::{Agent, AgentBuilder, Request, Response, SerdeValue};
+use ureq::{serde_json, Agent, AgentBuilder, Request, Response};
 use url::Url;
 
 use crate::{metrics::ApiClientMetricsCollector, retries::retry_request, Error};
@@ -114,7 +114,7 @@ impl RetryingAgent {
         logger: &Logger,
         request: &Request,
         endpoint: &'static str,
-        body: &SerdeValue,
+        body: &serde_json::Value,
     ) -> Result<Response, Error> {
         Ok(retry_request(
             logger,
