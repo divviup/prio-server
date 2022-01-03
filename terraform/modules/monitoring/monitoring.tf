@@ -462,15 +462,18 @@ module "account_mapping" {
 }
 
 resource "google_project_iam_member" "stackdriver_exporter" {
-  count  = var.use_aws ? 0 : 1
-  role   = "roles/monitoring.viewer"
-  member = "serviceAccount:${module.account_mapping.gcp_service_account_email}"
+  count = var.use_aws ? 0 : 1
+
+  project = var.gcp.project
+  role    = "roles/monitoring.viewer"
+  member  = "serviceAccount:${module.account_mapping.gcp_service_account_email}"
 }
 
 resource "aws_iam_role_policy" "cloudwatch_exporter" {
   count = var.use_aws ? 1 : 0
-  name  = "${var.environment}-prometheus-cloudwatch-exporter"
-  role  = module.account_mapping.aws_iam_role.name
+
+  name = "${var.environment}-prometheus-cloudwatch-exporter"
+  role = module.account_mapping.aws_iam_role.name
 
   policy = jsonencode({
     Version = "2012-10-17"

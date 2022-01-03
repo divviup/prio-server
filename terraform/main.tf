@@ -295,14 +295,8 @@ terraform {
       version = "~> 3.70.0"
     }
     google = {
-      source = "hashicorp/google"
-      # Ensure that this matches the google-beta provider version below.
+      source  = "hashicorp/google"
       version = "~> 4.5.0"
-    }
-    google-beta = {
-      source = "hashicorp/google-beta"
-      # Ensure that this matches the non-beta google provider version above.
-      version = "~> 3.86.0"
     }
     helm = {
       source  = "hashicorp/helm"
@@ -350,12 +344,6 @@ provider "google" {
   # This will use "Application Default Credentials". Run `gcloud auth
   # application-default login` to generate them.
   # https://www.terraform.io/docs/providers/google/guides/provider_reference.html#credentials
-  region  = var.gcp_region
-  project = var.gcp_project
-}
-
-provider "google-beta" {
-  # Duplicate settings from the non-beta provider
   region  = var.gcp_region
   project = var.gcp_project
 }
