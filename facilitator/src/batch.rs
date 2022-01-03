@@ -11,7 +11,7 @@ use anyhow::{anyhow, Context, Result};
 use avro_rs::{Reader, Writer};
 use chrono::NaiveDateTime;
 use ring::{
-    digest::Digest,
+    digest::{digest, Digest, SHA256},
     rand::SystemRandom,
     signature::{EcdsaKeyPair, Signature, UnparsedPublicKey},
 };
@@ -174,29 +174,52 @@ impl<'a, H: Header, P: Packet> BatchReader<'a, H, P> {
         &self,
         public_keys: &HashMap<String, UnparsedPublicKey<Vec<u8>>>,
     ) -> Result<(H, Vec<P>)> {
-        // First, read the batch signature.
+        // Read the batch signature.
         let signature = BatchSignature::read(
             self.transport
                 .get(self.batch.signature_key(), self.trace_id)?,
         )?;
 
-        // Read the header, and check the header's signature.
-        let mut header_buf = Vec::new();
-        self.transport
-            .get(self.batch.header_key(), self.trace_id)?
-            .read_to_end(&mut header_buf)
-            .context("failed to read header from transport")?;
+        // Read the header & packets, if not included in the signature.
+        let (header_bytes, packet_bytes) =
+            if signature.batch_header_bytes.is_some() && signature.packet_bytes.is_some() {
+                (
+                    signature.batch_header_bytes.unwrap(),
+                    signature.packet_bytes.unwrap(),
+                )
+            } else {
+                let mut header_bytes = Vec::new();
+                self.transport
+                    .get(self.batch.header_key(), self.trace_id)?
+                    .read_to_end(&mut header_bytes)
+                    .context("failed to read header from transport")?;
 
+                // We read all of the packets, rather than streaming bytes as we
+                // need them to yield a packet, because we need to check that the
+                // header's recorded digest matches the actual content's digest. The
+                // ingestion server authors suggest that the maximum batch size will be
+                // ~400MiB, so this should work out okay.
+                let mut packet_bytes = Vec::new();
+                self.transport
+                    .get(self.batch.packet_file_key(), self.trace_id)?
+                    .read_to_end(&mut packet_bytes)
+                    .context("failed to read packets from transport")?;
+
+                (header_bytes, packet_bytes)
+            };
+
+        // Check the header's signature, and parse it if the signature is valid.
+        let key_identifier = signature.key_identifier;
         if let Err(err) = public_keys
-            .get(&signature.key_identifier)
+            .get(&key_identifier)
             .with_context(|| {
                 format!(
                     "key identifier {} not present in key map {:?}",
-                    signature.key_identifier,
+                    key_identifier,
                     public_keys.keys(),
                 )
             })?
-            .verify(&header_buf, &signature.batch_header_signature)
+            .verify(&header_bytes, &signature.batch_header_signature)
         {
             if let Some(collector) = self.metrics_collector {
                 collector
@@ -206,7 +229,7 @@ impl<'a, H: Header, P: Packet> BatchReader<'a, H, P> {
             }
             let message = format!(
                 "invalid signature on header with key {}: {:?}",
-                signature.key_identifier, err
+                key_identifier, err
             );
             if self.permit_malformed_batch {
                 warn!(self.logger, "{}", message);
@@ -214,24 +237,10 @@ impl<'a, H: Header, P: Packet> BatchReader<'a, H, P> {
                 return Err(anyhow!("{}", message));
             }
         }
-        let header = H::read(Cursor::new(header_buf))?;
+        let header = H::read(Cursor::new(header_bytes))?;
 
-        // Read packets, after verifying that digest matches header.
-        // We read all of the packets, rather than streaming bytes as we
-        // need them to yield a packet, because we need to check that the
-        // header's recorded digest matches the actual content's digest. The
-        // ingestion server authors suggest that the maximum batch size will be
-        // ~400MiB, so this should work out okay.
-        let mut packet_reader = self
-            .transport
-            .get(self.batch.packet_file_key(), self.trace_id)?;
-        let mut packet_bytes = Vec::new();
-        let mut digest_writer = DigestWriter::new(&mut packet_bytes);
-
-        std::io::copy(&mut packet_reader, &mut digest_writer)
-            .context("failed to load packet file")?;
-
-        let packet_digest = digest_writer.finish();
+        // Verify that the packet digest matches header's recorded digest.
+        let packet_digest = digest(&SHA256, &packet_bytes);
         if header.packet_file_digest() != packet_digest.as_ref() {
             if let Some(collector) = self.metrics_collector {
                 collector
@@ -251,6 +260,7 @@ impl<'a, H: Header, P: Packet> BatchReader<'a, H, P> {
             }
         }
 
+        // Parse packets.
         // avro_rs readers will always attempt to read a header on creation;
         // apparently, avro_rs writers don't bother writing a header unless at
         // least one record is written. So we need to special-case zero bytes
@@ -355,6 +365,8 @@ impl<'a, H: Header, P: Packet> BatchWriter<'a, H, P> {
         let batch_signature = BatchSignature {
             batch_header_signature: signature.as_ref().to_vec(),
             key_identifier: key_identifier.to_string(),
+            batch_header_bytes: None,
+            packet_bytes: None,
         };
         let mut writer = self
             .transport
