@@ -66,10 +66,6 @@ locals {
 resource "google_compute_managed_ssl_certificate" "manifests" {
   count = local.use_custom_domain ? 1 : 0
 
-  # Managed SSL certificates are GA but the Terraform provider still restricts
-  # them to the beta variant.
-  provider = google-beta
-
   name = "prio-${var.environment}-manifests"
   managed {
     domains = [local.domain_name]
