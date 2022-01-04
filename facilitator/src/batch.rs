@@ -321,8 +321,6 @@ impl<'a, H: Header, P: Packet> BatchWriter<'a, H, P> {
         mut header: H,
         packets: impl Iterator<Item = Result<P>>,
     ) -> Result<()> {
-        // TODO(brandon): refactor TransportWriter::cancel_upload to be automatic (best-effort) on drop
-
         // Write packets.
         let mut transport_writer = self
             .transport
