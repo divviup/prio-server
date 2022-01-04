@@ -11,7 +11,7 @@ use anyhow::{Context, Result};
 use bytes::Bytes;
 use derivative::Derivative;
 use http::{HeaderMap, StatusCode};
-use hyper_rustls::HttpsConnector;
+use hyper_rustls::HttpsConnectorBuilder;
 use rusoto_core::{request::BufferedHttpResponse, ByteStream, RusotoError};
 use rusoto_s3::{
     AbortMultipartUploadRequest, CompleteMultipartUploadRequest, CompletedMultipartUpload,
@@ -80,7 +80,13 @@ impl S3Transport {
         // [3]: https://github.com/rusoto/rusoto/issues/1686
         let mut builder = hyper::Client::builder();
         builder.pool_idle_timeout(Duration::from_secs(10));
-        let connector = HttpsConnector::with_native_roots();
+        let connector = HttpsConnectorBuilder::new()
+            .with_native_roots()
+            // We connect over HTTP in tests and so must allow either protocol
+            .https_or_http()
+            .enable_http1()
+            .enable_http2()
+            .build();
         let http_client = rusoto_core::HttpClient::from_builder(builder, connector);
 
         Ok(S3Client::new_with(

@@ -12,6 +12,18 @@
             "name": "key_identifier",
             "type": "string",
             "doc": "identifier of the key used to sign this batch. Can be used to look up trusted public key in a peer's global or specific manifest file."
+        },
+        {
+            "name": "batch_header",
+            "type": ["null", "bytes"],
+            "default": null,
+            "doc": "An optional serialized header for the batch. If not provided, header will be assumed to be stored separately."
+        },
+        {
+            "name": "packets",
+            "type": ["null", "bytes"],
+            "default": null,
+            "doc": "A serialized sequence of packets making up the batch. If not provided, packets will be assumed to be stored separately."
         }
     ]
 }

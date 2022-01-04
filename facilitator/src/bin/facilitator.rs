@@ -1245,8 +1245,9 @@ fn get_valid_batch_signing_key(
                     "unable to find a batch signing key from the manifest and kubernetes secret store"
                 )),
                 Some(secret) => {
-                    let secret_name = secret.name();
                     let secret_bytestring = secret.data
+                        .as_ref()
+                        .ok_or_else(|| anyhow!("no data in Kubernetes secret"))?
                         .get("secret_key")
                         .ok_or_else(|| anyhow!("no secret_key in Kubernetes secret"))?;
                     let secret_data = base64::decode(&secret_bytestring.0)?;
@@ -1255,7 +1256,7 @@ fn get_valid_batch_signing_key(
                             .context("decoding secret key rejected")?;
 
                     Ok(BatchSigningKey {
-                        identifier: secret_name,
+                        identifier: secret.name(),
                         key,
                     })
                 }

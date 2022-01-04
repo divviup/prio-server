@@ -41,6 +41,10 @@ variable "facilitator_version" {
   type = string
 }
 
+variable "manifest_bucket" {
+  type = string
+}
+
 resource "kubernetes_namespace" "tester" {
   metadata {
     name = "tester"
@@ -156,19 +160,35 @@ resource "kubernetes_secret" "batch_signing_key" {
   }
 
   data = {
-    # We want this to be a Terraform resource that can be managed and destroyed
-    # by this module, but we do not want the cleartext private key to appear in
-    # the TF statefile. So we set a dummy value here, and will update the value
-    # later using kubectl. We use lifecycle.ignore_changes so that Terraform
-    # won't blow away the replaced value on subsequent applies.
-    secret_key = "not-a-real-key"
+    # This is the base64 encoding of a PKCS#8 document containing a P-256
+    # private key obtained from a development environment. Hard-coding this key
+    # here absolves us of generating it elsewhere, and since it is only used in
+    # test deployments, there's no hard in leaking it in git or in Terraform
+    # state.
+    secret_key = "MIGHAgEAMBMGByqGSM49AgEGCCqGSM49AwEHBG0wawIBAQQgRGhfadpOZSZuMdBrjO7SqvJsJSTqTFgfDPh9bTr4MBihRANCAATq6yKefdZ2vOnp5xed74OWuHhlGW27wOvMe8cUVJ5XbS3orlg1PVmH+lHFZy7VtcGxV8WU1YAxDayZbGZ2/Te3"
   }
+}
 
-  lifecycle {
-    ignore_changes = [
-      data["secret_key"]
-    ]
-  }
+resource "google_storage_bucket_object" "global_manifest" {
+  name          = "singleton-ingestor/global-manifest.json"
+  bucket        = var.manifest_bucket
+  content_type  = "application/json"
+  cache_control = "no-cache"
+  content = jsonencode({
+    format = 1
+    server-identity = {
+      aws-iam-entity            = aws_iam_role.tester_role.arn
+      gcp-service-account-id    = module.account_mapping.gcp_service_account_unique_id
+      gcp-service-account-email = module.account_mapping.gcp_service_account_email
+    }
+    batch-signing-public-keys = {
+      (kubernetes_secret.batch_signing_key.metadata[0].name) = {
+        # This public key corresponds to the private key in kubernetes_secret.batch_signing_key
+        public-key = "-----BEGIN PUBLIC KEY-----\nMFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAE6usinn3Wdrzp6ecXne+Dlrh4ZRlt\nu8DrzHvHFFSeV20t6K5YNT1Zh/pRxWcu1bXBsVfFlNWAMQ2smWxmdv03tw==\n-----END PUBLIC KEY-----\n"
+        expiration = "2099-10-05T23:18:59Z"
+      }
+    }
+  })
 }
 
 resource "kubernetes_deployment" "integration-tester" {

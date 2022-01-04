@@ -9,24 +9,34 @@ ingestors = {
     manifest_base_url = "storage.googleapis.com/prio-manifests"
     localities = {
       mn = {
-        intake_worker_count    = 3
-        aggregate_worker_count = 3
+        min_intake_worker_count    = 1
+        max_intake_worker_count    = 3
+        min_aggregate_worker_count = 1
+        max_aggregate_worker_count = 3
       }
       mx-coa = {
-        intake_worker_count    = 3
-        aggregate_worker_count = 3
+        min_intake_worker_count    = 1
+        max_intake_worker_count    = 3
+        min_aggregate_worker_count = 1
+        max_aggregate_worker_count = 3
       }
       mx-jal = {
-        intake_worker_count    = 3
-        aggregate_worker_count = 3
+        min_intake_worker_count    = 1
+        max_intake_worker_count    = 3
+        min_aggregate_worker_count = 1
+        max_aggregate_worker_count = 3
       }
       mx-pue = {
-        intake_worker_count    = 3
-        aggregate_worker_count = 3
+        min_intake_worker_count    = 1
+        max_intake_worker_count    = 3
+        min_aggregate_worker_count = 1
+        max_aggregate_worker_count = 3
       }
       mx-yuc = {
-        intake_worker_count    = 3
-        aggregate_worker_count = 3
+        min_intake_worker_count    = 1
+        max_intake_worker_count    = 3
+        min_aggregate_worker_count = 1
+        max_aggregate_worker_count = 3
       }
     }
   }
@@ -34,24 +44,34 @@ ingestors = {
     manifest_base_url = "exposure-notification.apple.com/manifest"
     localities = {
       mn = {
-        intake_worker_count    = 3
-        aggregate_worker_count = 3
+        min_intake_worker_count    = 1
+        max_intake_worker_count    = 3
+        min_aggregate_worker_count = 1
+        max_aggregate_worker_count = 3
       }
       mx-coa = {
-        intake_worker_count    = 3
-        aggregate_worker_count = 3
+        min_intake_worker_count    = 1
+        max_intake_worker_count    = 3
+        min_aggregate_worker_count = 1
+        max_aggregate_worker_count = 3
       }
       mx-jal = {
-        intake_worker_count    = 3
-        aggregate_worker_count = 3
+        min_intake_worker_count    = 1
+        max_intake_worker_count    = 3
+        min_aggregate_worker_count = 1
+        max_aggregate_worker_count = 3
       }
       mx-pue = {
-        intake_worker_count    = 3
-        aggregate_worker_count = 3
+        min_intake_worker_count    = 1
+        max_intake_worker_count    = 3
+        min_aggregate_worker_count = 1
+        max_aggregate_worker_count = 3
       }
       mx-yuc = {
-        intake_worker_count    = 3
-        aggregate_worker_count = 3
+        min_intake_worker_count    = 1
+        max_intake_worker_count    = 3
+        min_aggregate_worker_count = 1
+        max_aggregate_worker_count = 3
       }
     }
   }
@@ -78,6 +98,6 @@ default_aggregation_grace_period = "4h"
 default_peer_share_processor_manifest_base_url = "storage.googleapis.com/prio-enpa-g-prod-manifests"
 default_portal_server_manifest_base_url        = "manifest.global.enpa-pha.io"
 
-prometheus_helm_chart_version          = "14.8.1"
-grafana_helm_chart_version             = "6.16.12"
-cloudwatch_exporter_helm_chart_version = "0.16.0"
+prometheus_helm_chart_version          = "15.0.1"
+grafana_helm_chart_version             = "6.18.2"
+cloudwatch_exporter_helm_chart_version = "0.17.1"

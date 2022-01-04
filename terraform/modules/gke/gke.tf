@@ -38,11 +38,6 @@ resource "google_project_service" "kms" {
 }
 
 resource "google_container_cluster" "cluster" {
-  # The google provider seems to have not been updated to consider VPC-native
-  # clusters as GA, even though they are GA and in fact are now the default for
-  # new clusters created through the GCP UIs.
-  provider = google-beta
-
   name = "${var.resource_prefix}-cluster"
   # Specifying a region and not a zone here gives us a regional cluster, meaning
   # we get cluster masters across multiple zones.
@@ -83,7 +78,7 @@ resource "google_container_cluster" "cluster" {
   # service accounts which may then be used to authenticate to AWS S3.
   # https://cloud.google.com/kubernetes-engine/docs/how-to/workload-identity
   workload_identity_config {
-    identity_namespace = "${var.gcp_project}.svc.id.goog"
+    workload_pool = "${var.gcp_project}.svc.id.goog"
   }
   # This enables KMS encryption of the contents of the Kubernetes cluster etcd
   # instance which among other things, stores Kubernetes secrets, like the keys
@@ -122,7 +117,7 @@ resource "google_container_node_pool" "worker_nodes" {
     # Configures nodes to obtain workload identity from GKE metadata service
     # https://cloud.google.com/kubernetes-engine/docs/how-to/workload-identity
     workload_metadata_config {
-      node_metadata = "GKE_METADATA_SERVER"
+      mode = "GKE_METADATA"
     }
 
     shielded_instance_config {
