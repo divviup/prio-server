@@ -104,6 +104,14 @@ impl<'a> BatchIntaker<'a> {
             .set_use_bogus_packet_file_digest(bogus);
     }
 
+    /// Sets whether this BatchIntaker will write validation batches into a
+    /// single object. Otherwise, the batch writer will write into three
+    /// separate objects (signature, header, & packet objects).
+    pub fn set_use_single_object_write(&mut self, single_object_write: bool) {
+        self.peer_validation_batch
+            .set_use_single_object_write(single_object_write);
+    }
+
     /// Fetches the ingestion batch, validates the signatures over its header
     /// and packet file, then computes validation shares and sends them to the
     /// peer share processor. The provided callback is invoked once for every

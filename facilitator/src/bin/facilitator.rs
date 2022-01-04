@@ -94,6 +94,8 @@ trait AppArgumentAdder {
     fn add_permit_malformed_batch_argument(self) -> Self;
 
     fn add_worker_lifetime_argument(self) -> Self;
+
+    fn add_intake_batch_common_arguments(self) -> Self;
 }
 
 const SHARED_HELP: &str = "Storage arguments: Any flag ending in -input or -output can take an \
@@ -676,6 +678,26 @@ impl<'a, 'b> AppArgumentAdder for App<'a, 'b> {
                 ),
         )
     }
+
+    fn add_intake_batch_common_arguments(self) -> Self {
+        self.arg(
+            Arg::with_name("write-single-object-validation-batches")
+                .long("write-single-object-validation-batches")
+                .env("WRITE_SINGLE_OBJECT_VALIDATION_BATCHES")
+                .value_name("BOOL")
+                .possible_value("true")
+                .possible_value("false")
+                .default_value("false")
+                .help("Write single-object validation batches (atomically)")
+                .long_help(
+                    "If set, validation batches will be written in a \
+                    single-object format. (This makes writing a batch an \
+                    atomic operation.) If not set, validation batches will be \
+                    written using the same three-object format used for \
+                    ingestion & sum part batches.",
+                ),
+        )
+    }
 }
 
 fn main() -> Result<(), anyhow::Error> {
@@ -767,6 +789,7 @@ fn main() -> Result<(), anyhow::Error> {
                 .add_storage_arguments(Entity::Peer, InOut::Output)
                 .add_permit_malformed_batch_argument()
                 .add_gcp_workload_identity_pool_provider_argument()
+                .add_intake_batch_common_arguments()
         )
         .subcommand(
             SubCommand::with_name("aggregate")
@@ -905,6 +928,7 @@ fn main() -> Result<(), anyhow::Error> {
                 .add_permit_malformed_batch_argument()
                 .add_gcp_workload_identity_pool_provider_argument()
                 .add_worker_lifetime_argument()
+                .add_intake_batch_common_arguments()
         )
         .subcommand(
             SubCommand::with_name("aggregate-worker")
@@ -1485,6 +1509,10 @@ where
         Some("true") == sub_matches.value_of("permit-malformed-batch"),
         parent_logger,
     )?;
+
+    if Some("true") == sub_matches.value_of("write-single-object-validation-batches") {
+        batch_intaker.set_use_single_object_write(true);
+    }
 
     if let Some(collector) = metrics_collector {
         batch_intaker.set_metrics_collector(collector);
