@@ -315,11 +315,11 @@ impl<'a, H: Header, P: Packet> BatchWriter<'a, H, P> {
         self.use_bogus_packet_file_digest = bogus;
     }
 
-    pub fn write(
+    pub fn write<I: IntoIterator<Item = P>>(
         &self,
         key: &BatchSigningKey,
         mut header: H,
-        packets: impl Iterator<Item = Result<P>>,
+        packets: I,
     ) -> Result<()> {
         // Write packets.
         let mut transport_writer = self
@@ -331,7 +331,6 @@ impl<'a, H: Header, P: Packet> BatchWriter<'a, H, P> {
 
         for packet in packets {
             packet
-                .context("couldn't get next packet to write")?
                 .write(&mut packet_writer)
                 .context("couldn't write packet")?;
         }
@@ -531,11 +530,7 @@ mod tests {
         P: Packet + Clone + PartialEq + Debug,
     {
         batch_writer
-            .write(
-                write_key,
-                header.clone(),
-                packets.iter().map(|p| Ok(p.clone())),
-            )
+            .write(write_key, header.clone(), packets.iter().map(Clone::clone))
             .expect("Couldn't write batch");
 
         // Verify file layout is as expected
@@ -843,15 +838,14 @@ mod tests {
                     batch_end_time: 789456321,
                     packet_file_digest: Vec::new(),
                 },
-                Some(Ok(IngestionDataSharePacket {
+                Some(IngestionDataSharePacket {
                     uuid: Uuid::new_v4(),
                     encrypted_payload: vec![0u8, 1u8, 2u8, 3u8],
                     encryption_key_id: Some("fake-key-1".to_owned()),
                     r_pit: 1,
                     version_configuration: Some("config-1".to_owned()),
                     device_nonce: None,
-                }))
-                .into_iter(),
+                }),
             )
             .expect("Couldn't write batch");
 

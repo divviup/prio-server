@@ -154,6 +154,15 @@ impl<'a> BatchIntaker<'a> {
         let callback_cadence = self.callback_cadence;
         let logger = &self.logger;
 
+        let validation_packets: Vec<ValidationPacket> = ingestion_packets
+            .into_iter()
+            .map(|p| {
+                processed_bytes += p.encrypted_payload.len() as u64;
+                p.generate_validation_packet(&mut servers)
+            })
+            .collect::<Result<Vec<ValidationPacket>>>()
+            .context("couldn't generate validation packets")?;
+
         self.peer_validation_batch.write(
             self.peer_validation_batch_signing_key,
             ValidationHeader {
@@ -166,13 +175,12 @@ impl<'a> BatchIntaker<'a> {
                 hamming_weight: ingestion_header.hamming_weight,
                 packet_file_digest: Vec::new(),
             },
-            ingestion_packets.into_iter().map(|p| {
-                processed_bytes += p.encrypted_payload.len() as u64;
+            validation_packets.into_iter().map(|p| {
                 processed_packets += 1;
                 if processed_packets % callback_cadence == 0 {
                     callback(logger);
                 }
-                p.generate_validation_packet(&mut servers)
+                p
             }),
         )?;
 

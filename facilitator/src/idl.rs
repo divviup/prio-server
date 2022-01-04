@@ -59,7 +59,7 @@ lazy_static! {
 
 pub trait Header: Sized {
     /// Sets the SHA256 digest of the packet file this header describes.
-    fn set_packet_file_digest(&mut self, digest: impl Into<Vec<u8>>);
+    fn set_packet_file_digest<D: Into<Vec<u8>>>(&mut self, digest: D);
     /// Returns the SHA256 digest of the packet file this header describes.
     fn packet_file_digest(&self) -> &Vec<u8>;
     /// Reads and parses one Header from the provided std::io::Read instance.
@@ -245,7 +245,7 @@ impl IngestionHeader {
 }
 
 impl Header for IngestionHeader {
-    fn set_packet_file_digest(&mut self, digest: impl Into<Vec<u8>>) {
+    fn set_packet_file_digest<D: Into<Vec<u8>>>(&mut self, digest: D) {
         self.packet_file_digest = digest.into();
     }
 
@@ -599,7 +599,7 @@ impl ValidationHeader {
 }
 
 impl Header for ValidationHeader {
-    fn set_packet_file_digest(&mut self, digest: impl Into<Vec<u8>>) {
+    fn set_packet_file_digest<D: Into<Vec<u8>>>(&mut self, digest: D) {
         self.packet_file_digest = digest.into();
     }
 
@@ -831,7 +831,7 @@ impl SumPart {
 }
 
 impl Header for SumPart {
-    fn set_packet_file_digest(&mut self, digest: impl Into<Vec<u8>>) {
+    fn set_packet_file_digest<D: Into<Vec<u8>>>(&mut self, digest: D) {
         self.packet_file_digest = digest.into();
     }
 
