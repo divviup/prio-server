@@ -292,6 +292,7 @@ pub struct BatchWriter<'a, H: Header, P: Packet> {
     transport: &'a dyn Transport,
     trace_id: &'a Uuid,
     use_bogus_packet_file_digest: bool,
+    single_object_write: bool,
 }
 
 impl<'a, H: Header, P: Packet> BatchWriter<'a, H, P> {
@@ -301,6 +302,7 @@ impl<'a, H: Header, P: Packet> BatchWriter<'a, H, P> {
             transport,
             trace_id,
             use_bogus_packet_file_digest: false,
+            single_object_write: false,
         }
     }
 
@@ -315,7 +317,87 @@ impl<'a, H: Header, P: Packet> BatchWriter<'a, H, P> {
         self.use_bogus_packet_file_digest = bogus;
     }
 
+    /// Sets whether this BatchWriter will write the batch into a single
+    /// object. Otherwise, the batch writer will write into three separate
+    /// objects (signature, header, & packet objects).
+    pub fn set_use_single_object_write(&mut self, single_object_write: bool) {
+        self.single_object_write = single_object_write;
+    }
+
     pub fn write<I: IntoIterator<Item = P>>(
+        &self,
+        key: &BatchSigningKey,
+        header: H,
+        packets: I,
+    ) -> Result<()> {
+        if self.single_object_write {
+            self.single_object_write(key, header, packets)
+        } else {
+            self.multi_object_write(key, header, packets)
+        }
+    }
+
+    fn single_object_write<I: IntoIterator<Item = P>>(
+        &self,
+        key: &BatchSigningKey,
+        mut header: H,
+        packets: I,
+    ) -> Result<()> {
+        // Serialize packets in memory.
+        let mut packet_bytes = Vec::new();
+        let mut digest_writer = DigestWriter::new(&mut packet_bytes);
+        let mut packet_writer = Writer::new(P::schema(), &mut digest_writer);
+        for packet in packets {
+            packet
+                .write(&mut packet_writer)
+                .context("couldn't write packet")?;
+        }
+        packet_writer
+            .flush()
+            .context("couldn't flush packet writer")?;
+
+        // If the caller requested it, we insert a bogus packet file digest into
+        // the peer validaton batch headers instead of the real computed
+        // digest. This is meant to simulate a buggy peer data share processor,
+        // so that we can test how the aggregation step behaves.
+        let packet_digest = if self.use_bogus_packet_file_digest {
+            vec![0, 1, 2, 3, 4, 5, 6, 7, 8]
+        } else {
+            digest_writer.finish().as_ref().to_vec()
+        };
+
+        // Serialize header in memory.
+        header.set_packet_file_digest(packet_digest);
+        let mut header_bytes = Vec::new();
+        header
+            .write(&mut header_bytes)
+            .context("couldn't serialize header")?;
+        // TODO(brandon): per the advice of ring's doc comments, create a single SystemRandom &
+        // reuse it throughout the application rather than creating a new SystemRandom each time.
+        let header_signature = key
+            .key
+            .sign(&SystemRandom::new(), &header_bytes)
+            .context("couldn't sign header")?;
+
+        // Write signature, including serialized header & packets.
+        let batch_signature = BatchSignature {
+            batch_header_signature: header_signature.as_ref().to_vec(),
+            key_identifier: key.identifier.clone(),
+            batch_header_bytes: Some(header_bytes),
+            packet_bytes: Some(packet_bytes),
+        };
+        let mut transport_writer = self
+            .transport
+            .put(self.batch.signature_key(), self.trace_id)?;
+        batch_signature
+            .write(&mut transport_writer)
+            .context("couldn't write signature")?;
+        transport_writer
+            .complete_upload()
+            .context("failed to complete signature upload")
+    }
+
+    fn multi_object_write<I: IntoIterator<Item = P>>(
         &self,
         key: &BatchSigningKey,
         mut header: H,
@@ -574,27 +656,38 @@ mod tests {
     }
 
     #[test]
-    fn roundtrip_ingestion_batch_ok() {
-        roundtrip_ingestion_batch(true)
+    fn roundtrip_multi_object_ingestion_batch_ok() {
+        roundtrip_ingestion_batch(true, false)
     }
 
     #[test]
-    fn roundtrip_ingestion_batch_bad_read_key() {
-        roundtrip_ingestion_batch(false)
+    fn roundtrip_multi_object_ingestion_batch_bad_read_key() {
+        roundtrip_ingestion_batch(false, false)
     }
 
-    fn roundtrip_ingestion_batch(keys_match: bool) {
+    #[test]
+    fn roundtrip_single_object_ingestion_batch_ok() {
+        roundtrip_ingestion_batch(true, true)
+    }
+
+    #[test]
+    fn roundtrip_single_object_ingestion_batch_bad_read_key() {
+        roundtrip_ingestion_batch(false, true)
+    }
+
+    fn roundtrip_ingestion_batch(keys_match: bool, single_object_write: bool) {
         let logger = setup_test_logging();
         let tempdir = tempfile::TempDir::new().unwrap();
         let write_transport = LocalFileTransport::new(tempdir.path().to_path_buf());
         let read_transport = LocalFileTransport::new(tempdir.path().to_path_buf());
         let verify_transport = LocalFileTransport::new(tempdir.path().to_path_buf());
 
-        let batch_writer = BatchWriter::new(
+        let mut batch_writer = BatchWriter::new(
             Batch::new_ingestion(AGGREGATION_NAME, &BATCH_ID, &END_TIMESTAMP),
             &write_transport,
             &DEFAULT_TRACE_ID,
         );
+        batch_writer.set_use_single_object_write(single_object_write);
         let batch_reader = BatchReader::new(
             Batch::new_ingestion(AGGREGATION_NAME, &BATCH_ID, &END_TIMESTAMP),
             &read_transport,
@@ -608,6 +701,15 @@ mod tests {
             END_TIMESTAMP.format(DATE_FORMAT),
             BATCH_ID.to_hyphenated()
         );
+        let filenames = if single_object_write {
+            vec!["batch.sig".to_owned()]
+        } else {
+            vec![
+                "batch".to_owned(),
+                "batch.avro".to_owned(),
+                "batch.sig".to_owned(),
+            ]
+        };
         let read_key = if keys_match {
             default_ingestor_public_key()
         } else {
@@ -617,11 +719,7 @@ mod tests {
             &*INGESTION_HEADER,
             &*INGESTION_DATA_SHARE_PACKETS,
             base_path,
-            &[
-                "batch".to_owned(),
-                "batch.avro".to_owned(),
-                "batch.sig".to_owned(),
-            ],
+            &filenames,
             &batch_writer,
             &batch_reader,
             &verify_transport,
@@ -632,37 +730,58 @@ mod tests {
     }
 
     #[test]
-    fn roundtrip_validation_batch_first_ok() {
-        roundtrip_validation_batch(true, true)
+    fn roundtrip_multi_object_validation_batch_first_ok() {
+        roundtrip_validation_batch(true, true, false)
     }
 
     #[test]
-    fn roundtrip_validation_batch_first_bad_read_key() {
-        roundtrip_validation_batch(true, false)
+    fn roundtrip_multi_object_validation_batch_first_bad_read_key() {
+        roundtrip_validation_batch(true, false, false)
     }
 
     #[test]
-    fn roundtrip_validation_batch_second_ok() {
-        roundtrip_validation_batch(false, true)
+    fn roundtrip_multi_object_validation_batch_second_ok() {
+        roundtrip_validation_batch(false, true, false)
     }
 
     #[test]
-    fn roundtrip_validation_batch_second_bad_read_key() {
-        roundtrip_validation_batch(false, false)
+    fn roundtrip_multi_object_validation_batch_second_bad_read_key() {
+        roundtrip_validation_batch(false, false, false)
     }
 
-    fn roundtrip_validation_batch(is_first: bool, keys_match: bool) {
+    #[test]
+    fn roundtrip_single_object_validation_batch_first_ok() {
+        roundtrip_validation_batch(true, true, true)
+    }
+
+    #[test]
+    fn roundtrip_single_object_validation_batch_first_bad_read_key() {
+        roundtrip_validation_batch(true, false, true)
+    }
+
+    #[test]
+    fn roundtrip_single_object_validation_batch_second_ok() {
+        roundtrip_validation_batch(false, true, true)
+    }
+
+    #[test]
+    fn roundtrip_single_object_validation_batch_second_bad_read_key() {
+        roundtrip_validation_batch(false, false, true)
+    }
+
+    fn roundtrip_validation_batch(is_first: bool, keys_match: bool, single_object_write: bool) {
         let logger = setup_test_logging();
         let tempdir = tempfile::TempDir::new().unwrap();
         let write_transport = LocalFileTransport::new(tempdir.path().to_path_buf());
         let read_transport = LocalFileTransport::new(tempdir.path().to_path_buf());
         let verify_transport = LocalFileTransport::new(tempdir.path().to_path_buf());
 
-        let batch_writer = BatchWriter::new(
+        let mut batch_writer = BatchWriter::new(
             Batch::new_validation(AGGREGATION_NAME, &BATCH_ID, &END_TIMESTAMP, is_first),
             &write_transport,
             &DEFAULT_TRACE_ID,
         );
+        batch_writer.set_use_single_object_write(single_object_write);
         let batch_reader = BatchReader::new(
             Batch::new_validation(AGGREGATION_NAME, &BATCH_ID, &END_TIMESTAMP, is_first),
             &read_transport,
@@ -676,17 +795,14 @@ mod tests {
             END_TIMESTAMP.format(DATE_FORMAT),
             BATCH_ID.to_hyphenated()
         );
-        let filenames = if is_first {
-            [
-                "validity_0".to_owned(),
-                "validity_0.avro".to_owned(),
-                "validity_0.sig".to_owned(),
-            ]
+        let idx = if is_first { 0 } else { 1 };
+        let filenames = if single_object_write {
+            vec![format!("validity_{}.sig", idx)]
         } else {
-            [
-                "validity_1".to_owned(),
-                "validity_1.avro".to_owned(),
-                "validity_1.sig".to_owned(),
+            vec![
+                format!("validity_{}", idx),
+                format!("validity_{}.avro", idx),
+                format!("validity_{}.sig", idx),
             ]
         };
         let read_key = if keys_match {
@@ -709,33 +825,53 @@ mod tests {
     }
 
     #[test]
-    fn roundtrip_sum_batch_first_ok() {
-        roundtrip_sum_batch(true, true)
+    fn roundtrip_multi_object_sum_batch_first_ok() {
+        roundtrip_sum_batch(true, true, false)
     }
 
     #[test]
-    fn roundtrip_sum_batch_first_bad_read_key() {
-        roundtrip_sum_batch(true, false)
+    fn roundtrip_multi_object_sum_batch_first_bad_read_key() {
+        roundtrip_sum_batch(true, false, false)
     }
 
     #[test]
-    fn roundtrip_sum_batch_second_ok() {
-        roundtrip_sum_batch(false, true)
+    fn roundtrip_multi_object_sum_batch_second_ok() {
+        roundtrip_sum_batch(false, true, false)
     }
 
     #[test]
-    fn roundtrip_sum_batch_second_bad_read_key() {
-        roundtrip_sum_batch(false, false)
+    fn roundtrip_multi_object_sum_batch_second_bad_read_key() {
+        roundtrip_sum_batch(false, false, false)
     }
 
-    fn roundtrip_sum_batch(is_first: bool, keys_match: bool) {
+    #[test]
+    fn roundtrip_single_object_sum_batch_first_ok() {
+        roundtrip_sum_batch(true, true, true)
+    }
+
+    #[test]
+    fn roundtrip_single_object_sum_batch_first_bad_read_key() {
+        roundtrip_sum_batch(true, false, true)
+    }
+
+    #[test]
+    fn roundtrip_single_object_sum_batch_second_ok() {
+        roundtrip_sum_batch(false, true, true)
+    }
+
+    #[test]
+    fn roundtrip_single_object_sum_batch_second_bad_read_key() {
+        roundtrip_sum_batch(false, false, true)
+    }
+
+    fn roundtrip_sum_batch(is_first: bool, keys_match: bool, single_object_write: bool) {
         let logger = setup_test_logging();
         let tempdir = tempfile::TempDir::new().unwrap();
         let write_transport = LocalFileTransport::new(tempdir.path().to_path_buf());
         let read_transport = LocalFileTransport::new(tempdir.path().to_path_buf());
         let verify_transport = LocalFileTransport::new(tempdir.path().to_path_buf());
 
-        let batch_writer = BatchWriter::new(
+        let mut batch_writer = BatchWriter::new(
             Batch::new_sum(
                 INSTANCE_NAME,
                 AGGREGATION_NAME,
@@ -746,6 +882,7 @@ mod tests {
             &write_transport,
             &DEFAULT_TRACE_ID,
         );
+        batch_writer.set_use_single_object_write(single_object_write);
         let batch_reader = BatchReader::new(
             Batch::new_sum(
                 INSTANCE_NAME,
@@ -766,17 +903,14 @@ mod tests {
             START_TIMESTAMP.format(AGGREGATION_DATE_FORMAT),
             END_TIMESTAMP.format(AGGREGATION_DATE_FORMAT)
         );
-        let filenames = if is_first {
-            [
-                "sum_0".to_owned(),
-                "invalid_uuid_0.avro".to_owned(),
-                "sum_0.sig".to_owned(),
-            ]
+        let idx = if is_first { 0 } else { 1 };
+        let filenames = if single_object_write {
+            vec![format!("sum_{}.sig", idx)]
         } else {
-            [
-                "sum_1".to_owned(),
-                "invalid_uuid_1.avro".to_owned(),
-                "sum_1.sig".to_owned(),
+            vec![
+                format!("sum_{}", idx),
+                format!("invalid_uuid_{}.avro", idx),
+                format!("sum_{}.sig", idx),
             ]
         };
         let read_key = if keys_match {
