@@ -20,9 +20,8 @@ type BatchPath struct {
 	dateComponents []string
 	ID             string
 	Time           time.Time
-	metadata       bool
-	avro           bool
-	sig            bool
+
+	sigExists bool
 }
 
 // List is a type alias for a slice of BatchPath pointers
@@ -110,7 +109,7 @@ func New(batchName string) (*BatchPath, error) {
 }
 
 func (b *BatchPath) String() string {
-	return fmt.Sprintf("{%s %s %s files:%d%d%d}", b.AggregationID, b.dateComponents, b.ID, utils.Index(!b.metadata), utils.Index(!b.avro), utils.Index(!b.sig))
+	return fmt.Sprintf("{%s %s %s files:%d}", b.AggregationID, b.dateComponents, b.ID, utils.Index(!b.sigExists))
 }
 
 func (b *BatchPath) path() string {
@@ -122,10 +121,10 @@ func (b *BatchPath) DateString() string {
 	return strings.Join(b.dateComponents, "/")
 }
 
-// isComplete returns true if all three files in the batch are present (header,
+// isComplete returns true if the batch exists (header,
 // signature and packet file), and false otherwise.
 func (b *BatchPath) isComplete() bool {
-	return b.metadata && b.avro && b.sig
+	return b.sigExists
 }
 
 type ReadyBatchesResult struct {
@@ -154,14 +153,8 @@ func ReadyBatches(files []string, infix string) (*ReadyBatchesResult, error) {
 			}
 			batches[basename] = b
 		}
-		if strings.HasSuffix(name, fmt.Sprintf(".%s", infix)) {
-			b.metadata = true
-		}
-		if strings.HasSuffix(name, fmt.Sprintf(".%s.avro", infix)) {
-			b.avro = true
-		}
 		if strings.HasSuffix(name, fmt.Sprintf(".%s.sig", infix)) {
-			b.sig = true
+			b.sigExists = true
 		}
 	}
 
