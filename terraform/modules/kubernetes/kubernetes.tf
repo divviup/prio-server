@@ -162,6 +162,20 @@ variable "gcp_workload_identity_pool_provider" {
   type = string
 }
 
+# We repeat this declaration from main.tf to work around an issue where
+# Terraform will look for hashicorp/kubectl instead of gavinbunney/kubectl
+# https://github.com/gavinbunney/terraform-provider-kubectl/issues/39
+terraform {
+  required_version = ">= 0.14.8"
+
+  required_providers {
+    kubectl = {
+      source  = "gavinbunney/kubectl"
+      version = "~> 1.13.1"
+    }
+  }
+}
+
 locals {
   workflow_manager_iam_entity = "${var.environment}-${var.data_share_processor_name}-workflow-manager"
 }
@@ -422,9 +436,9 @@ resource "kubernetes_deployment" "intake_batch" {
   }
 }
 
-resource "kubernetes_manifest" "intake_queue_depth_metric" {
+resource "kubectl_manifest" "intake_queue_depth_metric" {
   count = var.use_aws ? 1 : 0
-  manifest = {
+  yaml_body = yamlencode({
     apiVersion = "metrics.aws/v1alpha1"
     kind       = "ExternalMetric"
     metadata = {
@@ -450,7 +464,7 @@ resource "kubernetes_manifest" "intake_queue_depth_metric" {
         }
       }]
     }
-  }
+  })
 }
 
 resource "kubernetes_horizontal_pod_autoscaler" "intake_batch_autoscaler" {
@@ -648,9 +662,9 @@ resource "kubernetes_deployment" "aggregate" {
   }
 }
 
-resource "kubernetes_manifest" "aggregate_queue_depth_metric" {
+resource "kubectl_manifest" "aggregate_queue_depth_metric" {
   count = var.use_aws ? 1 : 0
-  manifest = {
+  yaml_body = yamlencode({
     apiVersion = "metrics.aws/v1alpha1"
     kind       = "ExternalMetric"
     metadata = {
@@ -676,7 +690,7 @@ resource "kubernetes_manifest" "aggregate_queue_depth_metric" {
         }
       }]
     }
-  }
+  })
 }
 
 resource "kubernetes_horizontal_pod_autoscaler" "aggregate_autoscaler" {
