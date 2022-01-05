@@ -382,7 +382,7 @@ func scheduleTasks(config scheduleTasksConfig) error {
 		return err
 	}
 
-	intakeBatches, err := batchpath.ReadyBatches(intakeFiles, "batch")
+	intakeBatches, err := batchpath.ReadyBatches(intakeFiles, "batch", false /* acceptSignatureOnly */)
 	if err != nil {
 		return err
 	}
@@ -425,7 +425,7 @@ func scheduleTasks(config scheduleTasksConfig) error {
 		return fmt.Errorf("couldn't list intake batches for aggregation task generation: %w", err)
 	}
 
-	intakeBatches, err = batchpath.ReadyBatches(intakeFiles, "batch")
+	intakeBatches, err = batchpath.ReadyBatches(intakeFiles, "batch", false /* acceptSignatureOnly */)
 	if err != nil {
 		return fmt.Errorf("couldn't determine ready intake batches for aggregation task generation: %w", err)
 	}
@@ -443,7 +443,7 @@ func scheduleTasks(config scheduleTasksConfig) error {
 	}
 
 	peerValidityInfix := fmt.Sprintf("validity_%d", utils.Index(!config.isFirst))
-	peerValidationBatches, err := batchpath.ReadyBatches(peerValidationFiles, peerValidityInfix)
+	peerValidationBatches, err := batchpath.ReadyBatches(peerValidationFiles, peerValidityInfix, true /* acceptSignatureOnly */)
 	if err != nil {
 		return err
 	}
