@@ -21,7 +21,9 @@ type BatchPath struct {
 	ID             string
 	Time           time.Time
 
-	sigExists bool
+	headerObjectExists    bool
+	packetObjectExists    bool
+	signatureObjectExists bool
 }
 
 // List is a type alias for a slice of BatchPath pointers
@@ -109,7 +111,11 @@ func New(batchName string) (*BatchPath, error) {
 }
 
 func (b *BatchPath) String() string {
-	return fmt.Sprintf("{%s %s %s files:%d}", b.AggregationID, b.dateComponents, b.ID, utils.Index(!b.sigExists))
+	return fmt.Sprintf("{%s %s %s files:%d%d%d}",
+		b.AggregationID, b.dateComponents, b.ID,
+		utils.Index(!b.headerObjectExists),
+		utils.Index(!b.packetObjectExists),
+		utils.Index(!b.signatureObjectExists))
 }
 
 func (b *BatchPath) path() string {
@@ -121,12 +127,6 @@ func (b *BatchPath) DateString() string {
 	return strings.Join(b.dateComponents, "/")
 }
 
-// isComplete returns true if the batch exists (header,
-// signature and packet file), and false otherwise.
-func (b *BatchPath) isComplete() bool {
-	return b.sigExists
-}
-
 type ReadyBatchesResult struct {
 	Batches              List
 	IncompleteBatchCount int
@@ -136,7 +136,7 @@ type ReadyBatchesResult struct {
 // a header, packet file and a signature, corresponding to the given infix. On
 // success, returns the list of discovered batches and a count of batches
 // ignored because they were incomplete. Returns an error on failure.
-func ReadyBatches(files []string, infix string) (*ReadyBatchesResult, error) {
+func ReadyBatches(files []string, infix string, acceptSignatureOnly bool) (*ReadyBatchesResult, error) {
 	batches := make(map[string]*BatchPath)
 	for _, name := range files {
 		// Ignore task marker objects
@@ -153,8 +153,14 @@ func ReadyBatches(files []string, infix string) (*ReadyBatchesResult, error) {
 			}
 			batches[basename] = b
 		}
+		if strings.HasSuffix(name, fmt.Sprintf(".%s", infix)) {
+			b.headerObjectExists = true
+		}
+		if strings.HasSuffix(name, fmt.Sprintf(".%s.avro", infix)) {
+			b.packetObjectExists = true
+		}
 		if strings.HasSuffix(name, fmt.Sprintf(".%s.sig", infix)) {
-			b.sigExists = true
+			b.signatureObjectExists = true
 		}
 	}
 
@@ -164,7 +170,7 @@ func ReadyBatches(files []string, infix string) (*ReadyBatchesResult, error) {
 		// A validation or ingestion batch is not ready unless all three files
 		// are present. This isn't true for sum parts, but workflow-manager
 		// doesn't deal with those yet.
-		if v.isComplete() {
+		if v.signatureObjectExists && (acceptSignatureOnly || (v.headerObjectExists && v.packetObjectExists)) {
 			output = append(output, v)
 		} else {
 			log.Info().Msgf("ignoring incomplete batch %s", v)
