@@ -310,7 +310,7 @@ impl<'a> SampleGenerator<'a> {
                 batch_end_time,
                 packet_file_digest: Vec::new(),
             },
-            facilitator_packets.into_iter().map(Result::Ok),
+            facilitator_packets,
         )?;
         pha_ingestion_batch.write(
             &self.pha_output.transport.batch_signing_key,
@@ -326,7 +326,7 @@ impl<'a> SampleGenerator<'a> {
                 batch_end_time,
                 packet_file_digest: Vec::new(),
             },
-            pha_packets.into_iter().map(Result::Ok),
+            pha_packets,
         )?;
 
         info!(local_logger, "done");

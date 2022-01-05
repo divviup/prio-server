@@ -324,11 +324,11 @@ impl<'a, H: Header, P: Packet> BatchWriter<'a, H, P> {
         self.single_object_write = single_object_write;
     }
 
-    pub fn write(
+    pub fn write<I: IntoIterator<Item = P>>(
         &self,
         key: &BatchSigningKey,
         header: H,
-        packets: impl Iterator<Item = Result<P>>,
+        packets: I,
     ) -> Result<()> {
         if self.single_object_write {
             self.single_object_write(key, header, packets)
@@ -337,11 +337,11 @@ impl<'a, H: Header, P: Packet> BatchWriter<'a, H, P> {
         }
     }
 
-    fn single_object_write(
+    fn single_object_write<I: IntoIterator<Item = P>>(
         &self,
         key: &BatchSigningKey,
         mut header: H,
-        packets: impl Iterator<Item = Result<P>>,
+        packets: I,
     ) -> Result<()> {
         // Serialize packets in memory.
         let mut packet_bytes = Vec::new();
@@ -349,7 +349,6 @@ impl<'a, H: Header, P: Packet> BatchWriter<'a, H, P> {
         let mut packet_writer = Writer::new(P::schema(), &mut digest_writer);
         for packet in packets {
             packet
-                .context("couldn't get next packet to write")?
                 .write(&mut packet_writer)
                 .context("couldn't write packet")?;
         }
@@ -398,11 +397,11 @@ impl<'a, H: Header, P: Packet> BatchWriter<'a, H, P> {
             .context("failed to complete signature upload")
     }
 
-    fn multi_object_write(
+    fn multi_object_write<I: IntoIterator<Item = P>>(
         &self,
         key: &BatchSigningKey,
         mut header: H,
-        packets: impl Iterator<Item = Result<P>>,
+        packets: I,
     ) -> Result<()> {
         // Write packets.
         let mut transport_writer = self
@@ -414,7 +413,6 @@ impl<'a, H: Header, P: Packet> BatchWriter<'a, H, P> {
 
         for packet in packets {
             packet
-                .context("couldn't get next packet to write")?
                 .write(&mut packet_writer)
                 .context("couldn't write packet")?;
         }
@@ -471,7 +469,9 @@ impl<'a, H: Header, P: Packet> BatchWriter<'a, H, P> {
             .context("couldn't write signature")?;
         transport_writer
             .complete_upload()
-            .context("failed to complete signature upload")
+            .context("failed to complete signature upload")?;
+
+        Ok(())
     }
 }
 
@@ -612,11 +612,7 @@ mod tests {
         P: Packet + Clone + PartialEq + Debug,
     {
         batch_writer
-            .write(
-                write_key,
-                header.clone(),
-                packets.iter().map(|p| Ok(p.clone())),
-            )
+            .write(write_key, header.clone(), packets.iter().map(Clone::clone))
             .expect("Couldn't write batch");
 
         // Verify file layout is as expected
@@ -976,15 +972,14 @@ mod tests {
                     batch_end_time: 789456321,
                     packet_file_digest: Vec::new(),
                 },
-                Some(Ok(IngestionDataSharePacket {
+                Some(IngestionDataSharePacket {
                     uuid: Uuid::new_v4(),
                     encrypted_payload: vec![0u8, 1u8, 2u8, 3u8],
                     encryption_key_id: Some("fake-key-1".to_owned()),
                     r_pit: 1,
                     version_configuration: Some("config-1".to_owned()),
                     device_nonce: None,
-                }))
-                .into_iter(),
+                }),
             )
             .expect("Couldn't write batch");
 

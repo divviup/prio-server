@@ -225,9 +225,7 @@ impl<'a> BatchAggregator<'a> {
                 packet_file_digest: Vec::new(),
                 total_individual_clients: self.total_individual_clients,
             },
-            invalid_uuids
-                .into_iter()
-                .map(|u| Ok(InvalidPacket { uuid: u })),
+            invalid_uuids.into_iter().map(|u| InvalidPacket { uuid: u }),
         )
     }
 
