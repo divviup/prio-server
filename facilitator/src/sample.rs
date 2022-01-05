@@ -1,6 +1,6 @@
 use crate::{
     batch::{Batch, BatchWriter},
-    idl::{IngestionDataSharePacket, IngestionHeader, Packet},
+    idl::{IngestionDataSharePacket, IngestionHeader},
     logging::event,
     transport::SignableTransport,
     DATE_FORMAT,
@@ -202,8 +202,6 @@ impl<'a> SampleGenerator<'a> {
         // Borrowing distinct parts of a struct like the SampleOutputs works, but
         // not under closures: https://github.com/rust-lang/rust/issues/53488
         // The workaround is to borrow or copy fields outside the closure.
-        let facilitator_batch_signing_key_ref =
-            &self.facilitator_output.transport.batch_signing_key;
         let drop_nth_pha_packet = self.pha_output.drop_nth_packet;
         let drop_nth_facilitator_packet = self.facilitator_output.drop_nth_packet;
         let generate_short_packet = self.generate_short_packet;
@@ -215,125 +213,92 @@ impl<'a> SampleGenerator<'a> {
 
         let mut reference_sum = vec![FieldPriov2::from(0); self.dimension as usize];
         let mut contributions = 0;
+        let mut pha_packets = Vec::new();
         let mut pha_dropped_packets = Vec::new();
+        let mut facilitator_packets = Vec::new();
         let mut facilitator_dropped_packets = Vec::new();
 
-        // We nest the closures here to get both packet writers in one scope
-        let pha_packet_file_digest =
-            pha_ingestion_batch.packet_file_writer(|mut pha_packet_writer| {
-                let facilitator_packet_file_digest = facilitator_ingestion_batch
-                    .packet_file_writer(|mut facilitator_packet_writer| {
-                        for count in 0..packet_count {
-                            // Generate random bit vector
-                            let data_len = if Self::short_packet(generate_short_packet, count) {
-                                dimension - 1
-                            } else {
-                                dimension
-                            };
+        // Compute packets & dropped packets for facilitator & PHA.
+        for count in 0..packet_count {
+            // Generate random bit vector
+            let data_len = if Self::short_packet(generate_short_packet, count) {
+                dimension - 1
+            } else {
+                dimension
+            };
 
-                            let data: Vec<FieldPriov2> = (0..data_len)
-                                .map(|_| FieldPriov2::from(thread_rng.gen_range(0..2)))
-                                .collect();
+            let data: Vec<FieldPriov2> = (0..data_len)
+                .map(|_| FieldPriov2::from(thread_rng.gen_range(0..2)))
+                .collect();
 
-                            // If we are dropping the packet from either output, do
-                            // not include it in the reference sum
-                            if !SampleOutput::drop_packet(drop_nth_pha_packet, count)
-                                && !SampleOutput::drop_packet(drop_nth_facilitator_packet, count)
-                            {
-                                for (r, d) in reference_sum.iter_mut().zip(data.iter()) {
-                                    *r += *d
-                                }
-                                contributions += 1;
-                            }
+            // If we are dropping the packet from either output, do
+            // not include it in the reference sum
+            if !SampleOutput::drop_packet(drop_nth_pha_packet, count)
+                && !SampleOutput::drop_packet(drop_nth_facilitator_packet, count)
+            {
+                for (r, d) in reference_sum.iter_mut().zip(data.iter()) {
+                    *r += *d
+                }
+                contributions += 1;
+            }
 
-                            let curr_client = if Self::short_packet(generate_short_packet, count) {
-                                &mut short_packet_client
-                            } else {
-                                &mut client
-                            };
+            let curr_client = if Self::short_packet(generate_short_packet, count) {
+                &mut short_packet_client
+            } else {
+                &mut client
+            };
 
-                            let (pha_share, facilitator_share) =
-                                curr_client
-                                    .encode_simple(&data)
-                                    .context("failed to encode data")?;
+            let (pha_share, facilitator_share) = curr_client
+                .encode_simple(&data)
+                .context("failed to encode data")?;
 
-                            // Hardcoded r_pit value
-                            // This value can be dynamic by running an instance of libprio::Server
-                            // However, libprio::Server takes in a private key for initialization
-                            // which we don't have in this context. Using a constant value removes
-                            // the libprio::Server dependency for creating samples
-                            let r_pit: u32 = 998314904;
-                            let packet_uuid = Uuid::new_v4();
+            // Hardcoded r_pit value
+            // This value can be dynamic by running an instance of libprio::Server
+            // However, libprio::Server takes in a private key for initialization
+            // which we don't have in this context. Using a constant value removes
+            // the libprio::Server dependency for creating samples
+            let r_pit: u32 = 998314904;
+            let packet_uuid = Uuid::new_v4();
 
-                            let pha_packet = IngestionDataSharePacket {
-                                uuid: packet_uuid,
-                                encrypted_payload: pha_share,
-                                encryption_key_id: Some("pha-fake-key-1".to_owned()),
-                                r_pit: r_pit as i64,
-                                version_configuration: Some("config-1".to_owned()),
-                                device_nonce: None,
-                            };
+            if SampleOutput::drop_packet(drop_nth_pha_packet, count) {
+                info!(
+                    local_logger,
+                    "dropping packet #{} {} from PHA ingestion batch", count, packet_uuid
+                );
+                pha_dropped_packets.push(packet_uuid);
+            } else {
+                pha_packets.push(IngestionDataSharePacket {
+                    uuid: packet_uuid,
+                    encrypted_payload: pha_share,
+                    encryption_key_id: Some("pha-fake-key-1".to_owned()),
+                    r_pit: r_pit as i64,
+                    version_configuration: Some("config-1".to_owned()),
+                    device_nonce: None,
+                });
+            }
 
-                            if SampleOutput::drop_packet(drop_nth_pha_packet, count) {
-                                info!(
-                                    local_logger,
-                                    "dropping packet #{} {} from PHA ingestion batch",
-                                    count,
-                                    packet_uuid
-                                );
-                                pha_dropped_packets.push(packet_uuid);
-                            } else {
-                                pha_packet.write(&mut pha_packet_writer)?;
-                            }
+            if SampleOutput::drop_packet(drop_nth_facilitator_packet, count) {
+                info!(
+                    local_logger,
+                    "dropping packet #{} {} from facilitator ingestion batch", count, packet_uuid
+                );
+                facilitator_dropped_packets.push(packet_uuid);
+            } else {
+                facilitator_packets.push(IngestionDataSharePacket {
+                    uuid: packet_uuid,
+                    encrypted_payload: facilitator_share,
+                    encryption_key_id: None,
+                    r_pit: r_pit as i64,
+                    version_configuration: Some("config-1".to_owned()),
+                    device_nonce: None,
+                });
+            }
+        }
 
-                            let facilitator_packet = IngestionDataSharePacket {
-                                uuid: packet_uuid,
-                                encrypted_payload: facilitator_share,
-                                encryption_key_id: None,
-                                r_pit: r_pit as i64,
-                                version_configuration: Some("config-1".to_owned()),
-                                device_nonce: None,
-                            };
-
-                            if SampleOutput::drop_packet(drop_nth_facilitator_packet, count) {
-                                info!(
-                                    local_logger,
-                                    "dropping packet #{} {} from facilitator ingestion batch",
-                                    count,
-                                    packet_uuid
-                                );
-                                facilitator_dropped_packets.push(packet_uuid);
-                            } else {
-                                facilitator_packet.write(&mut facilitator_packet_writer)?;
-                            }
-                        }
-                        Ok(())
-                    })?;
-
-                let facilitator_header_signature = facilitator_ingestion_batch.put_header(
-                    &IngestionHeader {
-                        batch_uuid: *batch_uuid,
-                        name: aggregation_name.to_owned(),
-                        bins: dimension,
-                        epsilon,
-                        prime: FieldPriov2::modulus() as i64,
-                        number_of_servers: 2,
-                        hamming_weight: None,
-                        batch_start_time,
-                        batch_end_time,
-                        packet_file_digest: facilitator_packet_file_digest.as_ref().to_vec(),
-                    },
-                    &facilitator_batch_signing_key_ref.key,
-                )?;
-
-                facilitator_ingestion_batch.put_signature(
-                    &facilitator_header_signature,
-                    &facilitator_batch_signing_key_ref.identifier,
-                )
-            })?;
-
-        let pha_header_signature = pha_ingestion_batch.put_header(
-            &IngestionHeader {
+        // Write facilitator & PHA batches.
+        facilitator_ingestion_batch.write(
+            &self.facilitator_output.transport.batch_signing_key,
+            IngestionHeader {
                 batch_uuid: *batch_uuid,
                 name: aggregation_name.to_owned(),
                 bins: dimension,
@@ -343,13 +308,25 @@ impl<'a> SampleGenerator<'a> {
                 hamming_weight: None,
                 batch_start_time,
                 batch_end_time,
-                packet_file_digest: pha_packet_file_digest.as_ref().to_vec(),
+                packet_file_digest: Vec::new(),
             },
-            &self.pha_output.transport.batch_signing_key.key,
+            facilitator_packets,
         )?;
-        pha_ingestion_batch.put_signature(
-            &pha_header_signature,
-            &self.pha_output.transport.batch_signing_key.identifier,
+        pha_ingestion_batch.write(
+            &self.pha_output.transport.batch_signing_key,
+            IngestionHeader {
+                batch_uuid: *batch_uuid,
+                name: aggregation_name.to_owned(),
+                bins: dimension,
+                epsilon,
+                prime: FieldPriov2::modulus() as i64,
+                number_of_servers: 2,
+                hamming_weight: None,
+                batch_start_time,
+                batch_end_time,
+                packet_file_digest: Vec::new(),
+            },
+            pha_packets,
         )?;
 
         info!(local_logger, "done");

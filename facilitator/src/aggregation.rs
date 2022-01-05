@@ -1,8 +1,6 @@
 use crate::{
     batch::{Batch, BatchReader, BatchWriter},
-    idl::{
-        IngestionDataSharePacket, IngestionHeader, InvalidPacket, Packet, SumPart, ValidationPacket,
-    },
+    idl::{IngestionDataSharePacket, IngestionHeader, InvalidPacket, SumPart, ValidationPacket},
     logging::event,
     metrics::AggregateMetricsCollector,
     transport::{SignableTransport, VerifiableAndDecryptableTransport, VerifiableTransport},
@@ -187,17 +185,6 @@ impl<'a> BatchAggregator<'a> {
                 .inc_by(self.bytes_processed);
         }
 
-        // TODO(timg) what exactly do we write out when there are no invalid
-        // packets? Right now we will write an empty file.
-        let invalid_packets_digest =
-            self.aggregation_batch
-                .packet_file_writer(|mut packet_file_writer| {
-                    for invalid_uuid in invalid_uuids {
-                        InvalidPacket { uuid: invalid_uuid }.write(&mut packet_file_writer)?
-                    }
-                    Ok(())
-                })?;
-
         // We have one Server for each packet decryption key, and each of those
         // instances could contain some accumulated shares, depending on which
         // key was used to encrypt an individual packet. We make a new Server
@@ -215,15 +202,16 @@ impl<'a> BatchAggregator<'a> {
                 .merge_total_shares(server.total_shares())
                 .context("failed to accumulate shares")?;
         }
-
         let sum = accumulator_server
             .total_shares()
             .iter()
             .map(|f| u32::from(*f) as i64)
             .collect();
 
-        let sum_signature = self.aggregation_batch.put_header(
-            &SumPart {
+        // Write the aggregated data back to a sum part batch.
+        self.aggregation_batch.write(
+            self.share_processor_signing_key,
+            SumPart {
                 batch_uuids: included_batch_uuids,
                 name: ingestion_header.name,
                 bins: ingestion_header.bins,
@@ -234,14 +222,11 @@ impl<'a> BatchAggregator<'a> {
                 sum,
                 aggregation_start_time: self.aggregation_start.timestamp_millis(),
                 aggregation_end_time: self.aggregation_end.timestamp_millis(),
-                packet_file_digest: invalid_packets_digest.as_ref().to_vec(),
+                packet_file_digest: Vec::new(),
                 total_individual_clients: self.total_individual_clients,
             },
-            &self.share_processor_signing_key.key,
-        )?;
-
-        self.aggregation_batch
-            .put_signature(&sum_signature, &self.share_processor_signing_key.identifier)
+            invalid_uuids.into_iter().map(|u| InvalidPacket { uuid: u }),
+        )
     }
 
     /// Aggregate the batch for the provided batch_id into the provided server.

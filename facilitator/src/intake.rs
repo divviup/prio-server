@@ -1,6 +1,6 @@
 use crate::{
     batch::{Batch, BatchReader, BatchWriter},
-    idl::{IngestionDataSharePacket, IngestionHeader, Packet, ValidationHeader, ValidationPacket},
+    idl::{IngestionDataSharePacket, IngestionHeader, ValidationHeader, ValidationPacket},
     logging::event,
     metrics::IntakeMetricsCollector,
     transport::{SignableTransport, VerifiableAndDecryptableTransport},
@@ -31,7 +31,6 @@ pub struct BatchIntaker<'a> {
     callback_cadence: u32,
     aggregation_name: &'a str,
     metrics_collector: Option<&'a IntakeMetricsCollector>,
-    use_bogus_packet_file_digest: bool,
     logger: Logger,
 }
 
@@ -77,7 +76,6 @@ impl<'a> BatchIntaker<'a> {
             callback_cadence: 1000,
             aggregation_name,
             metrics_collector: None,
-            use_bogus_packet_file_digest: false,
             logger,
         })
     }
@@ -102,7 +100,8 @@ impl<'a> BatchIntaker<'a> {
     /// file digest when constructing the header of a validation batch. This is
     /// intended only for testing.
     pub fn set_use_bogus_packet_file_digest(&mut self, bogus: bool) {
-        self.use_bogus_packet_file_digest = bogus;
+        self.peer_validation_batch
+            .set_use_bogus_packet_file_digest(bogus);
     }
 
     /// Fetches the ingestion batch, validates the signatures over its header
@@ -146,31 +145,46 @@ impl<'a> BatchIntaker<'a> {
 
         // Read all the ingestion packets, generate a verification message for
         // each ingestion packet, writing them to the validation batch.
-
         let mut processed_packets = 0;
         let mut processed_bytes = 0;
+
         // Borrowing distinct parts of a struct works, but not under closures:
         // https://github.com/rust-lang/rust/issues/53488
         // The workaround is to borrow or copy fields outside the closure.
         let callback_cadence = self.callback_cadence;
         let logger = &self.logger;
 
-        let packet_file_digest =
-            self.peer_validation_batch
-                .packet_file_writer(|mut packet_writer| {
-                    for packet in ingestion_packets {
-                        processed_bytes += packet.encrypted_payload.len() as u64;
+        let validation_packets: Vec<ValidationPacket> = ingestion_packets
+            .into_iter()
+            .map(|p| {
+                processed_bytes += p.encrypted_payload.len() as u64;
+                p.generate_validation_packet(&mut servers)
+            })
+            .collect::<Result<Vec<ValidationPacket>>>()
+            .context("couldn't generate validation packets")?;
 
-                        let validation_packet = packet.generate_validation_packet(&mut servers)?;
-                        validation_packet.write(&mut packet_writer)?;
-                        processed_packets += 1;
-                        if processed_packets % callback_cadence == 0 {
-                            callback(logger);
-                        }
-                    }
-                    Ok(())
-                })?;
+        self.peer_validation_batch.write(
+            self.peer_validation_batch_signing_key,
+            ValidationHeader {
+                batch_uuid: ingestion_header.batch_uuid,
+                name: ingestion_header.name,
+                bins: ingestion_header.bins,
+                epsilon: ingestion_header.epsilon,
+                prime: ingestion_header.prime,
+                number_of_servers: ingestion_header.number_of_servers,
+                hamming_weight: ingestion_header.hamming_weight,
+                packet_file_digest: Vec::new(),
+            },
+            validation_packets.into_iter().map(|p| {
+                processed_packets += 1;
+                if processed_packets % callback_cadence == 0 {
+                    callback(logger);
+                }
+                p
+            }),
+        )?;
 
+        // Write back metrics based on the batch.
         if let Some(collector) = self.metrics_collector {
             collector
                 .packets_per_batch
@@ -187,38 +201,7 @@ impl<'a> BatchIntaker<'a> {
                 .with_label_values(&[self.aggregation_name])
                 .inc_by(processed_bytes);
         }
-
-        // If the caller requested it, we insert a bogus packet file digest into
-        // the own and peer validaton batch headers instead of the real computed
-        // digest. This is meant to simulate a buggy peer data share processor,
-        // so that we can test how the aggregation step behaves.
-        let packet_file_digest = if self.use_bogus_packet_file_digest {
-            info!(self.logger, "using bogus packet file digest");
-            vec![0u8, 1u8, 2u8, 3u8, 4u8, 5u8, 6u8, 7u8, 8u8]
-        } else {
-            packet_file_digest.as_ref().to_vec()
-        };
-
-        // Construct validation header and write it out
-        let header = ValidationHeader {
-            batch_uuid: ingestion_header.batch_uuid,
-            name: ingestion_header.name,
-            bins: ingestion_header.bins,
-            epsilon: ingestion_header.epsilon,
-            prime: ingestion_header.prime,
-            number_of_servers: ingestion_header.number_of_servers,
-            hamming_weight: ingestion_header.hamming_weight,
-            packet_file_digest,
-        };
-        let peer_header_signature = self
-            .peer_validation_batch
-            .put_header(&header, &self.peer_validation_batch_signing_key.key)?;
-
-        // Construct and write out signature
-        self.peer_validation_batch.put_signature(
-            &peer_header_signature,
-            &self.peer_validation_batch_signing_key.identifier,
-        )
+        Ok(())
     }
 }
 

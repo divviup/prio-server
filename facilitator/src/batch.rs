@@ -5,15 +5,15 @@ use crate::{
     },
     metrics::BatchReaderMetricsCollector,
     transport::{Transport, TransportWriter},
-    DigestWriter, Error, DATE_FORMAT,
+    BatchSigningKey, DigestWriter, Error, DATE_FORMAT,
 };
 use anyhow::{anyhow, Context, Result};
 use avro_rs::{Reader, Writer};
 use chrono::NaiveDateTime;
 use ring::{
-    digest::{digest, Digest, SHA256},
+    digest::{digest, SHA256},
     rand::SystemRandom,
-    signature::{EcdsaKeyPair, Signature, UnparsedPublicKey},
+    signature::UnparsedPublicKey,
 };
 use slog::{o, warn, Logger};
 use std::{
@@ -291,6 +291,7 @@ pub struct BatchWriter<'a, H: Header, P: Packet> {
     batch: Batch<H, P>,
     transport: &'a dyn Transport,
     trace_id: &'a Uuid,
+    use_bogus_packet_file_digest: bool,
 }
 
 impl<'a, H: Header, P: Packet> BatchWriter<'a, H, P> {
@@ -299,6 +300,7 @@ impl<'a, H: Header, P: Packet> BatchWriter<'a, H, P> {
             batch,
             transport,
             trace_id,
+            use_bogus_packet_file_digest: false,
         }
     }
 
@@ -306,77 +308,88 @@ impl<'a, H: Header, P: Packet> BatchWriter<'a, H, P> {
         self.transport.path()
     }
 
-    /// Encode the provided header into Avro, sign that representation with the
-    /// provided key and write the header into the batch. Returns the signature
-    /// on success.
-    pub fn put_header(&self, header: &H, key: &EcdsaKeyPair) -> Result<Signature> {
-        let mut transport_writer = self.transport.put(self.batch.header_key(), self.trace_id)?;
-        let mut header_buf = Vec::new();
-        header.write(&mut header_buf)?;
-
-        transport_writer.write_all(&header_buf)?;
-        transport_writer
-            .complete_upload()
-            .context("failed to complete batch header upload")?;
-
-        // TODO(brandon): per the advice of ring's doc comments, create a single SystemRandom &
-        // reuse it throughout the application rather than creating a new SystemRandom each time.
-        key.sign(&SystemRandom::new(), &header_buf)
-            .context("failed to sign header file")
+    /// Sets whether this BatchWriter will use a bogus value for the packet
+    /// file digest when constructing the header of a validation batch. This
+    /// is intended only for testing.
+    pub fn set_use_bogus_packet_file_digest(&mut self, bogus: bool) {
+        self.use_bogus_packet_file_digest = bogus;
     }
 
-    /// Creates an avro_rs::Writer and provides it to the caller-provided
-    /// function, which may then write arbitrarily many packets into it. The
-    /// Avro encoding of the packet will be digested while they are written.
-    /// The operation should return Ok(()) when it has finished successfully or
-    /// some Err() otherwise. packet_file_writer returns the digest of all the
-    /// content written by the operation.
-    pub fn packet_file_writer<F>(&self, operation: F) -> Result<Digest>
-    where
-        F: FnOnce(&mut Writer<&mut DigestWriter<&mut Box<dyn TransportWriter>>>) -> Result<()>,
-    {
+    pub fn write<I: IntoIterator<Item = P>>(
+        &self,
+        key: &BatchSigningKey,
+        mut header: H,
+        packets: I,
+    ) -> Result<()> {
+        // Write packets.
         let mut transport_writer = self
             .transport
-            .put(self.batch.packet_file_key(), self.trace_id)?;
+            .put(self.batch.packet_file_key(), self.trace_id)
+            .context("couldn't start writing to packet file")?;
         let mut digest_writer = DigestWriter::new(&mut transport_writer);
-        let mut writer = Writer::new(P::schema(), &mut digest_writer);
+        let mut packet_writer = Writer::new(P::schema(), &mut digest_writer);
 
-        let result = operation(&mut writer);
-        writer
-            .flush()
-            .with_context(|| format!("failed to flush Avro writer ({:?})", result))?;
-
-        if let Err(e) = result {
-            transport_writer
-                .cancel_upload()
-                .with_context(|| format!("Encountered while handling: {}", e))?;
-            return Err(e);
+        for packet in packets {
+            packet
+                .write(&mut packet_writer)
+                .context("couldn't write packet")?;
         }
-        let digest = digest_writer.finish();
+
+        packet_writer
+            .flush()
+            .context("couldn't flush packet writer")?;
+        // If the caller requested it, we insert a bogus packet file digest into
+        // the peer validaton batch headers instead of the real computed
+        // digest. This is meant to simulate a buggy peer data share processor,
+        // so that we can test how the aggregation step behaves.
+        let packet_digest = if self.use_bogus_packet_file_digest {
+            vec![0, 1, 2, 3, 4, 5, 6, 7, 8]
+        } else {
+            digest_writer.finish().as_ref().to_vec()
+        };
         transport_writer
             .complete_upload()
-            .context("failed to complete packet file upload")?;
-        Ok(digest)
-    }
+            .context("couldn't complete packet file upload")?;
 
-    /// Constructs a signature structure from the provided buffers and writes it
-    /// to the batch's signature file
-    pub fn put_signature(&self, signature: &Signature, key_identifier: &str) -> Result<()> {
+        // Write header.
+        // TODO(brandon): per the advice of ring's doc comments, create a single SystemRandom &
+        // reuse it throughout the application rather than creating a new SystemRandom each time.
+        header.set_packet_file_digest(packet_digest);
+        let mut header_bytes = Vec::new();
+        header
+            .write(&mut header_bytes)
+            .context("couldn't serialize header")?;
+        let header_signature = key
+            .key
+            .sign(&SystemRandom::new(), &header_bytes)
+            .context("couldn't sign header")?;
+
+        let mut transport_writer = self.transport.put(self.batch.header_key(), self.trace_id)?;
+        transport_writer
+            .write_all(&header_bytes)
+            .context("couldn't write batch header")?;
+        transport_writer
+            .complete_upload()
+            .context("couldn't complete batch header upload")?;
+
+        // Write signature.
         let batch_signature = BatchSignature {
-            batch_header_signature: signature.as_ref().to_vec(),
-            key_identifier: key_identifier.to_string(),
+            batch_header_signature: header_signature.as_ref().to_vec(),
+            key_identifier: key.identifier.clone(),
             batch_header_bytes: None,
             packet_bytes: None,
         };
-        let mut writer = self
+        let mut transport_writer = self
             .transport
             .put(self.batch.signature_key(), self.trace_id)?;
         batch_signature
-            .write(&mut writer)
-            .context("failed to write signature")?;
-        writer
+            .write(&mut transport_writer)
+            .context("couldn't write signature")?;
+        transport_writer
             .complete_upload()
-            .context("failed to complete signature upload")
+            .context("failed to complete signature upload")?;
+
+        Ok(())
     }
 }
 
@@ -509,31 +522,16 @@ mod tests {
         batch_writer: &BatchWriter<'a, H, P>,
         batch_reader: &BatchReader<'a, H, P>,
         transport: &LocalFileTransport,
-        write_key: &EcdsaKeyPair,
+        write_key: &BatchSigningKey,
         read_key: &UnparsedPublicKey<Vec<u8>>,
         keys_match: bool,
     ) where
-        H: Header + DigestSetter + Clone + PartialEq + Debug,
-        P: Packet + PartialEq + Debug,
+        H: Header + Clone + PartialEq + Debug,
+        P: Packet + Clone + PartialEq + Debug,
     {
-        let packet_file_digest = batch_writer
-            .packet_file_writer(|mut packet_writer| {
-                for packet in packets {
-                    packet.write(&mut packet_writer)?;
-                }
-                Ok(())
-            })
-            .expect("failed to write packets");
-
-        let mut header = header.clone();
-        header.set_packet_file_digest(packet_file_digest.as_ref().to_vec());
-
-        let header_signature = batch_writer
-            .put_header(&header, write_key)
-            .expect("failed to write header");
-
-        let res = batch_writer.put_signature(&header_signature, "key-identifier");
-        assert!(res.is_ok(), "failed to put signature: {:?}", res.err());
+        batch_writer
+            .write(write_key, header.clone(), packets.iter().map(Clone::clone))
+            .expect("Couldn't write batch");
 
         // Verify file layout is as expected
         for extension in filenames {
@@ -543,7 +541,7 @@ mod tests {
         }
 
         let mut key_map = HashMap::new();
-        key_map.insert("key-identifier".to_owned(), read_key.clone());
+        key_map.insert(write_key.identifier.clone(), read_key.clone());
         let read_result = batch_reader.read(&key_map);
         if !keys_match {
             assert!(
@@ -557,9 +555,13 @@ mod tests {
             "failed to read header from batch {:?}",
             read_result.err()
         );
-        let (header_again, packets_again) = read_result.unwrap();
+        let (mut header_again, packets_again) = read_result.unwrap();
 
-        assert_eq!(header, header_again, "header does not match");
+        // Clearing the header's packet digest is required to make the written
+        // header match the given template; the digest itself is already
+        // checked by BatchReader::read.
+        header_again.set_packet_file_digest(Vec::new());
+        assert_eq!(header, &header_again, "header does not match");
 
         let mut packets_again_iter = packets_again.iter();
         for packet in packets {
@@ -623,7 +625,7 @@ mod tests {
             &batch_writer,
             &batch_reader,
             &verify_transport,
-            &default_ingestor_private_key().key,
+            &default_ingestor_private_key(),
             &read_key,
             keys_match,
         )
@@ -700,7 +702,7 @@ mod tests {
             &batch_writer,
             &batch_reader,
             &verify_transport,
-            &default_ingestor_private_key().key,
+            &default_ingestor_private_key(),
             &read_key,
             keys_match,
         )
@@ -790,7 +792,7 @@ mod tests {
             &batch_writer,
             &batch_reader,
             &verify_transport,
-            &default_ingestor_private_key().key,
+            &default_ingestor_private_key(),
             &read_key,
             keys_match,
         )
@@ -802,12 +804,15 @@ mod tests {
         let tempdir = tempfile::TempDir::new().unwrap();
         let write_transport = LocalFileTransport::new(tempdir.path().to_path_buf());
         let read_transport = LocalFileTransport::new(tempdir.path().to_path_buf());
+        let metrics_collector = BatchReaderMetricsCollector::new("test").unwrap();
 
-        let batch_writer = BatchWriter::new(
+        let mut batch_writer = BatchWriter::new(
             Batch::new_ingestion(AGGREGATION_NAME, &BATCH_ID, &END_TIMESTAMP),
             &write_transport,
             &DEFAULT_TRACE_ID,
         );
+        batch_writer.set_use_bogus_packet_file_digest(true);
+
         let mut batch_reader = BatchReader::new(
             Batch::new_ingestion(AGGREGATION_NAME, &BATCH_ID, &END_TIMESTAMP),
             &read_transport,
@@ -815,51 +820,39 @@ mod tests {
             &DEFAULT_TRACE_ID,
             &logger,
         );
-
-        let metrics_collector = BatchReaderMetricsCollector::new("test").unwrap();
         batch_reader.set_metrics_collector(&metrics_collector);
 
-        let packet = IngestionDataSharePacket {
-            uuid: Uuid::new_v4(),
-            encrypted_payload: vec![0u8, 1u8, 2u8, 3u8],
-            encryption_key_id: Some("fake-key-1".to_owned()),
-            r_pit: 1,
-            version_configuration: Some("config-1".to_owned()),
-            device_nonce: None,
-        };
-
+        let write_key = default_ingestor_private_key();
         batch_writer
-            .packet_file_writer(|mut packet_writer| {
-                packet.write(&mut packet_writer)?;
-                Ok(())
-            })
-            .expect("failed to write packets");
-
-        let header = IngestionHeader {
-            batch_uuid: BATCH_ID,
-            name: AGGREGATION_NAME.to_string(),
-            bins: 2,
-            epsilon: 1.601,
-            prime: 17,
-            number_of_servers: 2,
-            hamming_weight: None,
-            batch_start_time: 789456123,
-            batch_end_time: 789456321,
-            // Use bogus packet file digest
-            packet_file_digest: vec![0u8, 1u8, 2u8, 3u8, 4u8, 5u8, 6u8, 7u8, 8u8],
-        };
-
-        let header_signature = batch_writer
-            .put_header(&header, &default_ingestor_private_key().key)
-            .expect("failed to write header");
-
-        let res = batch_writer.put_signature(&header_signature, "key-identifier");
-        assert!(res.is_ok(), "failed to put signature: {:?}", res.err());
+            .write(
+                &write_key,
+                IngestionHeader {
+                    batch_uuid: BATCH_ID,
+                    name: AGGREGATION_NAME.to_string(),
+                    bins: 2,
+                    epsilon: 1.601,
+                    prime: 17,
+                    number_of_servers: 2,
+                    hamming_weight: None,
+                    batch_start_time: 789456123,
+                    batch_end_time: 789456321,
+                    packet_file_digest: Vec::new(),
+                },
+                Some(IngestionDataSharePacket {
+                    uuid: Uuid::new_v4(),
+                    encrypted_payload: vec![0u8, 1u8, 2u8, 3u8],
+                    encryption_key_id: Some("fake-key-1".to_owned()),
+                    r_pit: 1,
+                    version_configuration: Some("config-1".to_owned()),
+                    device_nonce: None,
+                }),
+            )
+            .expect("Couldn't write batch");
 
         // Verify with different key than we signed with
         let mut key_map = HashMap::new();
         key_map.insert(
-            "key-identifier".to_owned(),
+            write_key.identifier,
             default_facilitator_signing_public_key(),
         );
 
@@ -896,27 +889,5 @@ mod tests {
                 .get(),
             1
         );
-    }
-
-    trait DigestSetter {
-        fn set_packet_file_digest(&mut self, digest: Vec<u8>);
-    }
-
-    impl DigestSetter for IngestionHeader {
-        fn set_packet_file_digest(&mut self, digest: Vec<u8>) {
-            self.packet_file_digest = digest;
-        }
-    }
-
-    impl DigestSetter for ValidationHeader {
-        fn set_packet_file_digest(&mut self, digest: Vec<u8>) {
-            self.packet_file_digest = digest;
-        }
-    }
-
-    impl DigestSetter for SumPart {
-        fn set_packet_file_digest(&mut self, digest: Vec<u8>) {
-            self.packet_file_digest = digest;
-        }
     }
 }

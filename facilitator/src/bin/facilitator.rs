@@ -89,8 +89,6 @@ trait AppArgumentAdder {
 
     fn add_metrics_scrape_port_argument(self) -> Self;
 
-    fn add_use_bogus_packet_file_digest_argument(self) -> Self;
-
     fn add_common_sample_maker_arguments(self) -> Self;
 
     fn add_permit_malformed_batch_argument(self) -> Self;
@@ -484,26 +482,6 @@ impl<'a, 'b> AppArgumentAdder for App<'a, 'b> {
         )
     }
 
-    fn add_use_bogus_packet_file_digest_argument(self: App<'a, 'b>) -> App<'a, 'b> {
-        self.arg(
-            Arg::with_name("use-bogus-packet-file-digest")
-                .long("use-bogus-packet-file-digest")
-                .env("USE_BOGUS_PACKET_FILE_DIGEST")
-                .help("whether to tamper with validation batch headers")
-                .long_help(
-                    "If set, then instead of the computed digest of the packet \
-                    file, a fixed, bogusddigest will be inserted into the own \
-                    and peer validation batch headers written out during \
-                    intake tasks. This should only be used in test scenarios \
-                    to simulate buggy data share processors.",
-                )
-                .value_name("BOOL")
-                .possible_value("true")
-                .possible_value("false")
-                .default_value("false"),
-        )
-    }
-
     fn add_common_sample_maker_arguments(self: App<'a, 'b>) -> App<'a, 'b> {
         self.add_gcp_service_account_key_file_argument()
             .add_storage_arguments(Entity::Peer, InOut::Output)
@@ -787,7 +765,6 @@ fn main() -> Result<(), anyhow::Error> {
                 .add_storage_arguments(Entity::Ingestor, InOut::Input)
                 .add_manifest_base_url_argument(Entity::Peer)
                 .add_storage_arguments(Entity::Peer, InOut::Output)
-                .add_use_bogus_packet_file_digest_argument()
                 .add_permit_malformed_batch_argument()
                 .add_gcp_workload_identity_pool_provider_argument()
         )
@@ -925,7 +902,6 @@ fn main() -> Result<(), anyhow::Error> {
                 .add_storage_arguments(Entity::Peer, InOut::Output)
                 .add_task_queue_arguments()
                 .add_metrics_scrape_port_argument()
-                .add_use_bogus_packet_file_digest_argument()
                 .add_permit_malformed_batch_argument()
                 .add_gcp_workload_identity_pool_provider_argument()
                 .add_worker_lifetime_argument()
@@ -1509,10 +1485,6 @@ where
         Some("true") == sub_matches.value_of("permit-malformed-batch"),
         parent_logger,
     )?;
-
-    if let Some("true") = sub_matches.value_of("use-bogus-packet-file-digest") {
-        batch_intaker.set_use_bogus_packet_file_digest(true);
-    }
 
     if let Some(collector) = metrics_collector {
         batch_intaker.set_metrics_collector(collector);
