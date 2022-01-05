@@ -323,6 +323,10 @@ terraform {
       source  = "hashicorp/tls"
       version = "~> 3.1.0"
     }
+    kubectl = {
+      source  = "gavinbunney/kubectl"
+      version = "~> 1.13.1"
+    }
   }
 }
 
@@ -366,9 +370,6 @@ provider "kubernetes" {
   host                   = local.kubernetes_cluster.endpoint
   cluster_ca_certificate = base64decode(local.kubernetes_cluster.certificate_authority_data)
   token                  = local.kubernetes_cluster.token
-  experiments {
-    manifest_resource = true
-  }
 }
 
 provider "helm" {
@@ -377,6 +378,15 @@ provider "helm" {
     cluster_ca_certificate = base64decode(local.kubernetes_cluster.certificate_authority_data)
     token                  = local.kubernetes_cluster.token
   }
+}
+
+# We use provider kubectl to manage Kubernetes manifests, as a workaround for an
+# issue in hashicorp/kubernetes:
+# https://github.com/hashicorp/terraform-provider-kubernetes/issues/1380
+provider "kubectl" {
+  host                   = local.kubernetes_cluster.endpoint
+  cluster_ca_certificate = base64decode(local.kubernetes_cluster.certificate_authority_data)
+  token                  = local.kubernetes_cluster.token
 }
 
 module "manifest_gcp" {
