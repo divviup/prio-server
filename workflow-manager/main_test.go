@@ -204,15 +204,15 @@ func TestScheduleIntakeTasks(t *testing.T) {
 }
 
 func TestScheduleAggregationTasks(t *testing.T) {
-	batchTime := mustParseTime(t, "2020/10/31/20/29")
-	aggregationStart := mustParseTime(t, "2020/10/31/16/00")
-	aggregationEnd := mustParseTime(t, "2020/11/01/00/00")
+	batchTime := mustParseTime(t, "2020/10/31/02/29")
+	aggregationStart := mustParseTime(t, "2020/10/31/00/00")
+	aggregationEnd := mustParseTime(t, "2020/10/31/08/00")
 	aggregationMidpoint := aggregationStart.Add(aggregationEnd.Sub(aggregationStart) / 2)
 	now := mustParseTime(t, "2020/11/01/04/01")
 	maxAge := 24 * time.Hour
 	aggregationPeriod := 8 * time.Hour
-	gracePeriod := 4 * time.Hour
-	aggregationMarker := "aggregate-kittens-seen-2020-10-31-16-00-2020-11-01-00-00"
+	gracePeriod := 20 * time.Hour
+	aggregationMarker := "aggregate-kittens-seen-2020-10-31-00-00-2020-10-31-08-00"
 	expectedAggregationTask := &task.Aggregation{
 		TraceID:          expectedUuid,
 		AggregationID:    "kittens-seen",
@@ -306,15 +306,15 @@ func TestScheduleAggregationTasks(t *testing.T) {
 			intakeBucket := mockBucket{aggregationIDs: []string{"kittens-seen"}}
 			if testCase.hasIntakeBatch {
 				intakeBucket.batchFiles = []string{
-					"kittens-seen/2020/10/31/20/29/b8a5579a-f984-460a-a42d-2813cbf57771.batch",
-					"kittens-seen/2020/10/31/20/29/b8a5579a-f984-460a-a42d-2813cbf57771.batch.avro",
-					"kittens-seen/2020/10/31/20/29/b8a5579a-f984-460a-a42d-2813cbf57771.batch.sig",
+					"kittens-seen/2020/10/31/02/29/b8a5579a-f984-460a-a42d-2813cbf57771.batch",
+					"kittens-seen/2020/10/31/02/29/b8a5579a-f984-460a-a42d-2813cbf57771.batch.avro",
+					"kittens-seen/2020/10/31/02/29/b8a5579a-f984-460a-a42d-2813cbf57771.batch.sig",
 				}
 			}
 
 			ownValidationBucket := mockBucket{
 				aggregationIDs:    []string{"kittens-seen"},
-				intakeTaskMarkers: []string{"intake-kittens-seen-2020-10-31-20-29-b8a5579a-f984-460a-a42d-2813cbf57771"},
+				intakeTaskMarkers: []string{"intake-kittens-seen-2020-10-31-02-29-b8a5579a-f984-460a-a42d-2813cbf57771"},
 			}
 			if testCase.taskMarkerExists {
 				ownValidationBucket.aggregateTaskMarkers = []string{aggregationMarker}
@@ -323,9 +323,9 @@ func TestScheduleAggregationTasks(t *testing.T) {
 			peerValidationBucket := mockBucket{aggregationIDs: []string{"kittens-seen"}}
 			if testCase.hasPeerValidation {
 				peerValidationBucket.batchFiles = []string{
-					"kittens-seen/2020/10/31/20/29/b8a5579a-f984-460a-a42d-2813cbf57771.validity_0",
-					"kittens-seen/2020/10/31/20/29/b8a5579a-f984-460a-a42d-2813cbf57771.validity_0.avro",
-					"kittens-seen/2020/10/31/20/29/b8a5579a-f984-460a-a42d-2813cbf57771.validity_0.sig",
+					"kittens-seen/2020/10/31/02/29/b8a5579a-f984-460a-a42d-2813cbf57771.validity_0",
+					"kittens-seen/2020/10/31/02/29/b8a5579a-f984-460a-a42d-2813cbf57771.validity_0.avro",
+					"kittens-seen/2020/10/31/02/29/b8a5579a-f984-460a-a42d-2813cbf57771.validity_0.sig",
 				}
 			}
 
