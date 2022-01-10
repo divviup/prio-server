@@ -4,10 +4,12 @@ import (
 	"fmt"
 	"path"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/google/uuid"
+
 	"github.com/letsencrypt/prio-server/workflow-manager/task"
 	wftime "github.com/letsencrypt/prio-server/workflow-manager/time"
 )
@@ -38,15 +40,40 @@ func (b *mockBucket) ListAggregationIDs() ([]string, error) {
 }
 
 func (b *mockBucket) ListBatchFiles(aggregationID string, interval wftime.Interval) ([]string, error) {
-	return b.batchFiles, nil
+	var result []string
+	for _, ts := range interval.TimestampPrefixes() {
+		prefix := path.Join(aggregationID, ts.TruncatedTimestamp())
+		for _, bf := range b.batchFiles {
+			if strings.HasPrefix(bf, prefix) {
+				result = append(result, bf)
+			}
+		}
+	}
+	return result, nil
 }
 
 func (b *mockBucket) ListIntakeTaskMarkers(aggregationID string, interval wftime.Interval) ([]string, error) {
-	return b.intakeTaskMarkers, nil
+	var result []string
+	for _, ts := range interval.TimestampPrefixes() {
+		prefix := fmt.Sprintf("intake-%s-%s", aggregationID, ts.TruncatedMarkerString())
+		for _, itm := range b.intakeTaskMarkers {
+			if strings.HasPrefix(itm, prefix) {
+				result = append(result, itm)
+			}
+		}
+	}
+	return result, nil
 }
 
 func (b *mockBucket) ListAggregateTaskMarkers(aggregationID string) ([]string, error) {
-	return b.aggregateTaskMarkers, nil
+	var result []string
+	prefix := fmt.Sprintf("aggregate-%s-", aggregationID)
+	for _, atm := range b.aggregateTaskMarkers {
+		if strings.HasPrefix(atm, prefix) {
+			result = append(result, atm)
+		}
+	}
+	return result, nil
 }
 
 func (b *mockBucket) WriteTaskMarker(marker string) error {
@@ -125,12 +152,12 @@ func TestScheduleIntakeTasks(t *testing.T) {
 				maxAge:                  maxAge,
 				aggregationInterval:     wftime.StandardAggregationWindow(aggregationPeriod, gracePeriod),
 			}); err != nil {
-				t.Errorf("unexpected error %q", err)
+				t.Errorf("Unexpected error: %v", err)
 			}
 
 			if testCase.expectedIntakeTask == nil {
 				if len(intakeTaskEnqueuer.enqueuedTasks) != 0 {
-					t.Errorf("unexpected intake tasks scheduled: %q", intakeTaskEnqueuer.enqueuedTasks)
+					t.Errorf("Unexpected intake tasks scheduled: %v", intakeTaskEnqueuer.enqueuedTasks)
 				}
 			} else {
 				foundExpectedTask := false
@@ -147,17 +174,17 @@ func TestScheduleIntakeTasks(t *testing.T) {
 					}
 				}
 				if !foundExpectedTask {
-					t.Errorf("did not find expected intake task %+v among %q", testCase.expectedIntakeTask, intakeTaskEnqueuer.enqueuedTasks)
+					t.Errorf("Did not find expected intake task %+v among %v", testCase.expectedIntakeTask, intakeTaskEnqueuer.enqueuedTasks)
 				}
 			}
 
 			if len(aggregateTaskEnqueuer.enqueuedTasks) != 0 {
-				t.Errorf("unexpected aggregation tasks scheduled: %q", aggregateTaskEnqueuer.enqueuedTasks)
+				t.Errorf("Unexpected aggregation tasks scheduled: %v", aggregateTaskEnqueuer.enqueuedTasks)
 			}
 
 			if testCase.expectedTaskMarker == "" {
 				if len(ownValidationBucket.writtenObjectKeys) != 0 {
-					t.Errorf("unexpected task marker written: %q", ownValidationBucket.writtenObjectKeys)
+					t.Errorf("Unexpected task marker written: %v", ownValidationBucket.writtenObjectKeys)
 				}
 			} else {
 				foundExpectedMarker := false
@@ -169,7 +196,7 @@ func TestScheduleIntakeTasks(t *testing.T) {
 					}
 				}
 				if !foundExpectedMarker {
-					t.Errorf("did not find expected task marker among %q", ownValidationBucket.writtenObjectKeys)
+					t.Errorf("Did not find expected task marker among %v", ownValidationBucket.writtenObjectKeys)
 				}
 			}
 		})
@@ -177,15 +204,15 @@ func TestScheduleIntakeTasks(t *testing.T) {
 }
 
 func TestScheduleAggregationTasks(t *testing.T) {
-	batchTime := mustParseTime(t, "2020/10/31/20/29")
-	aggregationStart := mustParseTime(t, "2020/10/31/16/00")
-	aggregationEnd := mustParseTime(t, "2020/11/01/00/00")
+	batchTime := mustParseTime(t, "2020/10/31/02/29")
+	aggregationStart := mustParseTime(t, "2020/10/31/00/00")
+	aggregationEnd := mustParseTime(t, "2020/10/31/08/00")
 	aggregationMidpoint := aggregationStart.Add(aggregationEnd.Sub(aggregationStart) / 2)
 	now := mustParseTime(t, "2020/11/01/04/01")
 	maxAge := 24 * time.Hour
 	aggregationPeriod := 8 * time.Hour
-	gracePeriod := 4 * time.Hour
-	aggregationMarker := "aggregate-kittens-seen-2020-10-31-16-00-2020-11-01-00-00"
+	gracePeriod := 20 * time.Hour
+	aggregationMarker := "aggregate-kittens-seen-2020-10-31-00-00-2020-10-31-08-00"
 	expectedAggregationTask := &task.Aggregation{
 		TraceID:          expectedUuid,
 		AggregationID:    "kittens-seen",
@@ -208,7 +235,7 @@ func TestScheduleAggregationTasks(t *testing.T) {
 	}{
 		// Standard aggregation window tests.
 		{
-			name:                    "standard-within-window-no-own-no-peer",
+			name:                    "standard-within-window-no-intake-no-peer",
 			hasIntakeBatch:          false,
 			hasPeerValidation:       false,
 			taskMarkerExists:        false,
@@ -217,7 +244,7 @@ func TestScheduleAggregationTasks(t *testing.T) {
 			expectedTaskMarker:      "",
 		},
 		{
-			name:                    "standard-within-window-no-own-has-peer",
+			name:                    "standard-within-window-no-intake-has-peer",
 			hasIntakeBatch:          false,
 			hasPeerValidation:       true,
 			taskMarkerExists:        false,
@@ -226,7 +253,7 @@ func TestScheduleAggregationTasks(t *testing.T) {
 			expectedTaskMarker:      "",
 		},
 		{
-			name:                    "standard-within-window-has-own-no-peer",
+			name:                    "standard-within-window-has-intake-no-peer",
 			hasIntakeBatch:          true,
 			hasPeerValidation:       false,
 			taskMarkerExists:        false,
@@ -279,15 +306,15 @@ func TestScheduleAggregationTasks(t *testing.T) {
 			intakeBucket := mockBucket{aggregationIDs: []string{"kittens-seen"}}
 			if testCase.hasIntakeBatch {
 				intakeBucket.batchFiles = []string{
-					"kittens-seen/2020/10/31/20/29/b8a5579a-f984-460a-a42d-2813cbf57771.batch",
-					"kittens-seen/2020/10/31/20/29/b8a5579a-f984-460a-a42d-2813cbf57771.batch.avro",
-					"kittens-seen/2020/10/31/20/29/b8a5579a-f984-460a-a42d-2813cbf57771.batch.sig",
+					"kittens-seen/2020/10/31/02/29/b8a5579a-f984-460a-a42d-2813cbf57771.batch",
+					"kittens-seen/2020/10/31/02/29/b8a5579a-f984-460a-a42d-2813cbf57771.batch.avro",
+					"kittens-seen/2020/10/31/02/29/b8a5579a-f984-460a-a42d-2813cbf57771.batch.sig",
 				}
 			}
 
 			ownValidationBucket := mockBucket{
 				aggregationIDs:    []string{"kittens-seen"},
-				intakeTaskMarkers: []string{"intake-kittens-seen-2020-10-31-20-29-b8a5579a-f984-460a-a42d-2813cbf57771"},
+				intakeTaskMarkers: []string{"intake-kittens-seen-2020-10-31-02-29-b8a5579a-f984-460a-a42d-2813cbf57771"},
 			}
 			if testCase.taskMarkerExists {
 				ownValidationBucket.aggregateTaskMarkers = []string{aggregationMarker}
@@ -296,9 +323,9 @@ func TestScheduleAggregationTasks(t *testing.T) {
 			peerValidationBucket := mockBucket{aggregationIDs: []string{"kittens-seen"}}
 			if testCase.hasPeerValidation {
 				peerValidationBucket.batchFiles = []string{
-					"kittens-seen/2020/10/31/20/29/b8a5579a-f984-460a-a42d-2813cbf57771.validity_0",
-					"kittens-seen/2020/10/31/20/29/b8a5579a-f984-460a-a42d-2813cbf57771.validity_0.avro",
-					"kittens-seen/2020/10/31/20/29/b8a5579a-f984-460a-a42d-2813cbf57771.validity_0.sig",
+					"kittens-seen/2020/10/31/02/29/b8a5579a-f984-460a-a42d-2813cbf57771.validity_0",
+					"kittens-seen/2020/10/31/02/29/b8a5579a-f984-460a-a42d-2813cbf57771.validity_0.avro",
+					"kittens-seen/2020/10/31/02/29/b8a5579a-f984-460a-a42d-2813cbf57771.validity_0.sig",
 				}
 			}
 
@@ -317,16 +344,16 @@ func TestScheduleAggregationTasks(t *testing.T) {
 				maxAge:                  maxAge,
 				aggregationInterval:     testCase.aggregationInterval,
 			}); err != nil {
-				t.Errorf("Unexpected error: %q", err)
+				t.Errorf("Unexpected error: %v", err)
 			}
 
 			if len(intakeTaskEnqueuer.enqueuedTasks) != 0 {
-				t.Errorf("Unexpected intake tasks scheduled: %q", intakeTaskEnqueuer.enqueuedTasks)
+				t.Errorf("Unexpected intake tasks scheduled: %v", intakeTaskEnqueuer.enqueuedTasks)
 			}
 
 			if testCase.expectedAggregationTask == nil {
 				if len(aggregateTaskEnqueuer.enqueuedTasks) != 0 {
-					t.Errorf("Unexpected aggregation tasks scheduled: %q", aggregateTaskEnqueuer.enqueuedTasks)
+					t.Errorf("Unexpected aggregation tasks scheduled: %v", aggregateTaskEnqueuer.enqueuedTasks)
 				}
 			} else {
 				foundExpectedTask := false
@@ -343,13 +370,13 @@ func TestScheduleAggregationTasks(t *testing.T) {
 					}
 				}
 				if !foundExpectedTask {
-					t.Errorf("Did not find expected aggregate task among %q", aggregateTaskEnqueuer.enqueuedTasks)
+					t.Errorf("Did not find expected aggregate task among %v", aggregateTaskEnqueuer.enqueuedTasks)
 				}
 			}
 
 			if testCase.expectedTaskMarker == "" {
 				if len(ownValidationBucket.writtenObjectKeys) != 0 {
-					t.Errorf("Unexpected task marker written: %q", ownValidationBucket.writtenObjectKeys)
+					t.Errorf("Unexpected task marker written: %v", ownValidationBucket.writtenObjectKeys)
 				}
 			} else {
 				foundExpectedMarker := false
@@ -361,7 +388,7 @@ func TestScheduleAggregationTasks(t *testing.T) {
 					}
 				}
 				if !foundExpectedMarker {
-					t.Errorf("Did not find expected task marker among %q", ownValidationBucket.writtenObjectKeys)
+					t.Errorf("Did not find expected task marker among %v", ownValidationBucket.writtenObjectKeys)
 				}
 			}
 		})
