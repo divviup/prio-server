@@ -16,7 +16,7 @@ import (
 func webIDP(sess *session.Session, identity string) (*credentials.Credentials, error) {
 	stsSTS := sts.New(sess)
 	roleSessionName := ""
-	roleProvider := stscreds.NewWebIdentityRoleProviderWithToken(
+	roleProvider := stscreds.NewWebIdentityRoleProviderWithOptions(
 		stsSTS, identity, roleSessionName, tokenfetcher.NewTokenFetcher("sts.amazonaws.com/gke-identity-federation"))
 
 	return credentials.NewCredentials(roleProvider), nil
