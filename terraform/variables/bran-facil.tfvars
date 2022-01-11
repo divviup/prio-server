@@ -1,4 +1,5 @@
 environment     = "bran-facil"
+state_bucket    = "bran-facil-us-west1-prio-terraform"
 gcp_region      = "us-west1"
 gcp_project     = "prio-bran-dev"
 aws_profile     = "prio-brandon-dev"
