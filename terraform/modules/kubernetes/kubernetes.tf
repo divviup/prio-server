@@ -162,6 +162,15 @@ variable "gcp_workload_identity_pool_provider" {
   type = string
 }
 
+variable "single_object_validation_batch_localities" {
+  type        = set(string)
+  description = <<DESCRIPTION
+A set of localities where single-object validation batches are generated.
+(Other localities use the "old" three-object format.) The special value "*"
+indicates that all localities should generate single-object validation batches.
+DESCRIPTION
+}
+
 # We repeat this declaration from main.tf to work around an issue where
 # Terraform will look for hashicorp/kubectl instead of gavinbunney/kubectl
 # https://github.com/gavinbunney/terraform-provider-kubectl/issues/39
@@ -369,7 +378,8 @@ resource "kubernetes_deployment" "intake_batch" {
             "--aws-sqs-region=${var.use_aws ? var.aws_region : ""}",
             "--gcp-project-id=${var.use_aws ? "" : data.google_project.project.project_id}",
             "--gcp-workload-identity-pool-provider=${var.gcp_workload_identity_pool_provider}",
-            "--worker-maximum-lifetime=3600"
+            "--worker-maximum-lifetime=3600",
+            "--write-single-object-validation-batches=${contains(var.single_object_validation_batch_localities, "*") || contains(var.single_object_validation_batch_localities, var.kubernetes_namespace)}"
           ]
           # Prometheus metrics scrape endpoint
           port {

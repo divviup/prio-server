@@ -267,6 +267,16 @@ variable "stackdriver_exporter_helm_chart_version" {
   default = ""
 }
 
+variable "single_object_validation_batch_localities" {
+  type        = list(string)
+  default     = []
+  description = <<DESCRIPTION
+A set of localities where single-object validation batches are generated.
+(Other localities use the "old" three-object format.) The special value "*"
+indicates that all localities should generate single-object validation batches.
+DESCRIPTION
+}
+
 terraform {
   backend "gcs" {}
 
@@ -618,6 +628,7 @@ module "data_share_processors" {
   max_aggregate_worker_count                     = each.value.max_aggregate_worker_count
   eks_oidc_provider                              = var.use_aws ? module.eks[0].oidc_provider : { url = "", arn = "" }
   gcp_workload_identity_pool_provider            = local.gcp_workload_identity_pool_provider
+  single_object_validation_batch_localities      = toset(var.single_object_validation_batch_localities)
 }
 
 # The portal owns two sum part buckets (one for each data share processor) and

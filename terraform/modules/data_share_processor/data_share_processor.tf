@@ -133,6 +133,15 @@ variable "gcp_workload_identity_pool_provider" {
   type = string
 }
 
+variable "single_object_validation_batch_localities" {
+  type        = set(string)
+  description = <<DESCRIPTION
+A set of localities where single-object validation batches are generated.
+(Other localities use the "old" three-object format.) The special value "*"
+indicates that all localities should generate single-object validation batches.
+DESCRIPTION
+}
+
 # We need the ingestion server's manifest so that we can discover the GCP
 # service account it will use to upload ingestion batches. Some ingestors
 # (Apple) are singletons, and advertise a single global manifest which contains
@@ -374,40 +383,41 @@ module "sns_sqs" {
 }
 
 module "kubernetes" {
-  source                                  = "../../modules/kubernetes/"
-  data_share_processor_name               = var.data_share_processor_name
-  ingestor                                = var.ingestor
-  environment                             = var.environment
-  kubernetes_namespace                    = var.kubernetes_namespace
-  ingestion_bucket                        = local.ingestion_bucket_url
-  ingestor_manifest_base_url              = var.ingestor_manifest_base_url
-  packet_decryption_key_kubernetes_secret = var.packet_decryption_key_kubernetes_secret
-  peer_manifest_base_url                  = var.peer_share_processor_manifest_base_url
-  remote_peer_validation_bucket_identity  = local.remote_validation_bucket_writer
-  peer_validation_bucket                  = local.peer_validation_bucket_url
-  own_validation_bucket                   = local.own_validation_bucket_url
-  sum_part_bucket_service_account_email   = var.remote_bucket_writer_gcp_service_account_email
-  portal_server_manifest_base_url         = var.portal_server_manifest_base_url
-  is_first                                = var.is_first
-  intake_max_age                          = var.intake_max_age
-  aggregation_period                      = var.aggregation_period
-  aggregation_grace_period                = var.aggregation_grace_period
-  pushgateway                             = var.pushgateway
-  container_registry                      = var.container_registry
-  workflow_manager_image                  = var.workflow_manager_image
-  workflow_manager_version                = var.workflow_manager_version
-  facilitator_image                       = var.facilitator_image
-  facilitator_version                     = var.facilitator_version
-  intake_queue                            = local.intake_queue
-  aggregate_queue                         = local.aggregate_queue
-  min_intake_worker_count                 = var.min_intake_worker_count
-  max_intake_worker_count                 = var.max_intake_worker_count
-  min_aggregate_worker_count              = var.min_aggregate_worker_count
-  max_aggregate_worker_count              = var.max_aggregate_worker_count
-  use_aws                                 = var.use_aws
-  eks_oidc_provider                       = var.eks_oidc_provider
-  aws_region                              = var.aws_region
-  gcp_workload_identity_pool_provider     = var.gcp_workload_identity_pool_provider
+  source                                    = "../../modules/kubernetes/"
+  data_share_processor_name                 = var.data_share_processor_name
+  ingestor                                  = var.ingestor
+  environment                               = var.environment
+  kubernetes_namespace                      = var.kubernetes_namespace
+  ingestion_bucket                          = local.ingestion_bucket_url
+  ingestor_manifest_base_url                = var.ingestor_manifest_base_url
+  packet_decryption_key_kubernetes_secret   = var.packet_decryption_key_kubernetes_secret
+  peer_manifest_base_url                    = var.peer_share_processor_manifest_base_url
+  remote_peer_validation_bucket_identity    = local.remote_validation_bucket_writer
+  peer_validation_bucket                    = local.peer_validation_bucket_url
+  own_validation_bucket                     = local.own_validation_bucket_url
+  sum_part_bucket_service_account_email     = var.remote_bucket_writer_gcp_service_account_email
+  portal_server_manifest_base_url           = var.portal_server_manifest_base_url
+  is_first                                  = var.is_first
+  intake_max_age                            = var.intake_max_age
+  aggregation_period                        = var.aggregation_period
+  aggregation_grace_period                  = var.aggregation_grace_period
+  pushgateway                               = var.pushgateway
+  container_registry                        = var.container_registry
+  workflow_manager_image                    = var.workflow_manager_image
+  workflow_manager_version                  = var.workflow_manager_version
+  facilitator_image                         = var.facilitator_image
+  facilitator_version                       = var.facilitator_version
+  intake_queue                              = local.intake_queue
+  aggregate_queue                           = local.aggregate_queue
+  min_intake_worker_count                   = var.min_intake_worker_count
+  max_intake_worker_count                   = var.max_intake_worker_count
+  min_aggregate_worker_count                = var.min_aggregate_worker_count
+  max_aggregate_worker_count                = var.max_aggregate_worker_count
+  use_aws                                   = var.use_aws
+  eks_oidc_provider                         = var.eks_oidc_provider
+  aws_region                                = var.aws_region
+  gcp_workload_identity_pool_provider       = var.gcp_workload_identity_pool_provider
+  single_object_validation_batch_localities = var.single_object_validation_batch_localities
 }
 
 output "data_share_processor_name" {
