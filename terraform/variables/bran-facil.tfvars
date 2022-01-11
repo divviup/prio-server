@@ -2,7 +2,6 @@ environment     = "bran-facil"
 state_bucket    = "bran-facil-us-west1-prio-terraform"
 gcp_region      = "us-west1"
 gcp_project     = "prio-bran-dev"
-aws_profile     = "prio-brandon-dev"
 localities      = ["narnia", "gondor", "asgard", "eorzea"]
 aws_region      = "us-west-1"
 manifest_domain = "isrg-prio.org"
@@ -70,13 +69,6 @@ ingestors = {
     }
   }
 }
-cluster_settings = {
-  initial_node_count = 3
-  min_node_count     = 3
-  max_node_count     = 3
-  gcp_machine_type   = "e2-standard-2"
-  aws_machine_types  = []
-}
 test_peer_environment = {
   env_with_ingestor            = "bran-facil"
   env_without_ingestor         = "bran-pha"
@@ -96,5 +88,6 @@ default_aggregation_period = "30m"
 default_peer_share_processor_manifest_base_url = "isrg-prio-bran-pha-manifest.s3.amazonaws.com"
 default_portal_server_manifest_base_url        = "storage.googleapis.com/prio-bran-facil-manifests/portal-server"
 
-key_rotator_schedule           = "*/10 * * * *" // once per ten minutes
-enable_key_rotation_localities = ["*"]
+key_rotator_schedule                      = "*/10 * * * *" // once per ten minutes
+enable_key_rotation_localities            = ["*"]
+single_object_validation_batch_localities = ["gondor"]
