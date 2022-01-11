@@ -1,4 +1,5 @@
 environment     = "prod-intl"
+state_bucket    = "prod-intl-us-west1-prio-terraform"
 gcp_region      = "us-west1"
 gcp_project     = "prio-intl-prod"
 localities      = ["mn", "mx-coa", "mx-jal", "mx-pue", "mx-yuc"]

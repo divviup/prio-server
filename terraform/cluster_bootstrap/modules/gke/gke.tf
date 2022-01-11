@@ -86,7 +86,7 @@ resource "google_container_cluster" "cluster" {
   # https://cloud.google.com/kubernetes-engine/docs/how-to/encrypting-secrets
   database_encryption {
     state    = "ENCRYPTED"
-    key_name = google_kms_crypto_key.etcd_encryption_key.id
+    key_name = "${google_kms_crypto_key.etcd_encryption_key.key_ring}/cryptoKeys/${google_kms_crypto_key.etcd_encryption_key.name}"
   }
 
   # Enables boot integrity checking and monitoring for nodes in the cluster.
@@ -158,31 +158,22 @@ data "google_project" "project" {}
 # account name per the specification in:
 # https://cloud.google.com/kubernetes-engine/docs/how-to/encrypting-secrets#grant_permission_to_use_the_key
 resource "google_kms_crypto_key_iam_binding" "etcd-encryption-key-iam-binding" {
-  crypto_key_id = google_kms_crypto_key.etcd_encryption_key.id
+  crypto_key_id = "${google_kms_crypto_key.etcd_encryption_key.key_ring}/cryptoKeys/${google_kms_crypto_key.etcd_encryption_key.name}"
   role          = "roles/cloudkms.cryptoKeyEncrypterDecrypter"
   members = [
     "serviceAccount:service-${data.google_project.project.number}@container-engine-robot.iam.gserviceaccount.com"
   ]
 }
 
-data "google_client_config" "current" {}
-
-output "cluster_name" {
-  value = google_container_cluster.cluster.name
+# Create artifact registry to store container images
+resource "google_project_service" "artifact_registry" {
+  service = "artifactregistry.googleapis.com"
 }
 
-output "cluster_endpoint" {
-  value = "https://${google_container_cluster.cluster.endpoint}"
-}
+resource "google_artifact_registry_repository" "artifact_registry" {
+  provider = google-beta
 
-output "certificate_authority_data" {
-  value = google_container_cluster.cluster.master_auth.0.cluster_ca_certificate
-}
-
-output "kms_keyring" {
-  value = google_kms_key_ring.keyring.id
-}
-
-output "token" {
-  value = data.google_client_config.current.access_token
+  repository_id = "prio-server-docker"
+  format        = "DOCKER"
+  location      = var.gcp_region
 }

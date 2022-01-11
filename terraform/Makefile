@@ -20,9 +20,10 @@ PROJECT="$(shell grep '^gcp_project' $(VARS) | awk -F'=' '{print $$2}' | sed 's/
 ifeq ($(PROJECT),)
 $(error $(BOLD)$(RED)PROJECT was not detected$(RESET))
 endif
-
-STORAGE_BUCKET="$(ENV)-$(REGION)-prio-terraform"
-STORAGE_BUCKET_URL="gs://$(STORAGE_BUCKET)"
+STATE_BUCKET="$(shell grep '^state_bucket' $(VARS) | awk -F'=' '{print $$2}' | sed 's/[[:space:]]//g')"
+ifeq ($(STATE_BUCKET),)
+$(error $(BOLD)$(RED)STATE_BUCKET was not detected$(RESET))
+endif
 
 .PHONY: help
 help:
@@ -35,15 +36,6 @@ prep: ## Prepare a new workspace (environment) if needed, configure the tfstate 
 		echo "$(BOLD)$(RED)Could not find variables file: $(VARS)$(RESET)"; \
 		exit 1; \
 	 fi
-	@echo "$(BOLD)Verifying that the storage bucket $(STORAGE_BUCKET_URL) in $(PROJECT) for remote state exists$(RESET)"
-	@if ! gsutil ls -p $(PROJECT) -b $(STORAGE_BUCKET_URL) > /dev/null 2>&1 ; then \
-		echo "$(BOLD)Storage bucket $(STORAGE_BUCKET_URL) was not found, creating new bucket with versioning enabled to store tfstate$(RESET)"; \
-		gsutil mb -p $(PROJECT) -l $(REGION) $(STORAGE_BUCKET_URL) > /dev/null 2>&1 ; \
-		gsutil versioning set on -p $(PROJECT) $(STORAGE_BUCKET_URL) > /dev/null 2>&1 ; \
-		echo "$(BOLD)$(GREEN)Storage bucket $(STORAGE_BUCKET_URL) created$(RESET)"; \
-	 else
-		echo "$(BOLD)$(GREEN)Storage bucket $(STORAGE_BUCKET_URL) exists$(RESET)"; \
-	 fi
 	@echo "$(BOLD)Configuring the terraform backend$(RESET)"
 	@terraform init \
 		-input=false \
@@ -52,7 +44,7 @@ prep: ## Prepare a new workspace (environment) if needed, configure the tfstate 
 		-upgrade \
 		-verify-plugins=true \
 		-backend=true \
-		-backend-config="bucket=$(STORAGE_BUCKET)"
+		-backend-config="bucket=$(STATE_BUCKET)"
 
 .PHONY: validate
 validate: prep ## Show what terraform believes about the validity of the defined resources
@@ -180,10 +172,63 @@ destroy-target: prep ## Destroy a specific resource. Caution though, this destro
 		-var-file=$(VARS) \
 		-target=$$DATA
 
-.PHONY: destroy-backend
-destroy-backend: ## Destroy storage bucket
-	@if ! gsutil rm -r $(STORAGE_BUCKET_URL); then \
-		echo "$(BOLD)$(RED)Unable to delete cloud storage bucket $(STORAGE_BUCKET_URL).$(RESET)"; \
-	else
-		echo "$(BOLD)$(GREEN)Cloud storage bucket $(STORAGE_BUCKET_URL) deleted successfully.$(RESET)"; \
-	fi
+.PHONY: prep-cluster-bootstrap
+prep-cluster-bootstrap: ## Prepare a new workspace (environment) if needed, configure the tfstate backend, update any modules, and switch to the workspace
+	@rm -rf cluster_bootstrap/.terraform/
+	@if [ ! -f "$(VARS)" ]; then \
+		echo "$(BOLD)$(RED)Could not find variables file: $(VARS)$(RESET)"; \
+		exit 1; \
+	 fi
+	@echo "$(BOLD)Configuring the terraform backend$(RESET)"
+	@terraform \
+		-chdir="cluster_bootstrap" \
+		init \
+		-input=false \
+		-force-copy \
+		-lock=true \
+		-upgrade \
+		-verify-plugins=true \
+		-backend=true \
+		-backend-config="bucket=$(STATE_BUCKET)" \
+		-backend-config="prefix=cluster-bootstrap"
+
+.PHONY: plan-cluster-bootstrap
+plan-cluster-bootstrap: prep-cluster-bootstrap ## Show plan for configuring AWS management account for this environment
+	@terraform \
+		-chdir="cluster_bootstrap" \
+		plan \
+		-lock=true \
+		-input=false \
+		-refresh=true \
+		-var-file="../$(VARS)"
+
+.PHONY: apply-cluster-bootstrap
+apply-cluster-bootstrap: prep-cluster-bootstrap
+	@terraform \
+		-chdir="cluster_bootstrap" \
+		apply \
+		-lock=true \
+		-input=false \
+		-refresh=true \
+		-var-file="../$(VARS)"
+
+.PHONY: plan-destroy-cluster-bootstrap
+plan-destroy-cluster-bootstrap: prep-cluster-bootstrap
+	@terraform \
+		-chdir="cluster_bootstrap" \
+		plan \
+		-lock=true \
+		-input=false \
+		-refresh=true \
+		-destroy \
+		-var-file="../$(VARS)"
+
+.PHONY: destroy-cluster-bootstrap
+destroy-cluster-bootstrap: prep-cluster-bootstrap
+	@terraform \
+		-chdir="cluster_bootstrap" \
+		destroy \
+		-lock=true \
+		-input=false \
+		-refresh=true \
+		-var-file="../$(VARS)"

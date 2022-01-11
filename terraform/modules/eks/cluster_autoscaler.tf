@@ -15,7 +15,7 @@ module "account_mapping" {
   aws_iam_role_name = "${var.environment}-cluster-autoscaler"
   eks_oidc_provider = {
     url = local.oidc_provider_url,
-    arn = aws_iam_openid_connect_provider.oidc.arn,
+    arn = local.oidc_provider_arn
   }
   kubernetes_service_account_name = "cluster-autoscaler"
   kubernetes_service_account_labels = {
@@ -278,7 +278,7 @@ resource "kubernetes_deployment" "cluster_autoscaler" {
             "--cloud-provider=aws",
             "--skip-nodes-with-local-storage=false",
             "--expander=least-waste",
-            "--node-group-auto-discovery=asg:tag=k8s.io/cluster-autoscaler/enabled,k8s.io/cluster-autoscaler/${aws_eks_cluster.cluster.name}",
+            "--node-group-auto-discovery=asg:tag=k8s.io/cluster-autoscaler/enabled,k8s.io/cluster-autoscaler/${data.aws_eks_cluster.cluster.name}",
             "--balance-similar-node-groups",
             "--skip-nodes-with-system-pods=false",
           ]
