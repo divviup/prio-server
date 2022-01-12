@@ -328,7 +328,7 @@ DATASOURCE
 
 resource "kubernetes_config_map" "grafana_dashboard_default" {
   metadata {
-    name = "grafana-dashboard-default"
+    name      = "grafana-dashboard-default"
     namespace = kubernetes_namespace.monitoring.metadata[0].name
     labels = {
       grafana-dashboard = 1
@@ -360,12 +360,12 @@ resource "helm_release" "grafana" {
   }
 
   set {
-    name = "sidecar.dashboards.enabled"
+    name  = "sidecar.dashboards.enabled"
     value = "true"
   }
 
   set {
-    name = "sidecar.dashboards.label"
+    name  = "sidecar.dashboards.label"
     value = "grafana-dashboard"
   }
 }
