@@ -91,6 +91,6 @@ batch_signing_key_rotation_policy = {
   delete_min_count = 2
 }
 
-prometheus_helm_chart_version           = "15.0.1"
-grafana_helm_chart_version              = "6.18.2"
-stackdriver_exporter_helm_chart_version = "1.12.0"
+prometheus_helm_chart_version          = "15.0.2"
+grafana_helm_chart_version             = "6.20.5"
+cloudwatch_exporter_helm_chart_version = "1.12.0"

@@ -321,7 +321,7 @@ apiVersion: 1
 datasources:
 - name: prometheus
   type: prometheus
-  url: prometheus-server
+  url: http://prometheus-server
 DATASOURCE
   }
 }
