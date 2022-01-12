@@ -326,6 +326,20 @@ DATASOURCE
   }
 }
 
+resource "kubernetes_config_map" "grafana_dashboard_default" {
+  metadata {
+    name = "grafana-dashboard-default"
+    namespace = kubernetes_namespace.monitoring.metadata[0].name
+    labels = {
+      grafana-dashboard = 1
+    }
+  }
+
+  data = {
+    "default_dashboard.json" = file("${path.module}/default_dashboard.json")
+  }
+}
+
 # We use Grafana as a frontend to Prometheus for dashboards. Documentation and
 # config reference: https://artifacthub.io/packages/helm/grafana/grafana
 resource "helm_release" "grafana" {
@@ -343,6 +357,16 @@ resource "helm_release" "grafana" {
   set {
     name  = "sidecar.datasources.label"
     value = "grafana-datasources"
+  }
+
+  set {
+    name = "sidecar.dashboards.enabled"
+    value = "true"
+  }
+
+  set {
+    name = "sidecar.dashboards.label"
+    value = "grafana-dashboard"
   }
 }
 
