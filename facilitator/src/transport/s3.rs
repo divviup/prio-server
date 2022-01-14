@@ -19,7 +19,7 @@ use rusoto_s3::{
 };
 use slog::{debug, info, o, warn, Logger};
 use std::{
-    io::{Read, Write},
+    io::{self, ErrorKind, Read, Write},
     mem,
     pin::Pin,
     time::Duration,
@@ -27,6 +27,7 @@ use std::{
 use tokio::{
     io::{AsyncRead, AsyncReadExt},
     runtime::Handle,
+    time::timeout,
 };
 use uuid::Uuid;
 
@@ -235,14 +236,19 @@ impl MultipartUploadWriter {
             S3Transport::service(),
             "CreateMultipartUpload",
             || {
-                runtime_handle.block_on(client.create_multipart_upload(
-                    CreateMultipartUploadRequest {
-                        bucket: bucket.to_string(),
-                        key: key.to_string(),
-                        acl: Some("bucket-owner-full-control".to_owned()),
-                        ..Default::default()
-                    },
-                ))
+                runtime_handle.block_on(async {
+                    timeout(
+                        Duration::from_secs(600),
+                        client.create_multipart_upload(CreateMultipartUploadRequest {
+                            bucket: bucket.to_string(),
+                            key: key.to_string(),
+                            acl: Some("bucket-owner-full-control".to_owned()),
+                            ..Default::default()
+                        }),
+                    )
+                    .await
+                    .map_err(|err| RusotoError::from(io::Error::new(ErrorKind::TimedOut, err)))?
+                })
             },
         )
         .context(format!(
