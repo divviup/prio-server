@@ -11,6 +11,7 @@ atty = "0.2"
 avro-rs = { version = "0.13.0", features = ["snappy"] }
 backoff = "0.4.0"
 base64 = "0.13.0"
+bitvec = "1"
 bytes = "1.1.0"
 chrono = { version = "0.4", features = ["serde"] }
 clap = "2.34.0"

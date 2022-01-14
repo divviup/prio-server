@@ -6,13 +6,13 @@ use crate::{
     DATE_FORMAT,
 };
 use anyhow::{anyhow, Context, Result};
+use bitvec::prelude::*;
 use chrono::NaiveDateTime;
 use prio::{
     client::Client,
     encrypt::PublicKey,
     field::{FieldElement, FieldPriov2},
 };
-use rand::{thread_rng, Rng};
 use slog::{info, o, Logger};
 use uuid::Uuid;
 
@@ -181,8 +181,6 @@ impl<'a> SampleGenerator<'a> {
         );
 
         // Generate random data packets and write into data share packets
-        let mut thread_rng = thread_rng();
-
         let mut client = Client::new(
             // usize is probably bigger than i32 and we have checked that dim is
             // positive so this is safe
@@ -220,16 +218,30 @@ impl<'a> SampleGenerator<'a> {
 
         // Compute packets & dropped packets for facilitator & PHA.
         for count in 0..packet_count {
+            let packet_uuid = Uuid::new_v4();
+
             // Generate random bit vector
             let data_len = if Self::short_packet(generate_short_packet, count) {
-                dimension - 1
+                (dimension - 1) as usize
             } else {
-                dimension
+                dimension as usize
             };
 
-            let data: Vec<FieldPriov2> = (0..data_len)
-                .map(|_| FieldPriov2::from(thread_rng.gen_range(0..2)))
+            // Compute data deterministically from packet_uuid. This allows the
+            // data to be computed later without needing to reread the data
+            // share packets.
+            let data: Vec<FieldPriov2> = packet_uuid
+                .as_bytes()
+                .view_bits::<Msb0>()
+                .iter()
+                .take(data_len)
+                .map(|bit| FieldPriov2::from(*bit as u32))
                 .collect();
+            assert_eq!(
+                data.len(),
+                data_len,
+                "Packet UUID not large enough for dimension"
+            );
 
             // If we are dropping the packet from either output, do
             // not include it in the reference sum
@@ -258,7 +270,6 @@ impl<'a> SampleGenerator<'a> {
             // which we don't have in this context. Using a constant value removes
             // the libprio::Server dependency for creating samples
             let r_pit: u32 = 998314904;
-            let packet_uuid = Uuid::new_v4();
 
             if SampleOutput::drop_packet(drop_nth_pha_packet, count) {
                 info!(
