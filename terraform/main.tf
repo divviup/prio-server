@@ -566,10 +566,17 @@ data "google_container_cluster" "cluster" {
   location = var.gcp_region
 }
 
+resource "random_string" "kms_id" {
+  length  = 8
+  upper   = false
+  number  = false
+  special = false
+}
+
 data "google_kms_key_ring" "keyring" {
   count = var.use_aws ? 0 : 1
 
-  name     = "prio-${var.environment}-kms-keyring"
+  name     = "prio-${var.environment}-${random_string.kms_id.result}-kms-keyring"
   location = var.gcp_region
 }
 
