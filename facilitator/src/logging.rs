@@ -1,8 +1,9 @@
-use anyhow::{anyhow, Result};
+use anyhow::{anyhow, Context, Result};
 use atty::{self, Stream};
 use serde::Serialize;
 use slog::{o, Drain, FnValue, Level, LevelFilter, Logger, PushFnValue};
 use slog_json::Json;
+use slog_scope::GlobalLoggerGuard;
 use slog_term::{FullFormat, PlainSyncDecorator, TermDecorator, TestStdoutWriter};
 use std::{
     convert::From,
@@ -11,6 +12,8 @@ use std::{
     str::FromStr,
     thread,
 };
+use tracing_error::ErrorLayer;
+use tracing_subscriber::{layer::SubscriberExt, EnvFilter, Registry};
 
 /// `event` defines constants for structured events
 pub mod event {
@@ -113,15 +116,18 @@ impl IoErrorDrain for FullFormat<TermDecorator> {}
 
 /// Initialize logging resources. On success, returns a root [`slog::Logger`][1]
 /// from which modules should create child loggers to add more key-value pairs
-/// to the events they log. Returns an error if `LoggingConfiguration` is
+/// to the events they log, and a [`slog_scope::GlobalLoggerGuard`], which must
+/// be kept live by the caller. Returns an error if `LoggingConfiguration` is
 /// invalid.
 ///
 /// [1]: https://docs.rs/slog/2.7.0/slog/struct.Logger.html
-pub fn setup_logging(config: &LoggingConfiguration) -> Result<Logger> {
+pub fn setup_logging(config: &LoggingConfiguration) -> Result<(Logger, GlobalLoggerGuard)> {
+    // If stderr is not a tty, output logs as JSON structures on the assumption
+    // that we are running in a cloud.
+    let json_output = atty::isnt(Stream::Stderr) || config.force_json_output;
+
     // We have to box the Drain so that both branches return the same type
-    let drain: Box<dyn IoErrorDrain> = if atty::isnt(Stream::Stderr) || config.force_json_output {
-        // If stderr is not a tty, output logs as JSON structures on the
-        // assumption that we are running in a cloud.
+    let drain: Box<dyn IoErrorDrain> = if json_output {
         let json_drain = Json::new(stderr())
             .set_newlines(true)
             // slog_json::JsonBuilder::add_default_keys adds keys for
@@ -174,7 +180,36 @@ pub fn setup_logging(config: &LoggingConfiguration) -> Result<Logger> {
         ),
     );
 
-    Ok(root_logger)
+    // Register the root logger in the global scope and then set it up to
+    // capture messages emited by dependencies like Rusoto that use  the `log`
+    // crate
+    let scope_guard = slog_scope::set_global_logger(root_logger.clone());
+    slog_stdlog::init().context("failed to initialize slog as log backend")?;
+
+    // We also install a tracing subscriber to capture trace events from
+    // dependencies like tokio and hyper
+    let fmt_layer = tracing_subscriber::fmt::layer()
+        .with_thread_ids(true)
+        .with_thread_names(true)
+        .with_level(true)
+        .with_target(true);
+
+    let fmt_layer: Box<dyn tracing_subscriber::layer::Layer<_> + Send + Sync> = if json_output {
+        Box::new(fmt_layer.json())
+    } else {
+        Box::new(fmt_layer.pretty())
+    };
+
+    let subscriber = Registry::default()
+        .with(fmt_layer)
+        // Configure filters with RUST_LOG env var. Format discussed at
+        // https://docs.rs/tracing-subscriber/0.2.20/tracing_subscriber/filter/struct.EnvFilter.html
+        .with(EnvFilter::from_default_env())
+        .with(ErrorLayer::default());
+
+    tracing::subscriber::set_global_default(subscriber).unwrap();
+
+    Ok((root_logger, scope_guard))
 }
 
 /// Initialize logging for unit or integration tests. Must be public for

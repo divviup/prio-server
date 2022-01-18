@@ -958,11 +958,12 @@ fn main() -> Result<(), anyhow::Error> {
     let log_level = &env::var("RUST_LOG")
         .unwrap_or_else(|_| "INFO".to_owned())
         .to_uppercase();
-    let root_logger = setup_logging(&LoggingConfiguration {
+    let (root_logger, _guard) = setup_logging(&LoggingConfiguration {
         force_json_output: force_json_log_output,
         version_string: option_env!("BUILD_INFO").unwrap_or("(BUILD_INFO unavailable)"),
         log_level,
     })?;
+
     let args: Vec<String> = std::env::args().collect();
     info!(
         root_logger,

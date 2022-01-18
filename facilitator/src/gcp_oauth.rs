@@ -551,15 +551,18 @@ impl GcpAccessTokenProvider {
     /// The returned value is an owned reference because the token owned by this
     /// struct could change while the caller is still holding the returned token
     fn ensure_default_access_token(&self) -> Result<String> {
+        debug!(self.logger, "obtaining read lock on default access token");
         if let Some(token) = &*self.default_access_token.read().unwrap() {
+            debug!(self.logger, "obtained read lock on default access token");
             if !token.expired() {
                 debug!(self.logger, "cached default access token is still valid");
                 return Ok(token.token.clone());
             }
         }
 
+        debug!(self.logger, "obtaining write lock on default access token");
         let mut default_access_token = self.default_access_token.write().unwrap();
-
+        debug!(self.logger, "obtained write lock on default access token");
         // Check if the token was updated between when we dropped the read lock
         // and when we acquired the write lock
         if let Some(token) = &*default_access_token {
@@ -594,7 +597,15 @@ impl GcpAccessTokenProvider {
             return Err(anyhow!("no service account to impersonate was provided"));
         }
 
+        debug!(
+            self.logger,
+            "obtaining read lock on impersonated account token"
+        );
         if let Some(token) = &*self.impersonated_account_token.read().unwrap() {
+            debug!(
+                self.logger,
+                "obtained read lock on impersonated account token"
+            );
             if !token.expired() {
                 debug!(
                     self.logger,
@@ -605,7 +616,15 @@ impl GcpAccessTokenProvider {
         }
 
         let default_token = self.ensure_default_access_token()?;
+        debug!(
+            self.logger,
+            "obtaining write lock on impersonated account token"
+        );
         let mut impersonated_account_token = self.impersonated_account_token.write().unwrap();
+        debug!(
+            self.logger,
+            "obtained write lock on impersonated account token"
+        );
         let service_account_to_impersonate = match self.account_to_impersonate.as_str() {
             Some(account) => account,
             None => return Err(anyhow!("no service account to impersonate was provided")),
