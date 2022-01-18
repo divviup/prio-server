@@ -10,16 +10,18 @@ use crate::{
 use anyhow::{Context, Result};
 use bytes::Bytes;
 use derivative::Derivative;
+use futures::future::FutureExt;
 use http::{HeaderMap, StatusCode};
 use hyper_rustls::HttpsConnectorBuilder;
 use rusoto_core::{request::BufferedHttpResponse, ByteStream, RusotoError};
 use rusoto_s3::{
-    AbortMultipartUploadRequest, CompleteMultipartUploadRequest, CompletedMultipartUpload,
-    CompletedPart, CreateMultipartUploadRequest, GetObjectRequest, S3Client, UploadPartRequest, S3,
+    AbortMultipartUploadRequest, CompleteMultipartUploadError, CompleteMultipartUploadRequest,
+    CompletedMultipartUpload, CompletedPart, CreateMultipartUploadRequest, GetObjectRequest,
+    S3Client, UploadPartRequest, S3,
 };
 use slog::{debug, info, o, warn, Logger};
 use std::{
-    io::{self, ErrorKind, Read, Write},
+    io::{Read, Write},
     mem,
     pin::Pin,
     time::Duration,
@@ -27,7 +29,6 @@ use std::{
 use tokio::{
     io::{AsyncRead, AsyncReadExt},
     runtime::Handle,
-    time::timeout,
 };
 use uuid::Uuid;
 
@@ -121,13 +122,13 @@ impl Transport for S3Transport {
             &self.api_metrics,
             Self::service(),
             "GetObject",
+            &self.runtime_handle,
             || {
-                self.runtime_handle
-                    .block_on(client.get_object(GetObjectRequest {
-                        bucket: self.path.bucket.to_owned(),
-                        key: [&self.path.key, key].concat(),
-                        ..Default::default()
-                    }))
+                client.get_object(GetObjectRequest {
+                    bucket: self.path.bucket.to_owned(),
+                    key: [&self.path.key, key].concat(),
+                    ..Default::default()
+                })
             },
         )
         .context("error getting S3 object")?;
@@ -235,19 +236,13 @@ impl MultipartUploadWriter {
             api_metrics,
             S3Transport::service(),
             "CreateMultipartUpload",
+            &runtime_handle,
             || {
-                runtime_handle.block_on(async {
-                    timeout(
-                        Duration::from_secs(600),
-                        client.create_multipart_upload(CreateMultipartUploadRequest {
-                            bucket: bucket.to_string(),
-                            key: key.to_string(),
-                            acl: Some("bucket-owner-full-control".to_owned()),
-                            ..Default::default()
-                        }),
-                    )
-                    .await
-                    .map_err(|err| RusotoError::from(io::Error::new(ErrorKind::TimedOut, err)))?
+                client.create_multipart_upload(CreateMultipartUploadRequest {
+                    bucket: bucket.to_string(),
+                    key: key.to_string(),
+                    acl: Some("bucket-owner-full-control".to_owned()),
+                    ..Default::default()
                 })
             },
         )
@@ -297,16 +292,16 @@ impl MultipartUploadWriter {
             &self.api_metrics,
             S3Transport::service(),
             "UploadPart",
+            &self.runtime_handle,
             || {
-                self.runtime_handle
-                    .block_on(self.client.upload_part(UploadPartRequest {
-                        bucket: self.bucket.to_string(),
-                        key: self.key.to_string(),
-                        upload_id: self.upload_id.clone(),
-                        part_number: part_number as i64,
-                        body: Some(body.clone().into()),
-                        ..Default::default()
-                    }))
+                self.client.upload_part(UploadPartRequest {
+                    bucket: self.bucket.to_string(),
+                    key: self.key.to_string(),
+                    upload_id: self.upload_id.clone(),
+                    part_number: part_number as i64,
+                    body: Some(body.clone().into()),
+                    ..Default::default()
+                })
             },
         )
         .context("failed to upload part")
@@ -370,41 +365,44 @@ impl TransportWriter for MultipartUploadWriter {
             &self.api_metrics,
             S3Transport::service(),
             "CompleteMultipartUpload",
+            &self.runtime_handle,
             || {
-                let output =
-                    self.runtime_handle
-                        .block_on(self.client.complete_multipart_upload(
-                            CompleteMultipartUploadRequest {
-                                bucket: self.bucket.to_string(),
-                                key: self.key.to_string(),
-                                upload_id: self.upload_id.clone(),
-                                multipart_upload: Some(CompletedMultipartUpload {
-                                    parts: Some(completed_parts.clone()),
-                                }),
-                                ..Default::default()
-                            },
-                        ))?;
-
-                // Due to an oddity in S3's CompleteMultipartUpload API, some
-                // failed uploads can cause complete_multipart_upload to return
-                // Ok(). To work around this, we check if key fields of the
-                // output are None, and if so, synthesize a RusotoError::Unknown
-                // wrapping an HTTP response with status code 500 so that our
-                // retry logic will gracefully try again.
-                // https://github.com/rusoto/rusoto/issues/1936
-                if output.location == None
-                    && output.e_tag == None
-                    && output.bucket == None
-                    && output.key == None
-                {
-                    return Err(RusotoError::Unknown(BufferedHttpResponse {
-                        status: StatusCode::from_u16(500).unwrap(),
-                        headers: HeaderMap::with_capacity(0),
-                        body: Bytes::from_static(b"synthetic HTTP 500 response"),
-                    }));
-                }
-
-                Ok(output)
+                self.client
+                    .complete_multipart_upload(CompleteMultipartUploadRequest {
+                        bucket: self.bucket.to_string(),
+                        key: self.key.to_string(),
+                        upload_id: self.upload_id.clone(),
+                        multipart_upload: Some(CompletedMultipartUpload {
+                            parts: Some(completed_parts.clone()),
+                        }),
+                        ..Default::default()
+                    })
+                    .map(|rslt| {
+                        if let Ok(output) = rslt {
+                            if output.location == None
+                                && output.e_tag == None
+                                && output.bucket == None
+                                && output.key == None
+                            {
+                                // Due to an oddity in S3's CompleteMultipartUpload API, some
+                                // failed uploads can cause complete_multipart_upload to return
+                                // Ok(). To work around this, we check if key fields of the
+                                // output are None, and if so, synthesize a RusotoError::Unknown
+                                // wrapping an HTTP response with status code 500 so that our
+                                // retry logic will gracefully try again.
+                                // https://github.com/rusoto/rusoto/issues/1936
+                                return Err(RusotoError::<CompleteMultipartUploadError>::Unknown(
+                                    BufferedHttpResponse {
+                                        status: StatusCode::from_u16(500).unwrap(),
+                                        headers: HeaderMap::with_capacity(0),
+                                        body: Bytes::from_static(b"synthetic HTTP 500 response"),
+                                    },
+                                ));
+                            }
+                            return Ok(output);
+                        }
+                        rslt
+                    })
             },
         )
         .context("error completing upload")?;
