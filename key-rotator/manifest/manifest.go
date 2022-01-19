@@ -141,6 +141,9 @@ type UpdateKeysConfig struct {
 	PacketEncryptionKey         key.Key // the key used for packet encryption operations
 	PacketEncryptionKeyIDPrefix string  // the key ID prefix to use for packet encryption keys
 	PacketEncryptionKeyCSRFQDN  string  // the FQDN to specify for packet encryption key CSRs
+
+	SkipPreUpdateValidations  bool // if set, do not perform pre-update validation checks
+	SkipPostUpdateValidations bool // if set, do not perform post-update validation checks
 }
 
 func (cfg UpdateKeysConfig) Validate() error {
@@ -172,11 +175,13 @@ func (m DataShareProcessorSpecificManifest) UpdateKeys(cfg UpdateKeysConfig) (Da
 	if err := cfg.Validate(); err != nil {
 		return DataShareProcessorSpecificManifest{}, fmt.Errorf("invalid update config: %w", err)
 	}
-	if err := validatePreUpdateManifest(cfg, m); err != nil {
-		return DataShareProcessorSpecificManifest{}, fmt.Errorf("manifest pre-update validation error: %w", err)
-	}
-	if err := validateKeyMaterialAgainstManifest(cfg, m); err != nil {
-		return DataShareProcessorSpecificManifest{}, fmt.Errorf("manifest pre-update validation error: %w", err)
+	if !cfg.SkipPreUpdateValidations {
+		if err := validatePreUpdateManifest(cfg, m); err != nil {
+			return DataShareProcessorSpecificManifest{}, fmt.Errorf("manifest pre-update validation error: %w", err)
+		}
+		if err := validateKeyMaterialAgainstManifest(cfg, m); err != nil {
+			return DataShareProcessorSpecificManifest{}, fmt.Errorf("manifest pre-update validation error: %w", err)
+		}
 	}
 
 	// Copy the current manifest, clearing any existing batch signing/packet encryption keys.
@@ -222,11 +227,13 @@ func (m DataShareProcessorSpecificManifest) UpdateKeys(cfg UpdateKeysConfig) (Da
 	newM.PacketEncryptionKeyCSRs[kid] = newPEC
 
 	// Validate results.
-	if err := validatePostUpdateManifest(cfg, newM, m); err != nil {
-		return DataShareProcessorSpecificManifest{}, fmt.Errorf("manifest post-update validation error: %w", err)
-	}
-	if err := validateKeyMaterialAgainstManifest(cfg, newM); err != nil {
-		return DataShareProcessorSpecificManifest{}, fmt.Errorf("manifest post-update validation error: %w", err)
+	if !cfg.SkipPostUpdateValidations {
+		if err := validatePostUpdateManifest(cfg, newM, m); err != nil {
+			return DataShareProcessorSpecificManifest{}, fmt.Errorf("manifest post-update validation error: %w", err)
+		}
+		if err := validateKeyMaterialAgainstManifest(cfg, newM); err != nil {
+			return DataShareProcessorSpecificManifest{}, fmt.Errorf("manifest post-update validation error: %w", err)
+		}
 	}
 	return newM, nil
 }
