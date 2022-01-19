@@ -230,7 +230,9 @@ func TestUpdateKeys(t *testing.T) {
 		manifestPEKs        PacketEncryptionKeyCSRs
 		batchSigningKey     key.Key
 		packetEncryptionKey key.Key
-		wantErrStr          string
+
+		wantSkipPreUpdateValidationsToFix bool
+		wantErrStr                        string
 	}{
 		{
 			name:                "empty batch signing key",
@@ -245,36 +247,40 @@ func TestUpdateKeys(t *testing.T) {
 			wantErrStr:          "packet encryption key has no key versions",
 		},
 		{
-			name:                "manifest does not contain primary version of update config batch signing key",
-			manifestBSKs:        manifestBSK(10, 20),
-			manifestPEKs:        manifestPEK(0),
-			batchSigningKey:     bsk(0, 10, 20),
-			packetEncryptionKey: pek(0),
-			wantErrStr:          "update's batch signing key primary version",
+			name:                              "manifest does not contain primary version of update config batch signing key",
+			manifestBSKs:                      manifestBSK(10, 20),
+			manifestPEKs:                      manifestPEK(0),
+			batchSigningKey:                   bsk(0, 10, 20),
+			packetEncryptionKey:               pek(0),
+			wantSkipPreUpdateValidationsToFix: true,
+			wantErrStr:                        "update's batch signing key primary version",
 		},
 		{
-			name:                "manifest contains packet encryption key that does not match to update config packet encryption key",
-			manifestBSKs:        manifestBSK(0),
-			manifestPEKs:        manifestPEK(10),
-			batchSigningKey:     bsk(0),
-			packetEncryptionKey: pek(0),
-			wantErrStr:          "manifest packet encryption key version",
+			name:                              "manifest contains packet encryption key that does not match to update config packet encryption key",
+			manifestBSKs:                      manifestBSK(0),
+			manifestPEKs:                      manifestPEK(10),
+			batchSigningKey:                   bsk(0),
+			packetEncryptionKey:               pek(0),
+			wantSkipPreUpdateValidationsToFix: true,
+			wantErrStr:                        "manifest packet encryption key version",
 		},
 		{
-			name:                "key material differs from update config key material (batch signing key)",
-			manifestBSKs:        BatchSigningPublicKeys{"bsk": batchSigningPublicKey(keytest.Material("bsk-garbage"))},
-			manifestPEKs:        manifestPEK(0),
-			batchSigningKey:     bsk(0),
-			packetEncryptionKey: pek(0),
-			wantErrStr:          "key mismatch in batch signing key",
+			name:                              "key material differs from update config key material (batch signing key)",
+			manifestBSKs:                      BatchSigningPublicKeys{"bsk": batchSigningPublicKey(keytest.Material("bsk-garbage"))},
+			manifestPEKs:                      manifestPEK(0),
+			batchSigningKey:                   bsk(0),
+			packetEncryptionKey:               pek(0),
+			wantSkipPreUpdateValidationsToFix: true,
+			wantErrStr:                        "key mismatch in batch signing key",
 		},
 		{
-			name:                "key material differs from update config key material (packet encryption key)",
-			manifestBSKs:        manifestBSK(0),
-			manifestPEKs:        PacketEncryptionKeyCSRs{"pek": packetEncryptionCertificate(keytest.Material("pek-garbage"))},
-			batchSigningKey:     bsk(0),
-			packetEncryptionKey: pek(0),
-			wantErrStr:          "key mismatch in packet encryption key",
+			name:                              "key material differs from update config key material (packet encryption key)",
+			manifestBSKs:                      manifestBSK(0),
+			manifestPEKs:                      PacketEncryptionKeyCSRs{"pek": packetEncryptionCertificate(keytest.Material("pek-garbage"))},
+			batchSigningKey:                   bsk(0),
+			packetEncryptionKey:               pek(0),
+			wantSkipPreUpdateValidationsToFix: true,
+			wantErrStr:                        "key mismatch in packet encryption key",
 		},
 	} {
 		test := test
@@ -305,6 +311,19 @@ func TestUpdateKeys(t *testing.T) {
 			_, err := m.UpdateKeys(cfg)
 			if err == nil || !strings.Contains(err.Error(), test.wantErrStr) {
 				t.Errorf("Wanted error containing %q, got: %v", test.wantErrStr, err)
+			}
+
+			// Check that SkipPreUpdateValidations causes/does not cause success as expected.
+			cfg.SkipPreUpdateValidations = true
+			_, err = m.UpdateKeys(cfg)
+			if test.wantSkipPreUpdateValidationsToFix {
+				if err != nil {
+					t.Errorf("With SkipPreUpdateValidations, wanted no error, got: %v", err)
+				}
+			} else {
+				if err == nil || !strings.Contains(err.Error(), test.wantErrStr) {
+					t.Errorf("With SkipPreUpdateValidations, wanted error containing %q, got: %v", test.wantErrStr, err)
+				}
 			}
 		})
 	}
