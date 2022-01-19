@@ -36,10 +36,12 @@ use std::{
     convert::From,
     default::Default,
     fmt::{self, Debug, Display},
+    future::Future,
+    io::{self, ErrorKind},
     str,
-    time::Instant,
+    time::{Duration, Instant},
 };
-use tokio::runtime::Handle;
+use tokio::{runtime::Handle, time::timeout};
 use url::Url;
 use xml::EventReader;
 
@@ -389,22 +391,29 @@ impl ProvideAwsCredentials for Provider {
 /// the error is retryable (see retryable() in this module and its comments for
 /// details). The latency and status of each attempt is recorded in the provided
 /// metrics collector.
-pub(crate) fn retry_request<F, T, E>(
+pub(crate) fn retry_request<FN, F, T, E>(
     logger: &Logger,
     api_metrics: &ApiClientMetricsCollector,
     service: &str,
     endpoint: &str,
-    mut f: F,
+    runtime_handle: &Handle,
+    mut f: FN,
 ) -> RusotoResult<T, E>
 where
-    F: FnMut() -> RusotoResult<T, E>,
+    F: Future<Output = RusotoResult<T, E>>,
+    FN: FnMut() -> F,
     E: Debug,
 {
     retries::retry_request(
         logger,
         || {
             let before = Instant::now();
-            let result = f();
+            let future = f();
+            let result = runtime_handle.block_on(async {
+                timeout(Duration::from_secs(600), future)
+                    .await
+                    .map_err(|err| RusotoError::from(io::Error::new(ErrorKind::TimedOut, err)))?
+            });
             let latency = before.elapsed().as_millis();
 
             api_metrics

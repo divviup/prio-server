@@ -67,8 +67,9 @@ impl<T: Task> TaskQueue<T> for AwsSqsTaskQueue<T> {
             &self.api_metrics,
             Self::service(),
             "ReceiveMessage",
+            &self.runtime_handle,
             || {
-                let request = ReceiveMessageRequest {
+                client.receive_message(ReceiveMessageRequest {
                     // Dequeue one task at a time
                     max_number_of_messages: Some(1),
                     queue_url: self.queue_url.clone(),
@@ -81,10 +82,7 @@ impl<T: Task> TaskQueue<T> for AwsSqsTaskQueue<T> {
                     // 10 minutes.
                     visibility_timeout: Some(600),
                     ..Default::default()
-                };
-
-                self.runtime_handle
-                    .block_on(client.receive_message(request))
+                })
             },
         )
         .context("failed to dequeue message from SQS")?;
@@ -138,12 +136,12 @@ impl<T: Task> TaskQueue<T> for AwsSqsTaskQueue<T> {
             &self.api_metrics,
             Self::service(),
             "DeleteMessage",
+            &self.runtime_handle,
             || {
-                let request = DeleteMessageRequest {
+                client.delete_message(DeleteMessageRequest {
                     queue_url: self.queue_url.clone(),
                     receipt_handle: task.acknowledgment_id.clone(),
-                };
-                self.runtime_handle.block_on(client.delete_message(request))
+                })
             },
         )
         .context("failed to delete/acknowledge message in SQS")
@@ -212,14 +210,13 @@ impl<T: Task> AwsSqsTaskQueue<T> {
             &self.api_metrics,
             Self::service(),
             "ChangeMessageVisibility",
+            &self.runtime_handle,
             || {
-                let request = ChangeMessageVisibilityRequest {
+                client.change_message_visibility(ChangeMessageVisibilityRequest {
                     queue_url: self.queue_url.clone(),
                     receipt_handle: task.acknowledgment_id.clone(),
                     visibility_timeout: timeout,
-                };
-                self.runtime_handle
-                    .block_on(client.change_message_visibility(request))
+                })
             },
         )
         .context("failed to change message visibility message in SQS")
