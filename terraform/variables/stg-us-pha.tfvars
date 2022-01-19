@@ -62,11 +62,16 @@ ingestors = {
   }
 }
 cluster_settings = {
-  initial_node_count = 2
-  min_node_count     = 1
-  max_node_count     = 3
-  gcp_machine_type   = "e2-standard-2"
-  aws_machine_types  = ["t3.medium"]
+  initial_node_count  = 2
+  min_node_count      = 1
+  max_node_count      = 3
+  gcp_machine_type    = "e2-standard-2"
+  aws_machine_types   = ["t3.medium"]
+  eks_cluster_version = "1.21"
+  # https://docs.aws.amazon.com/eks/latest/userguide/managing-vpc-cni.html
+  eks_vpc_cni_addon_version = "v1.10.1-eksbuild.1"
+  # https://github.com/kubernetes/autoscaler/releases/tag/cluster-autoscaler-1.21.2
+  eks_cluster_autoscaler_version = "k8s.gcr.io/autoscaling/cluster-autoscaler:v1.21.2"
 }
 test_peer_environment = {
   env_with_ingestor    = "stg-us-facil"
