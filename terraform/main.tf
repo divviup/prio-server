@@ -280,7 +280,7 @@ DESCRIPTION
 terraform {
   backend "gcs" {}
 
-  required_version = ">= 0.14.8"
+  required_version = ">= 1.1.0"
 
   # https://www.terraform.io/docs/language/expressions/type-constraints.html#experimental-optional-object-type-attributes
   experiments = [module_variable_optional_attrs]
