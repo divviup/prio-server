@@ -157,6 +157,12 @@ func main() {
 	}
 
 	log.Info().Msgf("Starting up")
+	if *skipManifestPreUpdateValidations {
+		log.Warn().Msgf("--unsafe-skip-manifest-pre-update-validations is set; this flag is inherently unsafe and should only be set temporarily in order to fix an ongoing incident")
+	}
+	if *skipManifestPostUpdateValidations {
+		log.Warn().Msgf("--unsafe-skip-manifest-post-update-validations is set; this flag is inherently unsafe and should only be set temporarily in order to fix an ongoing incident")
+	}
 	ctx := context.Background()
 	if *timeout > 0 {
 		var cancel context.CancelFunc
