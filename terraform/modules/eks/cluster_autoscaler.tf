@@ -255,9 +255,7 @@ resource "kubernetes_deployment" "cluster_autoscaler" {
         service_account_name = module.account_mapping.kubernetes_service_account_name
 
         container {
-          # cluster-autoscaler image version should correspond to Kubernetes cluster version
-          # https://github.com/kubernetes/autoscaler/releases/tag/cluster-autoscaler-1.20.1
-          image = "k8s.gcr.io/autoscaling/cluster-autoscaler:v1.20.1"
+          image = var.cluster_settings.eks_cluster_autoscaler_version
           name  = "cluster-autoscaler"
 
           resources {
