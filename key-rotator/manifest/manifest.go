@@ -191,21 +191,31 @@ func (m DataShareProcessorSpecificManifest) UpdateKeys(cfg UpdateKeysConfig) (Da
 	// Update batch signing key.
 	if err := cfg.BatchSigningKey.Versions(func(v key.Version) error {
 		kid := cfg.batchSigningKeyID(v.CreationTimestamp)
-		var newBSPK BatchSigningPublicKey
+		var newBSPK *BatchSigningPublicKey
 		if bspk, ok := m.BatchSigningPublicKeys[kid]; ok {
-			newBSPK = bspk
-		} else {
+			// If the manifest has a key for this kid, and it matches, use it instead of generating a new PKIX encoding.
+			manifestPubkey, err := bspk.toPublicKey()
+			if err != nil {
+				return fmt.Errorf("couldn't parse batch signing key version %q from manifest: %w", kid, err)
+			}
+			if manifestPubkey.Equal(v.KeyMaterial.Public()) {
+				bspk := bspk
+				newBSPK = &bspk
+			}
+		}
+		if newBSPK == nil {
+			// Manifest either does not have this key version, or it doesn't match up. Generate it.
 			pkix, err := v.KeyMaterial.PublicAsPKIX()
 			if err != nil {
 				return fmt.Errorf("couldn't create PKIX-encoding for batch signing key version with creation timestamp %d: %w", v.CreationTimestamp, err)
 			}
 			const batchSigningPublicKeyValidityPeriod = 100 * 365 * 24 * time.Hour // 100 years
-			newBSPK = BatchSigningPublicKey{
+			newBSPK = &BatchSigningPublicKey{
 				PublicKey:  pkix,
 				Expiration: time.Now().UTC().Add(batchSigningPublicKeyValidityPeriod).Format(time.RFC3339),
 			}
 		}
-		newM.BatchSigningPublicKeys[kid] = newBSPK
+		newM.BatchSigningPublicKeys[kid] = *newBSPK
 		return nil
 	}); err != nil {
 		return DataShareProcessorSpecificManifest{}, err
@@ -214,17 +224,27 @@ func (m DataShareProcessorSpecificManifest) UpdateKeys(cfg UpdateKeysConfig) (Da
 	// Update packet encryption key.
 	primaryPEKVersion := cfg.PacketEncryptionKey.Primary()
 	kid := cfg.packetEncryptionKeyID(primaryPEKVersion.CreationTimestamp)
-	var newPEC PacketEncryptionCertificate
+	var newPEC *PacketEncryptionCertificate
 	if pec, ok := m.PacketEncryptionKeyCSRs[kid]; ok {
-		newPEC = pec
-	} else {
+		// If the manifest has a key for this kid, and it matches, use it instead of generating a new CSR.
+		manifestPubkey, err := pec.toPublicKey()
+		if err != nil {
+			return DataShareProcessorSpecificManifest{}, fmt.Errorf("couldn't parse packet encryption key version %q from manifest: %w", kid, err)
+		}
+		if manifestPubkey.Equal(primaryPEKVersion.KeyMaterial.Public()) {
+			pec := pec
+			newPEC = &pec
+		}
+	}
+	if newPEC == nil {
+		// Manifest either does not have this key version, or it doesn't match up. Generate it.
 		csr, err := primaryPEKVersion.KeyMaterial.PublicAsCSR(cfg.PacketEncryptionKeyCSRFQDN)
 		if err != nil {
 			return DataShareProcessorSpecificManifest{}, fmt.Errorf("couldn't create CSR for packet encryption key version with creation timestamp %d: %w", primaryPEKVersion.CreationTimestamp, err)
 		}
-		newPEC = PacketEncryptionCertificate{CertificateSigningRequest: csr}
+		newPEC = &PacketEncryptionCertificate{CertificateSigningRequest: csr}
 	}
-	newM.PacketEncryptionKeyCSRs[kid] = newPEC
+	newM.PacketEncryptionKeyCSRs[kid] = *newPEC
 
 	// Validate results.
 	if !cfg.SkipPostUpdateValidations {
