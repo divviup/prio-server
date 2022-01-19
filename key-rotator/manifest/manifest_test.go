@@ -332,6 +332,8 @@ func TestUpdateKeys(t *testing.T) {
 func TestPostUpdateKeysValidations(t *testing.T) {
 	t.Parallel()
 
+	now := time.Now()
+
 	// We check only validation check failures here, and we do so by directly
 	// calling `validateUpdatedManifest` rather than calling `UpdateKeys`
 	// because there is no/should be no way to trigger these checks via
@@ -566,7 +568,7 @@ func TestPostUpdateKeysValidations(t *testing.T) {
 				IngestionBucket:         "ingestion-bucket",
 				PeerValidationIdentity:  "peer-validation-identity",
 				PeerValidationBucket:    "peer-validation-bucket",
-				BatchSigningPublicKeys:  manifestBSK(0),
+				BatchSigningPublicKeys:  manifestBSKWithExpiration(now, 0),
 				PacketEncryptionKeyCSRs: manifestPEK(0),
 			},
 			oldManifest: DataShareProcessorSpecificManifest{
@@ -575,7 +577,7 @@ func TestPostUpdateKeysValidations(t *testing.T) {
 				IngestionBucket:         "ingestion-bucket",
 				PeerValidationIdentity:  "peer-validation-identity",
 				PeerValidationBucket:    "peer-validation-bucket",
-				BatchSigningPublicKeys:  BatchSigningPublicKeys{"bsk": BatchSigningPublicKey{PublicKey: "old BSK value"}},
+				BatchSigningPublicKeys:  manifestBSKWithExpiration(now.Add(time.Hour), 0),
 				PacketEncryptionKeyCSRs: manifestPEK(0),
 			},
 			wantErrStr: "pre-existing batch signing key",
@@ -600,7 +602,7 @@ func TestPostUpdateKeysValidations(t *testing.T) {
 				PeerValidationIdentity:  "peer-validation-identity",
 				PeerValidationBucket:    "peer-validation-bucket",
 				BatchSigningPublicKeys:  manifestBSK(0),
-				PacketEncryptionKeyCSRs: PacketEncryptionKeyCSRs{"pek": PacketEncryptionCertificate{CertificateSigningRequest: "old PEK value"}},
+				PacketEncryptionKeyCSRs: manifestPEK(0),
 			},
 			wantErrStr: "pre-existing packet encryption key",
 		},
@@ -794,10 +796,18 @@ func pek(tss ...int64) key.Key {
 }
 
 // manifestBSK creates a manifest BatchSigningPublicKeys with the given
-// timetamps. Order does not matter. Key material is arbitrary, but will match
-// that of other batch signing keys at the same timestamp, and will very likely
-// not match other key materials.
+// timetamps, expiring at the current time. Order does not matter. Key material
+// is arbitrary, but will match that of other batch signing keys at the same
+// timestamp, and will very likely not match other key materials.
 func manifestBSK(tss ...int64) BatchSigningPublicKeys {
+	return manifestBSKWithExpiration(time.Now(), tss...)
+}
+
+// manifestBSKWithExpiration creates a manifest BatchSigningPublicKeys with the
+// given timetamps, expiring at the given timestamp. Order does not matter. Key
+// material is arbitrary, but will match that of other batch signing keys at
+// the same timestamp, and will very likely not match other key materials.
+func manifestBSKWithExpiration(when time.Time, tss ...int64) BatchSigningPublicKeys {
 	rslt := BatchSigningPublicKeys{}
 	for _, ts := range tss {
 		kid := bskKID(ts)
@@ -807,7 +817,7 @@ func manifestBSK(tss ...int64) BatchSigningPublicKeys {
 		}
 		rslt[kid] = BatchSigningPublicKey{
 			PublicKey:  pkix,
-			Expiration: time.Now().Format(time.RFC3339),
+			Expiration: when.Format(time.RFC3339),
 		}
 	}
 	return rslt

@@ -338,17 +338,35 @@ func validatePostUpdateManifest(cfg UpdateKeysConfig, m, oldM DataShareProcessor
 	}
 
 	// Post-update, manifests' key data for key versions that exist both pre- &
-	// post-update must match exactly.
+	// post-update must match exactly, if their key data matches.
 	for kid, key := range m.BatchSigningPublicKeys {
 		if oldKey, ok := oldM.BatchSigningPublicKeys[kid]; ok {
-			if key != oldKey {
+			oldPubkey, err := oldKey.toPublicKey()
+			if err != nil {
+				return fmt.Errorf("couldn't parse batch signing key version %q from old manifest: %w", kid, err)
+			}
+			newPubkey, err := key.toPublicKey()
+			if err != nil {
+				return fmt.Errorf("couldn't parse batch signing key version %q from new manifest: %w", kid, err)
+			}
+
+			if oldPubkey.Equal(newPubkey) && key != oldKey {
 				return fmt.Errorf("pre-existing batch signing key %q modified", kid)
 			}
 		}
 	}
 	for kid, key := range m.PacketEncryptionKeyCSRs {
 		if oldKey, ok := oldM.PacketEncryptionKeyCSRs[kid]; ok {
-			if key != oldKey {
+			oldPubkey, err := oldKey.toPublicKey()
+			if err != nil {
+				return fmt.Errorf("couldn't parse packet encryption key version %q from old manifest: %w", kid, err)
+			}
+			newPubkey, err := key.toPublicKey()
+			if err != nil {
+				return fmt.Errorf("couldn't parse packet encryption key version %q from new manifest: %w", kid, err)
+			}
+
+			if oldPubkey.Equal(newPubkey) && key != oldKey {
 				return fmt.Errorf("pre-existing packet encryption key %q modified", kid)
 			}
 		}
