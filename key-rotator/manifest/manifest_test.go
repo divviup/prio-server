@@ -230,7 +230,9 @@ func TestUpdateKeys(t *testing.T) {
 		manifestPEKs        PacketEncryptionKeyCSRs
 		batchSigningKey     key.Key
 		packetEncryptionKey key.Key
-		wantErrStr          string
+
+		wantSkipPreUpdateValidationsToFix bool
+		wantErrStr                        string
 	}{
 		{
 			name:                "empty batch signing key",
@@ -245,36 +247,40 @@ func TestUpdateKeys(t *testing.T) {
 			wantErrStr:          "packet encryption key has no key versions",
 		},
 		{
-			name:                "manifest does not contain primary version of update config batch signing key",
-			manifestBSKs:        manifestBSK(10, 20),
-			manifestPEKs:        manifestPEK(0),
-			batchSigningKey:     bsk(0, 10, 20),
-			packetEncryptionKey: pek(0),
-			wantErrStr:          "update's batch signing key primary version",
+			name:                              "manifest does not contain primary version of update config batch signing key",
+			manifestBSKs:                      manifestBSK(10, 20),
+			manifestPEKs:                      manifestPEK(0),
+			batchSigningKey:                   bsk(0, 10, 20),
+			packetEncryptionKey:               pek(0),
+			wantSkipPreUpdateValidationsToFix: true,
+			wantErrStr:                        "update's batch signing key primary version",
 		},
 		{
-			name:                "manifest contains packet encryption key that does not match to update config packet encryption key",
-			manifestBSKs:        manifestBSK(0),
-			manifestPEKs:        manifestPEK(10),
-			batchSigningKey:     bsk(0),
-			packetEncryptionKey: pek(0),
-			wantErrStr:          "manifest packet encryption key version",
+			name:                              "manifest contains packet encryption key that does not match to update config packet encryption key",
+			manifestBSKs:                      manifestBSK(0),
+			manifestPEKs:                      manifestPEK(10),
+			batchSigningKey:                   bsk(0),
+			packetEncryptionKey:               pek(0),
+			wantSkipPreUpdateValidationsToFix: true,
+			wantErrStr:                        "manifest packet encryption key version",
 		},
 		{
-			name:                "key material differs from update config key material (batch signing key)",
-			manifestBSKs:        BatchSigningPublicKeys{"bsk": batchSigningPublicKey(keytest.Material("bsk-garbage"))},
-			manifestPEKs:        manifestPEK(0),
-			batchSigningKey:     bsk(0),
-			packetEncryptionKey: pek(0),
-			wantErrStr:          "key mismatch in batch signing key",
+			name:                              "key material differs from update config key material (batch signing key)",
+			manifestBSKs:                      BatchSigningPublicKeys{"bsk": batchSigningPublicKey(keytest.Material("bsk-garbage"))},
+			manifestPEKs:                      manifestPEK(0),
+			batchSigningKey:                   bsk(0),
+			packetEncryptionKey:               pek(0),
+			wantSkipPreUpdateValidationsToFix: true,
+			wantErrStr:                        "key mismatch in batch signing key",
 		},
 		{
-			name:                "key material differs from update config key material (packet encryption key)",
-			manifestBSKs:        manifestBSK(0),
-			manifestPEKs:        PacketEncryptionKeyCSRs{"pek": packetEncryptionCertificate(keytest.Material("pek-garbage"))},
-			batchSigningKey:     bsk(0),
-			packetEncryptionKey: pek(0),
-			wantErrStr:          "key mismatch in packet encryption key",
+			name:                              "key material differs from update config key material (packet encryption key)",
+			manifestBSKs:                      manifestBSK(0),
+			manifestPEKs:                      PacketEncryptionKeyCSRs{"pek": packetEncryptionCertificate(keytest.Material("pek-garbage"))},
+			batchSigningKey:                   bsk(0),
+			packetEncryptionKey:               pek(0),
+			wantSkipPreUpdateValidationsToFix: true,
+			wantErrStr:                        "key mismatch in packet encryption key",
 		},
 	} {
 		test := test
@@ -306,12 +312,27 @@ func TestUpdateKeys(t *testing.T) {
 			if err == nil || !strings.Contains(err.Error(), test.wantErrStr) {
 				t.Errorf("Wanted error containing %q, got: %v", test.wantErrStr, err)
 			}
+
+			// Check that SkipPreUpdateValidations causes/does not cause success as expected.
+			cfg.SkipPreUpdateValidations = true
+			_, err = m.UpdateKeys(cfg)
+			if test.wantSkipPreUpdateValidationsToFix {
+				if err != nil {
+					t.Errorf("With SkipPreUpdateValidations, wanted no error, got: %v", err)
+				}
+			} else {
+				if err == nil || !strings.Contains(err.Error(), test.wantErrStr) {
+					t.Errorf("With SkipPreUpdateValidations, wanted error containing %q, got: %v", test.wantErrStr, err)
+				}
+			}
 		})
 	}
 }
 
 func TestPostUpdateKeysValidations(t *testing.T) {
 	t.Parallel()
+
+	now := time.Now()
 
 	// We check only validation check failures here, and we do so by directly
 	// calling `validateUpdatedManifest` rather than calling `UpdateKeys`
@@ -547,7 +568,7 @@ func TestPostUpdateKeysValidations(t *testing.T) {
 				IngestionBucket:         "ingestion-bucket",
 				PeerValidationIdentity:  "peer-validation-identity",
 				PeerValidationBucket:    "peer-validation-bucket",
-				BatchSigningPublicKeys:  manifestBSK(0),
+				BatchSigningPublicKeys:  manifestBSKWithExpiration(now, 0),
 				PacketEncryptionKeyCSRs: manifestPEK(0),
 			},
 			oldManifest: DataShareProcessorSpecificManifest{
@@ -556,7 +577,7 @@ func TestPostUpdateKeysValidations(t *testing.T) {
 				IngestionBucket:         "ingestion-bucket",
 				PeerValidationIdentity:  "peer-validation-identity",
 				PeerValidationBucket:    "peer-validation-bucket",
-				BatchSigningPublicKeys:  BatchSigningPublicKeys{"bsk": BatchSigningPublicKey{PublicKey: "old BSK value"}},
+				BatchSigningPublicKeys:  manifestBSKWithExpiration(now.Add(time.Hour), 0),
 				PacketEncryptionKeyCSRs: manifestPEK(0),
 			},
 			wantErrStr: "pre-existing batch signing key",
@@ -581,7 +602,7 @@ func TestPostUpdateKeysValidations(t *testing.T) {
 				PeerValidationIdentity:  "peer-validation-identity",
 				PeerValidationBucket:    "peer-validation-bucket",
 				BatchSigningPublicKeys:  manifestBSK(0),
-				PacketEncryptionKeyCSRs: PacketEncryptionKeyCSRs{"pek": PacketEncryptionCertificate{CertificateSigningRequest: "old PEK value"}},
+				PacketEncryptionKeyCSRs: manifestPEK(0),
 			},
 			wantErrStr: "pre-existing packet encryption key",
 		},
@@ -775,10 +796,18 @@ func pek(tss ...int64) key.Key {
 }
 
 // manifestBSK creates a manifest BatchSigningPublicKeys with the given
-// timetamps. Order does not matter. Key material is arbitrary, but will match
-// that of other batch signing keys at the same timestamp, and will very likely
-// not match other key materials.
+// timestamps, expiring at the current time. Order does not matter. Key material
+// is arbitrary, but will match that of other batch signing keys at the same
+// timestamp, and will very likely not match other key materials.
 func manifestBSK(tss ...int64) BatchSigningPublicKeys {
+	return manifestBSKWithExpiration(time.Now(), tss...)
+}
+
+// manifestBSKWithExpiration creates a manifest BatchSigningPublicKeys with the
+// given timestamps, expiring at the given timestamp. Order does not matter. Key
+// material is arbitrary, but will match that of other batch signing keys at
+// the same timestamp, and will very likely not match other key materials.
+func manifestBSKWithExpiration(when time.Time, tss ...int64) BatchSigningPublicKeys {
 	rslt := BatchSigningPublicKeys{}
 	for _, ts := range tss {
 		kid := bskKID(ts)
@@ -788,7 +817,7 @@ func manifestBSK(tss ...int64) BatchSigningPublicKeys {
 		}
 		rslt[kid] = BatchSigningPublicKey{
 			PublicKey:  pkix,
-			Expiration: time.Now().Format(time.RFC3339),
+			Expiration: when.Format(time.RFC3339),
 		}
 	}
 	return rslt

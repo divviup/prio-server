@@ -54,6 +54,9 @@ var (
 	packetEncryptionKeyDeleteMinCount = flag.Int("packet-encryption-key-delete-min-count", 2, "The minimum number of packet encryption key versions left undeleted after rotation")
 	packetEncryptionKeyAlwaysWrite    = flag.Bool("packet-encryption-key-always-write", false, "If set, always write packet encryption key to backing storage, even if no changes are detected")
 
+	skipManifestPreUpdateValidations  = flag.Bool("unsafe-skip-manifest-pre-update-validations", false, "If set, skip manifest pre-update validations. This flag is unsafe; do not set unless you know what you are doing")
+	skipManifestPostUpdateValidations = flag.Bool("unsafe-skip-manifest-post-update-validations", false, "If set, skip manifest post-update validations. This flag is unsafe; do not set unless you know what you are doing")
+
 	// Other flags.
 	backup                        = flag.String("backup", "", "Set to 'aws' or 'gcp:gcp-project-id' to back up secrets to the respective cloud's secrets manager")
 	dryRun                        = flag.Bool("dry-run", true, "If set, do not actually write any keys or manifests back (only report what would have changed)")
@@ -154,6 +157,12 @@ func main() {
 	}
 
 	log.Info().Msgf("Starting up")
+	if *skipManifestPreUpdateValidations {
+		log.Warn().Msgf("--unsafe-skip-manifest-pre-update-validations is set; this flag is inherently unsafe and should only be set temporarily in order to fix an ongoing incident")
+	}
+	if *skipManifestPostUpdateValidations {
+		log.Warn().Msgf("--unsafe-skip-manifest-post-update-validations is set; this flag is inherently unsafe and should only be set temporarily in order to fix an ongoing incident")
+	}
 	ctx := context.Background()
 	if *timeout > 0 {
 		var cancel context.CancelFunc
@@ -257,6 +266,8 @@ func main() {
 				DeleteMinKeyCount: *packetEncryptionKeyDeleteMinCount,
 			},
 		},
+		skipManifestPreUpdateValidations:  *skipManifestPreUpdateValidations,
+		skipManifestPostUpdateValidations: *skipManifestPostUpdateValidations,
 	}); err != nil {
 		fail("Couldn't rotate keys: %v", err)
 	}
@@ -274,13 +285,15 @@ type rotateKeysConfig struct {
 	manifestStore storage.Manifest
 
 	// Configuration.
-	now             time.Time
-	locality        string
-	ingestors       []string
-	prioEnvironment string
-	csrFQDN         string
-	batchCFG        rotateKeyConfig
-	packetCFG       rotateKeyConfig
+	now                               time.Time
+	locality                          string
+	ingestors                         []string
+	prioEnvironment                   string
+	csrFQDN                           string
+	batchCFG                          rotateKeyConfig
+	packetCFG                         rotateKeyConfig
+	skipManifestPreUpdateValidations  bool
+	skipManifestPostUpdateValidations bool
 }
 
 type rotateKeyConfig struct {
@@ -344,6 +357,8 @@ func rotateKeys(ctx context.Context, cfg rotateKeysConfig) error {
 			PacketEncryptionKeyIDPrefix: fmt.Sprintf(
 				"%s-%s-ingestion-packet-decryption-key", cfg.prioEnvironment, cfg.locality),
 			PacketEncryptionKeyCSRFQDN: cfg.csrFQDN,
+			SkipPreUpdateValidations:   cfg.skipManifestPreUpdateValidations,
+			SkipPostUpdateValidations:  cfg.skipManifestPostUpdateValidations,
 		})
 		if err != nil {
 			return fmt.Errorf("couldn't update manifest for (%q, %q): %w",
