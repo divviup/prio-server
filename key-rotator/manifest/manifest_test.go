@@ -796,7 +796,7 @@ func pek(tss ...int64) key.Key {
 }
 
 // manifestBSK creates a manifest BatchSigningPublicKeys with the given
-// timetamps, expiring at the current time. Order does not matter. Key material
+// timestamps, expiring at the current time. Order does not matter. Key material
 // is arbitrary, but will match that of other batch signing keys at the same
 // timestamp, and will very likely not match other key materials.
 func manifestBSK(tss ...int64) BatchSigningPublicKeys {
