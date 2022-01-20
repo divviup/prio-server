@@ -804,7 +804,7 @@ func manifestBSK(tss ...int64) BatchSigningPublicKeys {
 }
 
 // manifestBSKWithExpiration creates a manifest BatchSigningPublicKeys with the
-// given timetamps, expiring at the given timestamp. Order does not matter. Key
+// given timestamps, expiring at the given timestamp. Order does not matter. Key
 // material is arbitrary, but will match that of other batch signing keys at
 // the same timestamp, and will very likely not match other key materials.
 func manifestBSKWithExpiration(when time.Time, tss ...int64) BatchSigningPublicKeys {
