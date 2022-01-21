@@ -6,13 +6,14 @@ use crate::{
     DATE_FORMAT,
 };
 use anyhow::{anyhow, Context, Result};
+use bitvec::prelude::*;
 use chrono::NaiveDateTime;
 use prio::{
     client::Client,
     encrypt::PublicKey,
     field::{FieldElement, FieldPriov2},
 };
-use rand::{thread_rng, Rng};
+use ring::digest;
 use slog::{info, o, Logger};
 use uuid::Uuid;
 
@@ -181,8 +182,6 @@ impl<'a> SampleGenerator<'a> {
         );
 
         // Generate random data packets and write into data share packets
-        let mut thread_rng = thread_rng();
-
         let mut client = Client::new(
             // usize is probably bigger than i32 and we have checked that dim is
             // positive so this is safe
@@ -219,20 +218,17 @@ impl<'a> SampleGenerator<'a> {
         let mut facilitator_dropped_packets = Vec::new();
 
         // Compute packets & dropped packets for facilitator & PHA.
-        for count in 0..packet_count {
-            // Generate random bit vector
-            let data_len = if Self::short_packet(generate_short_packet, count) {
-                dimension - 1
-            } else {
-                dimension
-            };
+        for (count, mut data) in sample_data_iterator(batch_uuid, dimension as usize)
+            .take(packet_count)
+            .enumerate()
+        {
+            // Shorten the returned data vector if requested.
+            if Self::short_packet(generate_short_packet, count) {
+                data.pop();
+            }
 
-            let data: Vec<FieldPriov2> = (0..data_len)
-                .map(|_| FieldPriov2::from(thread_rng.gen_range(0..2)))
-                .collect();
-
-            // If we are dropping the packet from either output, do
-            // not include it in the reference sum
+            // Update reference sum. (If we are dropping the packet from either
+            // output, do not include it in the reference sum.)
             if !SampleOutput::drop_packet(drop_nth_pha_packet, count)
                 && !SampleOutput::drop_packet(drop_nth_facilitator_packet, count)
             {
@@ -337,6 +333,43 @@ impl<'a> SampleGenerator<'a> {
             facilitator_dropped_packets,
         })
     }
+}
+
+/// Returns an iterator over sample data; each datum will be a vector of length
+/// `dimension`. This iterator will produce an arbitrarily large number of
+/// values, with the expectation that the caller will terminate iteration when
+/// enough values have been taken. The sequence of output values is
+/// deterministic based on `batch_uuid` & `dimension`.
+fn sample_data_iterator(
+    batch_uuid: &Uuid,
+    dimension: usize,
+) -> impl Iterator<Item = Vec<FieldPriov2>> {
+    // Ensure preconditions.
+    static DIGEST_ALGORITHM: &digest::Algorithm = &digest::SHA512_256;
+    assert!(
+        dimension <= 8 * DIGEST_ALGORITHM.output_len,
+        "Requested dimension {} is too large for digest algorithm in use (maximum dimension {})",
+        dimension,
+        8 * DIGEST_ALGORITHM.output_len
+    );
+
+    let batch_uuid = batch_uuid.to_owned();
+    (0_u64..).map(move |index| {
+        // Compute a digest over (batch_uuid, index) to produce deterministic, arbitrary,
+        // unique bits for data.
+        let mut ctx = digest::Context::new(DIGEST_ALGORITHM);
+        ctx.update(batch_uuid.as_bytes());
+        ctx.update(&index.to_be_bytes());
+        let digest = ctx.finish();
+
+        // Generate data based on the computed digest.
+        digest
+            .as_bits::<Msb0>()
+            .iter()
+            .take(dimension)
+            .map(|bit| FieldPriov2::from(*bit as u32))
+            .collect()
+    })
 }
 
 #[cfg(test)]
