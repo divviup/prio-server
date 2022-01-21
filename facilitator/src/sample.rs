@@ -335,7 +335,7 @@ impl<'a> SampleGenerator<'a> {
     }
 }
 
-/// Returns an iterator over sample datas; each will be a vector of length
+/// Returns an iterator over sample data; each datum will be a vector of length
 /// `dimension`. This iterator will produce an arbitrarily large number of
 /// values, with the expectation that the caller will terminate iteration when
 /// enough values have been taken. The sequence of output values is
