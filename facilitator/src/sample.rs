@@ -13,6 +13,7 @@ use prio::{
     encrypt::PublicKey,
     field::{FieldElement, FieldPriov2},
 };
+use ring::digest;
 use slog::{info, o, Logger};
 use uuid::Uuid;
 
@@ -217,34 +218,17 @@ impl<'a> SampleGenerator<'a> {
         let mut facilitator_dropped_packets = Vec::new();
 
         // Compute packets & dropped packets for facilitator & PHA.
-        for count in 0..packet_count {
-            let packet_uuid = Uuid::new_v4();
+        for (count, mut data) in sample_data_iterator(batch_uuid, dimension as usize)
+            .take(packet_count)
+            .enumerate()
+        {
+            // Shorten the returned data vector if requested.
+            if Self::short_packet(generate_short_packet, count) {
+                data.pop();
+            }
 
-            // Generate random bit vector
-            let data_len = if Self::short_packet(generate_short_packet, count) {
-                (dimension - 1) as usize
-            } else {
-                dimension as usize
-            };
-
-            // Compute data deterministically from packet_uuid. This allows the
-            // data to be computed later without needing to reread the data
-            // share packets.
-            let data: Vec<FieldPriov2> = packet_uuid
-                .as_bytes()
-                .view_bits::<Msb0>()
-                .iter()
-                .take(data_len)
-                .map(|bit| FieldPriov2::from(*bit as u32))
-                .collect();
-            assert_eq!(
-                data.len(),
-                data_len,
-                "Packet UUID not large enough for dimension"
-            );
-
-            // If we are dropping the packet from either output, do
-            // not include it in the reference sum
+            // Update reference sum. (If we are dropping the packet from either
+            // output, do not include it in the reference sum.)
             if !SampleOutput::drop_packet(drop_nth_pha_packet, count)
                 && !SampleOutput::drop_packet(drop_nth_facilitator_packet, count)
             {
@@ -270,6 +254,7 @@ impl<'a> SampleGenerator<'a> {
             // which we don't have in this context. Using a constant value removes
             // the libprio::Server dependency for creating samples
             let r_pit: u32 = 998314904;
+            let packet_uuid = Uuid::new_v4();
 
             if SampleOutput::drop_packet(drop_nth_pha_packet, count) {
                 info!(
@@ -348,6 +333,43 @@ impl<'a> SampleGenerator<'a> {
             facilitator_dropped_packets,
         })
     }
+}
+
+/// Returns an iterator over sample datas; each will be a vector of length
+/// `dimension`. This iterator will produce an arbitrarily large number of
+/// values, with the expectation that the caller will terminate iteration when
+/// enough values have been taken. The sequence of output values is
+/// deterministic based on `batch_uuid` & `dimension`.
+fn sample_data_iterator(
+    batch_uuid: &Uuid,
+    dimension: usize,
+) -> impl Iterator<Item = Vec<FieldPriov2>> {
+    // Ensure preconditions.
+    static DIGEST_ALGORITHM: &digest::Algorithm = &digest::SHA512_256;
+    assert!(
+        dimension <= 8 * DIGEST_ALGORITHM.output_len,
+        "Requested dimension {} is too large for digest algorithm in use (maximum dimension {})",
+        dimension,
+        8 * DIGEST_ALGORITHM.output_len
+    );
+
+    let batch_uuid = batch_uuid.to_owned();
+    (0_u64..).map(move |index| {
+        // Compute a digest over (batch_uuid, index) to produce deterministic, arbitrary,
+        // unique bits for data.
+        let mut ctx = digest::Context::new(DIGEST_ALGORITHM);
+        ctx.update(batch_uuid.as_bytes());
+        ctx.update(&index.to_be_bytes());
+        let digest = ctx.finish();
+
+        // Generate data based on the computed digest.
+        digest
+            .as_bits::<Msb0>()
+            .iter()
+            .take(dimension)
+            .map(|bit| FieldPriov2::from(*bit as u32))
+            .collect()
+    })
 }
 
 #[cfg(test)]
