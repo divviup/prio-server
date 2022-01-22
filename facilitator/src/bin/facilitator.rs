@@ -1334,7 +1334,7 @@ fn generate_sample(
         api_metrics,
     )?;
 
-    let mut peer_transport = SampleOutput {
+    let peer_transport = SampleOutput {
         transport: SignableTransport {
             transport: transport_for_path(
                 peer_output_path,
@@ -1381,7 +1381,7 @@ fn generate_sample(
         api_metrics,
     )?;
 
-    let mut facilitator_transport = SampleOutput {
+    let facilitator_transport = SampleOutput {
         transport: SignableTransport {
             transport: transport_for_path(
                 facilitator_output,
@@ -1406,8 +1406,8 @@ fn generate_sample(
         value_t!(sub_matches.value_of("epsilon"), f64)?,
         value_t!(sub_matches.value_of("batch-start-time"), i64)?,
         value_t!(sub_matches.value_of("batch-end-time"), i64)?,
-        &mut peer_transport,
-        &mut facilitator_transport,
+        &peer_transport,
+        &facilitator_transport,
         logger,
     );
 
