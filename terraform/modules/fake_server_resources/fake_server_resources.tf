@@ -114,42 +114,6 @@ module "account_mapping" {
   kubernetes_namespace            = kubernetes_namespace.tester.metadata[0].name
 }
 
-resource "kubernetes_role" "integration_tester_role" {
-  metadata {
-    name      = "${var.environment}-ingestion-tester-role"
-    namespace = kubernetes_namespace.tester.metadata[0].name
-  }
-
-  rule {
-    api_groups = [""]
-    // integration-tester needs to be able to list and get secrets.
-    // This is used by the integration-tester to find a valid
-    // batch signing key for itself.
-    resources = ["secrets"]
-    verbs     = ["list", "get"]
-  }
-}
-
-
-resource "kubernetes_role_binding" "integration_tester_role_binding" {
-  metadata {
-    name      = "${var.environment}-integration-tester-can-admin"
-    namespace = kubernetes_namespace.tester.metadata[0].name
-  }
-
-  role_ref {
-    kind      = "Role"
-    name      = kubernetes_role.integration_tester_role.metadata[0].name
-    api_group = "rbac.authorization.k8s.io"
-  }
-
-  subject {
-    kind      = "ServiceAccount"
-    name      = module.account_mapping.kubernetes_service_account_name
-    namespace = kubernetes_namespace.tester.metadata[0].name
-  }
-}
-
 resource "kubernetes_secret" "batch_signing_key" {
   metadata {
     generate_name = "batch-signing-key"
