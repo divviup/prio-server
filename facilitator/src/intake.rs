@@ -244,7 +244,7 @@ mod tests {
 
         let packet_encryption_csr = default_packet_encryption_certificate_signing_request();
 
-        let mut pha_output = SampleOutput {
+        let pha_output = SampleOutput {
             transport: SignableTransport {
                 transport: Box::new(LocalFileTransport::new(pha_tempdir.path().to_path_buf())),
                 batch_signing_key: default_ingestor_private_key(),
@@ -256,7 +256,7 @@ mod tests {
             drop_nth_packet: None,
         };
 
-        let mut facilitator_output = SampleOutput {
+        let facilitator_output = SampleOutput {
             transport: SignableTransport {
                 transport: Box::new(LocalFileTransport::new(
                     facilitator_tempdir.path().to_path_buf(),
@@ -276,8 +276,8 @@ mod tests {
             0.11,
             100,
             100,
-            &mut pha_output,
-            &mut facilitator_output,
+            &pha_output,
+            &facilitator_output,
             &logger,
         );
 
@@ -373,7 +373,7 @@ mod tests {
 
         let packet_encryption_csr = default_packet_encryption_certificate_signing_request();
 
-        let mut pha_output = SampleOutput {
+        let pha_output = SampleOutput {
             transport: SignableTransport {
                 transport: Box::new(LocalFileTransport::new(pha_tempdir.path().to_path_buf())),
                 batch_signing_key: default_ingestor_private_key(),
@@ -385,7 +385,7 @@ mod tests {
             drop_nth_packet: None,
         };
 
-        let mut facilitator_output = SampleOutput {
+        let facilitator_output = SampleOutput {
             transport: SignableTransport {
                 transport: Box::new(LocalFileTransport::new(
                     facilitator_tempdir.path().to_path_buf(),
@@ -405,8 +405,8 @@ mod tests {
             0.11,
             100,
             100,
-            &mut pha_output,
-            &mut facilitator_output,
+            &pha_output,
+            &facilitator_output,
             &logger,
         );
 
@@ -466,7 +466,7 @@ mod tests {
 
         let packet_encryption_csr = default_packet_encryption_certificate_signing_request();
 
-        let mut pha_output = SampleOutput {
+        let pha_output = SampleOutput {
             transport: SignableTransport {
                 transport: Box::new(LocalFileTransport::new(pha_tempdir.path().to_path_buf())),
                 batch_signing_key: default_ingestor_private_key(),
@@ -478,7 +478,7 @@ mod tests {
             drop_nth_packet: None,
         };
 
-        let mut facilitator_output = SampleOutput {
+        let facilitator_output = SampleOutput {
             transport: SignableTransport {
                 transport: Box::new(LocalFileTransport::new(
                     facilitator_tempdir.path().to_path_buf(),
@@ -498,8 +498,8 @@ mod tests {
             0.11,
             100,
             100,
-            &mut pha_output,
-            &mut facilitator_output,
+            &pha_output,
+            &facilitator_output,
             &logger,
         );
         sample_generator.set_generate_short_packet(5);
