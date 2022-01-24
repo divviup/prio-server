@@ -11,7 +11,6 @@ pub mod gcp_oauth;
 pub mod http;
 pub mod idl;
 pub mod intake;
-pub mod kubernetes;
 pub mod logging;
 pub mod manifest;
 pub mod metrics;

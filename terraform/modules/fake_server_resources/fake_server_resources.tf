@@ -114,42 +114,6 @@ module "account_mapping" {
   kubernetes_namespace            = kubernetes_namespace.tester.metadata[0].name
 }
 
-resource "kubernetes_role" "integration_tester_role" {
-  metadata {
-    name      = "${var.environment}-ingestion-tester-role"
-    namespace = kubernetes_namespace.tester.metadata[0].name
-  }
-
-  rule {
-    api_groups = [""]
-    // integration-tester needs to be able to list and get secrets.
-    // This is used by the integration-tester to find a valid
-    // batch signing key for itself.
-    resources = ["secrets"]
-    verbs     = ["list", "get"]
-  }
-}
-
-
-resource "kubernetes_role_binding" "integration_tester_role_binding" {
-  metadata {
-    name      = "${var.environment}-integration-tester-can-admin"
-    namespace = kubernetes_namespace.tester.metadata[0].name
-  }
-
-  role_ref {
-    kind      = "Role"
-    name      = kubernetes_role.integration_tester_role.metadata[0].name
-    api_group = "rbac.authorization.k8s.io"
-  }
-
-  subject {
-    kind      = "ServiceAccount"
-    name      = module.account_mapping.kubernetes_service_account_name
-    namespace = kubernetes_namespace.tester.metadata[0].name
-  }
-}
-
 resource "kubernetes_secret" "batch_signing_key" {
   metadata {
     generate_name = "batch-signing-key"
@@ -220,6 +184,32 @@ resource "kubernetes_deployment" "integration-tester" {
         container {
           name  = "integration-tester"
           image = "${var.container_registry}/${var.facilitator_image}:${var.facilitator_version}"
+          args = [
+            "generate-ingestion-sample-worker",
+            "--ingestor-name", each.value.ingestor,
+            "--locality-name", each.value.locality,
+            "--pha-manifest-base-url", "https://${each.value.peer_share_processor_manifest_base_url}",
+            "--facilitator-manifest-base-url", "https://${var.own_manifest_base_url}",
+            "--batch-signing-private-key-default-identifier=${kubernetes_secret.batch_signing_key.metadata[0].name}",
+            "--aggregation-id", "kittens-seen",
+            "--packet-count", "10",
+            "--batch-start-time", "1000000000",
+            "--batch-end-time", "1000000100",
+            "--dimension", "123",
+            "--epsilon", "0.23",
+            "--generation-interval", "60",
+            "--worker-maximum-lifetime", "3600",
+          ]
+          env {
+            name = "BATCH_SIGNING_PRIVATE_KEY"
+            value_from {
+              secret_key_ref {
+                name     = kubernetes_secret.batch_signing_key.metadata[0].name
+                key      = "secret_key"
+                optional = false
+              }
+            }
+          }
           env {
             name  = "RUST_BACKTRACE"
             value = "FULL"
@@ -228,24 +218,6 @@ resource "kubernetes_deployment" "integration-tester" {
             name  = "RUST_LOG"
             value = "info"
           }
-          args = [
-            "--pushgateway", var.pushgateway,
-            "generate-ingestion-sample-worker",
-            "--ingestor-name", each.value.ingestor,
-            "--locality-name", each.value.locality,
-            "--kube-namespace", kubernetes_namespace.tester.metadata[0].name,
-            "--ingestor-manifest-base-url", "https://${each.value.ingestor_manifest_base_url}",
-            "--pha-manifest-base-url", "https://${each.value.peer_share_processor_manifest_base_url}",
-            "--facilitator-manifest-base-url", "https://${var.own_manifest_base_url}",
-            "--aggregation-id", "kittens-seen",
-            "--packet-count", "10",
-            "--batch-start-time", "1000000000",
-            "--batch-end-time", "1000000100",
-            "--dimension", "123",
-            "--epsilon", "0.23",
-            "--generation-interval", "60",
-            "--worker-maximum-lifetime", "3600"
-          ]
         }
       }
     }
