@@ -1,7 +1,6 @@
 use anyhow::{anyhow, Context, Result};
 use chrono::{prelude::Utc, NaiveDateTime};
 use clap::{value_t, App, Arg, ArgGroup, ArgMatches, SubCommand};
-use kube::api::ResourceExt;
 use prio::encrypt::{PrivateKey, PublicKey};
 use ring::signature::{
     EcdsaKeyPair, KeyPair, UnparsedPublicKey, ECDSA_P256_SHA256_ASN1,
@@ -23,7 +22,6 @@ use facilitator::{
     },
     gcp_oauth::GcpAccessTokenProviderFactory,
     intake::BatchIntaker,
-    kubernetes::KubernetesClient,
     logging::{event, setup_logging, LoggingConfiguration},
     manifest::{
         DataShareProcessorGlobalManifest, DataShareProcessorSpecificManifest,
@@ -732,16 +730,6 @@ fn main() -> Result<(), anyhow::Error> {
                 .add_common_sample_maker_arguments()
                 .add_worker_lifetime_argument()
                 .arg(
-                    Arg::with_name("kube-namespace")
-                        .long("kube-namespace")
-                        .env("KUBE_NAMESPACE")
-                        .value_name("STRING")
-                        .help(
-                            "Name of the kubernetes namespace"
-                        )
-                        .required(true)
-                )
-                .arg(
                     Arg::with_name("generation-interval")
                         .long("generation-interval")
                         .value_name("INTERVAL")
@@ -1236,62 +1224,6 @@ fn get_ingestion_identity_and_bucket(
     }
 }
 
-fn get_valid_batch_signing_key(
-    namespace: Option<&str>,
-    ingestor_manifest_url: Option<&str>,
-    matches: &ArgMatches,
-    logger: &Logger,
-    api_metrics: &ApiClientMetricsCollector,
-) -> Result<BatchSigningKey> {
-    match ingestor_manifest_url {
-        Some(own_manifest_url) => {
-            let namespace = namespace.ok_or_else(|| {
-                anyhow!("If manifest URLs are used, kubernetes namespace must be provided")
-            })?;
-
-            let manifest =
-                IngestionServerManifest::from_https(own_manifest_url, None, logger, api_metrics)
-                    .context(format!(
-                        "unable to get ingestion server manifest from url: {}",
-                        own_manifest_url
-                    ))?;
-
-            let kubernetes = KubernetesClient::new(String::from(namespace));
-            let secrets = kubernetes.get_sorted_secrets("isrg-prio.org/type=batch-signing-key")?;
-
-            let batch_signing_keys = manifest.batch_signing_public_keys().unwrap();
-
-            let secret = secrets
-                .into_iter()
-                .find(|secret| batch_signing_keys.contains_key(&secret.name()));
-
-            match secret {
-                None => Err(anyhow!(
-                    "unable to find a batch signing key from the manifest and kubernetes secret store"
-                )),
-                Some(secret) => {
-                    let secret_bytestring = secret.data
-                        .as_ref()
-                        .ok_or_else(|| anyhow!("no data in Kubernetes secret"))?
-                        .get("secret_key")
-                        .ok_or_else(|| anyhow!("no secret_key in Kubernetes secret"))?;
-                    let secret_data = base64::decode(&secret_bytestring.0)?;
-                    let key =
-                        EcdsaKeyPair::from_pkcs8(&ECDSA_P256_SHA256_ASN1_SIGNING, &secret_data)
-                            .context("decoding secret key rejected")?;
-
-                    Ok(BatchSigningKey {
-                        identifier: secret.name(),
-                        key,
-                    })
-                }
-            }
-        }
-        // The caller is passing key in directly
-        None => batch_signing_key_from_arg(matches),
-    }
-}
-
 fn generate_sample(
     trace_id: &Uuid,
     sub_matches: &ArgMatches,
@@ -1301,19 +1233,8 @@ fn generate_sample(
     api_metrics: &ApiClientMetricsCollector,
     logger: &Logger,
 ) -> Result<(), anyhow::Error> {
-    let kube_namespace = sub_matches.value_of("kube-namespace");
-    let ingestor_manifest_base_url = sub_matches.value_of("ingestor-manifest-base-url");
-
     let ingestor_name = sub_matches.value_of("ingestor-name");
     let locality_name = sub_matches.value_of("locality-name");
-
-    let own_batch_signing_key = get_valid_batch_signing_key(
-        kube_namespace,
-        ingestor_manifest_base_url,
-        sub_matches,
-        logger,
-        api_metrics,
-    )?;
 
     let (peer_identity, peer_output_path) = get_ingestion_identity_and_bucket(
         value_t!(sub_matches.value_of("peer-identity"), Identity)?,
@@ -1347,7 +1268,7 @@ fn generate_sample(
                 gcp_access_token_provider_factory,
                 logger,
             )?,
-            batch_signing_key: own_batch_signing_key,
+            batch_signing_key: batch_signing_key_from_arg(sub_matches)?,
         },
         packet_encryption_public_key,
         drop_nth_packet: None,
@@ -1373,14 +1294,6 @@ fn generate_sample(
     )
     .unwrap();
 
-    let own_batch_signing_key = get_valid_batch_signing_key(
-        kube_namespace,
-        ingestor_manifest_base_url,
-        sub_matches,
-        logger,
-        api_metrics,
-    )?;
-
     let mut facilitator_transport = SampleOutput {
         transport: SignableTransport {
             transport: transport_for_path(
@@ -1394,7 +1307,7 @@ fn generate_sample(
                 gcp_access_token_provider_factory,
                 logger,
             )?,
-            batch_signing_key: own_batch_signing_key,
+            batch_signing_key: batch_signing_key_from_arg(sub_matches)?,
         },
         packet_encryption_public_key,
         drop_nth_packet: None,
