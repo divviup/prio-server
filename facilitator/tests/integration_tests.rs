@@ -60,7 +60,7 @@ fn aggregation_including_invalid_batch() {
         default_ingestor_public_key(),
     );
 
-    let mut pha_output = SampleOutput {
+    let pha_output = SampleOutput {
         transport: SignableTransport {
             transport: Box::new(LocalFileTransport::new(
                 pha_tempdir.path().join("ingestion"),
@@ -71,7 +71,7 @@ fn aggregation_including_invalid_batch() {
         drop_nth_packet: None,
     };
 
-    let mut facilitator_output = SampleOutput {
+    let facilitator_output = SampleOutput {
         transport: SignableTransport {
             transport: Box::new(LocalFileTransport::new(
                 facilitator_tempdir.path().join("ingestion"),
@@ -104,8 +104,8 @@ fn aggregation_including_invalid_batch() {
         0.11,
         100,
         100,
-        &mut pha_output,
-        &mut facilitator_output,
+        &pha_output,
+        &facilitator_output,
         &logger,
     );
 
@@ -332,7 +332,7 @@ fn end_to_end_test(drop_nth_pha: Option<usize>, drop_nth_facilitator: Option<usi
         default_ingestor_public_key(),
     );
 
-    let mut pha_output = SampleOutput {
+    let pha_output = SampleOutput {
         transport: SignableTransport {
             transport: Box::new(LocalFileTransport::new(pha_tempdir.path().to_path_buf())),
             batch_signing_key: default_ingestor_private_key(),
@@ -342,7 +342,7 @@ fn end_to_end_test(drop_nth_pha: Option<usize>, drop_nth_facilitator: Option<usi
         drop_nth_packet: drop_nth_pha,
     };
 
-    let mut facilitator_output = SampleOutput {
+    let facilitator_output = SampleOutput {
         transport: SignableTransport {
             transport: Box::new(LocalFileTransport::new(
                 facilitator_tempdir.path().to_path_buf(),
@@ -361,8 +361,8 @@ fn end_to_end_test(drop_nth_pha: Option<usize>, drop_nth_facilitator: Option<usi
         0.11,
         100,
         100,
-        &mut pha_output,
-        &mut facilitator_output,
+        &pha_output,
+        &facilitator_output,
         &logger,
     );
 

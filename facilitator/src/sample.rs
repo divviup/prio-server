@@ -85,10 +85,10 @@ pub struct SampleGenerator<'a> {
     generate_short_packet: Option<usize>,
     /// Describes where the PHA/"first" server's shares should be written and
     /// how
-    pha_output: &'a mut SampleOutput,
+    pha_output: &'a SampleOutput,
     /// Describes where the facilitator/"second" server's shares should be
     /// written and how
-    facilitator_output: &'a mut SampleOutput,
+    facilitator_output: &'a SampleOutput,
     /// Logger to which events will be written
     logger: Logger,
 }
@@ -103,8 +103,8 @@ impl<'a> SampleGenerator<'a> {
         epsilon: f64,
         batch_start_time: i64,
         batch_end_time: i64,
-        pha_output: &'a mut SampleOutput,
-        facilitator_output: &'a mut SampleOutput,
+        pha_output: &'a SampleOutput,
+        facilitator_output: &'a SampleOutput,
         parent_logger: &Logger,
     ) -> Self {
         let logger = parent_logger.new(o!(
@@ -335,6 +335,33 @@ impl<'a> SampleGenerator<'a> {
     }
 }
 
+/// Generates the expected sum for a given sum batch that was generated based
+/// off of sample ingestion batches (i.e. by `generate_ingestion_sample`).
+/// Typically, `batch_uuids` will come directly from SumPart.batch_uuids,
+/// `dimension` will come directly from SumPart.bins, and `packet_count` must
+/// match the `packet_count` that was used in the calls to
+/// `generate_ingestion_sample`. It is expected that neither the "short packet"
+/// nor the "drop packet" features were used during sample generation.
+pub fn expected_sample_sum_for_batches(
+    batch_uuids: &[Uuid],
+    dimension: i32,
+    packet_count: usize,
+) -> Vec<FieldPriov2> {
+    let dimension = dimension as usize;
+    let mut sum = vec![FieldPriov2::from(0); dimension];
+
+    for batch_uuid in batch_uuids {
+        for packet_data in sample_data_iterator(batch_uuid, dimension).take(packet_count) {
+            assert_eq!(sum.len(), packet_data.len());
+            for (s, v) in sum.iter_mut().zip(packet_data.iter()) {
+                *s += *v;
+            }
+        }
+    }
+
+    sum
+}
+
 /// Returns an iterator over sample data; each datum will be a vector of length
 /// `dimension`. This iterator will produce an arbitrarily large number of
 /// values, with the expectation that the caller will terminate iteration when
@@ -374,18 +401,23 @@ fn sample_data_iterator(
 
 #[cfg(test)]
 mod tests {
+    use std::iter;
+
     use super::*;
     use crate::{
         idl::Header,
         logging::setup_test_logging,
         test_utils::{
-            default_ingestor_private_key, DEFAULT_FACILITATOR_ECIES_PRIVATE_KEY,
-            DEFAULT_PHA_ECIES_PRIVATE_KEY, DEFAULT_TRACE_ID,
+            default_facilitator_packet_encryption_public_key,
+            default_facilitator_signing_private_key, default_ingestor_private_key,
+            default_pha_packet_encryption_public_key, default_pha_signing_private_key,
+            DEFAULT_FACILITATOR_ECIES_PRIVATE_KEY, DEFAULT_PHA_ECIES_PRIVATE_KEY, DEFAULT_TRACE_ID,
         },
         transport::{LocalFileTransport, Transport},
     };
     use chrono::NaiveDate;
     use prio::encrypt::PrivateKey;
+    use tempfile::TempDir;
 
     #[test]
     #[allow(clippy::float_cmp)] // No arithmetic done on floats
@@ -394,7 +426,7 @@ mod tests {
         let tempdir = tempfile::TempDir::new().unwrap();
         let batch_uuid = Uuid::new_v4();
 
-        let mut pha_output = SampleOutput {
+        let pha_output = SampleOutput {
             transport: SignableTransport {
                 transport: Box::new(LocalFileTransport::new(
                     tempdir.path().to_path_buf().join("pha"),
@@ -406,7 +438,7 @@ mod tests {
             ),
             drop_nth_packet: None,
         };
-        let mut facilitator_output = SampleOutput {
+        let facilitator_output = SampleOutput {
             transport: SignableTransport {
                 transport: Box::new(LocalFileTransport::new(
                     tempdir.path().to_path_buf().join("facilitator"),
@@ -425,8 +457,8 @@ mod tests {
             0.11,
             100,
             100,
-            &mut pha_output,
-            &mut facilitator_output,
+            &pha_output,
+            &facilitator_output,
             &logger,
         );
 
@@ -458,5 +490,75 @@ mod tests {
             assert_eq!(parsed_header.batch_start_time, 100);
             assert_eq!(parsed_header.batch_end_time, 100);
         }
+    }
+
+    #[test]
+    fn expected_sample_sum_for_batches() {
+        const BATCH_COUNT: usize = 4;
+        const DIMENSION: i32 = 123;
+        const PACKET_COUNT: usize = 10;
+
+        let logger = setup_test_logging();
+        let tempdir = TempDir::new().unwrap();
+        let batch_uuids: Vec<Uuid> = iter::repeat_with(Uuid::new_v4).take(BATCH_COUNT).collect();
+
+        // Determine expected sum, per expected_sample_sum_for_batches.
+        let expected_sum =
+            super::expected_sample_sum_for_batches(&batch_uuids, DIMENSION, PACKET_COUNT);
+
+        // Create SampleGenerator, along with its dependencies.
+        let sample_output_pha = SampleOutput {
+            transport: SignableTransport {
+                transport: Box::new(LocalFileTransport::new(
+                    tempdir.path().to_path_buf().join("pha"),
+                )),
+                batch_signing_key: default_pha_signing_private_key(),
+            },
+            packet_encryption_public_key: default_pha_packet_encryption_public_key(),
+            drop_nth_packet: None,
+        };
+
+        let sample_output_facilitator = SampleOutput {
+            transport: SignableTransport {
+                transport: Box::new(LocalFileTransport::new(
+                    tempdir.path().to_path_buf().join("facilitator"),
+                )),
+                batch_signing_key: default_facilitator_signing_private_key(),
+            },
+            packet_encryption_public_key: default_facilitator_packet_encryption_public_key(),
+            drop_nth_packet: None,
+        };
+
+        let sample_generator = SampleGenerator::new(
+            "fake-aggregation",
+            DIMENSION,
+            0.0,
+            0,
+            0,
+            &sample_output_pha,
+            &sample_output_facilitator,
+            &logger,
+        );
+
+        // Determine actual sum, per calls to generate_ingestion_sample.
+        let mut actual_sum = vec![FieldPriov2::from(0); DIMENSION as usize];
+        for batch_uuid in batch_uuids {
+            let batch_sum = sample_generator
+                .generate_ingestion_sample(
+                    &DEFAULT_TRACE_ID,
+                    &batch_uuid,
+                    &NaiveDate::from_ymd(2009, 2, 13).and_hms(23, 31, 0),
+                    PACKET_COUNT,
+                )
+                .unwrap()
+                .sum;
+            assert_eq!(batch_sum.len(), actual_sum.len());
+            for (s, v) in actual_sum.iter_mut().zip(batch_sum.iter()) {
+                *s += *v;
+            }
+        }
+
+        // Check that the expected sum matches the actual sum.
+        assert_eq!(expected_sum, actual_sum);
     }
 }
