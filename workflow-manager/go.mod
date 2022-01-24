@@ -9,7 +9,7 @@ require (
 	cloud.google.com/go/storage v1.18.2
 	github.com/aws/aws-sdk-go v1.42.39
 	github.com/google/uuid v1.3.0
-	github.com/prometheus/client_golang v1.11.0
+	github.com/prometheus/client_golang v1.12.0
 	github.com/rs/zerolog v1.26.1
 	google.golang.org/api v0.65.0
 )
