@@ -200,10 +200,35 @@ impl<'a, H: Header, P: Packet> BatchReader<'a, H, P> {
                 // ingestion server authors suggest that the maximum batch size will be
                 // ~400MiB, so this should work out okay.
                 let mut packet_bytes = Vec::new();
-                self.transport
-                    .get(self.batch.packet_file_key(), self.trace_id)?
-                    .read_to_end(&mut packet_bytes)
-                    .context("failed to read packets from transport")?;
+                let packet_get_result = self
+                    .transport
+                    .get(self.batch.packet_file_key(), self.trace_id);
+
+                match packet_get_result {
+                    Ok(mut reader) => {
+                        reader
+                            .read_to_end(&mut packet_bytes)
+                            .context("failed to read packets from transport")?;
+                    }
+                    Err(ref err) => {
+                        // We treat ObjectNotFoundErrors as "empty" packet
+                        // objects, as our transport writers do not create
+                        // 0-byte objects at all. This is a bug in the
+                        // in the transport writer, but at the point this was
+                        // fixed this behavior was long-standing and visible to
+                        // external partners, so it's better to simply accept
+                        // missing objects as representing a 0-byte packet
+                        // file. We check that the packet file _should_ be
+                        // empty when we check the digest below, so this won't
+                        // let someone get away with something sneaky by
+                        // deleting a packet file.
+                        if let Some(lib_err) = err.downcast_ref::<Error>() {
+                            if !matches!(lib_err, Error::ObjectNotFoundError(_, _)) {
+                                packet_get_result?;
+                            }
+                        };
+                    }
+                }
 
                 (header_bytes, packet_bytes)
             };

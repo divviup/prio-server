@@ -2,6 +2,10 @@ variable "environment" {
   type = string
 }
 
+variable "other_environment" {
+  type = string
+}
+
 variable "gcp_region" {
   type = string
 }
@@ -17,6 +21,8 @@ variable "sum_part_bucket_writer_email" {
 variable "use_aws" {
   type = bool
 }
+
+data "google_project" "project" {}
 
 # For our purposes, a fake portal server is simply a bucket where we can write
 # sum parts, as well as a correctly formed global manifest advertising that
@@ -37,10 +43,8 @@ resource "google_storage_bucket" "sum_part_output" {
 resource "google_storage_bucket_iam_binding" "write_sum_parts" {
   bucket = google_storage_bucket.sum_part_output.name
   # Allow ourselves to write to sum part outputs
-  role = "roles/storage.objectAdmin"
-  members = [
-    "serviceAccount:${var.sum_part_bucket_writer_email}"
-  ]
+  role    = "roles/storage.objectAdmin"
+  members = ["serviceAccount:${var.sum_part_bucket_writer_email}"]
 }
 
 locals {

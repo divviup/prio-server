@@ -16,8 +16,8 @@ use hyper_rustls::HttpsConnectorBuilder;
 use rusoto_core::{request::BufferedHttpResponse, ByteStream, RusotoError};
 use rusoto_s3::{
     AbortMultipartUploadRequest, CompleteMultipartUploadError, CompleteMultipartUploadRequest,
-    CompletedMultipartUpload, CompletedPart, CreateMultipartUploadRequest, GetObjectRequest,
-    S3Client, UploadPartRequest, S3,
+    CompletedMultipartUpload, CompletedPart, CreateMultipartUploadRequest, GetObjectError,
+    GetObjectRequest, S3Client, UploadPartRequest, S3,
 };
 use slog::{debug, info, o, warn, Logger};
 use std::{
@@ -131,6 +131,12 @@ impl Transport for S3Transport {
                 })
             },
         )
+        .map_err(|err| {
+            if matches!(err, RusotoError::Service(GetObjectError::NoSuchKey(_))) {
+                return Error::ObjectNotFoundError(key.to_owned(), anyhow::Error::from(err));
+            }
+            Error::from(anyhow::Error::from(err))
+        })
         .context("error getting S3 object")?;
 
         let body = get_output.body.context("no body in GetObjectResponse")?;

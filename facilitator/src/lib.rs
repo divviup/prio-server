@@ -41,6 +41,8 @@ pub enum Error {
     HttpError(#[from] ureq::Error),
     #[error("packet decryption failure for packet {0}")]
     PacketDecryptionError(Uuid),
+    #[error("object {0} not found: {1}")]
+    ObjectNotFoundError(String, anyhow::Error),
 }
 
 /// A wrapper-writer that computes a SHA256 digest over the content it is provided.

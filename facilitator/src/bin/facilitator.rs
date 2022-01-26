@@ -1,21 +1,29 @@
 use anyhow::{anyhow, Context, Result};
 use chrono::{prelude::Utc, NaiveDateTime};
 use clap::{value_t, App, Arg, ArgGroup, ArgMatches, SubCommand};
-use prio::encrypt::{PrivateKey, PublicKey};
+use prio::{
+    encrypt::{PrivateKey, PublicKey},
+    field::FieldPriov2,
+    util::reconstruct_shares,
+};
+use prometheus::{register_int_counter_vec, IntCounterVec};
 use ring::signature::{
     EcdsaKeyPair, KeyPair, UnparsedPublicKey, ECDSA_P256_SHA256_ASN1,
     ECDSA_P256_SHA256_ASN1_SIGNING,
 };
-use slog::{debug, error, info, Logger};
+use slog::{debug, error, info, o, warn, Logger};
 use std::{
-    collections::HashMap, env, fs, fs::File, io::Read, str::FromStr, time::Duration, time::Instant,
+    collections::HashMap, convert::TryFrom, env, fs, fs::File, io::Read, str::FromStr,
+    time::Duration, time::Instant,
 };
+use timer::Timer;
 use tokio::runtime::{self, Handle};
 use uuid::Uuid;
 
 use facilitator::{
     aggregation::BatchAggregator,
     aws_credentials,
+    batch::{Batch, BatchReader},
     config::{
         leak_string, Entity, Identity, InOut, ManifestKind, StoragePath, TaskQueueKind,
         WorkloadIdentityPoolParameters,
@@ -31,7 +39,7 @@ use facilitator::{
         start_metrics_scrape_endpoint, AggregateMetricsCollector, ApiClientMetricsCollector,
         IntakeMetricsCollector,
     },
-    sample::{SampleGenerator, SampleOutput},
+    sample::{expected_sample_sum_for_batches, SampleGenerator, SampleOutput},
     task::{AggregationTask, AwsSqsTaskQueue, GcpPubSubTaskQueue, IntakeBatchTask, TaskQueue},
     transport::{
         GcsTransport, LocalFileTransport, S3Transport, SignableTransport, Transport,
@@ -88,6 +96,8 @@ trait AppArgumentAdder {
     fn add_metrics_scrape_port_argument(self) -> Self;
 
     fn add_common_sample_maker_arguments(self) -> Self;
+
+    fn add_common_sample_arguments(self) -> Self;
 
     fn add_permit_malformed_batch_argument(self) -> Self;
 
@@ -484,8 +494,10 @@ impl<'a, 'b> AppArgumentAdder for App<'a, 'b> {
 
     fn add_common_sample_maker_arguments(self: App<'a, 'b>) -> App<'a, 'b> {
         self.add_gcp_service_account_key_file_argument()
+            .add_common_sample_arguments()
             .add_storage_arguments(Entity::Peer, InOut::Output)
             .add_storage_arguments(Entity::Facilitator, InOut::Output)
+            .add_batch_signing_key_arguments(false)
             .arg(
                 Arg::with_name("aggregation-id")
                     .long("aggregation-id")
@@ -528,15 +540,6 @@ impl<'a, 'b> AppArgumentAdder for App<'a, 'b> {
                     ),
             )
             .arg(
-                Arg::with_name("packet-count")
-                    .long("packet-count")
-                    .short("p")
-                    .value_name("INT")
-                    .required(true)
-                    .validator(num_validator::<usize>)
-                    .help("Number of data packets to generate"),
-            )
-            .arg(
                 Arg::with_name("pha-ecies-public-key")
                     .long("pha-ecies-public-key")
                     .env("PHA_ECIES_PUBLIC_KEY")
@@ -547,18 +550,6 @@ impl<'a, 'b> AppArgumentAdder for App<'a, 'b> {
                     ),
             )
             .arg(
-                Arg::with_name("pha-manifest-base-url")
-                    .long("pha-manifest-base-url")
-                    .env("PHA_MANIFEST_BASE_URL")
-                    .value_name("URL")
-                    .help("Base URL of the Public Health Authority manifest"),
-            )
-            .group(
-                ArgGroup::with_name("public_health_authority_information")
-                    .args(&["pha-ecies-public-key", "pha-manifest-base-url"])
-                    .required(true),
-            )
-            .arg(
                 Arg::with_name("facilitator-ecies-public-key")
                     .long("facilitator-ecies-public-key")
                     .env("FACILITATOR_ECIES_PUBLIC_KEY")
@@ -567,21 +558,6 @@ impl<'a, 'b> AppArgumentAdder for App<'a, 'b> {
                         "Base64 encoded X9.62 uncompressed public key for the \
                             facilitator server",
                     ),
-            )
-            .arg(
-                Arg::with_name("facilitator-manifest-base-url")
-                    .long("facilitator-manifest-base-url")
-                    .env("FACILITATOR_MANIFEST_BASE_URL")
-                    .value_name("URL")
-                    .help("Base URL of the Facilitator manifest"),
-            )
-            .group(
-                ArgGroup::with_name("facilitator_information")
-                    .args(&[
-                        "facilitator-ecies-public-key",
-                        "facilitator-manifest-base-url",
-                    ])
-                    .required(true),
             )
             .arg(
                 Arg::with_name("ingestor-manifest-base-url")
@@ -634,7 +610,45 @@ impl<'a, 'b> AppArgumentAdder for App<'a, 'b> {
                     .value_name("STRING")
                     .help("Name of this ingestor"),
             )
-            .add_batch_signing_key_arguments(false)
+            .group(
+                ArgGroup::with_name("public_health_authority_information")
+                    .args(&["pha-ecies-public-key", "pha-manifest-base-url"])
+                    .required(true),
+            )
+            .group(
+                ArgGroup::with_name("facilitator_information")
+                    .args(&[
+                        "facilitator-ecies-public-key",
+                        "facilitator-manifest-base-url",
+                    ])
+                    .required(true),
+            )
+    }
+
+    fn add_common_sample_arguments(self) -> Self {
+        self.arg(
+            Arg::with_name("packet-count")
+                .long("packet-count")
+                .short("p")
+                .value_name("INT")
+                .required(true)
+                .validator(num_validator::<usize>)
+                .help("Number of data packets to generate"),
+        )
+        .arg(
+            Arg::with_name("pha-manifest-base-url")
+                .long("pha-manifest-base-url")
+                .env("PHA_MANIFEST_BASE_URL")
+                .value_name("URL")
+                .help("Base URL of the Public Health Authority manifest"),
+        )
+        .arg(
+            Arg::with_name("facilitator-manifest-base-url")
+                .long("facilitator-manifest-base-url")
+                .env("FACILITATOR_MANIFEST_BASE_URL")
+                .value_name("URL")
+                .help("Base URL of the Facilitator manifest"),
+        )
     }
 
     fn add_permit_malformed_batch_argument(self: App<'a, 'b>) -> App<'a, 'b> {
@@ -738,6 +752,16 @@ fn main() -> Result<(), anyhow::Error> {
                         )
                         .required(true)
                 )
+        )
+        .subcommand(
+            SubCommand::with_name("validate-ingestion-sample-worker")
+            .about("Spawn a worker to validate aggregated ingestion samples")
+            .add_common_sample_arguments()
+            .add_task_queue_arguments()
+            .add_instance_name_argument()
+            .add_worker_lifetime_argument()
+            .add_storage_arguments(Entity::Facilitator, InOut::Output)
+            .add_storage_arguments(Entity::PHA, InOut::Output)
         )
         .subcommand(
             SubCommand::with_name("intake-batch")
@@ -991,6 +1015,14 @@ fn main() -> Result<(), anyhow::Error> {
             &mut gcp_access_token_provider_factory,
             &api_metrics,
             &root_logger,
+        ),
+        ("validate-ingestion-sample-worker", Some(sub_matches)) => validate_sample_worker(
+            &root_logger,
+            sub_matches,
+            runtime.handle(),
+            &mut aws_provider_factory,
+            &mut gcp_access_token_provider_factory,
+            &api_metrics,
         ),
         ("intake-batch", Some(sub_matches)) => intake_batch_subcommand(
             &Uuid::new_v4(),
@@ -1333,6 +1365,230 @@ fn generate_sample(
         ),
         value_t!(sub_matches.value_of("packet-count"), usize)?,
     )?;
+    Ok(())
+}
+
+fn validate_sample_worker(
+    logger: &Logger,
+    sub_matches: &ArgMatches,
+    runtime_handle: &Handle,
+    aws_provider_factory: &mut aws_credentials::ProviderFactory,
+    gcp_access_token_provider_factory: &mut GcpAccessTokenProviderFactory,
+    api_metrics: &ApiClientMetricsCollector,
+) -> Result<(), anyhow::Error> {
+    let termination_instant = termination_instant_from_args(sub_matches)?;
+    let instance_name = value_t!(sub_matches.value_of("instance-name"), String)?;
+    let packet_count = value_t!(sub_matches.value_of("packet-count"), usize)?;
+    let timer = Timer::new();
+    let queue = aggregation_task_queue_from_args(
+        sub_matches,
+        runtime_handle,
+        api_metrics,
+        aws_provider_factory,
+        gcp_access_token_provider_factory,
+        logger,
+    )?;
+
+    let pha_portal_bucket =
+        StoragePath::from_str(&value_t!(sub_matches.value_of("pha-output"), String)?)?;
+    let pha_transport = transport_from_args(
+        value_t!(
+            sub_matches.value_of(Entity::PHA.suffix("-identity")),
+            Identity
+        )?,
+        Entity::PHA,
+        PathOrInOut::Path(pha_portal_bucket),
+        sub_matches,
+        runtime_handle,
+        api_metrics,
+        aws_provider_factory,
+        gcp_access_token_provider_factory,
+        logger,
+    )?;
+    let pha_pubkey_map = DataShareProcessorSpecificManifest::from_https(
+        &value_t!(sub_matches.value_of("pha-manifest-base-url"), String)?,
+        &instance_name,
+        logger,
+        api_metrics,
+    )?
+    .batch_signing_public_keys()?;
+
+    let facilitator_portal_bucket = StoragePath::from_str(&value_t!(
+        sub_matches.value_of("facilitator-output"),
+        String
+    )?)?;
+    let facilitator_transport = transport_from_args(
+        value_t!(
+            sub_matches.value_of(Entity::Facilitator.suffix("-identity")),
+            Identity
+        )?,
+        Entity::Facilitator,
+        PathOrInOut::Path(facilitator_portal_bucket),
+        sub_matches,
+        runtime_handle,
+        api_metrics,
+        aws_provider_factory,
+        gcp_access_token_provider_factory,
+        logger,
+    )?;
+    let facilitator_pubkey_map = DataShareProcessorSpecificManifest::from_https(
+        &value_t!(
+            sub_matches.value_of("facilitator-manifest-base-url"),
+            String
+        )?,
+        &instance_name,
+        logger,
+        api_metrics,
+    )?
+    .batch_signing_public_keys()?;
+
+    let sample_generator_mismatched_sum_count: IntCounterVec = register_int_counter_vec!(
+        "sample_generator_mismatched_sum_count",
+        "Number of sum-mismatches found by the ingestion sample validator",
+        &["aggregation_id", "instance_name"]
+    )?;
+
+    while !should_terminate(termination_instant) {
+        if let Some(task_handle) = queue.dequeue()? {
+            let trace_id = task_handle.task.trace_id;
+            let logger = logger
+                .new(o!(event::TRACE_ID => trace_id.to_string(), event::TASK_HANDLE => task_handle.clone()));
+            info!(logger, "Dequeued sample validation task");
+
+            // Set up a periodic task that will occasionally refresh our lease
+            // on this work item until we're done processing.
+            let _guard = {
+                // TODO(brandon): all instances of the maybe_extend_task_deadline pattern will,
+                // once enough time has passed to extend the task deadline once, extend the task
+                // deadline _every time_ the extension is checked (since the "task_start" baseline
+                // is never updated). Fix every instance of this pattern.
+                let task_start = Instant::now();
+                let task_handle = task_handle.clone();
+                let logger = logger.clone();
+                let queue = queue.clone();
+                timer.schedule_repeating(chrono::Duration::seconds(5), move || {
+                    if let Err(err) =
+                        queue.maybe_extend_task_deadline(&task_handle, &task_start.elapsed())
+                    {
+                        error!(logger, "Couldn't extend task timeout: {}", err);
+                    }
+                })
+            };
+
+            // Wait long enough for the aggregation task to have been completed.
+            let wait_after_publish_time = chrono::Duration::seconds(600);
+            if let Some(published_time) = task_handle.published_time {
+                let wait_duration =
+                    published_time + wait_after_publish_time - Utc::now().naive_utc();
+                if wait_duration > chrono::Duration::zero() {
+                    info!(
+                        logger,
+                        "Sleeping for {} to allow aggregation task to be completed", wait_duration
+                    );
+                    std::thread::sleep(wait_duration.to_std()?);
+                }
+            } else {
+                warn!(logger, "Task has no published time, not waiting");
+            }
+
+            let result = validate_sample(
+                &logger,
+                &sample_generator_mismatched_sum_count,
+                &trace_id,
+                &instance_name,
+                packet_count,
+                pha_transport.as_ref(),
+                &pha_pubkey_map,
+                facilitator_transport.as_ref(),
+                &facilitator_pubkey_map,
+                &task_handle.task,
+            );
+
+            match result {
+                Ok(_) => queue.acknowledge_task(task_handle)?,
+                Err(err) => {
+                    error!(logger, "Error while processing task: {:?}", err);
+                    queue.nacknowledge_task(task_handle)?;
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+#[allow(clippy::too_many_arguments)]
+fn validate_sample(
+    logger: &Logger,
+    sample_generator_mismatched_sum_count: &IntCounterVec,
+    trace_id: &Uuid,
+    instance_name: &str,
+    packet_count: usize,
+    pha_transport: &dyn Transport,
+    pha_pubkey_map: &HashMap<String, UnparsedPublicKey<Vec<u8>>>,
+    facilitator_transport: &dyn Transport,
+    facilitator_pubkey_map: &HashMap<String, UnparsedPublicKey<Vec<u8>>>,
+    task: &AggregationTask,
+) -> Result<()> {
+    // Read the sum-part batches from the sum-part buckets.
+    let aggregation_start = NaiveDateTime::parse_from_str(&task.aggregation_start, DATE_FORMAT)?;
+    let aggregation_end = NaiveDateTime::parse_from_str(&task.aggregation_end, DATE_FORMAT)?;
+
+    let (pha_sum_part, _) = BatchReader::new(
+        Batch::new_sum(
+            instance_name,
+            &task.aggregation_id,
+            &aggregation_start,
+            &aggregation_end,
+            true,
+        ),
+        &*pha_transport,
+        false,
+        trace_id,
+        logger,
+    )
+    .read(pha_pubkey_map)?;
+
+    let (facilitator_sum_part, _) = BatchReader::new(
+        Batch::new_sum(
+            instance_name,
+            &task.aggregation_id,
+            &aggregation_start,
+            &aggregation_end,
+            false,
+        ),
+        &*facilitator_transport,
+        false,
+        trace_id,
+        logger,
+    )
+    .read(facilitator_pubkey_map)?;
+
+    let pha_accumulated_share: Vec<FieldPriov2> = pha_sum_part
+        .sum
+        .into_iter()
+        .map(|v| FieldPriov2::from(u32::try_from(v).unwrap()))
+        .collect();
+    let facilitator_accumulated_share: Vec<FieldPriov2> = facilitator_sum_part
+        .sum
+        .into_iter()
+        .map(|v| FieldPriov2::from(u32::try_from(v).unwrap()))
+        .collect();
+    let actual_sum =
+        reconstruct_shares(&pha_accumulated_share, &facilitator_accumulated_share).unwrap();
+
+    let expected_sum =
+        expected_sample_sum_for_batches(&pha_sum_part.batch_uuids, pha_sum_part.bins, packet_count);
+
+    if actual_sum != expected_sum {
+        error!(
+            logger,
+            "Sum mismatch. (expected = {:?}, actual = {:?})", expected_sum, actual_sum
+        );
+        sample_generator_mismatched_sum_count
+            .with_label_values(&[&task.aggregation_id, instance_name])
+            .inc();
+    }
+
     Ok(())
 }
 

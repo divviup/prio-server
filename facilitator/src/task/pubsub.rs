@@ -7,6 +7,7 @@ use crate::{
     task::{Task, TaskHandle, TaskQueue},
 };
 use anyhow::{anyhow, Context, Result};
+use chrono::DateTime;
 use serde::Deserialize;
 use slog::{debug, info, o, Logger};
 use std::{io::Cursor, marker::PhantomData, time::Duration};
@@ -203,20 +204,23 @@ impl<T: Task> TaskQueue<T> for GcpPubSubTaskQueue<T> {
                 response
             ));
         }
-
         if received_messages.is_empty() {
             return Ok(None);
         }
 
         // The JSON task is encoded as Base64 in the pubsub message
-        let task_json = base64::decode(&received_messages[0].message.data)
+        let received_message = &received_messages[0];
+        let task_json = base64::decode(&received_message.message.data)
             .context("failed to decode PubSub message")?;
-
         let task: T = serde_json::from_reader(Cursor::new(&task_json))
             .context(format!("failed to decode task {:?} from JSON", task_json))?;
 
+        let published_time =
+            DateTime::parse_from_rfc3339(&received_message.message.publish_time)?.naive_utc();
+
         let handle = TaskHandle {
             task,
+            published_time: Some(published_time),
             acknowledgment_id: received_messages[0].ack_id.clone(),
         };
 
