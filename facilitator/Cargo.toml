@@ -52,7 +52,7 @@ thiserror = "1.0"
 tokio = { version = "^1.15", features = ["full"] }
 tracing = "0.1.29"
 tracing-error = "0.2.0"
-tracing-subscriber = { version = "0.3.5", features = ["env-filter", "json"] }
+tracing-subscriber = { version = "0.3.7", features = ["env-filter", "json"] }
 ureq = { version = "^2.4", features = ["json"] }
 url = "2.2.2"
 urlencoding = "2.1.0"
