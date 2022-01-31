@@ -1,11 +1,14 @@
-use crate::transport::{Transport, TransportWriter};
+use crate::{
+    transport::{Transport, TransportWriter},
+    Error,
+};
 use anyhow::{Context, Result};
 use uuid::Uuid;
 
 use std::{
     boxed::Box,
     fs::{create_dir_all, File},
-    io::Read,
+    io::{ErrorKind, Read},
     path::{PathBuf, MAIN_SEPARATOR},
 };
 
@@ -37,8 +40,14 @@ impl Transport for LocalFileTransport {
 
     fn get(&self, key: &str, _trace_id: &Uuid) -> Result<Box<dyn Read>> {
         let path = self.directory.join(LocalFileTransport::relative_path(key));
-        let f =
-            File::open(path.as_path()).with_context(|| format!("opening {}", path.display()))?;
+        let f = File::open(path.as_path())
+            .map_err(|err| {
+                if err.kind() == ErrorKind::NotFound {
+                    return Error::ObjectNotFoundError(key.to_owned(), anyhow::Error::new(err));
+                }
+                Error::from(anyhow::Error::new(err))
+            })
+            .with_context(|| format!("opening {}", path.display()))?;
         Ok(Box::new(f))
     }
 

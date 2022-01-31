@@ -357,6 +357,7 @@ pub enum Entity {
     Peer,
     Own,
     Facilitator,
+    Pha,
     Portal,
 }
 
@@ -367,6 +368,7 @@ impl Entity {
             Entity::Peer => "peer",
             Entity::Own => "own",
             Entity::Facilitator => "facilitator",
+            Entity::Pha => "pha",
             Entity::Portal => "portal",
         }
     }

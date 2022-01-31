@@ -444,6 +444,10 @@ output "aws_iam_role" {
   value = module.kubernetes.aws_iam_role
 }
 
+output "aggregate_queue" {
+  value = local.aggregate_queue
+}
+
 output "specific_manifest" {
   value = var.pure_gcp ? {
     format                   = 2

@@ -721,18 +721,21 @@ locals {
 }
 
 module "fake_server_resources" {
-  count                 = local.is_env_with_ingestor ? 1 : 0
-  source                = "./modules/fake_server_resources"
-  gcp_region            = var.gcp_region
-  gcp_project           = var.gcp_project
-  environment           = var.environment
-  ingestor_pairs        = local.locality_ingestor_pairs
-  own_manifest_base_url = local.manifest.base_url
-  pushgateway           = var.pushgateway
-  container_registry    = var.container_registry
-  facilitator_image     = var.facilitator_image
-  facilitator_version   = var.facilitator_version
-  manifest_bucket       = local.manifest.bucket
+  count                         = local.is_env_with_ingestor ? 1 : 0
+  source                        = "./modules/fake_server_resources"
+  gcp_region                    = var.gcp_region
+  gcp_project                   = var.gcp_project
+  environment                   = var.environment
+  ingestor_pairs                = local.locality_ingestor_pairs
+  facilitator_manifest_base_url = local.manifest.base_url
+  container_registry            = var.container_registry
+  facilitator_image             = var.facilitator_image
+  facilitator_version           = var.facilitator_version
+  manifest_bucket               = local.manifest.bucket
+  other_environment             = var.test_peer_environment.env_without_ingestor
+  sum_part_bucket_writer_name   = google_service_account.sum_part_bucket_writer.name
+  sum_part_bucket_writer_email  = google_service_account.sum_part_bucket_writer.email
+  aggregate_queues              = { for v in module.data_share_processors : v.data_share_processor_name => v.aggregate_queue }
 }
 
 module "portal_server_resources" {
@@ -742,6 +745,7 @@ module "portal_server_resources" {
   use_aws                      = var.use_aws
   gcp_region                   = var.gcp_region
   environment                  = var.environment
+  other_environment            = local.is_env_with_ingestor ? var.test_peer_environment.env_without_ingestor : var.test_peer_environment.env_with_ingestor
   sum_part_bucket_writer_email = google_service_account.sum_part_bucket_writer.email
 }
 

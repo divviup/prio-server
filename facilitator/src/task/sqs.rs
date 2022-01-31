@@ -5,6 +5,7 @@ use crate::{
     task::{Task, TaskHandle, TaskQueue},
 };
 use anyhow::{anyhow, Context, Result};
+use chrono::NaiveDateTime;
 use rusoto_core::Region;
 use rusoto_sqs::{
     ChangeMessageVisibilityRequest, DeleteMessageRequest, ReceiveMessageRequest, Sqs, SqsClient,
@@ -59,9 +60,7 @@ impl<T: Task> AwsSqsTaskQueue<T> {
 impl<T: Task> TaskQueue<T> for AwsSqsTaskQueue<T> {
     fn dequeue(&self) -> Result<Option<TaskHandle<T>>> {
         debug!(self.logger, "pull task");
-
         let client = self.sqs_client()?;
-
         let response = retry_request(
             &self.logger.new(o!(event::ACTION => "dequeue message")),
             &self.api_metrics,
@@ -91,11 +90,9 @@ impl<T: Task> TaskQueue<T> for AwsSqsTaskQueue<T> {
             Some(ref messages) => messages,
             None => return Ok(None),
         };
-
         if received_messages.is_empty() {
             return Ok(None);
         }
-
         if received_messages.len() > 1 {
             return Err(anyhow!(
                 "unexpected number of messages in SQS response: {:?}",
@@ -103,13 +100,27 @@ impl<T: Task> TaskQueue<T> for AwsSqsTaskQueue<T> {
             ));
         }
 
-        let body = match &received_messages[0].body {
-            Some(body) => body,
-            None => return Err(anyhow!("no body in SQS message")),
-        };
-        let receipt_handle = match &received_messages[0].receipt_handle {
-            Some(handle) => handle,
-            None => return Err(anyhow!("no receipt handle in SQS message")),
+        let message = &received_messages[0];
+        let body = message
+            .body
+            .as_ref()
+            .ok_or_else(|| anyhow!("no body in SQS message"))?;
+        let receipt_handle = message
+            .receipt_handle
+            .as_ref()
+            .ok_or_else(|| anyhow!("no receipt handle in SQS message"))?;
+
+        let mut published_time = None;
+        if let Some(ref attributes) = message.attributes {
+            if let Some(sent_timestamp) = attributes.get("SentTimestamp") {
+                // SentTimestamp is a millisecond UNIX timestamp:
+                // https://docs.aws.amazon.com/AWSSimpleQueueService/latest/APIReference/API_Message.html
+                let sent_timestamp: i64 = sent_timestamp.parse()?;
+                published_time = NaiveDateTime::from_timestamp_opt(
+                    /* secs */ sent_timestamp / 1000,
+                    /* nsecs */ (1_000_000 * (sent_timestamp % 1000)) as u32,
+                )
+            }
         };
 
         let task = serde_json::from_reader(body.as_bytes())
@@ -117,6 +128,7 @@ impl<T: Task> TaskQueue<T> for AwsSqsTaskQueue<T> {
 
         Ok(Some(TaskHandle {
             task,
+            published_time,
             acknowledgment_id: receipt_handle.to_owned(),
         }))
     }

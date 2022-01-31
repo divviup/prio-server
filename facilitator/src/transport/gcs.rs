@@ -134,6 +134,14 @@ impl Transport for GcsTransport {
         let response = self
             .agent
             .call(&logger, &request, "get")
+            .map_err(|err| {
+                if let Error::HttpError(ref ureq_err) = err {
+                    if matches!(ureq_err, ureq::Error::Status(404, _)) {
+                        return Error::ObjectNotFoundError(key.to_owned(), anyhow::Error::new(err));
+                    }
+                }
+                err
+            })
             .context(format!("failed to fetch object {} from GCS", url))?;
 
         Ok(Box::new(response.into_reader()))

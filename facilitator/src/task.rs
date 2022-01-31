@@ -2,6 +2,7 @@ mod pubsub;
 mod sqs;
 
 use anyhow::Result;
+use chrono::NaiveDateTime;
 use dyn_clone::{clone_trait_object, DynClone};
 use serde::Deserialize;
 use slog::{Key, Record, Serializer, Value};
@@ -144,6 +145,8 @@ pub struct Batch {
 pub struct TaskHandle<T: Task> {
     /// The acknowledgment ID for the task
     acknowledgment_id: String,
+    /// The UTC timestamp at which the message was published, if available.
+    pub published_time: Option<NaiveDateTime>,
     /// The task
     pub task: T,
 }
@@ -158,6 +161,10 @@ impl<T: Task> Value for TaskHandle<T> {
 
 impl<T: Task> Display for TaskHandle<T> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "ack ID: {}\ntask: {}", self.acknowledgment_id, self.task)
+        write!(
+            f,
+            "ack ID: {}\npublished_time: {:?}\ntask: {}",
+            self.acknowledgment_id, self.published_time, self.task
+        )
     }
 }

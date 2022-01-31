@@ -76,8 +76,10 @@ impl<T: TransportWriter + ?Sized> TransportWriter for Box<T> {
 /// many tasks.
 pub trait Transport: Debug + DynClone + Send {
     /// Returns an std::io::Read instance from which the contents of the value
-    /// of the provided key may be read.
+    /// of the provided key may be read. If no object is found, an error
+    /// wrapping ObjectNotFoundError is returned.
     fn get(&self, key: &str, trace_id: &Uuid) -> Result<Box<dyn Read>>;
+
     /// Returns an std::io::Write instance into which the contents of the value
     /// may be written.
     fn put(&self, key: &str, trace_id: &Uuid) -> Result<Box<dyn TransportWriter>>;
