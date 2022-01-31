@@ -728,7 +728,6 @@ module "fake_server_resources" {
   environment                   = var.environment
   ingestor_pairs                = local.locality_ingestor_pairs
   facilitator_manifest_base_url = local.manifest.base_url
-  pushgateway                   = var.pushgateway
   container_registry            = var.container_registry
   facilitator_image             = var.facilitator_image
   facilitator_version           = var.facilitator_version
@@ -736,7 +735,7 @@ module "fake_server_resources" {
   other_environment             = var.test_peer_environment.env_without_ingestor
   sum_part_bucket_writer_name   = google_service_account.sum_part_bucket_writer.name
   sum_part_bucket_writer_email  = google_service_account.sum_part_bucket_writer.email
-  aggregate_queues              = { for v in module.data_share_processors : v.data_share_processor_name => v.aggregate_queue } # XXX
+  aggregate_queues              = { for v in module.data_share_processors : v.data_share_processor_name => v.aggregate_queue }
 }
 
 module "portal_server_resources" {

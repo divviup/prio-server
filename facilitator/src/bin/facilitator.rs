@@ -761,7 +761,7 @@ fn main() -> Result<(), anyhow::Error> {
             .add_instance_name_argument()
             .add_worker_lifetime_argument()
             .add_storage_arguments(Entity::Facilitator, InOut::Output)
-            .add_storage_arguments(Entity::PHA, InOut::Output)
+            .add_storage_arguments(Entity::Pha, InOut::Output)
         )
         .subcommand(
             SubCommand::with_name("intake-batch")
@@ -1393,10 +1393,10 @@ fn validate_sample_worker(
         StoragePath::from_str(&value_t!(sub_matches.value_of("pha-output"), String)?)?;
     let pha_transport = transport_from_args(
         value_t!(
-            sub_matches.value_of(Entity::PHA.suffix("-identity")),
+            sub_matches.value_of(Entity::Pha.suffix("-identity")),
             Identity
         )?,
-        Entity::PHA,
+        Entity::Pha,
         PathOrInOut::Path(pha_portal_bucket),
         sub_matches,
         runtime_handle,
@@ -1458,10 +1458,6 @@ fn validate_sample_worker(
             // Set up a periodic task that will occasionally refresh our lease
             // on this work item until we're done processing.
             let _guard = {
-                // TODO(brandon): all instances of the maybe_extend_task_deadline pattern will,
-                // once enough time has passed to extend the task deadline once, extend the task
-                // deadline _every time_ the extension is checked (since the "task_start" baseline
-                // is never updated). Fix every instance of this pattern.
                 let task_start = Instant::now();
                 let task_handle = task_handle.clone();
                 let logger = logger.clone();

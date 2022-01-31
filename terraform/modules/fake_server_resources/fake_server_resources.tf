@@ -25,10 +25,6 @@ variable "ingestor_pairs" {
   }))
 }
 
-variable "pushgateway" {
-  type = string
-}
-
 variable "container_registry" {
   type = string
 }
@@ -285,7 +281,7 @@ resource "google_pubsub_topic" "validate_dead_letter" {
 
 locals {
   # GCP PubSub creates a service account for each project used to move
-  # undeliverable messages from subscriptons to a dead letter topic
+  # undeliverable messages from subscriptions to a dead letter topic
   # https://cloud.google.com/pubsub/docs/dead-letter-topics#granting_forwarding_permissions
   pubsub_service_account = "serviceAccount:service-${data.google_project.project.number}@gcp-sa-pubsub.iam.gserviceaccount.com"
 }
