@@ -71,8 +71,9 @@ test_peer_environment = {
 }
 is_first                 = true
 use_aws                  = true
-workflow_manager_version = "0.6.18"
-facilitator_version      = "0.6.18"
+workflow_manager_version = "0.6.23"
+facilitator_version      = "0.6.23"
+key_rotator_version      = "0.6.23"
 victorops_routing_key    = "prio-staging"
 
 intake_max_age             = "75m"
@@ -80,3 +81,17 @@ default_aggregation_period = "30m"
 
 default_peer_share_processor_manifest_base_url = "storage.googleapis.com/prio-staging-facil-manifests"
 default_portal_server_manifest_base_url        = "storage.googleapis.com/prio-staging-pha-manifests/portal-server"
+
+key_rotator_schedule           = "*/10 * * * *" // once per ten minutes
+enable_key_rotation_localities = ["*"]
+batch_signing_key_rotation_policy = {
+  create_min_age   = "6480h" // 6480 hours = 9 months (w/ 30-day months, 24-hour days)
+  primary_min_age  = "6h"    // 6 hours
+  delete_min_age   = "9360h" // 9360 hours = 13 months (w/ 30-day months, 24-hour days)
+  delete_min_count = 2
+}
+
+prometheus_helm_chart_version           = "15.0.2"
+grafana_helm_chart_version              = "6.20.5"
+cloudwatch_exporter_helm_chart_version  = "0.17.2"
+stackdriver_exporter_helm_chart_version = "1.12.0"
