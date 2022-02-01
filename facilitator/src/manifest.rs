@@ -200,8 +200,7 @@ pub struct DataShareProcessorGlobalManifestV1 {
 pub enum DataShareProcessorSpecificManifest {
     // format version 0 was used in Narnia integration tests and is no longer
     // supported
-    V1(DataShareProcessorSpecificManifestV1),
-    V2(DataShareProcessorSpecificManifestV2),
+    V1or2(DataShareProcessorSpecificManifestV1or2),
 }
 
 impl DataShareProcessorSpecificManifest {
@@ -230,13 +229,9 @@ impl DataShareProcessorSpecificManifest {
             .context("format value in manifest has wrong type")?;
 
         let manifest = match format {
-            1 => Self::V1(
+            1 | 2 => Self::V1or2(
                 serde_json::from_slice(json)
                     .context("failed to decode v1 specific manifest from JSON")?,
-            ),
-            2 => Self::V2(
-                serde_json::from_slice(json)
-                    .context("failed to decode v2 specific manifest from JSON")?,
             ),
             _ => return Err(anyhow!("unsupported manifest format {}", format).into()),
         };
@@ -250,8 +245,7 @@ impl DataShareProcessorSpecificManifest {
     /// identifier to the public keys on success, or an error otherwise.
     pub fn batch_signing_public_keys(&self) -> Result<BatchSigningPublicKeys> {
         let pem_keys = match self {
-            Self::V1(manifest) => &manifest.batch_signing_public_keys,
-            Self::V2(manifest) => &manifest.batch_signing_public_keys,
+            Self::V1or2(manifest) => &manifest.batch_signing_public_keys,
         };
         let mut keys = HashMap::new();
         for (identifier, public_key) in pem_keys.iter() {
@@ -266,8 +260,7 @@ impl DataShareProcessorSpecificManifest {
 
     pub fn packet_encryption_keys(&self) -> &PacketEncryptionCertificateSigningRequests {
         match self {
-            Self::V1(manifest) => &manifest.packet_encryption_keys,
-            Self::V2(manifest) => &manifest.packet_encryption_keys,
+            Self::V1or2(manifest) => &manifest.packet_encryption_keys,
         }
     }
 
@@ -275,8 +268,7 @@ impl DataShareProcessorSpecificManifest {
     /// processor's peer validation bucket
     pub fn peer_validation_identity(&self) -> Identity {
         match self {
-            Self::V1(_) => Identity::none(),
-            Self::V2(manifest) => manifest.peer_validation_identity.clone(),
+            Self::V1or2(manifest) => manifest.peer_validation_identity.clone(),
         }
     }
 
@@ -284,8 +276,7 @@ impl DataShareProcessorSpecificManifest {
     /// bucket.
     pub fn peer_validation_bucket(&self) -> &StoragePath {
         match self {
-            Self::V1(manifest) => &manifest.peer_validation_bucket,
-            Self::V2(manifest) => &manifest.peer_validation_bucket,
+            Self::V1or2(manifest) => &manifest.peer_validation_bucket,
         }
     }
 
@@ -301,16 +292,14 @@ impl DataShareProcessorSpecificManifest {
     /// processor's ingestion bucket
     pub fn ingestion_identity(&self) -> &Identity {
         match self {
-            Self::V1(manifest) => &manifest.ingestion_identity,
-            Self::V2(manifest) => &manifest.ingestion_identity,
+            Self::V1or2(manifest) => &manifest.ingestion_identity,
         }
     }
 
     /// Returns the StoragePath for the data share processor's ingestion bucket
     pub fn ingestion_bucket(&self) -> &StoragePath {
         match self {
-            Self::V1(manifest) => &manifest.ingestion_bucket,
-            Self::V2(manifest) => &manifest.ingestion_bucket,
+            Self::V1or2(manifest) => &manifest.ingestion_bucket,
         }
     }
 
@@ -398,37 +387,11 @@ impl DataShareProcessorSpecificManifest {
     }
 }
 
-/// A data share processor specific manifest, format version 1.
+/// A data share processor specific manifest, format version 1 or 2.
 #[derive(Clone, Debug, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields, rename_all = "kebab-case")]
-pub struct DataShareProcessorSpecificManifestV1 {
-    /// Format version of the manifest. Always 1.
-    format: u32,
-    /// URL of the ingestion bucket owned by this data share processor, which
-    /// may be in the form "s3://{region}/{name}" or "gs://{name}".
-    ingestion_bucket: StoragePath,
-    /// The ARN of the AWS IAM role that should be assumed by an ingestion
-    /// server to write to this data share processor's ingestion bucket, if the
-    /// ingestor does not have an AWS account of their own. This will not be
-    /// present if the data share processor's ingestion bucket is not in AWS S3.
-    #[serde(default = "Identity::none")]
-    ingestion_identity: Identity,
-    /// URL of the validation bucket owned by this data share processor, which
-    /// may be in the form "s3://{region}/{name}" or "gs://{name}".
-    peer_validation_bucket: StoragePath,
-    /// Keys used by this data share processor to sign batches.
-    batch_signing_public_keys: HashMap<String, BatchSigningPublicKey>,
-    /// Certificate signing requests containing public keys that should be used
-    /// to encrypt ingestion share packets intended for this data share
-    /// processor.
-    packet_encryption_keys: PacketEncryptionCertificateSigningRequests,
-}
-
-/// A data share processor specific manifest, format version 1.
-#[derive(Clone, Debug, Deserialize, PartialEq)]
-#[serde(deny_unknown_fields, rename_all = "kebab-case")]
-pub struct DataShareProcessorSpecificManifestV2 {
-    /// Format version of the manifest. Always 2.
+pub struct DataShareProcessorSpecificManifestV1or2 {
+    /// Format version of the manifest. Always 1 or 2.
     format: u32,
     /// URL of the ingestion bucket owned by this data share processor, which
     /// may be in the form "s3://{region}/{name}" or "gs://{name}".
@@ -1018,15 +981,16 @@ mod tests {
                 ),
             },
         );
-        let expected_manifest = DataShareProcessorSpecificManifestV1 {
+        let expected_manifest = DataShareProcessorSpecificManifestV1or2 {
             format: 1,
             batch_signing_public_keys: expected_batch_keys,
             packet_encryption_keys: expected_packet_encryption_csrs,
             ingestion_bucket: StoragePath::from_str("s3://us-west-1/ingestion").unwrap(),
             ingestion_identity: Identity::from_str("arn:aws:iam:something:fake").unwrap(),
             peer_validation_bucket: StoragePath::from_str("gs://validation/path/fragment").unwrap(),
+            peer_validation_identity: Identity::none(),
         };
-        assert_matches!(&manifest, DataShareProcessorSpecificManifest::V1(manifest_v1) => {
+        assert_matches!(&manifest, DataShareProcessorSpecificManifest::V1or2(manifest_v1) => {
             assert_eq!(manifest_v1, &expected_manifest);
         });
         let batch_signing_keys = manifest.batch_signing_public_keys().unwrap();
@@ -1079,7 +1043,7 @@ mod tests {
         );
         struct TestCase {
             json: &'static [u8],
-            expected_manifest: DataShareProcessorSpecificManifestV2,
+            expected_manifest: DataShareProcessorSpecificManifestV1or2,
         }
 
         let test_cases = [
@@ -1102,7 +1066,7 @@ mod tests {
     }
 }
 "#,
-                expected_manifest: DataShareProcessorSpecificManifestV2 {
+                expected_manifest: DataShareProcessorSpecificManifestV1or2 {
                     format: 2,
                     ingestion_bucket: StoragePath::from_str("gs://ingestion").unwrap(),
                     ingestion_identity: Identity::none(),
@@ -1133,7 +1097,7 @@ mod tests {
     }
 }
 "#,
-                expected_manifest: DataShareProcessorSpecificManifestV2 {
+                expected_manifest: DataShareProcessorSpecificManifestV1or2 {
                     format: 2,
                     ingestion_bucket: StoragePath::from_str("s3://us-west-1/ingestion").unwrap(),
                     ingestion_identity: Identity::from_str("ingestion-identity").unwrap(),
@@ -1150,7 +1114,7 @@ mod tests {
         for test_case in &test_cases {
             let manifest = DataShareProcessorSpecificManifest::from_slice(test_case.json).unwrap();
 
-            assert_matches!(&manifest, DataShareProcessorSpecificManifest::V2(manifest_v2) => {
+            assert_matches!(&manifest, DataShareProcessorSpecificManifest::V1or2(manifest_v2) => {
                 assert_eq!(manifest_v2, &test_case.expected_manifest);
             });
         }
@@ -1911,11 +1875,12 @@ mod tests {
             PrivateKey::from_base64(packet_encryption_key_unrelated_private_b64).unwrap();
 
         let specific_manifest =
-            DataShareProcessorSpecificManifest::V1(DataShareProcessorSpecificManifestV1 {
+            DataShareProcessorSpecificManifest::V1or2(DataShareProcessorSpecificManifestV1or2 {
                 format: 1,
                 ingestion_bucket: StoragePath::from_str("gs://irrelevant").unwrap(),
                 ingestion_identity: Identity::none(),
                 peer_validation_bucket: StoragePath::from_str("gs://irrelevant").unwrap(),
+                peer_validation_identity: Identity::none(),
                 batch_signing_public_keys: IntoIter::new([
                     (
                         "batch-signing-key-1".to_owned(),
