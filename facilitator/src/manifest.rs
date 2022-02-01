@@ -127,15 +127,15 @@ impl DataShareProcessorGlobalManifest {
         match manifest.format {
             0 => {
                 if manifest.server_identity.aws_account_id.is_none() {
-                    return Err(anyhow!("manifest format 0 must have aws_account_id").into());
+                    return Err(anyhow!("manifest format 0 must have aws_account_id"));
                 }
             }
             1 => {
                 if manifest.server_identity.aws_account_id.is_some() {
-                    return Err(anyhow!("manifest format 1 must not have aws_account_id").into());
+                    return Err(anyhow!("manifest format 1 must not have aws_account_id"));
                 }
             }
-            _ => return Err(anyhow!("unsupported manifest format {}", manifest.format).into()),
+            _ => return Err(anyhow!("unsupported manifest format {}", manifest.format)),
         }
 
         Ok(manifest)
