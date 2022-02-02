@@ -57,7 +57,7 @@ fn num_validator<F: FromStr>(s: String) -> Result<(), String> {
 fn date_validator(s: String) -> Result<(), String> {
     NaiveDateTime::parse_from_str(&s, DATE_FORMAT)
         .map(|_| ())
-        .map_err(|e| format!("{} {}", s, e.to_string()))
+        .map_err(|e| format!("{} {}", s, e))
 }
 
 fn uuid_validator(s: String) -> Result<(), String> {
@@ -989,7 +989,6 @@ fn main() -> Result<(), anyhow::Error> {
     let mut gcp_access_token_provider_factory =
         GcpAccessTokenProviderFactory::new(runtime.handle(), &api_metrics, &root_logger);
     let mut aws_provider_factory = aws_credentials::ProviderFactory::new(
-        runtime.handle(),
         &gcp_access_token_provider_factory,
         &api_metrics,
         &root_logger,
