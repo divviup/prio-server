@@ -9,7 +9,7 @@ use slog::{Key, Record, Serializer, Value};
 use std::{
     fmt,
     fmt::{Debug, Display},
-    time::Duration,
+    time::{Duration, Instant},
 };
 use uuid::Uuid;
 
@@ -43,17 +43,30 @@ pub trait TaskQueue<T: Task>: Debug + DynClone + Send + Sync {
     /// Ok(()) if either the task deadline does not need extension or if the
     /// deadline was successfully extended, or an error if something goes wrong
     /// extending the deadline.
-    fn maybe_extend_task_deadline(&self, handle: &TaskHandle<T>, elapsed: &Duration) -> Result<()> {
+    fn maybe_extend_task_deadline(
+        &self,
+        handle: &TaskHandle<T>,
+        last_refresh: &mut Instant,
+    ) -> Result<()> {
         // We assume that 10 minutes is a reasonable deadline increment
         // regardless of queue implementation or what the task is. In the future
         // this could be a tunable parameter on facilitator.
-        let deadline_increment = Duration::from_secs(600);
+        const DEADLINE_INCREMENT: Duration = Duration::from_secs(600);
 
         // Extend the deadline when we get to 90% of the increment, to reduce
         // the risk of a task being redelivered by the queue if a call to
         // extend_task_deadline happens to take unusually long.
-        if elapsed >= &Duration::from_secs_f64(0.9 * Duration::from_secs(600).as_secs_f64()) {
-            return self.extend_task_deadline(handle, &deadline_increment);
+        // TODO(brandon): once Option::unwrap is stabilized as a const function, move the unwrap
+        // call from the if statement below to the declaration here.
+        const DURATION_BEFORE_REFRESH: Option<Duration> =
+            DEADLINE_INCREMENT.saturating_mul(9).checked_div(10);
+
+        if last_refresh.elapsed() >= DURATION_BEFORE_REFRESH.unwrap() {
+            return self
+                .extend_task_deadline(handle, &DEADLINE_INCREMENT)
+                .map(|_| {
+                    *last_refresh = Instant::now();
+                });
         }
         Ok(())
     }

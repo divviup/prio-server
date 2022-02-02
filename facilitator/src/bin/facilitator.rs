@@ -1458,13 +1458,13 @@ fn validate_sample_worker(
             // Set up a periodic task that will occasionally refresh our lease
             // on this work item until we're done processing.
             let _guard = {
-                let task_start = Instant::now();
+                let mut last_refresh = Instant::now();
                 let task_handle = task_handle.clone();
                 let logger = logger.clone();
                 let queue = queue.clone();
                 timer.schedule_repeating(chrono::Duration::seconds(5), move || {
                     if let Err(err) =
-                        queue.maybe_extend_task_deadline(&task_handle, &task_start.elapsed())
+                        queue.maybe_extend_task_deadline(&task_handle, &mut last_refresh)
                     {
                         error!(logger, "Couldn't extend task timeout: {}", err);
                     }
@@ -1763,7 +1763,7 @@ fn intake_batch_worker(
             info!(parent_logger, "dequeued intake task";
                 event::TASK_HANDLE => task_handle.clone(),
             );
-            let task_start = Instant::now();
+            let mut last_refresh = Instant::now();
 
             let trace_id = task_handle.task.trace_id;
 
@@ -1781,7 +1781,7 @@ fn intake_batch_worker(
                 parent_logger,
                 |logger| {
                     if let Err(e) =
-                        queue.maybe_extend_task_deadline(&task_handle, &task_start.elapsed())
+                        queue.maybe_extend_task_deadline(&task_handle, &mut last_refresh)
                     {
                         error!(
                             logger, "{}", e;
@@ -2054,7 +2054,7 @@ fn aggregate_worker(
                 parent_logger, "dequeued aggregate task";
                 event::TASK_HANDLE => task_handle.clone(),
             );
-            let task_start = Instant::now();
+            let mut last_refresh = Instant::now();
 
             let batches: Vec<(&str, &str)> = task_handle
                 .task
@@ -2080,7 +2080,7 @@ fn aggregate_worker(
                 parent_logger,
                 |logger| {
                     if let Err(e) =
-                        queue.maybe_extend_task_deadline(&task_handle, &task_start.elapsed())
+                        queue.maybe_extend_task_deadline(&task_handle, &mut last_refresh)
                     {
                         error!(
                             logger, "{}", e;
