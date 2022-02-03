@@ -48,6 +48,8 @@ variable "ingestors" {
       portal_server_manifest_base_url        = optional(string)
       aggregation_period                     = optional(string)
       aggregation_grace_period               = optional(string)
+
+      pure_gcp = optional(bool)
     }))
   }))
   description = <<DESCRIPTION
@@ -493,6 +495,10 @@ locals {
         var.ingestors[pair[1]].localities[pair[0]].aggregation_grace_period,
         var.default_aggregation_grace_period
       )
+      pure_gcp = coalesce(
+        var.ingestors[pair[1]].localities[pair[0]].pure_gcp,
+        var.pure_gcp
+      )
     }
   }
   # Are we in a paired env deploy that uses a test ingestor?
@@ -501,6 +507,7 @@ locals {
   is_env_with_ingestor = local.deployment_has_ingestor && lookup(var.test_peer_environment, "env_with_ingestor", "") == var.environment ? true : false
 
   # If pure GCP, we use the newer global manifest format
+  # XXX(brandon): what to do about this?
   global_manifest = var.pure_gcp ? jsonencode({
     format = 1
     server-identity = {
@@ -600,7 +607,7 @@ module "data_share_processors" {
   data_share_processor_name                      = each.key
   ingestor                                       = each.value.ingestor
   use_aws                                        = var.use_aws
-  pure_gcp                                       = var.pure_gcp
+  pure_gcp                                       = each.value.pure_gcp
   aws_region                                     = var.aws_region
   gcp_region                                     = var.gcp_region
   gcp_project                                    = var.gcp_project
