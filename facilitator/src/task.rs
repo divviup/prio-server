@@ -40,14 +40,15 @@ pub trait TaskQueue<T: Task>: Debug + DynClone + Send + Sync {
 
     /// Extend the deadline for the provided task if enough time has elapsed
     /// since the start of handling the task to require an extension. Returns
-    /// Ok(()) if either the task deadline does not need extension or if the
-    /// deadline was successfully extended, or an error if something goes wrong
-    /// extending the deadline.
+    /// an Ok value with the instant of the most recent refresh if either the
+    /// task deadline does not need extension or if the deadline was
+    /// successfully extended, or an error if something goes wrong extending
+    /// the deadline.
     fn maybe_extend_task_deadline(
         &self,
         handle: &TaskHandle<T>,
-        last_refresh: &mut Instant,
-    ) -> Result<()> {
+        last_refresh: Instant,
+    ) -> Result<Instant> {
         // We assume that 10 minutes is a reasonable deadline increment
         // regardless of queue implementation or what the task is. In the future
         // this could be a tunable parameter on facilitator.
@@ -64,11 +65,9 @@ pub trait TaskQueue<T: Task>: Debug + DynClone + Send + Sync {
         if last_refresh.elapsed() >= DURATION_BEFORE_REFRESH.unwrap() {
             return self
                 .extend_task_deadline(handle, &DEADLINE_INCREMENT)
-                .map(|_| {
-                    *last_refresh = Instant::now();
-                });
+                .map(|_| Instant::now());
         }
-        Ok(())
+        Ok(last_refresh)
     }
 }
 

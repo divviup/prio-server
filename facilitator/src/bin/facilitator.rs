@@ -1462,10 +1462,9 @@ fn validate_sample_worker(
                 let logger = logger.clone();
                 let queue = queue.clone();
                 timer.schedule_repeating(chrono::Duration::seconds(5), move || {
-                    if let Err(err) =
-                        queue.maybe_extend_task_deadline(&task_handle, &mut last_refresh)
-                    {
-                        error!(logger, "Couldn't extend task timeout: {}", err);
+                    match queue.maybe_extend_task_deadline(&task_handle, last_refresh) {
+                        Ok(new_last_refresh) => last_refresh = new_last_refresh,
+                        Err(err) => error!(logger, "Couldn't extend task timeout: {}", err),
                     }
                 })
             };
@@ -1778,16 +1777,13 @@ fn intake_batch_worker(
                 Some(&metrics_collector),
                 api_metrics,
                 parent_logger,
-                |logger| {
-                    if let Err(e) =
-                        queue.maybe_extend_task_deadline(&task_handle, &mut last_refresh)
-                    {
-                        error!(
-                            logger, "{}", e;
-                            event::TRACE_ID => trace_id.to_string(),
-                            event::TASK_HANDLE => task_handle.clone(),
-                        );
-                    }
+                |logger| match queue.maybe_extend_task_deadline(&task_handle, last_refresh) {
+                    Ok(new_last_refresh) => last_refresh = new_last_refresh,
+                    Err(err) => error!(
+                        logger, "{}", err;
+                        event::TRACE_ID => trace_id.to_string(),
+                        event::TASK_HANDLE => task_handle.clone(),
+                    ),
                 },
             );
 
@@ -2077,16 +2073,13 @@ fn aggregate_worker(
                 Some(&metrics_collector),
                 api_metrics,
                 parent_logger,
-                |logger| {
-                    if let Err(e) =
-                        queue.maybe_extend_task_deadline(&task_handle, &mut last_refresh)
-                    {
-                        error!(
-                            logger, "{}", e;
-                            event::TRACE_ID => trace_id.to_string(),
-                            event::TASK_HANDLE => task_handle.clone(),
-                        );
-                    }
+                |logger| match queue.maybe_extend_task_deadline(&task_handle, last_refresh) {
+                    Ok(new_last_refresh) => last_refresh = new_last_refresh,
+                    Err(err) => error!(
+                        logger, "{}", err;
+                        event::TRACE_ID => trace_id.to_string(),
+                        event::TASK_HANDLE => task_handle.clone(),
+                    ),
                 },
             );
 
