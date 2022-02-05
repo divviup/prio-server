@@ -196,12 +196,35 @@ pub struct DataShareProcessorGlobalManifestV1 {
 /// peers at runtime.
 /// See the design document for the full specification and format versions.
 /// https://docs.google.com/document/d/1MdfM3QT63ISU70l63bwzTrxr93Z7Tv7EDjLfammzo6Q/edit#heading=h.3j8dgxqo5h68
-#[derive(Clone, Debug, PartialEq)]
-pub enum DataShareProcessorSpecificManifest {
-    // format version 0 was used in Narnia integration tests and is no longer
-    // supported
-    V1(DataShareProcessorSpecificManifestV1),
-    V2(DataShareProcessorSpecificManifestV2),
+#[derive(Clone, Debug, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields, rename_all = "kebab-case")]
+pub struct DataShareProcessorSpecificManifest {
+    /// Format version of the manifest. Always 1 or 2.
+    format: u32,
+    /// URL of the ingestion bucket owned by this data share processor, which
+    /// may be in the form "s3://{region}/{name}" or "gs://{name}".
+    ingestion_bucket: StoragePath,
+    /// The ARN of the AWS IAM role that should be assumed by an ingestion
+    /// server to write to this data share processor's ingestion bucket, if the
+    /// ingestor does not have an AWS account of their own. This will not be
+    /// present if the data share processor's ingestion bucket is not in AWS S3.
+    #[serde(default = "Identity::none")]
+    ingestion_identity: Identity,
+    /// URL of the validation bucket owned by this data share processor, which
+    /// may be in the form "s3://{region}/{name}" or "gs://{name}".
+    peer_validation_bucket: StoragePath,
+    /// The ARN of the AWS IAM role that should be assumed by an ingestion
+    /// server to write to this data share processor's peer validation bucket.
+    /// This will not be present if the data share processor's peer validation
+    /// bucket is not in AWS S3.
+    #[serde(default = "Identity::none")]
+    peer_validation_identity: Identity,
+    /// Keys used by this data share processor to sign batches.
+    batch_signing_public_keys: HashMap<String, BatchSigningPublicKey>,
+    /// Certificate signing requests containing public keys that should be used
+    /// to encrypt ingestion share packets intended for this data share
+    /// processor.
+    packet_encryption_keys: PacketEncryptionCertificateSigningRequests,
 }
 
 impl DataShareProcessorSpecificManifest {
@@ -221,25 +244,24 @@ impl DataShareProcessorSpecificManifest {
     /// Loads the manifest from the provided String. Returns an error if
     /// the manifest could not be parsed.
     pub fn from_slice(json: &[u8]) -> Result<Self, Error> {
-        let manifest: HashMap<String, Value> =
-            serde_json::from_slice(json).context("failed to decode JSON as map")?;
-        let format = manifest
-            .get("format")
-            .context("manifest does not contain format key")?
-            .as_u64()
-            .context("format value in manifest has wrong type")?;
+        // Parse.
+        let manifest: DataShareProcessorSpecificManifest =
+            serde_json::from_slice(json).context("failed to decode specific manifest from JSON")?;
 
-        let manifest = match format {
-            1 => Self::V1(
-                serde_json::from_slice(json)
-                    .context("failed to decode v1 specific manifest from JSON")?,
-            ),
-            2 => Self::V2(
-                serde_json::from_slice(json)
-                    .context("failed to decode v2 specific manifest from JSON")?,
-            ),
-            _ => return Err(anyhow!("unsupported manifest format {}", format).into()),
-        };
+        // Validate.
+        match manifest.format {
+            1 => {
+                if manifest.peer_validation_identity.is_some() {
+                    return Err(anyhow!(
+                        "manifest format 1 cannot have peer_validation_identity, has {}",
+                        manifest.peer_validation_identity
+                    )
+                    .into());
+                }
+            }
+            2 => (), // no additional validation needed
+            _ => return Err(anyhow!("unsupported manifest format {}", manifest.format).into()),
+        }
 
         Ok(manifest)
     }
@@ -249,44 +271,34 @@ impl DataShareProcessorSpecificManifest {
     /// structures containing ECDSA P256 keys, and returns a map of key
     /// identifier to the public keys on success, or an error otherwise.
     pub fn batch_signing_public_keys(&self) -> Result<BatchSigningPublicKeys> {
-        let pem_keys = match self {
-            Self::V1(manifest) => &manifest.batch_signing_public_keys,
-            Self::V2(manifest) => &manifest.batch_signing_public_keys,
-        };
-        let mut keys = HashMap::new();
-        for (identifier, public_key) in pem_keys.iter() {
-            keys.insert(
-                identifier.clone(),
-                public_key_from_pem(&public_key.public_key)
-                    .with_context(|| format!("couldn't parse key identifier {}", identifier))?,
-            );
-        }
-        Ok(keys)
+        // TODO(brandon): parse keys once, on deserialization, rather than every time this
+        // method is called.
+        self.batch_signing_public_keys
+            .iter()
+            .map(|(k, v)| {
+                Ok((
+                    k.clone(),
+                    public_key_from_pem(&v.public_key)
+                        .with_context(|| format!("couldn't parse key identifier {}", k))?,
+                ))
+            })
+            .collect()
     }
 
     pub fn packet_encryption_keys(&self) -> &PacketEncryptionCertificateSigningRequests {
-        match self {
-            Self::V1(manifest) => &manifest.packet_encryption_keys,
-            Self::V2(manifest) => &manifest.packet_encryption_keys,
-        }
+        &self.packet_encryption_keys
     }
 
     /// Returns the identity that should be assumed to write to the data share
     /// processor's peer validation bucket
     pub fn peer_validation_identity(&self) -> Identity {
-        match self {
-            Self::V1(_) => Identity::none(),
-            Self::V2(manifest) => manifest.peer_validation_identity.clone(),
-        }
+        self.peer_validation_identity.clone()
     }
 
     /// Returns the StoragePath for the data share processor's peer validation
     /// bucket.
     pub fn peer_validation_bucket(&self) -> &StoragePath {
-        match self {
-            Self::V1(manifest) => &manifest.peer_validation_bucket,
-            Self::V2(manifest) => &manifest.peer_validation_bucket,
-        }
+        &self.peer_validation_bucket
     }
 
     /// Returns true if all the members of the parsed manifest are valid, false
@@ -300,18 +312,12 @@ impl DataShareProcessorSpecificManifest {
     /// Returns the identity that should be assumed to write to the data share
     /// processor's ingestion bucket
     pub fn ingestion_identity(&self) -> &Identity {
-        match self {
-            Self::V1(manifest) => &manifest.ingestion_identity,
-            Self::V2(manifest) => &manifest.ingestion_identity,
-        }
+        &self.ingestion_identity
     }
 
     /// Returns the StoragePath for the data share processor's ingestion bucket
     pub fn ingestion_bucket(&self) -> &StoragePath {
-        match self {
-            Self::V1(manifest) => &manifest.ingestion_bucket,
-            Self::V2(manifest) => &manifest.ingestion_bucket,
-        }
+        &self.ingestion_bucket
     }
 
     /// Checks if the batch signing public key in the manifest matches the
@@ -396,64 +402,6 @@ impl DataShareProcessorSpecificManifest {
 
         Ok(())
     }
-}
-
-/// A data share processor specific manifest, format version 1.
-#[derive(Clone, Debug, Deserialize, PartialEq)]
-#[serde(deny_unknown_fields, rename_all = "kebab-case")]
-pub struct DataShareProcessorSpecificManifestV1 {
-    /// Format version of the manifest. Always 1.
-    format: u32,
-    /// URL of the ingestion bucket owned by this data share processor, which
-    /// may be in the form "s3://{region}/{name}" or "gs://{name}".
-    ingestion_bucket: StoragePath,
-    /// The ARN of the AWS IAM role that should be assumed by an ingestion
-    /// server to write to this data share processor's ingestion bucket, if the
-    /// ingestor does not have an AWS account of their own. This will not be
-    /// present if the data share processor's ingestion bucket is not in AWS S3.
-    #[serde(default = "Identity::none")]
-    ingestion_identity: Identity,
-    /// URL of the validation bucket owned by this data share processor, which
-    /// may be in the form "s3://{region}/{name}" or "gs://{name}".
-    peer_validation_bucket: StoragePath,
-    /// Keys used by this data share processor to sign batches.
-    batch_signing_public_keys: HashMap<String, BatchSigningPublicKey>,
-    /// Certificate signing requests containing public keys that should be used
-    /// to encrypt ingestion share packets intended for this data share
-    /// processor.
-    packet_encryption_keys: PacketEncryptionCertificateSigningRequests,
-}
-
-/// A data share processor specific manifest, format version 1.
-#[derive(Clone, Debug, Deserialize, PartialEq)]
-#[serde(deny_unknown_fields, rename_all = "kebab-case")]
-pub struct DataShareProcessorSpecificManifestV2 {
-    /// Format version of the manifest. Always 2.
-    format: u32,
-    /// URL of the ingestion bucket owned by this data share processor, which
-    /// may be in the form "s3://{region}/{name}" or "gs://{name}".
-    ingestion_bucket: StoragePath,
-    /// The ARN of the AWS IAM role that should be assumed by an ingestion
-    /// server to write to this data share processor's ingestion bucket, if the
-    /// ingestor does not have an AWS account of their own. This will not be
-    /// present if the data share processor's ingestion bucket is not in AWS S3.
-    #[serde(default = "Identity::none")]
-    ingestion_identity: Identity,
-    /// URL of the validation bucket owned by this data share processor, which
-    /// may be in the form "s3://{region}/{name}" or "gs://{name}".
-    peer_validation_bucket: StoragePath,
-    /// The ARN of the AWS IAM role that should be assumed by an ingestion
-    /// server to write to this data share processor's peer validation bucket.
-    /// This will not be present if the data share processor's peer validation
-    /// bucket is not in AWS S3.
-    #[serde(default = "Identity::none")]
-    peer_validation_identity: Identity,
-    /// Keys used by this data share processor to sign batches.
-    batch_signing_public_keys: HashMap<String, BatchSigningPublicKey>,
-    /// Certificate signing requests containing public keys that should be used
-    /// to encrypt ingestion share packets intended for this data share
-    /// processor.
-    packet_encryption_keys: PacketEncryptionCertificateSigningRequests,
 }
 
 /// Represents the server-identity structure within an ingestion server global
@@ -1018,17 +966,16 @@ mod tests {
                 ),
             },
         );
-        let expected_manifest = DataShareProcessorSpecificManifestV1 {
+        let expected_manifest = DataShareProcessorSpecificManifest {
             format: 1,
             batch_signing_public_keys: expected_batch_keys,
             packet_encryption_keys: expected_packet_encryption_csrs,
             ingestion_bucket: StoragePath::from_str("s3://us-west-1/ingestion").unwrap(),
             ingestion_identity: Identity::from_str("arn:aws:iam:something:fake").unwrap(),
             peer_validation_bucket: StoragePath::from_str("gs://validation/path/fragment").unwrap(),
+            peer_validation_identity: Identity::none(),
         };
-        assert_matches!(&manifest, DataShareProcessorSpecificManifest::V1(manifest_v1) => {
-            assert_eq!(manifest_v1, &expected_manifest);
-        });
+        assert_eq!(manifest, expected_manifest);
         let batch_signing_keys = manifest.batch_signing_public_keys().unwrap();
         let content = b"some content";
         let signature = default_ingestor_private_key()
@@ -1079,7 +1026,7 @@ mod tests {
         );
         struct TestCase {
             json: &'static [u8],
-            expected_manifest: DataShareProcessorSpecificManifestV2,
+            expected_manifest: DataShareProcessorSpecificManifest,
         }
 
         let test_cases = [
@@ -1102,7 +1049,7 @@ mod tests {
     }
 }
 "#,
-                expected_manifest: DataShareProcessorSpecificManifestV2 {
+                expected_manifest: DataShareProcessorSpecificManifest {
                     format: 2,
                     ingestion_bucket: StoragePath::from_str("gs://ingestion").unwrap(),
                     ingestion_identity: Identity::none(),
@@ -1133,7 +1080,7 @@ mod tests {
     }
 }
 "#,
-                expected_manifest: DataShareProcessorSpecificManifestV2 {
+                expected_manifest: DataShareProcessorSpecificManifest {
                     format: 2,
                     ingestion_bucket: StoragePath::from_str("s3://us-west-1/ingestion").unwrap(),
                     ingestion_identity: Identity::from_str("ingestion-identity").unwrap(),
@@ -1149,10 +1096,7 @@ mod tests {
 
         for test_case in &test_cases {
             let manifest = DataShareProcessorSpecificManifest::from_slice(test_case.json).unwrap();
-
-            assert_matches!(&manifest, DataShareProcessorSpecificManifest::V2(manifest_v2) => {
-                assert_eq!(manifest_v2, &test_case.expected_manifest);
-            });
+            assert_eq!(manifest, test_case.expected_manifest);
         }
     }
 
@@ -1910,45 +1854,45 @@ mod tests {
         let packet_encryption_key_unrelated_private =
             PrivateKey::from_base64(packet_encryption_key_unrelated_private_b64).unwrap();
 
-        let specific_manifest =
-            DataShareProcessorSpecificManifest::V1(DataShareProcessorSpecificManifestV1 {
-                format: 1,
-                ingestion_bucket: StoragePath::from_str("gs://irrelevant").unwrap(),
-                ingestion_identity: Identity::none(),
-                peer_validation_bucket: StoragePath::from_str("gs://irrelevant").unwrap(),
-                batch_signing_public_keys: IntoIter::new([
-                    (
-                        "batch-signing-key-1".to_owned(),
-                        BatchSigningPublicKey {
-                            public_key: batch_signing_key_1_public.to_owned(),
-                            expiration: "irrelevant".to_owned(),
-                        },
-                    ),
-                    (
-                        "batch-signing-key-2".to_owned(),
-                        BatchSigningPublicKey {
-                            public_key: batch_signing_key_2_public.to_owned(),
-                            expiration: "irrelevant".to_owned(),
-                        },
-                    ),
-                ])
-                .collect(),
-                packet_encryption_keys: IntoIter::new([
-                    (
-                        "packet-encryption-key-1".to_owned(),
-                        PacketEncryptionCertificateSigningRequest {
-                            certificate_signing_request: packet_encryption_key_1_csr.to_owned(),
-                        },
-                    ),
-                    (
-                        "packet-encryption-key-2".to_owned(),
-                        PacketEncryptionCertificateSigningRequest {
-                            certificate_signing_request: packet_encryption_key_2_csr.to_owned(),
-                        },
-                    ),
-                ])
-                .collect(),
-            });
+        let specific_manifest = DataShareProcessorSpecificManifest {
+            format: 1,
+            ingestion_bucket: StoragePath::from_str("gs://irrelevant").unwrap(),
+            ingestion_identity: Identity::none(),
+            peer_validation_bucket: StoragePath::from_str("gs://irrelevant").unwrap(),
+            peer_validation_identity: Identity::none(),
+            batch_signing_public_keys: IntoIter::new([
+                (
+                    "batch-signing-key-1".to_owned(),
+                    BatchSigningPublicKey {
+                        public_key: batch_signing_key_1_public.to_owned(),
+                        expiration: "irrelevant".to_owned(),
+                    },
+                ),
+                (
+                    "batch-signing-key-2".to_owned(),
+                    BatchSigningPublicKey {
+                        public_key: batch_signing_key_2_public.to_owned(),
+                        expiration: "irrelevant".to_owned(),
+                    },
+                ),
+            ])
+            .collect(),
+            packet_encryption_keys: IntoIter::new([
+                (
+                    "packet-encryption-key-1".to_owned(),
+                    PacketEncryptionCertificateSigningRequest {
+                        certificate_signing_request: packet_encryption_key_1_csr.to_owned(),
+                    },
+                ),
+                (
+                    "packet-encryption-key-2".to_owned(),
+                    PacketEncryptionCertificateSigningRequest {
+                        certificate_signing_request: packet_encryption_key_2_csr.to_owned(),
+                    },
+                ),
+            ])
+            .collect(),
+        };
 
         // Passes because manifest has corresponding public key
         specific_manifest

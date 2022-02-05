@@ -65,7 +65,6 @@ struct ProviderFactoryKey {
 /// multiple API clients.
 #[derive(Clone, Debug)]
 pub struct ProviderFactory {
-    runtime_handle: Handle,
     gcp_access_token_provider_factory: GcpAccessTokenProviderFactory,
     api_metrics: ApiClientMetricsCollector,
     logger: Logger,
@@ -76,13 +75,11 @@ impl ProviderFactory {
     /// Creates a new credential provider factory. The provided `api_metrics`,
     /// `runtime_handle` and `logger` will be used when creating any `Provider`.
     pub fn new(
-        runtime_handle: &Handle,
         gcp_access_token_provider_factory: &GcpAccessTokenProviderFactory,
         api_metrics: &ApiClientMetricsCollector,
         logger: &Logger,
     ) -> Self {
         Self {
-            runtime_handle: runtime_handle.clone(),
             gcp_access_token_provider_factory: gcp_access_token_provider_factory.clone(),
             api_metrics: api_metrics.clone(),
             logger: logger.clone(),
@@ -155,6 +152,7 @@ impl ProviderFactory {
 /// provided to multiple threads, they will efficiently share a single cached
 /// credential.
 #[derive(Clone)]
+#[allow(clippy::large_enum_variant)]
 pub enum Provider {
     /// Rusoto's default credentials provider, which attempts to source
     /// AWS credentials from environment variables or ~/.aws/credentials.
@@ -609,13 +607,10 @@ fn get_caller_identity_token_at_time(
     // Construct the string to be signed
     // https://docs.aws.amazon.com/general/latest/gr/sigv4-create-string-to-sign.html
     let string_to_sign = format!(
-        "AWS4-HMAC-SHA256\n{timestamp}\n{scope}\n{hash}",
+        "AWS4-HMAC-SHA256\n{timestamp}\n{date}/{region}/sts/aws4_request\n{hash}",
         timestamp = request_time_long,
-        scope = format!(
-            "{date}/{region}/sts/aws4_request",
-            date = request_time.format(SHORT_DATE),
-            region = aws_region.name(),
-        ),
+        date = request_time.format(SHORT_DATE),
+        region = aws_region.name(),
         hash = hex::encode(hasher.finalize().as_slice()),
     );
 
@@ -642,14 +637,11 @@ fn get_caller_identity_token_at_time(
     // Construct the HTTP authorization header to sendin the request
     // https://docs.aws.amazon.com/general/latest/gr/sigv4-add-signature-to-request.html
     let authorization_header = format!(
-        "AWS4-HMAC-SHA256 Credential={access_key}/{scope},\
+        "AWS4-HMAC-SHA256 Credential={access_key}/{date}/{region}/sts/aws4_request,\
                 SignedHeaders={signed_headers},Signature={signature}",
         access_key = credentials.aws_access_key_id(),
-        scope = format!(
-            "{date}/{region}/sts/aws4_request",
-            date = request_time.format("%Y%m%d"),
-            region = aws_region.name(),
-        ),
+        date = request_time.format("%Y%m%d"),
+        region = aws_region.name(),
         signed_headers = &signed_header_string(&headers),
         signature = signature
     );
