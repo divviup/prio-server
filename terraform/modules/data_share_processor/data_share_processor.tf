@@ -449,28 +449,11 @@ output "aggregate_queue" {
 }
 
 output "specific_manifest" {
-  value = var.pure_gcp ? {
+  value = {
     format                   = 2
     ingestion-identity       = var.use_aws ? local.ingestion_bucket_writer_role : null
     ingestion-bucket         = local.ingestion_bucket_url
-    peer-validation-identity = var.use_aws ? aws_iam_role.bucket_role[0].arn : null
-    peer-validation-bucket   = local.peer_validation_bucket_url
-    batch-signing-public-keys = {
-      (module.kubernetes.batch_signing_key) = {
-        public-key = ""
-        expiration = ""
-      }
-    }
-    packet-encryption-keys = {
-      (var.packet_decryption_key_kubernetes_secret) = {
-        certificate-signing-request = ""
-      }
-    }
-    } : {
-    format                   = 1
-    ingestion-identity       = var.use_aws ? local.ingestion_bucket_writer_role : null
-    ingestion-bucket         = local.ingestion_bucket_url
-    peer-validation-identity = null
+    peer-validation-identity = (var.pure_gcp && var.use_aws) ? aws_iam_role.bucket_role[0].arn : null
     peer-validation-bucket   = local.peer_validation_bucket_url
     batch-signing-public-keys = {
       (module.kubernetes.batch_signing_key) = {
