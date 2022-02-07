@@ -57,7 +57,7 @@ fn num_validator<F: FromStr>(s: String) -> Result<(), String> {
 fn date_validator(s: String) -> Result<(), String> {
     NaiveDateTime::parse_from_str(&s, DATE_FORMAT)
         .map(|_| ())
-        .map_err(|e| format!("{} {}", s, e.to_string()))
+        .map_err(|e| format!("{} {}", s, e))
 }
 
 fn uuid_validator(s: String) -> Result<(), String> {
@@ -989,7 +989,6 @@ fn main() -> Result<(), anyhow::Error> {
     let mut gcp_access_token_provider_factory =
         GcpAccessTokenProviderFactory::new(runtime.handle(), &api_metrics, &root_logger);
     let mut aws_provider_factory = aws_credentials::ProviderFactory::new(
-        runtime.handle(),
         &gcp_access_token_provider_factory,
         &api_metrics,
         &root_logger,
@@ -1458,15 +1457,14 @@ fn validate_sample_worker(
             // Set up a periodic task that will occasionally refresh our lease
             // on this work item until we're done processing.
             let _guard = {
-                let task_start = Instant::now();
+                let mut last_refresh = Instant::now();
                 let task_handle = task_handle.clone();
                 let logger = logger.clone();
                 let queue = queue.clone();
                 timer.schedule_repeating(chrono::Duration::seconds(5), move || {
-                    if let Err(err) =
-                        queue.maybe_extend_task_deadline(&task_handle, &task_start.elapsed())
-                    {
-                        error!(logger, "Couldn't extend task timeout: {}", err);
+                    match queue.maybe_extend_task_deadline(&task_handle, last_refresh) {
+                        Ok(new_last_refresh) => last_refresh = new_last_refresh,
+                        Err(err) => error!(logger, "Couldn't extend task timeout: {}", err),
                     }
                 })
             };
@@ -1763,7 +1761,7 @@ fn intake_batch_worker(
             info!(parent_logger, "dequeued intake task";
                 event::TASK_HANDLE => task_handle.clone(),
             );
-            let task_start = Instant::now();
+            let mut last_refresh = Instant::now();
 
             let trace_id = task_handle.task.trace_id;
 
@@ -1779,16 +1777,13 @@ fn intake_batch_worker(
                 Some(&metrics_collector),
                 api_metrics,
                 parent_logger,
-                |logger| {
-                    if let Err(e) =
-                        queue.maybe_extend_task_deadline(&task_handle, &task_start.elapsed())
-                    {
-                        error!(
-                            logger, "{}", e;
-                            event::TRACE_ID => trace_id.to_string(),
-                            event::TASK_HANDLE => task_handle.clone(),
-                        );
-                    }
+                |logger| match queue.maybe_extend_task_deadline(&task_handle, last_refresh) {
+                    Ok(new_last_refresh) => last_refresh = new_last_refresh,
+                    Err(err) => error!(
+                        logger, "{}", err;
+                        event::TRACE_ID => trace_id.to_string(),
+                        event::TASK_HANDLE => task_handle.clone(),
+                    ),
                 },
             );
 
@@ -2054,7 +2049,7 @@ fn aggregate_worker(
                 parent_logger, "dequeued aggregate task";
                 event::TASK_HANDLE => task_handle.clone(),
             );
-            let task_start = Instant::now();
+            let mut last_refresh = Instant::now();
 
             let batches: Vec<(&str, &str)> = task_handle
                 .task
@@ -2078,16 +2073,13 @@ fn aggregate_worker(
                 Some(&metrics_collector),
                 api_metrics,
                 parent_logger,
-                |logger| {
-                    if let Err(e) =
-                        queue.maybe_extend_task_deadline(&task_handle, &task_start.elapsed())
-                    {
-                        error!(
-                            logger, "{}", e;
-                            event::TRACE_ID => trace_id.to_string(),
-                            event::TASK_HANDLE => task_handle.clone(),
-                        );
-                    }
+                |logger| match queue.maybe_extend_task_deadline(&task_handle, last_refresh) {
+                    Ok(new_last_refresh) => last_refresh = new_last_refresh,
+                    Err(err) => error!(
+                        logger, "{}", err;
+                        event::TRACE_ID => trace_id.to_string(),
+                        event::TASK_HANDLE => task_handle.clone(),
+                    ),
                 },
             );
 

@@ -26,7 +26,7 @@ fn storage_api_base_url() -> Url {
 fn gcp_object_url(bucket: &str, encoded_key: &str) -> Result<Url> {
     let request_url = &format!(
         "{}storage/v1/b/{}/o/{}",
-        storage_api_base_url().to_string(),
+        storage_api_base_url(),
         bucket,
         encoded_key
     );

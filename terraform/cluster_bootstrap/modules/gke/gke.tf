@@ -97,6 +97,9 @@ resource "google_container_cluster" "cluster" {
 }
 
 resource "google_container_node_pool" "worker_nodes" {
+  # Beta provider is required for the spot VMs feature
+  provider = google-beta
+
   name               = "${var.resource_prefix}-node-pool"
   location           = var.gcp_region
   cluster            = google_container_cluster.cluster.name
@@ -114,6 +117,10 @@ resource "google_container_node_pool" "worker_nodes" {
       "logging-write",
       "monitoring"
     ]
+
+    # Opt into spot VMs so that we use spare GCE capacity which costs less
+    # https://cloud.google.com/kubernetes-engine/docs/concepts/spot-vms
+    spot = true
     # Configures nodes to obtain workload identity from GKE metadata service
     # https://cloud.google.com/kubernetes-engine/docs/how-to/workload-identity
     workload_metadata_config {
