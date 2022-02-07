@@ -125,14 +125,13 @@ impl DataShareProcessorGlobalManifest {
 
         // Validate.
         match manifest.format {
-            0 => {
-                if manifest.server_identity.aws_account_id.is_none() {
-                    return Err(anyhow!("manifest format 0 must have aws_account_id"));
-                }
-            }
-            1 => {
-                if manifest.server_identity.aws_account_id.is_some() {
-                    return Err(anyhow!("manifest format 1 must not have aws_account_id"));
+            0 | 1 => {
+                if manifest.server_identity.aws_account_id.is_some()
+                    && manifest.server_identity.gcp_service_account_id.is_some()
+                {
+                    return Err(anyhow!(
+                        "at most one of aws_account_id, gcp_service_account_id may be set"
+                    ));
                 }
             }
             _ => return Err(anyhow!("unsupported manifest format {}", manifest.format)),
@@ -147,7 +146,8 @@ impl DataShareProcessorGlobalManifest {
 #[derive(Clone, Debug, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields, rename_all = "kebab-case")]
 pub struct DataShareProcessorServerIdentity {
-    /// Deprecated and unused.
+    /// The numeric account ID of the AWS account this data share processor will
+    /// use to access peer resources.
     aws_account_id: Option<u64>,
     /// The numeric ID of the GCP service account this data share processor will
     /// use to access peer resources. Note that while the value is an integer,
