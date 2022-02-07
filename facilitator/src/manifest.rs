@@ -15,7 +15,6 @@ use ring::{
     signature::{UnparsedPublicKey, ECDSA_P256_SHA256_ASN1},
 };
 use serde::Deserialize;
-use serde_json::Value;
 use slog::Logger;
 use std::{collections::HashMap, fmt::Debug};
 use url::Url;
@@ -628,7 +627,6 @@ mod tests {
             DEFAULT_PACKET_ENCRYPTION_CSR,
         },
     };
-    use assert_matches::assert_matches;
     use mockito::mock;
     use prio::encrypt::{PrivateKey, PublicKey};
     use ring::signature::{EcdsaKeyPair, ECDSA_P256_SHA256_ASN1_SIGNING};
@@ -757,15 +755,6 @@ mod tests {
             r#"
  {
     "format": 0
-}
-        "#,
-            // v0 missing aws account
-            r#"
- {
-    "format": 0,
-    "server-identity": {
-        "gcp-service-account-email": "service-account@project-name.iam.gserviceaccount.com"
-    }
 }
         "#,
             // v0 non numeric aws account
