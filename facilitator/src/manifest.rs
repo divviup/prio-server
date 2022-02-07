@@ -217,16 +217,7 @@ impl DataShareProcessorSpecificManifest {
 
         // Validate.
         match manifest.format {
-            1 => {
-                if manifest.peer_validation_identity.is_some() {
-                    return Err(anyhow!(
-                        "manifest format 1 cannot have peer_validation_identity, has {}",
-                        manifest.peer_validation_identity
-                    )
-                    .into());
-                }
-            }
-            2 => (), // no additional validation needed
+            1 | 2 => (), // no additional validation needed
             _ => return Err(anyhow!("unsupported manifest format {}", manifest.format).into()),
         }
 
