@@ -217,7 +217,8 @@ locals {
     gcp_sa_to_impersonate_while_assuming_identity = var.remote_bucket_writer_gcp_service_account_email
     } : {
     identity                                      = aws_iam_role.bucket_role[0].arn
-    gcp_sa_to_impersonate_while_assuming_identity = ""
+    # gcp_sa_to_impersonate_while_assuming_identity = ""  # XXX
+    gcp_sa_to_impersonate_while_assuming_identity = var.remote_bucket_writer_gcp_service_account_email
   }
 
   ingestion_bucket_name = "${local.resource_prefix}-ingestion"
