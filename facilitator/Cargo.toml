@@ -24,7 +24,7 @@ hmac = "0.12"
 http = "^0.2"
 hyper = "^0.14"
 hyper-rustls = { version = "^0.23", features = ["http2"] }
-jsonwebtoken = "7"
+jsonwebtoken = "8"
 lazy_static = "1"
 p256 = "0.10.1"
 pem = "1.0"
@@ -51,9 +51,9 @@ tempfile = "3.3.0"
 thiserror = "1.0"
 timer = "0.2"
 tokio = { version = "^1.16", features = ["full"] }
-tracing = "0.1.29"
+tracing = "0.1.30"
 tracing-error = "0.2.0"
-tracing-subscriber = { version = "0.3.7", features = ["env-filter", "json"] }
+tracing-subscriber = { version = "0.3.8", features = ["env-filter", "json"] }
 ureq = { version = "^2.4", features = ["json"] }
 url = "2.2.2"
 urlencoding = "2.1.0"

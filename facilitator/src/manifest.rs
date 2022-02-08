@@ -15,7 +15,6 @@ use ring::{
     signature::{UnparsedPublicKey, ECDSA_P256_SHA256_ASN1},
 };
 use serde::Deserialize;
-use serde_json::Value;
 use slog::Logger;
 use std::{collections::HashMap, fmt::Debug};
 use url::Url;
@@ -93,10 +92,14 @@ pub type PacketEncryptionCertificateSigningRequests =
 /// peers at deploy time.
 /// See the design document for the full specification and format versions.
 /// https://docs.google.com/document/d/1MdfM3QT63ISU70l63bwzTrxr93Z7Tv7EDjLfammzo6Q/edit#heading=h.3j8dgxqo5h68
-#[derive(Clone, Debug, PartialEq)]
-pub enum DataShareProcessorGlobalManifest {
-    V0(DataShareProcessorGlobalManifestV0),
-    V1(DataShareProcessorGlobalManifestV1),
+#[derive(Clone, Debug, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields, rename_all = "kebab-case")]
+pub struct DataShareProcessorGlobalManifest {
+    /// Format version of the manifest. Always 0 or 1.
+    format: u32,
+    /// Identities used by the data share processor instances to access peer
+    /// resources
+    server_identity: DataShareProcessorServerIdentity,
 }
 
 impl DataShareProcessorGlobalManifest {
@@ -115,60 +118,36 @@ impl DataShareProcessorGlobalManifest {
     /// Loads the manifest from the provided String. Returns an error if
     /// the manifest could not be parsed.
     pub fn from_slice(json: &[u8]) -> Result<Self> {
-        let manifest: HashMap<String, Value> =
-            serde_json::from_slice(json).context("failed to decode JSON as map")?;
-        let format = manifest
-            .get("format")
-            .context("manifest does not contain format key")?
-            .as_u64()
-            .context("format value in manifest has wrong type")?;
+        // Parse.
+        let manifest: DataShareProcessorGlobalManifest =
+            serde_json::from_slice(json).context("failed to decode global manifest from JSON")?;
 
-        let manifest = match format {
-            0 => Self::V0(
-                serde_json::from_slice(json)
-                    .context("failed to decode v0 global manifest from JSON")?,
-            ),
-            1 => Self::V1(
-                serde_json::from_slice(json)
-                    .context("failed to decode v1 global manifest from JSON")?,
-            ),
-            _ => return Err(anyhow!("unsupported manifest format {}", format)),
-        };
+        // Validate.
+        match manifest.format {
+            0 | 1 => {
+                if manifest.server_identity.aws_account_id.is_some()
+                    && manifest.server_identity.gcp_service_account_id.is_some()
+                {
+                    return Err(anyhow!(
+                        "at most one of aws_account_id, gcp_service_account_id may be set"
+                    ));
+                }
+            }
+            _ => return Err(anyhow!("unsupported manifest format {}", manifest.format)),
+        }
 
         Ok(manifest)
     }
 }
 
-/// Represents the server-identity map inside a format version 0 data share
-/// processor global manifest.
+/// Represents the server-identity map inside data share processor global
+/// manifest.
 #[derive(Clone, Debug, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields, rename_all = "kebab-case")]
-pub struct DataShareProcessorServerIdentityV0 {
+pub struct DataShareProcessorServerIdentity {
     /// The numeric account ID of the AWS account this data share processor will
     /// use to access peer resources.
-    aws_account_id: u64,
-    /// The email address of the GCP service account this data share processor
-    /// will use to access peer resources.
-    gcp_service_account_email: String,
-}
-
-/// A format version 0 data share processor global manifest. This version is
-/// used in the prod-us deployment.
-#[derive(Clone, Debug, Deserialize, PartialEq)]
-#[serde(deny_unknown_fields, rename_all = "kebab-case")]
-pub struct DataShareProcessorGlobalManifestV0 {
-    /// Format version of the manifest. Always 0.
-    format: u32,
-    /// Identities used by the data share processor instances to access peer
-    /// resources
-    server_identity: DataShareProcessorServerIdentityV0,
-}
-
-/// Represents the server-identity map inside a format version 1 data share
-/// processor global manifest.
-#[derive(Clone, Debug, Deserialize, PartialEq)]
-#[serde(deny_unknown_fields, rename_all = "kebab-case")]
-pub struct DataShareProcessorServerIdentityV1 {
+    aws_account_id: Option<u64>,
     /// The numeric ID of the GCP service account this data share processor will
     /// use to access peer resources. Note that while the value is an integer,
     /// we expect a JSON *string* and treat it opaquely as a string, to avoid
@@ -178,18 +157,6 @@ pub struct DataShareProcessorServerIdentityV1 {
     /// The email address of the GCP service account this data share processor
     /// will use to access peer resources.
     gcp_service_account_email: String,
-}
-
-/// A format version 1 data share processor global manifest. This version is
-/// used in the international deployment.
-#[derive(Clone, Debug, Deserialize, PartialEq)]
-#[serde(deny_unknown_fields, rename_all = "kebab-case")]
-pub struct DataShareProcessorGlobalManifestV1 {
-    /// Format version of the manifest. Always 1.
-    format: u32,
-    /// Identities used by the data share processor instances to access peer
-    /// resources
-    server_identity: DataShareProcessorServerIdentityV1,
 }
 
 /// A data share processor specific manifest, used to exchange parameters with
@@ -651,7 +618,6 @@ mod tests {
             DEFAULT_PACKET_ENCRYPTION_CSR,
         },
     };
-    use assert_matches::assert_matches;
     use mockito::mock;
     use prio::encrypt::{PrivateKey, PublicKey};
     use ring::signature::{EcdsaKeyPair, ECDSA_P256_SHA256_ASN1_SIGNING};
@@ -683,28 +649,25 @@ mod tests {
     }
 }
             "#;
-        let expected_v0_manifest = DataShareProcessorGlobalManifestV0 {
+        let expected_v0_manifest = DataShareProcessorGlobalManifest {
             format: 0,
-            server_identity: DataShareProcessorServerIdentityV0 {
-                aws_account_id: 12345678901234567,
+            server_identity: DataShareProcessorServerIdentity {
+                aws_account_id: Some(12345678901234567),
+                gcp_service_account_id: None,
                 gcp_service_account_email: "service-account@project-name.iam.gserviceaccount.com"
                     .to_owned(),
             },
         };
 
         let manifest = DataShareProcessorGlobalManifest::from_slice(json).unwrap();
-        assert_matches!(
-        manifest,
-        DataShareProcessorGlobalManifest::V0(manifest_v0) => {
-            assert_eq!(manifest_v0, expected_v0_manifest);
-        });
+        assert_eq!(expected_v0_manifest, manifest);
     }
 
     #[test]
     fn load_data_share_processor_global_manifest_v1() {
         struct TestCase {
             json: &'static [u8],
-            expected_manifest: DataShareProcessorGlobalManifestV1,
+            expected_manifest: DataShareProcessorGlobalManifest,
         }
         let test_cases = [
             TestCase {
@@ -717,9 +680,10 @@ mod tests {
     }
 }
             "#,
-                expected_manifest: DataShareProcessorGlobalManifestV1 {
+                expected_manifest: DataShareProcessorGlobalManifest {
                     format: 1,
-                    server_identity: DataShareProcessorServerIdentityV1 {
+                    server_identity: DataShareProcessorServerIdentity {
+                        aws_account_id: None,
                         gcp_service_account_id: Some("12345678901234567".to_owned()),
                         gcp_service_account_email:
                             "service-account@project-name.iam.gserviceaccount.com".to_owned(),
@@ -736,9 +700,10 @@ mod tests {
     }
 }
             "#,
-                expected_manifest: DataShareProcessorGlobalManifestV1 {
+                expected_manifest: DataShareProcessorGlobalManifest {
                     format: 1,
-                    server_identity: DataShareProcessorServerIdentityV1 {
+                    server_identity: DataShareProcessorServerIdentity {
+                        aws_account_id: None,
                         gcp_service_account_id: Some("12345678901234567".to_owned()),
                         gcp_service_account_email:
                             "service-account@project-name.iam.gserviceaccount.com".to_owned(),
@@ -749,10 +714,7 @@ mod tests {
 
         for test_case in &test_cases {
             let manifest = DataShareProcessorGlobalManifest::from_slice(test_case.json).unwrap();
-            assert_matches!(
-            manifest, DataShareProcessorGlobalManifest::V1(manifest_v1) => {
-                assert_eq!(manifest_v1, test_case.expected_manifest);
-            })
+            assert_eq!(test_case.expected_manifest, manifest);
         }
     }
 
@@ -784,15 +746,6 @@ mod tests {
             r#"
  {
     "format": 0
-}
-        "#,
-            // v0 missing aws account
-            r#"
- {
-    "format": 0,
-    "server-identity": {
-        "gcp-service-account-email": "service-account@project-name.iam.gserviceaccount.com"
-    }
 }
         "#,
             // v0 non numeric aws account
