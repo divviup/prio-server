@@ -104,7 +104,7 @@ plan-bootstrap: prep ## Show what terraform thinks it will do
 		-var-file="$(VARS)" \
 		-target=module.manifest_gcp \
 		-target=module.manifest_aws \
-		-target=module.fake_server_resources \
+		-target=module.fake_server_resources[0].google_storage_bucket_object.global_manifest \
 		-target=module.portal_server_resources \
 		-target=module.gke \
 		-target=module.eks \
@@ -119,7 +119,7 @@ apply-bootstrap: prep ## Have terraform bring up the minimal resources needed to
 		-var-file="$(VARS)" \
 		-target=module.manifest_gcp \
 		-target=module.manifest_aws \
-		-target=module.fake_server_resources \
+		-target=module.fake_server_resources[0].google_storage_bucket_object.global_manifest \
 		-target=module.portal_server_resources \
 		-target=module.gke \
 		-target=module.eks \
@@ -134,7 +134,7 @@ destroy-bootstrap: prep ## Have terraform destroy the resources brought up by ap
 		-var-file="$(VARS)" \
 		-target=module.manifest_gcp \
 		-target=module.manifest_aws \
-		-target=module.fake_server_resources \
+		-target=module.fake_server_resources[0].google_storage_bucket_object.global_manifest \
 		-target=module.portal_server_resources \
 		-target=module.gke \
 		-target=module.eks \
