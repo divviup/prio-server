@@ -37,6 +37,16 @@ resource "google_project_service" "kms" {
   service = "cloudkms.googleapis.com"
 }
 
+# This service is needed by Cloud Operations for GKE.
+resource "google_project_service" "logging" {
+  service = "logging.googleapis.com"
+}
+
+# This service will be required by key-rotator, after bootstrapping.
+resource "google_project_service" "secretmanager" {
+  service = "secretmanager.googleapis.com"
+}
+
 resource "google_container_cluster" "cluster" {
   name = "${var.resource_prefix}-cluster"
   # Specifying a region and not a zone here gives us a regional cluster, meaning
@@ -93,7 +103,10 @@ resource "google_container_cluster" "cluster" {
   # More configuration values are defined in node pools below.
   enable_shielded_nodes = true
 
-  depends_on = [google_project_service.container]
+  depends_on = [
+    google_project_service.container,
+    google_project_service.kms
+  ]
 }
 
 resource "google_container_node_pool" "worker_nodes" {
@@ -176,4 +189,6 @@ resource "google_artifact_registry_repository" "artifact_registry" {
   repository_id = "prio-server-docker"
   format        = "DOCKER"
   location      = var.gcp_region
+
+  depends_on = [google_project_service.artifact_registry]
 }

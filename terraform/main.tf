@@ -350,6 +350,11 @@ provider "google" {
   project = var.gcp_project
 }
 
+provider "google-beta" {
+  region  = var.gcp_region
+  project = var.gcp_project
+}
+
 # AWS provider credentials come from environment variables set by the `aws-mfa`
 # script
 provider "aws" {
