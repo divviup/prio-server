@@ -28,6 +28,11 @@ variable "aws_region" {
   type = string
 }
 
+variable "allowed_aws_account_ids" {
+  type    = list(string)
+  default = null
+}
+
 variable "localities" {
   type = list(string)
 }
@@ -365,7 +370,8 @@ provider "aws" {
   # aws_s3_bucket resources will be created in the region specified in this
   # provider.
   # https://github.com/hashicorp/terraform/issues/12512
-  region = var.aws_region
+  region              = var.aws_region
+  allowed_account_ids = var.allowed_aws_account_ids
 
   default_tags {
     tags = {

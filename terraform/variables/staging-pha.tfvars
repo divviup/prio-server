@@ -80,3 +80,5 @@ default_aggregation_period = "30m"
 
 default_peer_share_processor_manifest_base_url = "storage.googleapis.com/prio-staging-facil-manifests"
 default_portal_server_manifest_base_url        = "storage.googleapis.com/prio-staging-pha-manifests/portal-server"
+
+allowed_aws_account_ids = ["338276578713"]
