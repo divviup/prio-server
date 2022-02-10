@@ -81,6 +81,4 @@ default_aggregation_period = "30m"
 default_peer_share_processor_manifest_base_url = "storage.googleapis.com/prio-staging-facil-manifests"
 default_portal_server_manifest_base_url        = "storage.googleapis.com/prio-staging-pha-manifests/portal-server"
 
-# Uncomment and fill in this variable to require that this file always be used
-# with the same AWS account.
-# allowed_aws_account_ids = ["123456789012"]
+allowed_aws_account_ids = ["338276578713"]

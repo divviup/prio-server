@@ -238,6 +238,4 @@ grafana_helm_chart_version              = "6.20.5"
 cloudwatch_exporter_helm_chart_version  = "0.17.2"
 stackdriver_exporter_helm_chart_version = "1.12.0"
 
-# Uncomment and fill in this variable to require that this file always be used
-# with the same AWS account.
-# allowed_aws_account_ids = ["123456789012"]
+allowed_aws_account_ids = ["338276578713"]
