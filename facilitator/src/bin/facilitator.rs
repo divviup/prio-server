@@ -970,19 +970,7 @@ fn app() -> App<'static, 'static> {
         )
 }
 
-fn main() -> Result<(), anyhow::Error> {
-    let matches = app().get_matches();
-
-    let force_json_log_output = value_t!(matches.value_of("force-json-log-output"), bool)?;
-    let log_level = &env::var("RUST_LOG")
-        .unwrap_or_else(|_| "INFO".to_owned())
-        .to_uppercase();
-    let (root_logger, _guard) = setup_logging(&LoggingConfiguration {
-        force_json_output: force_json_log_output,
-        version_string: option_env!("BUILD_INFO").unwrap_or("(BUILD_INFO unavailable)"),
-        log_level,
-    })?;
-
+fn run(matches: ArgMatches, root_logger: Logger) -> Result<(), anyhow::Error> {
     let args: Vec<String> = std::env::args().collect();
     info!(
         root_logger,
@@ -1004,7 +992,7 @@ fn main() -> Result<(), anyhow::Error> {
     let result = match matches.subcommand() {
         // The configuration of the Args above should guarantee that the
         // various parameters are present and valid, so it is safe to use
-        // unwrap() here.
+        // unwrap() when fetching their values in each command's implementation.
         ("generate-ingestion-sample", Some(sub_matches)) => generate_sample(
             &Uuid::new_v4(),
             sub_matches,
@@ -1071,6 +1059,33 @@ fn main() -> Result<(), anyhow::Error> {
     };
 
     result
+}
+
+fn main() -> Result<(), anyhow::Error> {
+    let matches = app().get_matches();
+
+    let force_json_log_output = value_t!(matches.value_of("force-json-log-output"), bool)?;
+    let log_level = &env::var("RUST_LOG")
+        .unwrap_or_else(|_| "INFO".to_owned())
+        .to_uppercase();
+    let (root_logger, _guard) = setup_logging(&LoggingConfiguration {
+        force_json_output: force_json_log_output,
+        version_string: option_env!("BUILD_INFO").unwrap_or("(BUILD_INFO unavailable)"),
+        log_level,
+    })?;
+
+    if let Err(error) = run(matches, root_logger) {
+        // We cannot return this error out of main to lang_start because
+        // certain errors (i.e. from ureq) may attempt to log when they are
+        // dropped, but the `slog_scope::GlobalLoggerGuard` will have already
+        // been dropped upon return. slog-scope will panic in this case.
+        // Instead, we handle displaying the error and returning an error code
+        // manually here, while the guard is still alive.
+        eprintln!("Error: {:?}", error);
+        std::process::exit(1);
+    }
+
+    Ok(())
 }
 
 /// Check batch signing and packet encryption public keys in this instance's
