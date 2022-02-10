@@ -106,34 +106,38 @@ trait AppArgumentAdder {
     fn add_intake_batch_common_arguments(self) -> Self;
 }
 
-const SHARED_HELP: &str = "Storage arguments: Any flag ending in -input or -output can take an \
-     S3 bucket (s3://<region>/<bucket>), a Google Storage bucket (gs://), \
-     or a local directory name. The corresponding -identity flag specifies \
-     what identity to use with a bucket.
+macro_rules! shared_help {
+    () => {
+        "Storage arguments: Any flag ending in -input or -output can take an \
+        S3 bucket (s3://<region>/<bucket>), a Google Storage bucket (gs://), \
+        or a local directory name. The corresponding -identity flag specifies \
+        what identity to use with a bucket.
 
-     For S3 buckets: An identity flag may contain an AWS IAM role, specified \
-     using an ARN (i.e. \"arn:...\"). Facilitator will assume that role \
-     using an OIDC auth token obtained from the GKE metadata service. \
-     Appropriate mappings need to be in place from Facilitator's k8s \
-     service account to its GCP service account to the IAM role. If \
-     the identity flag is omitted or is the empty string, use credentials from \
-     ~/.aws.
+        For S3 buckets: An identity flag may contain an AWS IAM role, specified \
+        using an ARN (i.e. \"arn:...\"). Facilitator will assume that role \
+        using an OIDC auth token obtained from the GKE metadata service. \
+        Appropriate mappings need to be in place from Facilitator's k8s \
+        service account to its GCP service account to the IAM role. If \
+        the identity flag is omitted or is the empty string, use credentials from \
+        ~/.aws.
 
-     For GS buckets: An identity flag may contain a GCP service account \
-     (identified by an email address). Requests to Google Storage (gs://) \
-     are always authenticated as one of our service accounts by GKE's \
-     Workload Identity feature: \
-     https://cloud.google.com/kubernetes-engine/docs/how-to/workload-identity. \
-     If an identity flag is set, facilitator will use its default service account \
-     to impersonate a different account, which should have permissions to write \
-     to or read from the named bucket. If an identity flag is omitted or is \
-     the empty string, the default service account exposed by the GKE metadata \
-     service is used. \
-     \
-     Keys: All keys are P-256. Public keys are base64-encoded DER SPKI. Private \
-     keys are in the base64 encoded format expected by libprio-rs, or base64-encoded \
-     PKCS#8, as documented. \
-    ";
+        For GS buckets: An identity flag may contain a GCP service account \
+        (identified by an email address). Requests to Google Storage (gs://) \
+        are always authenticated as one of our service accounts by GKE's \
+        Workload Identity feature: \
+        https://cloud.google.com/kubernetes-engine/docs/how-to/workload-identity. \
+        If an identity flag is set, facilitator will use its default service account \
+        to impersonate a different account, which should have permissions to write \
+        to or read from the named bucket. If an identity flag is omitted or is \
+        the empty string, the default service account exposed by the GKE metadata \
+        service is used. \
+        \
+        Keys: All keys are P-256. Public keys are base64-encoded DER SPKI. Private \
+        keys are in the base64 encoded format expected by libprio-rs, or base64-encoded \
+        PKCS#8, as documented. \
+        "
+    };
+}
 
 fn upper_snake_case(s: &str) -> String {
     s.to_uppercase().replace("-", "_")
@@ -712,8 +716,8 @@ impl<'a, 'b> AppArgumentAdder for App<'a, 'b> {
     }
 }
 
-fn main() -> Result<(), anyhow::Error> {
-    let matches = App::new("facilitator")
+fn app() -> App<'static, 'static> {
+    App::new("facilitator")
         .about("Prio data share processor")
         .arg(
             // TODO(brandon): remove this flag once it is no longer specified anywhere
@@ -765,7 +769,7 @@ fn main() -> Result<(), anyhow::Error> {
         )
         .subcommand(
             SubCommand::with_name("intake-batch")
-                .about(format!("Validate an input share (from an ingestor's bucket) and emit a validation share.\n\n{}", SHARED_HELP).as_str())
+                .about(concat!("Validate an input share (from an ingestor's bucket) and emit a validation share.\n\n", shared_help!()))
                 .add_instance_name_argument()
                 .add_is_first_argument()
                 .add_gcp_service_account_key_file_argument()
@@ -805,7 +809,7 @@ fn main() -> Result<(), anyhow::Error> {
         )
         .subcommand(
             SubCommand::with_name("aggregate")
-                .about(format!("Verify peer validation share and emit sum part.\n\n{}", SHARED_HELP).as_str())
+                .about(concat!("Verify peer validation share and emit sum part.\n\n", shared_help!()))
                 .add_instance_name_argument()
                 .add_is_first_argument()
                 .add_gcp_service_account_key_file_argument()
@@ -924,7 +928,7 @@ fn main() -> Result<(), anyhow::Error> {
         )
         .subcommand(
             SubCommand::with_name("intake-batch-worker")
-                .about(format!("Consume intake batch tasks from a queue, validating an input share (from an ingestor's bucket) and emit a validation share.\n\n{}", SHARED_HELP).as_str())
+                .about(concat!("Consume intake batch tasks from a queue, validating an input share (from an ingestor's bucket) and emit a validation share.\n\n", shared_help!()))
                 .add_instance_name_argument()
                 .add_is_first_argument()
                 .add_gcp_service_account_key_file_argument()
@@ -944,7 +948,7 @@ fn main() -> Result<(), anyhow::Error> {
         )
         .subcommand(
             SubCommand::with_name("aggregate-worker")
-                .about(format!("Consume aggregate tasks from a queue.\n\n{}", SHARED_HELP).as_str())
+                .about(concat!("Consume aggregate tasks from a queue.\n\n", shared_help!()))
                 .add_instance_name_argument()
                 .add_is_first_argument()
                 .add_gcp_service_account_key_file_argument()
@@ -964,7 +968,10 @@ fn main() -> Result<(), anyhow::Error> {
                 .add_gcp_workload_identity_pool_provider_argument()
                 .add_worker_lifetime_argument()
         )
-        .get_matches();
+}
+
+fn main() -> Result<(), anyhow::Error> {
+    let matches = app().get_matches();
 
     let force_json_log_output = value_t!(matches.value_of("force-json-log-output"), bool)?;
     let log_level = &env::var("RUST_LOG")
