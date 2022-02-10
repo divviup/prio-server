@@ -17,6 +17,10 @@ updates:
     directory: "/terraform"
     schedule:
       interval: "weekly"
+  - package-ecosystem: "terraform"
+    directory: "/terraform/cluster_bootstrap"
+    schedule:
+      interval: "weekly"
   - package-ecosystem: "gomod"
     directory: "/workflow-manager"
     schedule:
