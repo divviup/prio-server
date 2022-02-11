@@ -151,7 +151,7 @@ resource "random_string" "kms_id" {
 
 # KMS keyring to store etcd encryption key
 resource "google_kms_key_ring" "keyring" {
-  name = "${var.resource_prefix}-${random_string.kms_id.result}-kms-keyring"
+  name = "${var.resource_prefix}-kms-keyring-${random_string.kms_id.result}"
   # Keyrings can also be zonal, but ours must be regional to match the GKE
   # cluster.
   location = var.gcp_region
