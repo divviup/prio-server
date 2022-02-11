@@ -4,7 +4,6 @@
 
 - scanning the contents of ingestion, own validation and peer validation buckets and translating the objects it finds into intake and aggregation tasks
 - writing markers to avoid scheduling duplicate tasks
-- reaping Kubernetes jobs left behind by older versions of itself
 
 ## Task queues
 
@@ -30,10 +29,10 @@ To support new task queues, simply add an implementation of the `task.Enqueuer` 
 
 ## Developing and debugging
 
-`workflow-manager` is intended to run as a Kubernetes cronjob, but it can also be run locally from the command line. It uses cloud platform APIs to access storage buckets and Kubernetes APIs to list and manipulate jobs. If no special arguments are provided, it will use ambient cloud platform credits (i.e., whatever is in `~/.aws` or `~/.config/gcloud`) for the former. For Kubernetes API access, it defaults to using the in cluster client configuration, expecting a Kubernetes service account with appropriate RBAC permissions to be mounted. However you can have it use the credentials configured for `kubectl` by passing `--kube-config-path /path/to/your/.kube/config`. See `kubectl` documentation for more information on `kubeconfig`.
+`workflow-manager` is intended to run as a Kubernetes cronjob, but it can also be run locally from the command line. It uses cloud platform APIs to access storage buckets and Kubernetes APIs to list and manipulate jobs. If no special arguments are provided, it will use ambient cloud platform credentials (i.e., whatever is in `~/.aws` or `~/.config/gcloud`) for the former.
 
 ### Dry run mode
 
-If you want to see what `workflow-manager` would do and avoid any side-effects, pass `--dry-run`. No tasks will be scheduled, no objects will be written to cloud storage and no Kubernetes jobs will be deleted. Instead, the operations that would have been performed will be logged.
+If you want to see what `workflow-manager` would do and avoid any side-effects, pass `--dry-run`. No tasks will be scheduled and no objects will be written to cloud storage. Instead, the operations that would have been performed will be logged.
 
 Note that dry run mode does not guarantee that the logged operations would have succeeded.
