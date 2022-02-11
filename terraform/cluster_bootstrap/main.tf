@@ -26,6 +26,19 @@ The AWS region in which resources should be created.
 DESCRIPTION
 }
 
+variable "allowed_aws_account_ids" {
+  type        = list(string)
+  default     = null
+  description = <<DESCRIPTION
+A list of AWS account IDs that are allowed to be used. Set this in an
+environment's variables to prevent accidentally using the environment with
+the wrong AWS configuration profile. This variable may be omitted, in which
+case no AWS account ID check is performed. If a list of account IDs is
+given, the provider will check the account of the active credentials, and
+return an error if it is not listed here.
+DESCRIPTION
+}
+
 variable "use_aws" {
   type        = bool
   description = <<DESCRIPTION
@@ -85,7 +98,8 @@ terraform {
 # AWS provider is configured via environment variables that get set by aws-mfa
 # script
 provider "aws" {
-  region = var.aws_region
+  region              = var.aws_region
+  allowed_account_ids = var.allowed_aws_account_ids
 
   default_tags {
     tags = {
