@@ -141,7 +141,7 @@ resource "google_container_node_pool" "worker_nodes" {
 
   depends_on = [google_project_service.compute]
 }
-      
+
 resource "random_string" "kms_id" {
   length  = 8
   upper   = false
