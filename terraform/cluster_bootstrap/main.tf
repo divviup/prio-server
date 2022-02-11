@@ -138,3 +138,7 @@ module "eks" {
   resource_prefix  = "prio-${var.environment}"
   cluster_settings = var.cluster_settings
 }
+
+output "google_kms_key_ring_id" {
+  value = var.use_aws ? "" : module.gke[0].google_kms_key_ring_id
+}

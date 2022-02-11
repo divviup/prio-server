@@ -142,14 +142,25 @@ resource "google_container_node_pool" "worker_nodes" {
   depends_on = [google_project_service.compute]
 }
 
+resource "random_string" "kms_id" {
+  length  = 8
+  upper   = false
+  number  = false
+  special = false
+}
+
 # KMS keyring to store etcd encryption key
 resource "google_kms_key_ring" "keyring" {
-  name = "${var.resource_prefix}-kms-keyring"
+  name = "${var.resource_prefix}-kms-keyring-${random_string.kms_id.result}"
   # Keyrings can also be zonal, but ours must be regional to match the GKE
   # cluster.
   location = var.gcp_region
 
   depends_on = [google_project_service.kms]
+
+  lifecycle {
+    ignore_changes = [name]
+  }
 }
 
 # KMS key used by GKE cluster to encrypt contents of cluster etcd, crucially to
@@ -191,4 +202,8 @@ resource "google_artifact_registry_repository" "artifact_registry" {
   location      = var.gcp_region
 
   depends_on = [google_project_service.artifact_registry]
+}
+
+output "google_kms_key_ring_id" {
+  value = google_kms_key_ring.keyring.id
 }

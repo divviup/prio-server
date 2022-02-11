@@ -282,6 +282,14 @@ indicates that all localities should generate single-object validation batches.
 DESCRIPTION
 }
 
+variable "state_bucket" {
+  type        = string
+  description = <<DESCRIPTION
+The name of the GCS bucket that Terraform's state is stored in, for access
+to outputs from the cluster_bootstrap stage.
+DESCRIPTION
+}
+
 terraform {
   backend "gcs" {}
 
@@ -566,11 +574,12 @@ data "google_container_cluster" "cluster" {
   location = var.gcp_region
 }
 
-data "google_kms_key_ring" "keyring" {
-  count = var.use_aws ? 0 : 1
-
-  name     = "prio-${var.environment}-kms-keyring"
-  location = var.gcp_region
+data "terraform_remote_state" "cluster_bootstrap" {
+  backend = "gcs"
+  config = {
+    bucket = var.state_bucket
+    prefix = "cluster-bootstrap"
+  }
 }
 
 resource "google_project_iam_custom_role" "gcp_secret_writer" {
@@ -632,7 +641,7 @@ module "data_share_processors" {
   intake_max_age                                 = var.intake_max_age
   aggregation_period                             = each.value.aggregation_period
   aggregation_grace_period                       = each.value.aggregation_grace_period
-  kms_keyring                                    = var.use_aws ? "" : data.google_kms_key_ring.keyring[0].id
+  kms_keyring                                    = data.terraform_remote_state.cluster_bootstrap.outputs.google_kms_key_ring_id
   pushgateway                                    = var.pushgateway
   workflow_manager_image                         = var.workflow_manager_image
   workflow_manager_version                       = var.workflow_manager_version
