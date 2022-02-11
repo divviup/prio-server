@@ -157,6 +157,10 @@ resource "google_kms_key_ring" "keyring" {
   location = var.gcp_region
 
   depends_on = [google_project_service.kms]
+
+  lifecycle {
+    ignore_changes = [name]
+  }
 }
 
 # KMS key used by GKE cluster to encrypt contents of cluster etcd, crucially to
