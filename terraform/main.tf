@@ -86,12 +86,12 @@ variable "managed_dns_zone" {
 
 variable "test_peer_environment" {
   type = object({
-    env_with_ingestor            = string
-    env_without_ingestor         = string
+    env_with_ingestor    = string
+    env_without_ingestor = string
   })
   default = {
-    env_with_ingestor            = ""
-    env_without_ingestor         = ""
+    env_with_ingestor    = ""
+    env_without_ingestor = ""
   }
   description = <<DESCRIPTION
 Describes a pair of data share processor environments set up to test against
