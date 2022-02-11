@@ -203,3 +203,7 @@ resource "google_artifact_registry_repository" "artifact_registry" {
 
   depends_on = [google_project_service.artifact_registry]
 }
+
+output "google_kms_key_ring_id" {
+  value = google_kms_key_ring.keyring.id
+}
