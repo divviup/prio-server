@@ -85,12 +85,12 @@ terraform {
     google = {
       source = "hashicorp/google"
       # Keep this version in sync with provider google-beta
-      version = "~> 4.5.0"
+      version = "~> 4.10.0"
     }
     google-beta = {
       source = "hashicorp/google-beta"
       # Keep this version in sync with provider google
-      version = "~> 4.5.0"
+      version = "~> 4.10.0"
     }
   }
 }
@@ -137,4 +137,8 @@ module "eks" {
   environment      = var.environment
   resource_prefix  = "prio-${var.environment}"
   cluster_settings = var.cluster_settings
+}
+
+output "google_kms_key_ring_id" {
+  value = var.use_aws ? "" : module.gke[0].google_kms_key_ring_id
 }

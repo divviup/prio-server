@@ -31,7 +31,7 @@ help:
 
 .PHONY: prep
 prep: ## Prepare a new workspace (environment) if needed, configure the tfstate backend, update any modules, and switch to the workspace
-	@rm .terraform/terraform.tfstate
+	@rm -f .terraform/terraform.tfstate
 	@if [ ! -f "$(VARS)" ]; then \
 		echo "$(BOLD)$(RED)Could not find variables file: $(VARS)$(RESET)"; \
 		exit 1; \
@@ -172,7 +172,7 @@ destroy-target: prep ## Destroy a specific resource. Caution though, this destro
 
 .PHONY: prep-cluster-bootstrap
 prep-cluster-bootstrap: ## Prepare a new workspace (environment) if needed, configure the tfstate backend, update any modules, and switch to the workspace
-	@rm cluster_bootstrap/.terraform/terraform.tfstate
+	@rm -f cluster_bootstrap/.terraform/terraform.tfstate
 	@if [ ! -f "$(VARS)" ]; then \
 		echo "$(BOLD)$(RED)Could not find variables file: $(VARS)$(RESET)"; \
 		exit 1; \

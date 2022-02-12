@@ -88,23 +88,22 @@ variable "managed_dns_zone" {
 
 variable "test_peer_environment" {
   type = object({
-    env_with_ingestor            = string
-    env_without_ingestor         = string
-    localities_with_sample_maker = list(string)
+    env_with_ingestor    = string
+    env_without_ingestor = string
   })
   default = {
-    env_with_ingestor            = ""
-    env_without_ingestor         = ""
-    localities_with_sample_maker = []
+    env_with_ingestor    = ""
+    env_without_ingestor = ""
   }
   description = <<DESCRIPTION
 Describes a pair of data share processor environments set up to test against
-each other. One environment, named in "env_with_ingestor", hosts a fake
-ingestion servers, but only for the localities enumerated in
-"localities_with_sample_makers", which should be a subset of the ones in
-"localities". The other environment, named in "env_without_ingestor", has no
-fake ingestion servers. This variable should not be specified in production
-deployments.
+each other. One environment, named in "env_with_ingestor", hosts fake
+ingestion servers writing ingestion batches to both environments, as well as
+validators that check that the eventual sums match the data in the ingestion
+batches. The other environment, named in "env_without_ingestor", has no fake
+ingestion servers or validators.
+
+This variable should not be specified in production deployments.
 DESCRIPTION
 }
 
@@ -284,6 +283,14 @@ indicates that all localities should generate single-object validation batches.
 DESCRIPTION
 }
 
+variable "state_bucket" {
+  type        = string
+  description = <<DESCRIPTION
+The name of the GCS bucket that Terraform's state is stored in, for access
+to outputs from the cluster_bootstrap stage.
+DESCRIPTION
+}
+
 terraform {
   backend "gcs" {}
 
@@ -300,12 +307,12 @@ terraform {
     google = {
       source = "hashicorp/google"
       # Keep this version in sync with provider google-beta
-      version = "~> 4.9.0"
+      version = "~> 4.10.0"
     }
     google-beta = {
       source = "hashicorp/google-beta"
       # Keep this version in sync with provider google
-      version = "~> 4.9.0"
+      version = "~> 4.10.0"
     }
     helm = {
       source  = "hashicorp/helm"
@@ -566,11 +573,12 @@ data "google_container_cluster" "cluster" {
   location = var.gcp_region
 }
 
-data "google_kms_key_ring" "keyring" {
-  count = var.use_aws ? 0 : 1
-
-  name     = "prio-${var.environment}-kms-keyring"
-  location = var.gcp_region
+data "terraform_remote_state" "cluster_bootstrap" {
+  backend = "gcs"
+  config = {
+    bucket = var.state_bucket
+    prefix = "cluster-bootstrap"
+  }
 }
 
 resource "google_project_iam_custom_role" "gcp_secret_writer" {
@@ -632,7 +640,7 @@ module "data_share_processors" {
   intake_max_age                                 = var.intake_max_age
   aggregation_period                             = each.value.aggregation_period
   aggregation_grace_period                       = each.value.aggregation_grace_period
-  kms_keyring                                    = var.use_aws ? "" : data.google_kms_key_ring.keyring[0].id
+  kms_keyring                                    = data.terraform_remote_state.cluster_bootstrap.outputs.google_kms_key_ring_id
   pushgateway                                    = var.pushgateway
   workflow_manager_image                         = var.workflow_manager_image
   workflow_manager_version                       = var.workflow_manager_version

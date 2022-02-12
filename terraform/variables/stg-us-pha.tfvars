@@ -69,9 +69,8 @@ cluster_settings = {
   aws_machine_types  = []
 }
 test_peer_environment = {
-  env_with_ingestor            = "stg-us-facil"
-  env_without_ingestor         = "stg-us-pha"
-  localities_with_sample_maker = ["narnia", "gondor"]
+  env_with_ingestor    = "stg-us-facil"
+  env_without_ingestor = "stg-us-pha"
 }
 is_first                 = true
 use_aws                  = true
