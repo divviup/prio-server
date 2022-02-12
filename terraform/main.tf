@@ -53,6 +53,8 @@ variable "ingestors" {
       portal_server_manifest_base_url        = optional(string)
       aggregation_period                     = optional(string)
       aggregation_grace_period               = optional(string)
+
+      pure_gcp = optional(bool)
     }))
   }))
   description = <<DESCRIPTION
@@ -517,6 +519,10 @@ locals {
         var.ingestors[pair[1]].localities[pair[0]].aggregation_grace_period,
         var.default_aggregation_grace_period
       )
+      pure_gcp = coalesce(
+        var.ingestors[pair[1]].localities[pair[0]].pure_gcp,
+        var.pure_gcp
+      )
     }
   }
   # Are we in a paired env deploy that uses a test ingestor?
@@ -524,17 +530,11 @@ locals {
   # Does this specific environment home the ingestor?
   is_env_with_ingestor = local.deployment_has_ingestor && lookup(var.test_peer_environment, "env_with_ingestor", "") == var.environment ? true : false
 
-  # If pure GCP, we use the newer global manifest format
-  global_manifest = var.pure_gcp ? jsonencode({
+  global_manifest = jsonencode({
     format = 1
     server-identity = {
-      gcp-service-account-id    = var.use_aws ? null : tostring(google_service_account.sum_part_bucket_writer.unique_id)
-      gcp-service-account-email = google_service_account.sum_part_bucket_writer.email
-    }
-    }) : jsonencode({
-    format = 0
-    server-identity = {
       aws-account-id            = tonumber(data.aws_caller_identity.current.account_id)
+      gcp-service-account-id    = var.use_aws ? null : tostring(google_service_account.sum_part_bucket_writer.unique_id)
       gcp-service-account-email = google_service_account.sum_part_bucket_writer.email
     }
   })
@@ -625,7 +625,7 @@ module "data_share_processors" {
   data_share_processor_name                      = each.key
   ingestor                                       = each.value.ingestor
   use_aws                                        = var.use_aws
-  pure_gcp                                       = var.pure_gcp
+  pure_gcp                                       = each.value.pure_gcp
   aws_region                                     = var.aws_region
   gcp_region                                     = var.gcp_region
   gcp_project                                    = var.gcp_project
