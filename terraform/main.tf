@@ -86,23 +86,22 @@ variable "managed_dns_zone" {
 
 variable "test_peer_environment" {
   type = object({
-    env_with_ingestor            = string
-    env_without_ingestor         = string
-    localities_with_sample_maker = list(string)
+    env_with_ingestor    = string
+    env_without_ingestor = string
   })
   default = {
-    env_with_ingestor            = ""
-    env_without_ingestor         = ""
-    localities_with_sample_maker = []
+    env_with_ingestor    = ""
+    env_without_ingestor = ""
   }
   description = <<DESCRIPTION
 Describes a pair of data share processor environments set up to test against
-each other. One environment, named in "env_with_ingestor", hosts a fake
-ingestion servers, but only for the localities enumerated in
-"localities_with_sample_makers", which should be a subset of the ones in
-"localities". The other environment, named in "env_without_ingestor", has no
-fake ingestion servers. This variable should not be specified in production
-deployments.
+each other. One environment, named in "env_with_ingestor", hosts fake
+ingestion servers writing ingestion batches to both environments, as well as
+validators that check that the eventual sums match the data in the ingestion
+batches. The other environment, named in "env_without_ingestor", has no fake
+ingestion servers or validators.
+
+This variable should not be specified in production deployments.
 DESCRIPTION
 }
 
