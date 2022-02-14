@@ -599,7 +599,7 @@ mod tests {
             50,
             S3Client::new_with(
                 HttpClient::new().unwrap(),
-                aws_credentials::Provider::new_mock(&api_metrics),
+                aws_credentials::Provider::new_mock(&logger, &api_metrics),
                 Region::Custom {
                     name: TEST_REGION.into(),
                     endpoint: mockito::server_url(),
@@ -646,7 +646,7 @@ mod tests {
             50,
             S3Client::new_with(
                 HttpClient::new().unwrap(),
-                aws_credentials::Provider::new_mock(&api_metrics),
+                aws_credentials::Provider::new_mock(&logger, &api_metrics),
                 Region::Custom {
                     name: TEST_REGION.into(),
                     endpoint: mockito::server_url(),
@@ -713,7 +713,7 @@ mod tests {
             50,
             S3Client::new_with(
                 HttpClient::new().unwrap(),
-                aws_credentials::Provider::new_mock(&api_metrics),
+                aws_credentials::Provider::new_mock(&logger, &api_metrics),
                 Region::Custom {
                     name: TEST_REGION.into(),
                     endpoint: mockito::server_url(),
@@ -783,7 +783,7 @@ mod tests {
             50,
             S3Client::new_with(
                 HttpClient::new().unwrap(),
-                aws_credentials::Provider::new_mock(&api_metrics),
+                aws_credentials::Provider::new_mock(&logger, &api_metrics),
                 Region::Custom {
                     name: TEST_REGION.into(),
                     endpoint: mockito::server_url(),
@@ -841,7 +841,7 @@ mod tests {
 
         let transport = S3Transport::new(
             s3_path,
-            aws_credentials::Provider::new_mock(&api_metrics),
+            aws_credentials::Provider::new_mock(&logger, &api_metrics),
             runtime.handle(),
             &logger,
             &api_metrics,
@@ -877,7 +877,7 @@ mod tests {
 
         let transport = S3Transport::new(
             s3_path,
-            aws_credentials::Provider::new_mock(&api_metrics),
+            aws_credentials::Provider::new_mock(&logger, &api_metrics),
             runtime.handle(),
             &logger,
             &api_metrics,
@@ -929,7 +929,7 @@ mod tests {
 
         let transport = S3Transport::new(
             s3_path,
-            aws_credentials::Provider::new_mock(&api_metrics),
+            aws_credentials::Provider::new_mock(&logger, &api_metrics),
             runtime.handle(),
             &logger,
             &api_metrics,

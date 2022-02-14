@@ -1,4 +1,5 @@
 use backoff::{retry, ExponentialBackoff};
+use futures::Future;
 use slog::{debug, warn, Logger};
 use std::{fmt::Debug, time::Duration};
 
@@ -79,6 +80,76 @@ where
             retry_after: _,
         } => err,
     })
+}
+
+/// Executes the provided action `f`, awaits the returned future, and retries
+/// with exponential backoff if the future returns an error and the error is
+/// deemed retryable by `is_retryable`. On success, returns the output of the
+/// future. On failure, returns the error from the last future. Retryable
+/// failures will be logged using the provided logger.
+pub(crate) async fn retry_request_future<F, Fut, T, E, R>(
+    logger: &Logger,
+    f: F,
+    is_retryable: R,
+) -> Result<T, E>
+where
+    F: FnMut() -> Fut,
+    Fut: Future<Output = Result<T, E>>,
+    R: Fn(&E) -> bool,
+    E: Debug,
+{
+    // This uses the same parameters as the non-async version.
+    retry_request_future_with_params(
+        logger,
+        Duration::from_secs(1),
+        Duration::from_secs(30),
+        Duration::from_secs(600),
+        f,
+        is_retryable,
+    )
+    .await
+}
+
+async fn retry_request_future_with_params<F, Fut, T, E, R>(
+    logger: &Logger,
+    backoff_initial_interval: Duration,
+    backoff_max_interval: Duration,
+    backoff_max_elapsed: Duration,
+    mut f: F,
+    is_retryable: R,
+) -> Result<T, E>
+where
+    F: FnMut() -> Fut,
+    Fut: Future<Output = Result<T, E>>,
+    R: Fn(&E) -> bool,
+    E: Debug,
+{
+    let backoff = ExponentialBackoff {
+        initial_interval: backoff_initial_interval,
+        max_interval: backoff_max_interval,
+        multiplier: 2.0,
+        max_elapsed_time: Some(backoff_max_elapsed),
+        ..Default::default()
+    };
+
+    backoff::future::retry(backoff, || {
+        let future = f();
+        async {
+            future.await.map_err(|error| {
+                if is_retryable(&error) {
+                    warn!(
+                        logger, "encountered retryable error";
+                        "error" => format!("{:?}", error),
+                    );
+                    backoff::Error::transient(error)
+                } else {
+                    debug!(logger, "encountered non-retryable error");
+                    backoff::Error::Permanent(error)
+                }
+            })
+        }
+    })
+    .await
 }
 
 #[cfg(test)]
@@ -171,6 +242,110 @@ mod tests {
             |_| false,
         )
         .unwrap_err();
+        assert_eq!(counter, 1);
+    }
+}
+
+#[cfg(test)]
+mod tests_async {
+    use super::*;
+    use crate::logging::setup_test_logging;
+    use crate::test_utils::test_runtime;
+    use futures::future::ready;
+
+    #[test]
+    fn success() {
+        let logger = setup_test_logging();
+        let runtime = test_runtime();
+        let mut counter = 0;
+        let f = || {
+            counter += 1;
+            ready(Ok::<(), bool>(()))
+        };
+
+        runtime
+            .block_on(retry_request_future_with_params(
+                &logger,
+                Duration::from_millis(10),
+                Duration::from_millis(10),
+                Duration::from_millis(10),
+                f,
+                |_| false,
+            ))
+            .unwrap();
+        assert_eq!(counter, 1);
+    }
+
+    #[test]
+    fn retryable_failure() {
+        let logger = setup_test_logging();
+        let runtime = test_runtime();
+        let mut counter = 0;
+        let f = || {
+            counter += 1;
+            if counter == 1 {
+                ready(Err::<(), bool>(false))
+            } else {
+                ready(Ok::<(), bool>(()))
+            }
+        };
+
+        runtime
+            .block_on(retry_request_future_with_params(
+                &logger,
+                Duration::from_millis(10),
+                Duration::from_millis(10),
+                Duration::from_millis(30),
+                f,
+                |_| true,
+            ))
+            .unwrap();
+        assert!(counter > 1);
+    }
+
+    #[test]
+    fn retryable_failure_exhaust_max_elapsed() {
+        let logger = setup_test_logging();
+        let runtime = test_runtime();
+        let mut counter = 0;
+        let f = || {
+            counter += 1;
+            ready(Err::<(), bool>(false))
+        };
+
+        runtime
+            .block_on(retry_request_future_with_params(
+                &logger,
+                Duration::from_millis(10),
+                Duration::from_millis(10),
+                Duration::from_millis(30),
+                f,
+                |_| true,
+            ))
+            .unwrap_err();
+        assert!(counter >= 2);
+    }
+
+    #[test]
+    fn unretryable_failure() {
+        let logger = setup_test_logging();
+        let runtime = test_runtime();
+        let mut counter = 0;
+        let f = || {
+            counter += 1;
+            ready(Err::<(), bool>(false))
+        };
+
+        runtime
+            .block_on(retry_request_future_with_params(
+                &logger,
+                Duration::from_millis(10),
+                Duration::from_millis(10),
+                Duration::from_millis(30),
+                f,
+                |_| false,
+            ))
+            .unwrap_err();
         assert_eq!(counter, 1);
     }
 }
