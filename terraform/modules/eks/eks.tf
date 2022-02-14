@@ -6,6 +6,23 @@ variable "aws_region" {
   type = string
 }
 
+variable "cluster_settings" {
+  type = object({
+    initial_node_count             = number
+    min_node_count                 = number
+    max_node_count                 = number
+    gcp_machine_type               = string
+    aws_machine_types              = list(string)
+    eks_cluster_version            = optional(string)
+    eks_vpc_cni_addon_version      = optional(string)
+    eks_cluster_autoscaler_version = optional(string)
+  })
+}
+
+terraform {
+  experiments = [module_variable_optional_attrs]
+}
+
 # This cluster role binding references the built-in cluster role "view" and
 # defines a group that can then be referenced in the kube-system/aws-auth config
 # map.

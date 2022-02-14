@@ -291,6 +291,44 @@ to outputs from the cluster_bootstrap stage.
 DESCRIPTION
 }
 
+variable "cluster_settings" {
+  type = object({
+    initial_node_count             = number
+    min_node_count                 = number
+    max_node_count                 = number
+    gcp_machine_type               = string
+    aws_machine_types              = list(string)
+    eks_cluster_version            = optional(string)
+    eks_vpc_cni_addon_version      = optional(string)
+    eks_cluster_autoscaler_version = optional(string)
+  })
+  description = <<DESCRIPTION
+Settings for the Kubernetes cluster.
+
+  - `initial_node_count` is the initial number of worker nodes to provision
+  - `min_node_count` is the minimum number of worker nodes
+  - `max_node_count` is the maximum number of worker nodes
+  - `gcp_machine_type` is the type and size of VM to use as worker nodes in GKE
+    clusters
+  - `aws_machine_types` is the types and sizes of VMs to use as worker nodes in
+    EKS clusters
+  - `eks_cluster_version` is the Amazon EKS Kubernetes version to use. See
+    https://docs.aws.amazon.com/eks/latest/userguide/kubernetes-versions.html
+    for available versions. Only used in EKS clusters.
+  - `eks_vpc_cni_addon_version` is the Amazon VPC CNI add-on version to use. See
+    https://docs.aws.amazon.com/eks/latest/userguide/managing-vpc-cni.html for
+    available versions. Only used in EKS clusters.
+  - `eks_cluster_autoscaler_version` is the version of the Kubernetes cluster
+    autoscaler to use. The version must match the minor version of Kubernetes.
+    See https://github.com/kubernetes/autoscaler/releases for available
+    versions. Only used in EKS clusters.
+
+Note that on AWS, there will always be at least three worker nodes in an "on
+demand" node pool, and the `{min,max}_node_count` values only govern the size of
+an additional "spot" node pool.
+DESCRIPTION
+}
+
 terraform {
   backend "gcs" {}
 
@@ -429,10 +467,11 @@ module "manifest_aws" {
 }
 
 module "eks" {
-  source      = "./modules/eks"
-  count       = var.use_aws ? 1 : 0
-  environment = var.environment
-  aws_region  = var.aws_region
+  source           = "./modules/eks"
+  count            = var.use_aws ? 1 : 0
+  environment      = var.environment
+  aws_region       = var.aws_region
+  cluster_settings = var.cluster_settings
 }
 
 # While we create a distinct data share processor for each (ingestor, locality)

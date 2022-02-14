@@ -49,11 +49,14 @@ DESCRIPTION
 
 variable "cluster_settings" {
   type = object({
-    initial_node_count = number
-    min_node_count     = number
-    max_node_count     = number
-    gcp_machine_type   = string
-    aws_machine_types  = list(string)
+    initial_node_count             = number
+    min_node_count                 = number
+    max_node_count                 = number
+    gcp_machine_type               = string
+    aws_machine_types              = list(string)
+    eks_cluster_version            = optional(string)
+    eks_vpc_cni_addon_version      = optional(string)
+    eks_cluster_autoscaler_version = optional(string)
   })
   description = <<DESCRIPTION
 Settings for the Kubernetes cluster.
@@ -65,6 +68,16 @@ Settings for the Kubernetes cluster.
     clusters
   - `aws_machine_types` is the types and sizes of VMs to use as worker nodes in
     EKS clusters
+  - `eks_cluster_version` is the Amazon EKS Kubernetes version to use. See
+    https://docs.aws.amazon.com/eks/latest/userguide/kubernetes-versions.html
+    for available versions. Only used in EKS clusters.
+  - `eks_vpc_cni_addon_version` is the Amazon VPC CNI add-on version to use. See
+    https://docs.aws.amazon.com/eks/latest/userguide/managing-vpc-cni.html for
+    available versions. Only used in EKS clusters.
+  - `eks_cluster_autoscaler_version` is the version of the Kubernetes cluster
+    autoscaler to use. The version must match the minor version of Kubernetes.
+    See https://github.com/kubernetes/autoscaler/releases for available
+    versions. Only used in EKS clusters.
 
 Note that on AWS, there will always be at least three worker nodes in an "on
 demand" node pool, and the `{min,max}_node_count` values only govern the size of
@@ -76,6 +89,9 @@ terraform {
   backend "gcs" {}
 
   required_version = ">= 1.1.0"
+
+  # https://www.terraform.io/docs/language/expressions/type-constraints.html#experimental-optional-object-type-attributes
+  experiments = [module_variable_optional_attrs]
 
   required_providers {
     aws = {

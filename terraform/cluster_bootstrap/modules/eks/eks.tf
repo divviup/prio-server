@@ -8,12 +8,19 @@ variable "resource_prefix" {
 
 variable "cluster_settings" {
   type = object({
-    initial_node_count = number
-    min_node_count     = number
-    max_node_count     = number
-    gcp_machine_type   = string
-    aws_machine_types  = list(string)
+    initial_node_count             = number
+    min_node_count                 = number
+    max_node_count                 = number
+    gcp_machine_type               = string
+    aws_machine_types              = list(string)
+    eks_cluster_version            = optional(string)
+    eks_vpc_cni_addon_version      = optional(string)
+    eks_cluster_autoscaler_version = optional(string)
   })
+}
+
+terraform {
+  experiments = [module_variable_optional_attrs]
 }
 
 data "aws_region" "current" {}
@@ -203,7 +210,7 @@ resource "aws_kms_key" "etcd_secrets" {
 resource "aws_eks_cluster" "cluster" {
   name     = var.resource_prefix
   role_arn = aws_iam_role.cluster_role.arn
-  version  = "1.20"
+  version  = var.cluster_settings.eks_cluster_version
   # Send cluster logs to CloudWatch Logs
   enabled_cluster_log_types = ["api", "audit", "authenticator", "controllerManager", "scheduler"]
 
@@ -268,6 +275,7 @@ resource "aws_iam_role" "worker_node_role" {
 resource "aws_eks_node_group" "node_group" {
   node_group_name = var.resource_prefix
   cluster_name    = aws_eks_cluster.cluster.name
+  version         = var.cluster_settings.eks_cluster_version
   node_role_arn   = aws_iam_role.worker_node_role.arn
   # Worker nodes will be distributed across the AZs that the subnets are in
   subnet_ids     = module.subnets[*].id
@@ -301,6 +309,7 @@ resource "aws_eks_node_group" "node_group" {
 resource "aws_eks_node_group" "on_demand_nodes" {
   node_group_name = "${var.resource_prefix}-on-demand"
   cluster_name    = aws_eks_cluster.cluster.name
+  version         = var.cluster_settings.eks_cluster_version
   node_role_arn   = aws_iam_role.worker_node_role.arn
   subnet_ids      = module.subnets[*].id
   capacity_type   = "ON_DEMAND"
@@ -318,17 +327,12 @@ resource "aws_eks_node_group" "on_demand_nodes" {
 # The AWS VPC CNI plugin allows pods to have the same IP in the pod as they do
 # on the VPC network.
 # https://docs.aws.amazon.com/eks/latest/userguide/managing-vpc-cni.html
-# AWS docs say we should configure it to assume an IAM role that just has
-# AmazonEKS_CNI_Policy, but empirically that doesn't actually work so instead we
-# allow it to implicitly inherit the worker-node role. It seems that this might
-# be because of issues with how the VPC CNI plugin is reaching STS to perform
-# sts:AssumeRole calls.
-# https://github.com/aws/amazon-vpc-cni-k8s/issues/1473
-# https://github.com/aws/amazon-vpc-cni-k8s/issues/647
 resource "aws_eks_addon" "vpc_cni" {
   cluster_name             = aws_eks_cluster.cluster.name
   addon_name               = "vpc-cni"
+  addon_version            = var.cluster_settings.eks_vpc_cni_addon_version
   service_account_role_arn = aws_iam_role.vpc_cni.arn
+  resolve_conflicts        = "OVERWRITE"
 }
 
 resource "aws_iam_role" "vpc_cni" {

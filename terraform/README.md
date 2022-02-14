@@ -34,3 +34,21 @@ Our continuous integration is set up to do basic validation of Terraform files o
 ## Debugging
 
 Debugging Terraform problems can be tricky since some providers emit terse and unhelpful error messages. To get more insight into what is going on, set the environment variable `TF_LOG=debug` when invoking `Makefile` targets like `apply` and Terraform will emit a huge amount of data, usually including HTTP requests to cloud platforms. See [Terraform documentation](https://www.terraform.io/docs/cli/config/environment-variables.html) for more on supported environment variables.
+
+## EKS notes
+
+### Updating the `vpc-cni` add-on
+
+In EKS, customers are responsible for keeping the [`vpc-cni` add-on](https://docs.aws.amazon.com/eks/latest/userguide/pod-networking.html) up to date. We do this via Terraform, but there is a constraint that makes certain updates impossible for Terraform to handle for us: [you can only update one minor version at a time](https://docs.aws.amazon.com/eks/latest/userguide/managing-vpc-cni.html#updating-vpc-cni-eks-add-on). If you find yourself with a Terraform plan that would update the addon from something like `v1.7.5-eksbuild.2` to `v1.10.1-eksbuild.1`, then the apply will fail with an error like this:
+
+    {
+      RespMetadata: {
+        StatusCode: 400,
+        RequestID: "692a4d18-dfc4-4b5e-a875-c72e1f65932e"
+      },
+      AddonName: "vpc-cni",
+      ClusterName: "your-cluster-name",
+      Message_: "Updating VPC-CNI can only go up or down 1 minor version at a time"
+    }
+
+The workaround is to manually apply the addon updates between the version your cluster is on and the version you want to get to. Consult [AWS documentation](https://docs.aws.amazon.com/eks/latest/userguide/managing-vpc-cni.html#updating-vpc-cni-eks-add-on) for instructions on doing this in either the AWS console or the `aws` CLI.
