@@ -66,7 +66,7 @@ cluster_settings = {
   min_node_count     = 1
   max_node_count     = 3
   gcp_machine_type   = "e2-standard-2"
-  aws_machine_types  = []
+  aws_machine_types  = ["t3.medium"]
 }
 test_peer_environment = {
   env_with_ingestor    = "stg-us-facil"

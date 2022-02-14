@@ -222,9 +222,9 @@ is_first                                  = false
 use_aws                                   = false
 default_aggregation_period                = "8h"
 default_aggregation_grace_period          = "4h"
-workflow_manager_version                  = "0.6.21"
-facilitator_version                       = "0.6.21"
-key_rotator_version                       = "0.6.21"
+workflow_manager_version                  = "0.6.24"
+facilitator_version                       = "0.6.24"
+key_rotator_version                       = "0.6.24"
 prometheus_server_persistent_disk_size_gb = 1000
 victorops_routing_key                     = "prio-prod-us"
 
