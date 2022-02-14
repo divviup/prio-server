@@ -70,7 +70,7 @@ resource "google_storage_bucket_object" "portal_server_global_manifest" {
   content      = local.global_manifest_content
 }
 
-resource "aws_s3_bucket_object" "portal_server_global_manifest" {
+resource "aws_s3_object" "portal_server_global_manifest" {
   count = var.use_aws ? 1 : 0
 
   bucket        = var.manifest_bucket

@@ -21,7 +21,7 @@ resource "aws_s3_bucket_acl" "manifests" {
   acl    = "public-read"
 }
 
-resource "aws_s3_bucket_object" "global_manifest" {
+resource "aws_s3_object" "global_manifest" {
   bucket        = aws_s3_bucket.manifests.bucket
   key           = "global-manifest.json"
   content       = var.global_manifest_content
