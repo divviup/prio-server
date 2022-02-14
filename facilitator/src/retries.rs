@@ -67,7 +67,7 @@ where
                 backoff::Error::transient(error)
             } else {
                 debug!(logger, "encountered non-retryable error");
-                backoff::Error::Permanent(error)
+                backoff::Error::permanent(error)
             }
         })
     })
@@ -144,7 +144,7 @@ where
                     backoff::Error::transient(error)
                 } else {
                     debug!(logger, "encountered non-retryable error");
-                    backoff::Error::Permanent(error)
+                    backoff::Error::permanent(error)
                 }
             })
         }

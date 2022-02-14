@@ -407,14 +407,14 @@ impl ProvideAwsCredentials for Provider {
 /// Wraps an AWS credential provider and records API call latencies when
 /// credentials are fetched.
 #[derive(Clone)]
-pub struct MeasuringProvider<P: ProvideAwsCredentials + Clone> {
+pub struct MeasuringProvider<P> {
     inner: P,
     service: &'static str,
     endpoint: &'static str,
     api_metrics: ApiClientMetricsCollector,
 }
 
-impl<P: ProvideAwsCredentials + Clone> MeasuringProvider<P> {
+impl<P> MeasuringProvider<P> {
     pub fn new(
         inner: P,
         service: &'static str,
@@ -441,9 +441,7 @@ impl<P: ProvideAwsCredentials + Clone> MeasuringProvider<P> {
 }
 
 #[async_trait]
-impl<P: ProvideAwsCredentials + Send + Sync + Clone> ProvideAwsCredentials
-    for MeasuringProvider<P>
-{
+impl<P: ProvideAwsCredentials + Send + Sync> ProvideAwsCredentials for MeasuringProvider<P> {
     async fn credentials(&self) -> Result<AwsCredentials, CredentialsError> {
         let before = Instant::now();
         let result = self.inner.credentials().await;
@@ -466,12 +464,12 @@ impl<P: ProvideAwsCredentials + Send + Sync + Clone> ProvideAwsCredentials
 /// Wraps an AWS credential provider and performs retries with exponential
 /// backoff upon failure.
 #[derive(Clone)]
-pub struct RetryingProvider<P: ProvideAwsCredentials + Clone> {
+pub struct RetryingProvider<P> {
     inner: P,
     logger: Logger,
 }
 
-impl<P: ProvideAwsCredentials + Clone> RetryingProvider<P> {
+impl<P> RetryingProvider<P> {
     pub fn new(inner: P, logger: &Logger) -> RetryingProvider<P> {
         RetryingProvider {
             inner,
@@ -491,7 +489,7 @@ impl<P: ProvideAwsCredentials + Clone> RetryingProvider<P> {
 }
 
 #[async_trait]
-impl<P: ProvideAwsCredentials + Send + Sync + Clone> ProvideAwsCredentials for RetryingProvider<P> {
+impl<P: ProvideAwsCredentials + Send + Sync> ProvideAwsCredentials for RetryingProvider<P> {
     async fn credentials(&self) -> Result<AwsCredentials, CredentialsError> {
         retries::retry_request_future(
             &self.logger,
