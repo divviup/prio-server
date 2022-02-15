@@ -12,12 +12,16 @@ variable "global_manifest_content" {
 resource "aws_s3_bucket" "manifests" {
   bucket = "isrg-prio-${var.environment}-manifest"
   # Allow unauthenticated reads of manifests
-  acl = "public-read"
   # Destroy bucket contents when destroying the bucket
   force_destroy = true
 }
 
-resource "aws_s3_bucket_object" "global_manifest" {
+resource "aws_s3_bucket_acl" "manifests" {
+  bucket = aws_s3_bucket.manifests.id
+  acl    = "public-read"
+}
+
+resource "aws_s3_object" "global_manifest" {
   bucket        = aws_s3_bucket.manifests.bucket
   key           = "global-manifest.json"
   content       = var.global_manifest_content

@@ -57,25 +57,36 @@ resource "aws_kms_key" "bucket_encryption" {
 }
 
 resource "aws_s3_bucket" "buckets" {
-  for_each = toset(["ingestion", "local_peer_validation", "own_validation"])
+  for_each = local.bucket_parameters
 
-  bucket = local.bucket_parameters[each.value].name
+  bucket = each.value.name
   # Force deletion of bucket contents on bucket destroy
   force_destroy = true
+}
+
+resource "aws_s3_bucket_lifecycle_configuration" "buckets" {
+  for_each = local.bucket_parameters
+  bucket   = aws_s3_bucket.buckets[each.key].id
   # Delete objects 7 days after creation
-  lifecycle_rule {
-    enabled = true
+  rule {
+    id     = "expire-one-week"
+    status = "Enabled"
     expiration {
       days = 7
     }
   }
+}
+
+resource "aws_s3_bucket_policy" "buckets" {
+  for_each = local.bucket_parameters
+  bucket   = aws_s3_bucket.buckets[each.key].id
   policy = jsonencode({
     Version = "2012-10-17"
     Statement = [
       {
         Effect = "Allow"
         Principal = {
-          AWS = local.bucket_parameters[each.value].writer
+          AWS = each.value.writer
         }
         Action = [
           "s3:AbortMultipartUpload",
@@ -84,8 +95,8 @@ resource "aws_s3_bucket" "buckets" {
           "s3:ListBucketMultipartUploads",
         ]
         Resource = [
-          "arn:aws:s3:::${local.bucket_parameters[each.value].name}/*",
-          "arn:aws:s3:::${local.bucket_parameters[each.value].name}"
+          "${aws_s3_bucket.buckets[each.key].arn}/*",
+          aws_s3_bucket.buckets[each.key].arn
         ]
       },
       {
@@ -98,8 +109,8 @@ resource "aws_s3_bucket" "buckets" {
           "s3:ListBucket",
         ]
         Resource = [
-          "arn:aws:s3:::${local.bucket_parameters[each.value].name}/*",
-          "arn:aws:s3:::${local.bucket_parameters[each.value].name}"
+          "${aws_s3_bucket.buckets[each.key].arn}/*",
+          aws_s3_bucket.buckets[each.key].arn
         ]
       }
     ]
