@@ -281,6 +281,10 @@ resource "helm_release" "prometheus" {
     name  = "server.strategy.type"
     value = "Recreate"
   }
+  set {
+    name  = "alertmanager.strategy.type"
+    value = "Recreate"
+  }
 
   # Alerting rules are defined in their own YAML file. We then need to provide
   # them to the Helm chart, under the key serverFiles."alerting_rules.yml".
