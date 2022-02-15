@@ -2,7 +2,7 @@ use crate::Error;
 use anyhow::{Context, Result};
 use avro_rs::{
     from_value,
-    types::{Record, Value},
+    types::{Record, Value, ValueKind},
     Reader, Schema, Writer,
 };
 use lazy_static::lazy_static;
@@ -13,6 +13,7 @@ use prio::{
 use serde::{Deserialize, Serialize};
 use std::{
     convert::TryFrom,
+    fmt::Display,
     io::{Read, Write},
     num::TryFromIntError,
 };
@@ -57,25 +58,139 @@ lazy_static! {
     static ref INVALID_PACKET_SCHEMA: &'static Schema = &_SCHEMAS[6];
 }
 
+/// Provides additional information on what kind of Avro-related operation raised an error.
+#[derive(Debug)]
+pub enum AvroErrorContext {
+    /// Error while constructing a `Reader`, and reading the Avro header.
+    ReadHeader,
+    /// Error while reading a record.
+    ReadRecord,
+    /// Error while writing a record out to a `Writer`.
+    Append,
+    /// Error while flushing a `Writer`.
+    Flush,
+    /// Error while deserializing from a `Value` to an application-specific data model.
+    Deserialization,
+}
+
+impl Display for AvroErrorContext {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            AvroErrorContext::ReadHeader => write!(f, "reading avro header"),
+            AvroErrorContext::ReadRecord => write!(f, "reading record"),
+            AvroErrorContext::Append => write!(f, "writing"),
+            AvroErrorContext::Flush => write!(f, "flushing"),
+            AvroErrorContext::Deserialization => write!(f, "deserializing"),
+        }
+    }
+}
+
+/// Identifies which application-level validation rule resulted in a malformed header error.
+#[derive(Debug)]
+pub enum MalformedHeaderCause {
+    /// The `batch_header_signature` field was missing.
+    MissingBatchHeaderSignature,
+    /// The `key_identifier` field was missing.
+    MissingKeyIdentifier,
+    /// The `hamming_weight` union contained a value of an invalid type.
+    HammingWeightWrongType(ValueKind),
+    /// There was an extra field in the header record (or a field of the wrong type).
+    ExtraField(String, ValueKind),
+    /// A required field was missing from the header record.
+    MissingField,
+    /// The `sum` array field contained a value of an invalid type.
+    SumArrayElementWrongType(ValueKind),
+    /// The `batch_uuids` array field contained a value of an invalid type.
+    BatchUuidsElementWrongType(ValueKind),
+}
+
+impl Display for MalformedHeaderCause {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            MalformedHeaderCause::MissingBatchHeaderSignature => {
+                write!(f, "missing batch_header_signature")
+            }
+            MalformedHeaderCause::MissingKeyIdentifier => write!(f, "missing key_identifier"),
+            MalformedHeaderCause::HammingWeightWrongType(value_kind) => {
+                write!(f, "unexpected value {:?} for hamming weight", value_kind)
+            }
+            MalformedHeaderCause::ExtraField(name, value_kind) => {
+                write!(f, "unexpected field {} -> {:?} in record", name, value_kind)
+            }
+            MalformedHeaderCause::MissingField => write!(f, "missing field(s) in record"),
+            MalformedHeaderCause::SumArrayElementWrongType(value_kind) => {
+                write!(f, "unexpected value in sum array {:?}", value_kind)
+            }
+            MalformedHeaderCause::BatchUuidsElementWrongType(value_kind) => {
+                write!(f, "unexpected value in batch_uuids array {:?}", value_kind)
+            }
+        }
+    }
+}
+
+/// Identifies which application-level validation rule resulted in a malformed data packet error.
+#[derive(Debug)]
+pub enum MalformedPacketCause {
+    /// The `uuid` field was missing from the data packet record.
+    MissingUuid,
+    /// The `encrypted_payload` field was missing from the data packet record.
+    MissingEncryptedPayload,
+    /// The `r_pit` field was missing from the data packet record.
+    MissingRPit,
+}
+
+impl Display for MalformedPacketCause {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            MalformedPacketCause::MissingUuid => write!(f, "missing uuid"),
+            MalformedPacketCause::MissingEncryptedPayload => write!(f, "missing encrypted_payload"),
+            MalformedPacketCause::MissingRPit => write!(f, "missing r_pit"),
+        }
+    }
+}
+
+/// Errors related to the ENPA IDL layer, including Avro decoding, required headers, etc.
+#[derive(Debug, thiserror::Error)]
+pub enum IdlError {
+    /// Parsing or I/O error from the Avro library.
+    #[error("avro error upon {1}: {0}")]
+    Avro(avro_rs::Error, AvroErrorContext),
+    /// A record was expected in the Avro file, but the end of the file was found first.
+    #[error("end of file")]
+    Eof,
+    /// A header could not be parsed, due to missing record fields or record fields of the wrong type.
+    #[error("malformed header: {0}")]
+    MalformedHeader(MalformedHeaderCause),
+    /// A data packet could not be parsed, due to missing record fields.
+    #[error("malformed data packet: {0}")]
+    MalformedPacket(MalformedPacketCause),
+    /// Unexpected extra values were found in an Avro file.
+    #[error("excess value")]
+    ExtraData,
+    /// The Avro file did not contain a record as its top-level value.
+    #[error("not a record")]
+    WrongValueType,
+}
+
 pub trait Header: Sized {
     /// Sets the SHA256 digest of the packet file this header describes.
     fn set_packet_file_digest<D: Into<Vec<u8>>>(&mut self, digest: D);
     /// Returns the SHA256 digest of the packet file this header describes.
     fn packet_file_digest(&self) -> &Vec<u8>;
     /// Reads and parses one Header from the provided std::io::Read instance.
-    fn read<R: Read>(reader: R) -> Result<Self, Error>;
+    fn read<R: Read>(reader: R) -> Result<Self, IdlError>;
     /// Serializes this message into Avro format and writes it to the provided
     /// std::io::Write instance.
-    fn write<W: Write>(&self, writer: &mut W) -> Result<(), Error>;
+    fn write<W: Write>(&self, writer: &mut W) -> Result<(), IdlError>;
 }
 
-pub trait Packet: Sized + TryFrom<Value, Error = Error> {
+pub trait Packet: Sized + TryFrom<Value, Error = IdlError> {
     /// Serializes and writes a single Packet to the provided avro_rs::Writer.
     /// Note that unlike other structures, this does not take a primitive
     /// std::io::Write, because we do not want to create a new Avro schema and
     /// reader for each packet. The Reader must have been created with the
     /// schema returned from Packet::schema.
-    fn write<W: Write>(&self, writer: &mut Writer<W>) -> Result<(), Error>;
+    fn write<W: Write>(&self, writer: &mut Writer<W>) -> Result<(), IdlError>;
 
     /// Provides the avro_rs::Schema used by the packet. For constructing the
     /// avro_rs::{Reader, Writer} to use in Packet::{read, write}.
@@ -95,25 +210,20 @@ pub struct BatchSignature {
 impl BatchSignature {
     /// Reads and parses one BatchSignature from the provided std::io::Read
     /// instance.
-    pub fn read<R: Read>(reader: R) -> Result<BatchSignature, Error> {
+    pub fn read<R: Read>(reader: R) -> Result<BatchSignature, IdlError> {
         let mut reader = Reader::with_schema(*BATCH_SIGNATURE_SCHEMA, reader)
-            .map_err(|e| Error::AvroError("failed to create Avro reader".to_owned(), e))?;
+            .map_err(|e| IdlError::Avro(e, AvroErrorContext::ReadHeader))?;
 
         // We expect exactly one record and for it to be an ingestion signature
         let value = match reader.next() {
             Some(Ok(value)) => value,
             Some(Err(e)) => {
-                return Err(Error::AvroError(
-                    "failed to read record from Avro reader".to_owned(),
-                    e,
-                ));
+                return Err(IdlError::Avro(e, AvroErrorContext::ReadRecord));
             }
-            None => return Err(Error::EofError),
+            None => return Err(IdlError::Eof),
         };
         if reader.next().is_some() {
-            return Err(Error::MalformedHeaderError(
-                "excess value in reader".to_owned(),
-            ));
+            return Err(IdlError::ExtraData);
         }
 
         BatchSignature::try_from(value)
@@ -121,30 +231,28 @@ impl BatchSignature {
 
     /// Serializes this signature into Avro format and writes it to the provided
     /// std::io::Write instance.
-    pub fn write<W: Write>(&self, writer: &mut W) -> Result<(), Error> {
+    pub fn write<W: Write>(&self, writer: &mut W) -> Result<(), IdlError> {
         let mut writer = Writer::new(*BATCH_SIGNATURE_SCHEMA, writer);
-        writer.append(self.clone()).map_err(|e| {
-            Error::AvroError("failed to append record to Avro writer".to_owned(), e)
-        })?;
+        writer
+            .append(self.clone())
+            .map_err(|e| IdlError::Avro(e, AvroErrorContext::Append))?;
 
         writer
             .flush()
-            .map_err(|e| Error::AvroError("failed to flush Avro writer".to_owned(), e))?;
+            .map_err(|e| IdlError::Avro(e, AvroErrorContext::Flush))?;
 
         Ok(())
     }
 }
 
 impl TryFrom<Value> for BatchSignature {
-    type Error = Error;
+    type Error = IdlError;
 
     fn try_from(value: Value) -> Result<Self, Self::Error> {
         let fields = if let Value::Record(f) = value {
             f
         } else {
-            return Err(Error::MalformedBatchError(
-                "value is not a Record".to_owned(),
-            ));
+            return Err(IdlError::WrongValueType);
         };
 
         // Here we might wish to use from_value::<BatchSignature>(record) but
@@ -176,11 +284,12 @@ impl TryFrom<Value> for BatchSignature {
         }
 
         Ok(BatchSignature {
-            batch_header_signature: batch_header_signature.ok_or_else(|| {
-                Error::MalformedHeaderError("missing batch_header_signature".to_owned())
-            })?,
-            key_identifier: key_identifier
-                .ok_or_else(|| Error::MalformedHeaderError("missing key_identifier".to_owned()))?,
+            batch_header_signature: batch_header_signature.ok_or(IdlError::MalformedHeader(
+                MalformedHeaderCause::MissingBatchHeaderSignature,
+            ))?,
+            key_identifier: key_identifier.ok_or(IdlError::MalformedHeader(
+                MalformedHeaderCause::MissingKeyIdentifier,
+            ))?,
             batch_header_bytes,
             packet_bytes,
         })
@@ -253,31 +362,21 @@ impl Header for IngestionHeader {
         &self.packet_file_digest
     }
 
-    fn read<R: Read>(reader: R) -> Result<IngestionHeader, Error> {
-        let mut reader = Reader::with_schema(*INGESTION_HEADER_SCHEMA, reader).map_err(|e| {
-            Error::AvroError("failed to create reader for ingestion header".to_owned(), e)
-        })?;
+    fn read<R: Read>(reader: R) -> Result<IngestionHeader, IdlError> {
+        let mut reader = Reader::with_schema(*INGESTION_HEADER_SCHEMA, reader)
+            .map_err(|e| IdlError::Avro(e, AvroErrorContext::ReadHeader))?;
 
         // We expect exactly one record in the reader and for it to be an ingestion header
         let record = match reader.next() {
             Some(Ok(Value::Record(r))) => r,
             Some(Ok(_)) => {
-                return Err(Error::MalformedHeaderError(
-                    "value is not a record".to_owned(),
-                ))
+                return Err(IdlError::WrongValueType);
             }
-            Some(Err(e)) => {
-                return Err(Error::AvroError(
-                    "failed to read header from Avro reader".to_owned(),
-                    e,
-                ))
-            }
-            None => return Err(Error::EofError),
+            Some(Err(e)) => return Err(IdlError::Avro(e, AvroErrorContext::ReadRecord)),
+            None => return Err(IdlError::Eof),
         };
         if reader.next().is_some() {
-            return Err(Error::MalformedHeaderError(
-                "excess header in reader".to_owned(),
-            ));
+            return Err(IdlError::ExtraData);
         }
 
         // Here we might wish to use from_value::<IngestionHeader>(record) but avro_rs does not
@@ -308,10 +407,9 @@ impl Header for IngestionHeader {
                         Value::Int(v) => Some(v),
                         Value::Null => None,
                         v => {
-                            return Err(Error::MalformedHeaderError(format!(
-                                "unexpected value {:?} for hamming weight",
-                                v
-                            )));
+                            return Err(IdlError::MalformedHeader(
+                                MalformedHeaderCause::HammingWeightWrongType(v.into()),
+                            ));
                         }
                     }
                 }
@@ -319,9 +417,9 @@ impl Header for IngestionHeader {
                 ("batch_end_time", Value::TimestampMillis(v)) => batch_end_time = Some(v),
                 ("packet_file_digest", Value::Bytes(v)) => packet_file_digest = Some(v),
                 (f, v) => {
-                    return Err(Error::MalformedHeaderError(format!(
-                        "unexpected field {} -> {:?} in record",
-                        f, v
+                    return Err(IdlError::MalformedHeader(MalformedHeaderCause::ExtraField(
+                        f.to_owned(),
+                        v.into(),
                     )))
                 }
             }
@@ -337,8 +435,8 @@ impl Header for IngestionHeader {
             || batch_end_time.is_none()
             || packet_file_digest.is_none()
         {
-            return Err(Error::MalformedHeaderError(
-                "missing field(s) in record".to_owned(),
+            return Err(IdlError::MalformedHeader(
+                MalformedHeaderCause::MissingField,
             ));
         }
 
@@ -356,7 +454,7 @@ impl Header for IngestionHeader {
         })
     }
 
-    fn write<W: Write>(&self, writer: &mut W) -> Result<(), Error> {
+    fn write<W: Write>(&self, writer: &mut W) -> Result<(), IdlError> {
         let mut writer = Writer::new(*INGESTION_HEADER_SCHEMA, writer);
 
         // Ideally we would just do `writer.append_ser(self)` to use Serde serialization to write
@@ -395,13 +493,13 @@ impl Header for IngestionHeader {
             Value::Bytes(self.packet_file_digest.clone()),
         );
 
-        writer.append(record).map_err(|e| {
-            Error::AvroError("failed to append record to Avro writer".to_owned(), e)
-        })?;
+        writer
+            .append(record)
+            .map_err(|e| IdlError::Avro(e, AvroErrorContext::Append))?;
 
         writer
             .flush()
-            .map_err(|e| Error::AvroError("failed to flush Avro writer".to_owned(), e))?;
+            .map_err(|e| IdlError::Avro(e, AvroErrorContext::Flush))?;
 
         Ok(())
     }
@@ -425,7 +523,7 @@ impl Packet for IngestionDataSharePacket {
         *INGESTION_DATA_SHARE_PACKET_SCHEMA
     }
 
-    fn write<W: Write>(&self, writer: &mut Writer<W>) -> Result<(), Error> {
+    fn write<W: Write>(&self, writer: &mut Writer<W>) -> Result<(), IdlError> {
         // Ideally we would just do `writer.append_ser(self)` to use Serde
         // serialization to write the record but there seems to be some problem
         // with serializing UUIDs, so we have to construct the record.
@@ -464,24 +562,22 @@ impl Packet for IngestionDataSharePacket {
             None => record.put("device_nonce", Value::Union(Box::new(Value::Null))),
         }
 
-        writer.append(record).map_err(|e| {
-            Error::AvroError("failed to append record to Avro writer".to_owned(), e)
-        })?;
+        writer
+            .append(record)
+            .map_err(|e| IdlError::Avro(e, AvroErrorContext::Append))?;
 
         Ok(())
     }
 }
 
 impl TryFrom<Value> for IngestionDataSharePacket {
-    type Error = Error;
+    type Error = IdlError;
 
     fn try_from(value: Value) -> Result<Self, Self::Error> {
         let fields = if let Value::Record(f) = value {
             f
         } else {
-            return Err(Error::MalformedBatchError(
-                "value is not a Record".to_owned(),
-            ));
+            return Err(IdlError::WrongValueType);
         };
 
         // As in IngestionSignature::read_signature, we can't just deserialize
@@ -518,13 +614,12 @@ impl TryFrom<Value> for IngestionDataSharePacket {
         }
 
         Ok(IngestionDataSharePacket {
-            uuid: uuid.ok_or_else(|| Error::MalformedDataPacketError("missing uuid".to_owned()))?,
-            encrypted_payload: encrypted_payload.ok_or_else(|| {
-                Error::MalformedDataPacketError("missing encrypted_payload".to_owned())
-            })?,
+            uuid: uuid.ok_or(IdlError::MalformedPacket(MalformedPacketCause::MissingUuid))?,
+            encrypted_payload: encrypted_payload.ok_or(IdlError::MalformedPacket(
+                MalformedPacketCause::MissingEncryptedPayload,
+            ))?,
             encryption_key_id,
-            r_pit: r_pit
-                .ok_or_else(|| Error::MalformedDataPacketError("missing r_pit".to_owned()))?,
+            r_pit: r_pit.ok_or(IdlError::MalformedPacket(MalformedPacketCause::MissingRPit))?,
             version_configuration,
             device_nonce,
         })
@@ -607,34 +702,21 @@ impl Header for ValidationHeader {
         &self.packet_file_digest
     }
 
-    fn read<R: Read>(reader: R) -> Result<ValidationHeader, Error> {
-        let mut reader = Reader::with_schema(*VALIDATION_HEADER_SCHEMA, reader).map_err(|e| {
-            Error::AvroError(
-                "failed to create reader for validation header".to_owned(),
-                e,
-            )
-        })?;
+    fn read<R: Read>(reader: R) -> Result<ValidationHeader, IdlError> {
+        let mut reader = Reader::with_schema(*VALIDATION_HEADER_SCHEMA, reader)
+            .map_err(|e| IdlError::Avro(e, AvroErrorContext::ReadHeader))?;
 
         // We expect exactly one record in the reader and for it to be an ingestion header
         let record = match reader.next() {
             Some(Ok(Value::Record(r))) => r,
             Some(Ok(_)) => {
-                return Err(Error::MalformedHeaderError(
-                    "value is not a record".to_owned(),
-                ))
+                return Err(IdlError::WrongValueType);
             }
-            Some(Err(e)) => {
-                return Err(Error::AvroError(
-                    "failed to read header from Avro reader".to_owned(),
-                    e,
-                ))
-            }
-            None => return Err(Error::EofError),
+            Some(Err(e)) => return Err(IdlError::Avro(e, AvroErrorContext::ReadRecord)),
+            None => return Err(IdlError::Eof),
         };
         if reader.next().is_some() {
-            return Err(Error::MalformedHeaderError(
-                "excess header in reader".to_owned(),
-            ));
+            return Err(IdlError::ExtraData);
         }
 
         // Here we might wish to use from_value::<IngestionSignature>(record) but avro_rs does not
@@ -663,18 +745,17 @@ impl Header for ValidationHeader {
                         Value::Int(v) => Some(v),
                         Value::Null => None,
                         v => {
-                            return Err(Error::MalformedHeaderError(format!(
-                                "unexpected value {:?} for hamming weight",
-                                v
-                            )));
+                            return Err(IdlError::MalformedHeader(
+                                MalformedHeaderCause::HammingWeightWrongType(v.into()),
+                            ));
                         }
                     }
                 }
                 ("packet_file_digest", Value::Bytes(v)) => packet_file_digest = Some(v),
                 (f, v) => {
-                    return Err(Error::MalformedHeaderError(format!(
-                        "unexpected field {} -> {:?} in record",
-                        f, v
+                    return Err(IdlError::MalformedHeader(MalformedHeaderCause::ExtraField(
+                        f.to_owned(),
+                        v.into(),
                     )))
                 }
             }
@@ -688,8 +769,8 @@ impl Header for ValidationHeader {
             || number_of_servers.is_none()
             || packet_file_digest.is_none()
         {
-            return Err(Error::MalformedHeaderError(
-                "missing field(s) in record".to_owned(),
+            return Err(IdlError::MalformedHeader(
+                MalformedHeaderCause::MissingField,
             ));
         }
 
@@ -705,7 +786,7 @@ impl Header for ValidationHeader {
         })
     }
 
-    fn write<W: Write>(&self, writer: &mut W) -> Result<(), Error> {
+    fn write<W: Write>(&self, writer: &mut W) -> Result<(), IdlError> {
         let mut writer = Writer::new(*VALIDATION_HEADER_SCHEMA, writer);
 
         let mut record = match Record::new(writer.schema()) {
@@ -732,13 +813,13 @@ impl Header for ValidationHeader {
             Value::Bytes(self.packet_file_digest.clone()),
         );
 
-        writer.append(record).map_err(|e| {
-            Error::AvroError("failed to append record to Avro writer".to_owned(), e)
-        })?;
+        writer
+            .append(record)
+            .map_err(|e| IdlError::Avro(e, AvroErrorContext::Append))?;
 
         writer
             .flush()
-            .map_err(|e| Error::AvroError("failed to flush Avro writer".to_owned(), e))?;
+            .map_err(|e| IdlError::Avro(e, AvroErrorContext::Flush))?;
 
         Ok(())
     }
@@ -757,7 +838,7 @@ impl Packet for ValidationPacket {
         *VALIDATION_PACKET_SCHEMA
     }
 
-    fn write<W: Write>(&self, writer: &mut Writer<W>) -> Result<(), Error> {
+    fn write<W: Write>(&self, writer: &mut Writer<W>) -> Result<(), IdlError> {
         // Ideally we would just do `writer.append_ser(self)` to use Serde serialization to write
         // the record but there seems to be some problem with serializing UUIDs, so we have to
         // construct the record.
@@ -776,20 +857,19 @@ impl Packet for ValidationPacket {
         record.put("g_r", Value::Long(self.g_r));
         record.put("h_r", Value::Long(self.h_r));
 
-        writer.append(record).map_err(|e| {
-            Error::AvroError("failed to append record to Avro writer".to_owned(), e)
-        })?;
+        writer
+            .append(record)
+            .map_err(|e| IdlError::Avro(e, AvroErrorContext::Append))?;
 
         Ok(())
     }
 }
 
 impl TryFrom<Value> for ValidationPacket {
-    type Error = Error;
+    type Error = IdlError;
 
     fn try_from(value: Value) -> Result<Self, Self::Error> {
-        from_value(&value)
-            .map_err(|e| Error::AvroError("failed to parse validation header".to_owned(), e))
+        from_value(&value).map_err(|e| IdlError::Avro(e, AvroErrorContext::Deserialization))
     }
 }
 
@@ -839,31 +919,22 @@ impl Header for SumPart {
         &self.packet_file_digest
     }
 
-    fn read<R: Read>(reader: R) -> Result<SumPart, Error> {
+    fn read<R: Read>(reader: R) -> Result<SumPart, IdlError> {
         let mut reader = Reader::with_schema(*SUM_PART_SCHEMA, reader)
-            .map_err(|e| Error::AvroError("failed to create reader for sum part".to_owned(), e))?;
+            .map_err(|e| IdlError::Avro(e, AvroErrorContext::ReadHeader))?;
 
         // We expect exactly one record in the reader and for it to be a sum
         // part.
         let record = match reader.next() {
             Some(Ok(Value::Record(r))) => r,
             Some(Ok(_)) => {
-                return Err(Error::MalformedHeaderError(
-                    "value is not a record".to_owned(),
-                ))
+                return Err(IdlError::WrongValueType);
             }
-            Some(Err(e)) => {
-                return Err(Error::AvroError(
-                    "failed to read header from Avro reader".to_owned(),
-                    e,
-                ))
-            }
-            None => return Err(Error::EofError),
+            Some(Err(e)) => return Err(IdlError::Avro(e, AvroErrorContext::ReadRecord)),
+            None => return Err(IdlError::Eof),
         };
         if reader.next().is_some() {
-            return Err(Error::MalformedHeaderError(
-                "excess header in reader".to_owned(),
-            ));
+            return Err(IdlError::ExtraData);
         }
 
         let mut batch_uuids = None;
@@ -889,10 +960,11 @@ impl Header for SumPart {
                                 if let Value::Uuid(u) = value {
                                     Ok(u)
                                 } else {
-                                    Err(Error::MalformedHeaderError(format!(
-                                        "unexpected value in batch_uuids array {:?}",
-                                        value
-                                    )))
+                                    Err(IdlError::MalformedHeader(
+                                        MalformedHeaderCause::BatchUuidsElementWrongType(
+                                            value.into(),
+                                        ),
+                                    ))
                                 }
                             })
                             .collect::<Result<Vec<_>, _>>()?,
@@ -908,10 +980,9 @@ impl Header for SumPart {
                         Value::Int(v) => Some(v),
                         Value::Null => None,
                         v => {
-                            return Err(Error::MalformedHeaderError(format!(
-                                "unexpected value {:?} for hamming weight",
-                                v
-                            )));
+                            return Err(IdlError::MalformedHeader(
+                                MalformedHeaderCause::HammingWeightWrongType(v.into()),
+                            ));
                         }
                     }
                 }
@@ -923,10 +994,11 @@ impl Header for SumPart {
                                 if let Value::Long(l) = value {
                                     Ok(l)
                                 } else {
-                                    Err(Error::MalformedHeaderError(format!(
-                                        "unexpected value in sum array {:?}",
-                                        value
-                                    )))
+                                    Err(IdlError::MalformedHeader(
+                                        MalformedHeaderCause::SumArrayElementWrongType(
+                                            value.into(),
+                                        ),
+                                    ))
                                 }
                             })
                             .collect::<Result<Vec<_>, _>>()?,
@@ -941,9 +1013,9 @@ impl Header for SumPart {
                 ("packet_file_digest", Value::Bytes(v)) => packet_file_digest = Some(v),
                 ("total_individual_clients", Value::Long(v)) => total_individual_clients = Some(v),
                 (f, v) => {
-                    return Err(Error::MalformedHeaderError(format!(
-                        "unexpected field {} -> {:?} in record",
-                        f, v
+                    return Err(IdlError::MalformedHeader(MalformedHeaderCause::ExtraField(
+                        f.to_owned(),
+                        v.into(),
                     )))
                 }
             }
@@ -960,8 +1032,8 @@ impl Header for SumPart {
             || aggregation_end_time.is_none()
             || packet_file_digest.is_none()
         {
-            return Err(Error::MalformedHeaderError(
-                "missing field(s) in record".to_owned(),
+            return Err(IdlError::MalformedHeader(
+                MalformedHeaderCause::MissingField,
             ));
         }
 
@@ -981,7 +1053,7 @@ impl Header for SumPart {
         })
     }
 
-    fn write<W: Write>(&self, writer: &mut W) -> Result<(), Error> {
+    fn write<W: Write>(&self, writer: &mut W) -> Result<(), IdlError> {
         let mut writer = Writer::new(*SUM_PART_SCHEMA, writer);
 
         // Ideally we would just do `writer.append_ser(self)` to use Serde serialization to write
@@ -1031,13 +1103,13 @@ impl Header for SumPart {
             Value::Long(self.total_individual_clients),
         );
 
-        writer.append(record).map_err(|e| {
-            Error::AvroError("failed to append record to Avro writer".to_owned(), e)
-        })?;
+        writer
+            .append(record)
+            .map_err(|e| IdlError::Avro(e, AvroErrorContext::Append))?;
 
         writer
             .flush()
-            .map_err(|e| Error::AvroError("failed to flush Avro writer".to_owned(), e))?;
+            .map_err(|e| IdlError::Avro(e, AvroErrorContext::Flush))?;
 
         Ok(())
     }
@@ -1053,7 +1125,7 @@ impl Packet for InvalidPacket {
         *INVALID_PACKET_SCHEMA
     }
 
-    fn write<W: Write>(&self, writer: &mut Writer<W>) -> Result<(), Error> {
+    fn write<W: Write>(&self, writer: &mut Writer<W>) -> Result<(), IdlError> {
         // Ideally we would just do `writer.append_ser(self)` to use Serde serialization to write
         // the record but there seems to be some problem with serializing UUIDs, so we have to
         // construct the record.
@@ -1069,20 +1141,19 @@ impl Packet for InvalidPacket {
 
         record.put("uuid", Value::Uuid(self.uuid));
 
-        writer.append(record).map_err(|e| {
-            Error::AvroError("failed to append record to Avro writer".to_owned(), e)
-        })?;
+        writer
+            .append(record)
+            .map_err(|e| IdlError::Avro(e, AvroErrorContext::Append))?;
 
         Ok(())
     }
 }
 
 impl TryFrom<Value> for InvalidPacket {
-    type Error = Error;
+    type Error = IdlError;
 
     fn try_from(value: Value) -> Result<Self, Self::Error> {
-        from_value(&value)
-            .map_err(|e| Error::AvroError("failed to parse invalid packet".to_owned(), e))
+        from_value(&value).map_err(|e| IdlError::Avro(e, AvroErrorContext::Deserialization))
     }
 }
 

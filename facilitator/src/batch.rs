@@ -1,7 +1,7 @@
 use crate::{
     idl::{
-        BatchSignature, Header, IngestionDataSharePacket, IngestionHeader, InvalidPacket, Packet,
-        SumPart, ValidationHeader, ValidationPacket,
+        AvroErrorContext, BatchSignature, Header, IdlError, IngestionDataSharePacket,
+        IngestionHeader, InvalidPacket, Packet, SumPart, ValidationHeader, ValidationPacket,
     },
     metrics::BatchReaderMetricsCollector,
     transport::{Transport, TransportWriter},
@@ -291,19 +291,17 @@ impl<'a, H: Header, P: Packet> BatchReader<'a, H, P> {
         // least one record is written. So we need to special-case zero bytes
         // of content as returning an empty vector of packets, because trying
         // to use a Reader will error out.
-        let packets =
-            if packet_bytes.is_empty() {
-                Vec::new()
-            } else {
-                Reader::with_schema(P::schema(), Cursor::new(&packet_bytes))
-                    .context("failed to create Avro reader for packets")?
-                    .map(|val| {
-                        P::try_from(val.map_err(|e| {
-                            Error::AvroError("couldn't read Avro value".to_owned(), e)
-                        })?)
-                    })
-                    .collect::<Result<Vec<P>, _>>()?
-            };
+        let packets = if packet_bytes.is_empty() {
+            Vec::new()
+        } else {
+            Reader::with_schema(P::schema(), Cursor::new(&packet_bytes))
+                .map_err(|e| IdlError::Avro(e, AvroErrorContext::ReadHeader))?
+                .map(|res| {
+                    let val = res.map_err(|e| IdlError::Avro(e, AvroErrorContext::ReadRecord))?;
+                    P::try_from(val)
+                })
+                .collect::<Result<Vec<P>, _>>()?
+        };
 
         Ok((header, packets))
     }

@@ -29,16 +29,6 @@ pub const DATE_FORMAT: &str = "%Y/%m/%d/%H/%M";
 pub enum Error {
     #[error(transparent)]
     AnyhowError(#[from] anyhow::Error),
-    #[error("avro error: {0}")]
-    AvroError(String, #[source] avro_rs::Error),
-    #[error("malformed header: {0}")]
-    MalformedHeaderError(String),
-    #[error("malformed data packet: {0}")]
-    MalformedDataPacketError(String),
-    #[error("malformed batch: {0}")]
-    MalformedBatchError(String),
-    #[error("end of file")]
-    EofError,
     #[error("HTTP resource error")]
     HttpError(#[from] ureq::Error),
     #[error("packet decryption failure for packet {0}")]
