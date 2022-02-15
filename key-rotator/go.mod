@@ -6,7 +6,7 @@ require (
 	cloud.google.com/go v0.81.0
 	cloud.google.com/go/storage v1.10.0
 	github.com/aws/aws-sdk-go v1.42.0
-	github.com/google/go-cmp v0.5.6
+	github.com/google/go-cmp v0.5.7
 	github.com/googleapis/gax-go/v2 v2.0.5
 	github.com/prometheus/client_golang v1.11.0
 	github.com/rs/zerolog v1.26.0
