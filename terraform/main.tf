@@ -708,11 +708,11 @@ resource "google_service_account" "sum_part_bucket_writer" {
 # If running in GCP, permit the service accounts for all the data share
 # processors to request access and identity tokens allowing them to impersonate
 # the sum part bucket writer.
-resource "google_service_account_iam_binding" "data_share_processors_to_sum_part_bucket_writer_token_creator" {
-  count              = var.use_aws ? 0 : 1
+resource "google_service_account_iam_member" "data_share_processors_to_sum_part_bucket_writer_token_creator" {
+  for_each           = var.use_aws ? {} : module.data_share_processors
   service_account_id = google_service_account.sum_part_bucket_writer.name
   role               = "roles/iam.serviceAccountTokenCreator"
-  members            = [for v in module.data_share_processors : "serviceAccount:${v.gcp_service_account_email}"]
+  member             = "serviceAccount:${each.value.gcp_service_account_email}"
 }
 
 # GCP services we must enable to use Workload Identity Pool
