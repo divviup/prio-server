@@ -712,7 +712,10 @@ resource "google_service_account_iam_binding" "data_share_processors_to_sum_part
   count              = var.use_aws ? 0 : 1
   service_account_id = google_service_account.sum_part_bucket_writer.name
   role               = "roles/iam.serviceAccountTokenCreator"
-  members            = [for v in module.data_share_processors : "serviceAccount:${v.gcp_service_account_email}"]
+  members = concat(
+    [for v in module.data_share_processors : "serviceAccount:${v.gcp_service_account_email}"],
+    local.is_env_with_ingestor ? ["serviceAccount:${module.fake_server_resources[0].gcp_service_account_email}"] : []
+  )
 }
 
 # GCP services we must enable to use Workload Identity Pool
@@ -797,7 +800,6 @@ module "fake_server_resources" {
   facilitator_version           = var.facilitator_version
   manifest_bucket               = local.manifest.bucket
   other_environment             = var.test_peer_environment.env_without_ingestor
-  sum_part_bucket_writer_name   = google_service_account.sum_part_bucket_writer.name
   sum_part_bucket_writer_email  = google_service_account.sum_part_bucket_writer.email
   aggregate_queues              = { for v in module.data_share_processors : v.data_share_processor_name => v.aggregate_queue }
 }
