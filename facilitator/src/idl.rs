@@ -662,7 +662,7 @@ impl IngestionDataSharePacket {
         }
         // If we arrive here, this packet could not be decrypted by any key we have.
         // All we can do is report this to the caller.
-        Err(IntakeError::PacketDecryptionError(self.uuid))
+        Err(IntakeError::PacketDecryption(self.uuid))
     }
 }
 

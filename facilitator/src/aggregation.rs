@@ -285,7 +285,7 @@ impl<'a> BatchAggregator<'a> {
             match ingestion_packet.generate_validation_packet(servers) {
                 Ok(p) => ingestion_and_own_validation_packets.push((ingestion_packet, p)),
                 Err(e) => {
-                    if let IntakeError::PacketDecryptionError(packet_uuid) = e {
+                    if let IntakeError::PacketDecryption(packet_uuid) = e {
                         // This ingestion batch contains a packet that can't be
                         // decrypted. Ignore the entire ingestion batch, on the
                         // assumption that our peer will do the same, since we

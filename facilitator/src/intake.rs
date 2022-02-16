@@ -25,7 +25,7 @@ pub enum IntakeError {
     #[error(transparent)]
     Idl(IdlError),
     #[error("packet decryption failure for packet {0}")]
-    PacketDecryptionError(Uuid),
+    PacketDecryption(Uuid),
     #[error("error generating verification message: {0}")]
     PrioVerification(prio::server::ServerError),
     #[error("error setting up Prio server: {0}")]
@@ -461,7 +461,7 @@ mod tests {
         .unwrap();
 
         let err = pha_ingestor.generate_validation_share(|_| {}).unwrap_err();
-        assert_matches!(err, Error::Intake(IntakeError::PacketDecryptionError(_)));
+        assert_matches!(err, Error::Intake(IntakeError::PacketDecryption(_)));
     }
 
     #[test]
