@@ -45,6 +45,10 @@ variable "other_environment" {
   type = string
 }
 
+variable "sum_part_bucket_writer_name" {
+  type = string
+}
+
 variable "sum_part_bucket_writer_email" {
   type = string
 }
@@ -136,6 +140,15 @@ module "account_mapping" {
   gcp_project                     = var.gcp_project
   kubernetes_service_account_name = "ingestion-identity"
   kubernetes_namespace            = kubernetes_namespace.tester.metadata[0].name
+}
+
+# Allow the integration-test identity to impersonate the sum part bucket writer
+# service accounts to allow reading sum parts. (It would be more precise to
+# make this read-only, but this is for testing infrastructure.)
+resource "google_service_account_iam_member" "integration_test_identity_to_my_sum_part_bucket_writer_token_creator" {
+  service_account_id = var.sum_part_bucket_writer_name
+  role               = "roles/iam.serviceAccountTokenCreator"
+  member             = "serviceAccount:${module.account_mapping.gcp_service_account_email}"
 }
 
 locals {
