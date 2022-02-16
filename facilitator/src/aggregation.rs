@@ -1,12 +1,13 @@
 use crate::{
     batch::{Batch, BatchReader, BatchWriter},
     idl::{IngestionDataSharePacket, IngestionHeader, InvalidPacket, SumPart, ValidationPacket},
+    intake::IntakeError,
     logging::event,
     metrics::AggregateMetricsCollector,
     transport::{SignableTransport, VerifiableAndDecryptableTransport, VerifiableTransport},
     BatchSigningKey, Error,
 };
-use anyhow::{anyhow, Context, Result};
+use anyhow::{Context, Result};
 use chrono::NaiveDateTime;
 use prio::{
     field::FieldPriov2,
@@ -18,6 +19,16 @@ use std::{
     convert::TryFrom,
 };
 use uuid::Uuid;
+
+#[derive(Debug, thiserror::Error)]
+pub enum AggError {
+    #[error("batch_ids_and_dates is empty")]
+    EmptyBatchesAndDates,
+    #[error("ingestion header does not match peer validation header. {0}")]
+    HeaderMismatch(String),
+    #[error("error setting up Prio server: {0}")]
+    PrioSetup(prio::server::ServerError),
+}
 
 pub struct BatchAggregator<'a> {
     trace_id: &'a Uuid,
@@ -95,13 +106,13 @@ impl<'a> BatchAggregator<'a> {
         &mut self,
         batch_ids_and_dates: &[(Uuid, NaiveDateTime)],
         mut callback: F,
-    ) -> Result<()>
+    ) -> Result<(), Error>
     where
         F: FnMut(&Logger),
     {
         info!(self.logger, "processing aggregation task");
         if batch_ids_and_dates.is_empty() {
-            return Err(anyhow!("batch_ids_and_dates is empty"));
+            return Err(Error::Aggregation(AggError::EmptyBatchesAndDates));
         }
         let mut invalid_uuids = Vec::new();
         let mut included_batch_uuids = Vec::new();
@@ -142,17 +153,17 @@ impl<'a> BatchAggregator<'a> {
                         .packet_decryption_keys
                         .iter()
                         .map(|k| Server::new(ingestion_hdr.bins as usize, self.is_first, k.clone()))
-                        .collect::<Result<_, _>>()?,
+                        .collect::<Result<_, _>>()
+                        .map_err(|e| Error::Aggregation(AggError::PrioSetup(e)))?,
                 );
             }
 
             // Make sure all the parameters in the headers line up.
             if !ingestion_hdr.check_parameters(&peer_validation_hdr) {
-                return Err(anyhow!(
-                "ingestion header does not match peer validation header. Ingestion: {:?}\nPeer:{:?}",
-                ingestion_hdr,
-                peer_validation_hdr
-            ));
+                return Err(Error::Aggregation(AggError::HeaderMismatch(format!(
+                    "Ingestion: {:?}\nPeer:{:?}",
+                    ingestion_hdr, peer_validation_hdr
+                ))));
             }
 
             if self.aggregate_share(
@@ -211,24 +222,26 @@ impl<'a> BatchAggregator<'a> {
             .collect();
 
         // Write the aggregated data back to a sum part batch.
-        self.aggregation_batch.write(
-            self.share_processor_signing_key,
-            SumPart {
-                batch_uuids: included_batch_uuids,
-                name: ingestion_header.name,
-                bins: ingestion_header.bins,
-                epsilon: ingestion_header.epsilon,
-                prime: ingestion_header.prime,
-                number_of_servers: ingestion_header.number_of_servers,
-                hamming_weight: ingestion_header.hamming_weight,
-                sum,
-                aggregation_start_time: self.aggregation_start.timestamp_millis(),
-                aggregation_end_time: self.aggregation_end.timestamp_millis(),
-                packet_file_digest: Vec::new(),
-                total_individual_clients: self.total_individual_clients,
-            },
-            invalid_uuids.into_iter().map(|u| InvalidPacket { uuid: u }),
-        )
+        self.aggregation_batch
+            .write(
+                self.share_processor_signing_key,
+                SumPart {
+                    batch_uuids: included_batch_uuids,
+                    name: ingestion_header.name,
+                    bins: ingestion_header.bins,
+                    epsilon: ingestion_header.epsilon,
+                    prime: ingestion_header.prime,
+                    number_of_servers: ingestion_header.number_of_servers,
+                    hamming_weight: ingestion_header.hamming_weight,
+                    sum,
+                    aggregation_start_time: self.aggregation_start.timestamp_millis(),
+                    aggregation_end_time: self.aggregation_end.timestamp_millis(),
+                    packet_file_digest: Vec::new(),
+                    total_individual_clients: self.total_individual_clients,
+                },
+                invalid_uuids.into_iter().map(|u| InvalidPacket { uuid: u }),
+            )
+            .map_err(Error::AnyhowError)
     }
 
     /// Aggregate the batch for the provided batch_id into the provided server.
@@ -244,7 +257,7 @@ impl<'a> BatchAggregator<'a> {
         invalid_uuids: &mut Vec<Uuid>,
         ingestion_packets: Vec<IngestionDataSharePacket>,
         peer_validation_packets: Vec<ValidationPacket>,
-    ) -> Result<bool> {
+    ) -> Result<bool, Error> {
         // We can't be sure that the peer validation, own validation and
         // ingestion batches contain all the same packets or that they are in
         // the same order. There could also be duplicate packets. Compared to
@@ -272,7 +285,7 @@ impl<'a> BatchAggregator<'a> {
             match ingestion_packet.generate_validation_packet(servers) {
                 Ok(p) => ingestion_and_own_validation_packets.push((ingestion_packet, p)),
                 Err(e) => {
-                    if let Some(Error::PacketDecryptionError(packet_uuid)) = e.downcast_ref() {
+                    if let IntakeError::PacketDecryptionError(packet_uuid) = e {
                         // This ingestion batch contains a packet that can't be
                         // decrypted. Ignore the entire ingestion batch, on the
                         // assumption that our peer will do the same, since we
@@ -282,7 +295,7 @@ impl<'a> BatchAggregator<'a> {
                             event::PACKET_UUID => packet_uuid.to_string());
                         return Ok(false);
                     }
-                    return Err(e);
+                    return Err(e.into());
                 }
             }
         }
@@ -322,8 +335,10 @@ impl<'a> BatchAggregator<'a> {
             for server in servers.iter_mut() {
                 match server.aggregate(
                     &ingestion_packet.encrypted_payload,
-                    &VerificationMessage::try_from(peer_validation_packet)?,
-                    &VerificationMessage::try_from(&own_validation_packet)?,
+                    &VerificationMessage::try_from(peer_validation_packet)
+                        .map_err(|e| Error::AnyhowError(e.into()))?,
+                    &VerificationMessage::try_from(&own_validation_packet)
+                        .map_err(|e| Error::AnyhowError(e.into()))?,
                 ) {
                     Ok(valid) => {
                         if !valid {
@@ -354,7 +369,8 @@ impl<'a> BatchAggregator<'a> {
                     .context(format!(
                         "trace id {} failed to validate packets",
                         self.trace_id
-                    ));
+                    ))
+                    .map_err(crate::Error::AnyhowError);
             }
         }
 

@@ -1,5 +1,4 @@
-use crate::Error;
-use anyhow::{Context, Result};
+use crate::intake::IntakeError;
 use avro_rs::{
     from_value,
     types::{Record, Value, ValueKind},
@@ -170,6 +169,9 @@ pub enum IdlError {
     /// The Avro file did not contain a record as its top-level value.
     #[error("not a record")]
     WrongValueType,
+    /// The value for r_pit was out of range.
+    #[error("illegal r_pit value {0}")]
+    OverflowingRPit(i64),
 }
 
 pub trait Header: Sized {
@@ -630,10 +632,10 @@ impl IngestionDataSharePacket {
     pub(crate) fn generate_validation_packet(
         &self,
         servers: &mut Vec<Server<FieldPriov2>>,
-    ) -> Result<ValidationPacket> {
+    ) -> Result<ValidationPacket, IntakeError> {
         let r_pit = FieldPriov2::from(
             u32::try_from(self.r_pit)
-                .with_context(|| format!("illegal r_pit value {}", self.r_pit))?,
+                .map_err(|_| IntakeError::Idl(IdlError::OverflowingRPit(self.r_pit)))?,
         );
         // TODO(timg): if this fails for a non-empty subset of the
         // ingestion packets, do we abort handling of the entire
@@ -648,9 +650,7 @@ impl IngestionDataSharePacket {
                         continue;
                     }
                     Err(e) => {
-                        return Err(
-                            anyhow::Error::new(e).context("error generating verification message")
-                        );
+                        return Err(IntakeError::PrioVerification(e));
                     }
                 };
             return Ok(ValidationPacket {
@@ -662,7 +662,7 @@ impl IngestionDataSharePacket {
         }
         // If we arrive here, this packet could not be decrypted by any key we have.
         // All we can do is report this to the caller.
-        Err(Error::PacketDecryptionError(self.uuid).into())
+        Err(IntakeError::PacketDecryptionError(self.uuid))
     }
 }
 

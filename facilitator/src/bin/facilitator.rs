@@ -1545,7 +1545,7 @@ fn validate_sample(
     facilitator_transport: &dyn Transport,
     facilitator_pubkey_map: &HashMap<String, UnparsedPublicKey<Vec<u8>>>,
     task: &AggregationTask,
-) -> Result<()> {
+) -> Result<(), Error> {
     // Read the sum-part batches from the sum-part buckets.
     let aggregation_start = NaiveDateTime::parse_from_str(&task.aggregation_start, DATE_FORMAT)?;
     let aggregation_end = NaiveDateTime::parse_from_str(&task.aggregation_end, DATE_FORMAT)?;
@@ -1622,7 +1622,7 @@ fn intake_batch<F>(
     api_metrics: &ApiClientMetricsCollector,
     parent_logger: &Logger,
     callback: F,
-) -> Result<(), anyhow::Error>
+) -> Result<(), Error>
 where
     F: FnMut(&Logger),
 {
@@ -1662,7 +1662,9 @@ where
         } else if let Some(path) = sub_matches.value_of(Entity::Peer.suffix(InOut::Output.str())) {
             StoragePath::from_str(path)?
         } else {
-            return Err(anyhow!("peer-output or peer-manifest-base-url required."));
+            return Err(Error::MissingArguments(
+                "peer-output or peer-manifest-base-url required.",
+            ));
         };
 
     let mut peer_validation_transport = SignableTransport {
@@ -1751,6 +1753,7 @@ fn intake_batch_subcommand(
         parent_logger,
         |_| {}, // no-op callback
     )
+    .map_err(Into::into)
 }
 
 fn intake_batch_worker(
@@ -1839,7 +1842,7 @@ fn aggregate<F>(
     api_metrics: &ApiClientMetricsCollector,
     logger: &Logger,
     callback: F,
-) -> Result<()>
+) -> Result<(), Error>
 where
     F: FnMut(&Logger),
 {
@@ -1891,9 +1894,9 @@ where
             public_key_map_from_arg(public_key, public_key_identifier)?
         }
         _ => {
-            return Err(anyhow!(
+            return Err(Error::MissingArguments(
                 "peer-public-key and peer-public-key-identifier are \
-                        required if peer-manifest-base-url is not provided."
+                        required if peer-manifest-base-url is not provided.",
             ));
         }
     };
@@ -1912,8 +1915,8 @@ where
         }
         (_, Some(path)) => StoragePath::from_str(path)?,
         _ => {
-            return Err(anyhow!(
-                "portal-output or portal-manifest-base-url required"
+            return Err(Error::MissingArguments(
+                "portal-output or portal-manifest-base-url required",
             ))
         }
     };
@@ -2039,6 +2042,7 @@ fn aggregate_subcommand(
         parent_logger,
         |_| {}, // no-op callback
     )
+    .map_err(Into::into)
 }
 
 fn aggregate_worker(

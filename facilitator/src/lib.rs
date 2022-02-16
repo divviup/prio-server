@@ -1,9 +1,10 @@
 #![allow(clippy::too_many_arguments)]
 
+use aggregation::AggError;
 use anyhow::Result;
+use intake::IntakeError;
 use ring::{digest, signature::EcdsaKeyPair};
 use std::io::Write;
-use uuid::Uuid;
 
 pub mod aggregation;
 pub mod aws_credentials;
@@ -29,12 +30,20 @@ pub const DATE_FORMAT: &str = "%Y/%m/%d/%H/%M";
 pub enum Error {
     #[error(transparent)]
     AnyhowError(#[from] anyhow::Error),
-    #[error("HTTP resource error")]
+    #[error("HTTP resource error: {0}")]
     HttpError(#[from] ureq::Error),
-    #[error("packet decryption failure for packet {0}")]
-    PacketDecryptionError(Uuid),
     #[error("object {0} not found: {1}")]
     ObjectNotFoundError(String, anyhow::Error),
+    #[error("error parsing time: {0}")]
+    TimeParse(#[from] chrono::ParseError),
+    #[error("command line parsing error: {0}")]
+    Clap(#[from] clap::Error),
+    #[error("missing arguments: {0}")]
+    MissingArguments(&'static str),
+    #[error(transparent)]
+    Intake(#[from] IntakeError),
+    #[error(transparent)]
+    Aggregation(AggError),
 }
 
 /// A wrapper-writer that computes a SHA256 digest over the content it is provided.
