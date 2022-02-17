@@ -110,6 +110,7 @@ variable "intake_queue" {
     topic             = string
     subscription_kind = string
     subscription      = string
+    dead_letter_topic = string
   })
 }
 
@@ -120,6 +121,7 @@ variable "aggregate_queue" {
     topic             = string
     subscription_kind = string
     subscription      = string
+    dead_letter_topic = string
   })
 }
 
@@ -375,6 +377,7 @@ resource "kubernetes_deployment" "intake_batch" {
             "--peer-gcp-sa-to-impersonate-before-assuming-role=${var.remote_peer_validation_bucket_identity.gcp_sa_to_impersonate_while_assuming_identity}",
             "--task-queue-kind=${var.intake_queue.subscription_kind}",
             "--task-queue-name=${var.intake_queue.subscription}",
+            "--dead-letter-topic=${var.intake_queue.dead_letter_topic}",
             "--aws-sqs-region=${var.use_aws ? var.aws_region : ""}",
             "--gcp-project-id=${var.use_aws ? "" : data.google_project.project.project_id}",
             "--gcp-workload-identity-pool-provider=${var.gcp_workload_identity_pool_provider}",
@@ -605,6 +608,7 @@ resource "kubernetes_deployment" "aggregate" {
             "--portal-manifest-base-url=https://${var.portal_server_manifest_base_url}",
             "--task-queue-kind=${var.aggregate_queue.subscription_kind}",
             "--task-queue-name=${var.aggregate_queue.subscription}",
+            "--dead-letter-topic=${var.aggregate_queue.dead_letter_topic}",
             "--gcp-project-id=${var.use_aws ? "" : data.google_project.project.project_id}",
             "--aws-sqs-region=${var.use_aws ? var.aws_region : ""}",
             "--permit-malformed-batch=true",

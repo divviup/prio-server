@@ -35,6 +35,10 @@ pub trait TaskQueue<T: Task>: Debug + DynClone + Send + Sync {
     /// retried later.
     fn nacknowledge_task(&self, handle: TaskHandle<T>) -> Result<()>;
 
+    /// Immediately forward a task to the associated dead letter queue, and
+    /// remove it from the task queue.
+    fn forward_to_dead_letter_queue(&self, handle: TaskHandle<T>) -> Result<()>;
+
     /// Signal to the task queue that more time is needed to handle the task.
     fn extend_task_deadline(&self, handle: &TaskHandle<T>, increment: &Duration) -> Result<()>;
 
@@ -161,6 +165,8 @@ pub struct TaskHandle<T: Task> {
     pub published_time: Option<NaiveDateTime>,
     /// The task
     pub task: T,
+    /// The original JSON body
+    raw_body: String,
 }
 
 // Implementing slog::Value allows us to put TaskHandles in structured events

@@ -75,7 +75,8 @@ resource "google_pubsub_topic_iam_binding" "dead_letter" {
   topic = google_pubsub_topic.dead_letter.name
   role  = "roles/pubsub.publisher"
   members = [
-    local.pubsub_service_account
+    local.pubsub_service_account,
+    "serviceAccount:${var.subscriber_service_account}"
   ]
 }
 
@@ -98,5 +99,6 @@ output "queue" {
     topic             = google_pubsub_topic.task.name
     subscription_kind = "gcp-pubsub"
     subscription      = google_pubsub_subscription.task.name
+    dead_letter_topic = google_pubsub_topic.dead_letter.name
   }
 }

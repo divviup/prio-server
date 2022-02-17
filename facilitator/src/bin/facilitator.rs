@@ -436,6 +436,22 @@ impl<'a, 'b> AppArgumentAdder for App<'a, 'b> {
                 .default_value("")
                 .hide_default_value(true),
         )
+        .arg(
+            Arg::with_name("dead-letter-topic")
+                .long("dead-letter-topic")
+                .env("DEAD_LETTER_TOPIC")
+                .help("Name of dead letter topic for forwarding permanently failed tasks")
+                .long_help(
+                    "Name of topic associated with the dead letter queue. \
+                    Tasks that result in non-retryable failures will be \
+                    forwarded to this topic, and acknowledged and removed \
+                    from the task queue. If no dead letter topic is provided, \
+                    the task will not be acknowledged, and it is expected the \
+                    queue will eventually move the task to the dead letter \
+                    queue once it has exhausted its retries.",
+                )
+                .required(false),
+        )
         // It's counterintuitive that users must explicitly opt into the
         // default credentials provider. This was done to preserve backward
         // compatibility with previous versions, which defaulted to a provider
@@ -1814,6 +1830,13 @@ fn intake_batch_worker(
 
             match result {
                 Ok(_) => queue.acknowledge_task(task_handle)?,
+                Err(err) if !err.is_retryable() => {
+                    error!(parent_logger, "error while processing intake task (non-retryable): {:?}", err;
+                        event::TASK_HANDLE => task_handle.clone(),
+                        event::TRACE_ID => trace_id.to_string(),
+                    );
+                    queue.forward_to_dead_letter_queue(task_handle)?;
+                }
                 Err(err) => {
                     error!(
                         parent_logger, "error while processing intake task: {:?}", err;
@@ -2110,6 +2133,13 @@ fn aggregate_worker(
 
             match result {
                 Ok(_) => queue.acknowledge_task(task_handle)?,
+                Err(err) if !err.is_retryable() => {
+                    error!(parent_logger, "error while processing task (non-retryable): {:?}", err;
+                        event::TRACE_ID => trace_id.to_string(),
+                        event::TASK_HANDLE => task_handle.clone(),
+                    );
+                    queue.forward_to_dead_letter_queue(task_handle)?;
+                }
                 Err(err) => {
                     error!(
                         parent_logger, "error while processing task: {:?}", err;
@@ -2475,6 +2505,7 @@ fn intake_task_queue_from_args(
     let queue_name = matches
         .value_of("task-queue-name")
         .ok_or_else(|| anyhow!("task-queue-name is required"))?;
+    let dead_letter_topic = matches.value_of("dead-letter-topic");
 
     match task_queue_kind {
         TaskQueueKind::GcpPubSub => {
@@ -2486,6 +2517,7 @@ fn intake_task_queue_from_args(
                 pubsub_api_endpoint,
                 gcp_project_id,
                 queue_name,
+                dead_letter_topic,
                 identity,
                 gcp_access_token_provider_factory,
                 logger,
@@ -2508,6 +2540,7 @@ fn intake_task_queue_from_args(
             Ok(Box::new(AwsSqsTaskQueue::new(
                 sqs_region,
                 queue_name,
+                dead_letter_topic,
                 runtime_handle,
                 credentials_provider,
                 logger,
@@ -2534,6 +2567,7 @@ fn aggregation_task_queue_from_args(
     let queue_name = matches
         .value_of("task-queue-name")
         .ok_or_else(|| anyhow!("task-queue-name is required"))?;
+    let dead_letter_topic = matches.value_of("dead-letter-topic");
 
     match task_queue_kind {
         TaskQueueKind::GcpPubSub => {
@@ -2545,6 +2579,7 @@ fn aggregation_task_queue_from_args(
                 pubsub_api_endpoint,
                 gcp_project_id,
                 queue_name,
+                dead_letter_topic,
                 identity,
                 gcp_access_token_provider_factory,
                 logger,
@@ -2567,6 +2602,7 @@ fn aggregation_task_queue_from_args(
             Ok(Box::new(AwsSqsTaskQueue::new(
                 sqs_region,
                 queue_name,
+                dead_letter_topic,
                 runtime_handle,
                 credentials_provider,
                 logger,

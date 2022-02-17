@@ -95,6 +95,33 @@ resource "aws_sns_topic_subscription" "task" {
   raw_message_delivery = true
 }
 
+# This topic allows the facilitator to immediately deliver a message to the
+# dead letter queue in certain circumstances, rather than waiting for the task
+# queue's automatic retries to do so upon repeated failure.
+resource "aws_sns_topic" "dead_letter" {
+  name = "${var.environment}-${var.data_share_processor_name}-${var.task}-dead-letter"
+}
+
+resource "aws_sns_topic_policy" "dead_letter" {
+  arn = aws_sns_topic.dead_letter.arn
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Principal = {
+          AWS = var.subscriber_iam_role
+        }
+        Action = [
+          "SNS:Publish",
+        ]
+        Resource = aws_sns_topic.dead_letter.arn
+      }
+    ]
+  })
+}
+
 resource "aws_sqs_queue" "dead_letter" {
   name                       = "${aws_sns_topic.task.name}-dead-letter"
   visibility_timeout_seconds = 600
@@ -116,9 +143,31 @@ resource "aws_sqs_queue_policy" "dead_letter" {
           "sqs:SendMessage"
         ]
         Resource = aws_sqs_queue.dead_letter.arn
+      },
+      {
+        Effect = "Allow"
+        Principal = {
+          Service = "sns.amazonaws.com"
+        }
+        Action = [
+          "sqs::SendMessage"
+        ]
+        Resource = aws_sqs_queue.dead_letter.arn
+        Condition = {
+          ArnEquals = {
+            "aws:SourceArn" = aws_sns_topic.dead_letter.arn
+          }
+        }
       }
     ]
   })
+}
+
+resource "aws_sns_topic_subscription" "dead_letter" {
+  topic_arn            = aws_sns_topic.dead_letter.arn
+  protocol             = "sqs"
+  endpoint             = aws_sqs_queue.dead_letter.arn
+  raw_message_delivery = true
 }
 
 output "queue" {
@@ -129,6 +178,7 @@ output "queue" {
     subscription_kind = "aws-sqs"
     # aws_sqs_queue.id yields the SQS queue *URL*, not an ARN or name, which is
     # what clients need in order to dequeue messages
-    subscription = aws_sqs_queue.task.id
+    subscription      = aws_sqs_queue.task.id
+    dead_letter_topic = aws_sns_topic.dead_letter.arn
   }
 }

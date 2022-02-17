@@ -10,7 +10,7 @@ use anyhow::{anyhow, Context, Result};
 use chrono::DateTime;
 use serde::Deserialize;
 use slog::{debug, info, o, Logger};
-use std::{io::Cursor, marker::PhantomData, time::Duration};
+use std::{marker::PhantomData, time::Duration};
 use ureq::AgentBuilder;
 use url::Url;
 
@@ -64,6 +64,22 @@ fn gcp_pubsub_modify_ack_deadline(
     ))
 }
 
+// API reference: https://cloud.google.com/pubsub/docs/reference/rest/v1/projects.topics/publish
+fn gcp_pubsub_publish_url(
+    pubsub_api_endpoint: &str,
+    gcp_project_id: &str,
+    topic: &str,
+) -> Result<Url> {
+    let request_url = format!(
+        "{}/v1/projects/{}/topics/{}:publish",
+        pubsub_api_endpoint, gcp_project_id, topic
+    );
+    Url::parse(&request_url).context(format!(
+        "failed to parse gcp_pubsub_publish_url: {}",
+        request_url
+    ))
+}
+
 /// Represents the response to a subscription.pull request. See API doc for
 /// discussion of fields.
 /// https://cloud.google.com/pubsub/docs/reference/rest/v1/projects.subscriptions/pull#response-body
@@ -101,6 +117,7 @@ pub struct GcpPubSubTaskQueue<T: Task> {
     pubsub_api_endpoint: String,
     gcp_project_id: String,
     subscription_id: String,
+    dead_letter_topic: Option<String>,
     access_token_provider: GcpAccessTokenProvider,
     phantom_task: PhantomData<T>,
     agent: RetryingAgent,
@@ -112,6 +129,7 @@ impl<T: Task> GcpPubSubTaskQueue<T> {
         pubsub_api_endpoint: Option<&str>,
         gcp_project_id: &str,
         subscription_id: &str,
+        dead_letter_topic: Option<&str>,
         identity: Identity,
         gcp_access_token_provider_factory: &mut GcpAccessTokenProviderFactory,
         parent_logger: &Logger,
@@ -145,6 +163,7 @@ impl<T: Task> GcpPubSubTaskQueue<T> {
                 .to_owned(),
             gcp_project_id: gcp_project_id.to_string(),
             subscription_id: subscription_id.to_string(),
+            dead_letter_topic: dead_letter_topic.map(str::to_owned),
             access_token_provider: gcp_access_token_provider_factory.get(
                 AccessScope::PubSub,
                 identity,
@@ -210,9 +229,11 @@ impl<T: Task> TaskQueue<T> for GcpPubSubTaskQueue<T> {
 
         // The JSON task is encoded as Base64 in the pubsub message
         let received_message = &received_messages[0];
-        let task_json = base64::decode(&received_message.message.data)
+        let task_bytes = base64::decode(&received_message.message.data)
             .context("failed to decode PubSub message")?;
-        let task: T = serde_json::from_reader(Cursor::new(&task_json))
+        let task_json =
+            String::from_utf8(task_bytes).context("utf-8 decoding error with PubSub message")?;
+        let task: T = serde_json::from_reader(task_json.as_bytes())
             .context(format!("failed to decode task {:?} from JSON", task_json))?;
 
         let published_time =
@@ -220,6 +241,7 @@ impl<T: Task> TaskQueue<T> for GcpPubSubTaskQueue<T> {
 
         let handle = TaskHandle {
             task,
+            raw_body: task_json,
             published_time: Some(published_time),
             acknowledgment_id: received_messages[0].ack_id.clone(),
         };
@@ -275,6 +297,47 @@ impl<T: Task> TaskQueue<T> for GcpPubSubTaskQueue<T> {
 
         self.modify_ack_deadline(handle, increment)
             .context("failed to extend deadline on task")
+    }
+
+    fn forward_to_dead_letter_queue(&self, handle: TaskHandle<T>) -> Result<()> {
+        let logger = self.logger.new(o!(
+            event::TASK_ACKNOWLEDGEMENT_ID => handle.acknowledgment_id.to_owned(),
+        ));
+
+        if let Some(topic) = &self.dead_letter_topic {
+            info!(
+                logger, "forwarding to dead letter queue";
+            );
+
+            let request = self.agent.prepare_request(RequestParameters {
+                url: gcp_pubsub_publish_url(
+                    &self.pubsub_api_endpoint,
+                    &self.gcp_project_id,
+                    topic,
+                )?,
+                method: Method::Post,
+                token_provider: Some(&self.access_token_provider),
+            })?;
+
+            self.agent
+                .send_json_request(
+                    &logger,
+                    &request,
+                    "publish",
+                    &ureq::json!({
+                        "messages": [{"data": handle.raw_body}]
+                    }),
+                )
+                .context(format!("failed to forward task {:?}", handle))?;
+
+            self.acknowledge_task(handle)
+        } else {
+            info!(
+                logger, "not forwarding to dead letter queue, topic not configured";
+                event::TASK_ACKNOWLEDGEMENT_ID => &handle.acknowledgment_id,
+            );
+            self.nacknowledge_task(handle)
+        }
     }
 }
 

@@ -46,6 +46,12 @@ pub enum Error {
     Aggregation(AggError),
 }
 
+impl Error {
+    pub fn is_retryable(&self) -> bool {
+        !matches!(self, Error::Intake(IntakeError::PacketDecryption(_)))
+    }
+}
+
 /// A wrapper-writer that computes a SHA256 digest over the content it is provided.
 pub struct DigestWriter<W: Write> {
     writer: W,
