@@ -5,6 +5,7 @@ use anyhow::Result;
 use intake::IntakeError;
 use ring::{digest, signature::EcdsaKeyPair};
 use std::io::Write;
+use url::Url;
 
 pub mod aggregation;
 pub mod aws_credentials;
@@ -44,12 +45,22 @@ pub enum Error {
     Intake(#[from] IntakeError),
     #[error(transparent)]
     Aggregation(AggError),
+    #[error(transparent)]
+    Url(#[from] UrlParseError),
 }
 
 impl Error {
     pub fn is_retryable(&self) -> bool {
         !matches!(self, Error::Intake(IntakeError::PacketDecryption(_)))
     }
+}
+
+#[derive(Debug, thiserror::Error)]
+#[error("failed to parse: {1}, {0}")]
+pub struct UrlParseError(url::ParseError, String);
+
+pub fn parse_url(input: String) -> Result<Url, UrlParseError> {
+    Url::parse(&input).map_err(|e| UrlParseError(e, input))
 }
 
 /// A wrapper-writer that computes a SHA256 digest over the content it is provided.

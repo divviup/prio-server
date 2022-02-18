@@ -4,7 +4,9 @@ use crate::{
     http::{Method, RequestParameters, RetryingAgent},
     logging::event,
     metrics::ApiClientMetricsCollector,
+    parse_url,
     task::{Task, TaskHandle, TaskQueue},
+    UrlParseError,
 };
 use anyhow::{anyhow, Context, Result};
 use chrono::DateTime;
@@ -21,15 +23,12 @@ fn gcp_pubsub_pull_url(
     pubsub_api_endpoint: &str,
     gcp_project_id: &str,
     subscription_id: &str,
-) -> Result<Url> {
+) -> Result<Url, UrlParseError> {
     let request_url = format!(
         "{}/v1/projects/{}/subscriptions/{}:pull",
         pubsub_api_endpoint, gcp_project_id, subscription_id
     );
-    Url::parse(&request_url).context(format!(
-        "faield to parse gcp_pubsub_pull_url: {}",
-        request_url
-    ))
+    parse_url(request_url)
 }
 
 // API reference: https://cloud.google.com/pubsub/docs/reference/rest/v1/projects.subscriptions/acknowledge
@@ -37,15 +36,12 @@ fn gcp_pubsub_ack_url(
     pubsub_api_endpoint: &str,
     gcp_project_id: &str,
     subscription_id: &str,
-) -> Result<Url> {
+) -> Result<Url, UrlParseError> {
     let request_url = format!(
         "{}/v1/projects/{}/subscriptions/{}:acknowledge",
         pubsub_api_endpoint, gcp_project_id, subscription_id
     );
-    Url::parse(&request_url).context(format!(
-        "failed to parse gcp_pubsub_ack_url: {}",
-        request_url
-    ))
+    parse_url(request_url)
 }
 
 // API reference: https://cloud.google.com/pubsub/docs/reference/rest/v1/projects.subscriptions/modifyAckDeadline
@@ -53,15 +49,12 @@ fn gcp_pubsub_modify_ack_deadline(
     pubsub_api_endpoint: &str,
     gcp_project_id: &str,
     subscription_id: &str,
-) -> Result<Url> {
+) -> Result<Url, UrlParseError> {
     let request_url = format!(
         "{}/v1/projects/{}/subscriptions/{}:modifyAckDeadline",
         pubsub_api_endpoint, gcp_project_id, subscription_id
     );
-    Url::parse(&request_url).context(format!(
-        "faield to parse gcp_pubsub_modify_ack_deadline: {}",
-        request_url
-    ))
+    parse_url(request_url)
 }
 
 // API reference: https://cloud.google.com/pubsub/docs/reference/rest/v1/projects.topics/publish
@@ -69,15 +62,12 @@ fn gcp_pubsub_publish_url(
     pubsub_api_endpoint: &str,
     gcp_project_id: &str,
     topic: &str,
-) -> Result<Url> {
+) -> Result<Url, UrlParseError> {
     let request_url = format!(
         "{}/v1/projects/{}/topics/{}:publish",
         pubsub_api_endpoint, gcp_project_id, topic
     );
-    Url::parse(&request_url).context(format!(
-        "failed to parse gcp_pubsub_publish_url: {}",
-        request_url
-    ))
+    parse_url(request_url)
 }
 
 /// Represents the response to a subscription.pull request. See API doc for

@@ -17,13 +17,12 @@ use ring::{
 use serde::Deserialize;
 use slog::Logger;
 use std::{collections::HashMap, fmt::Debug};
-use url::Url;
 
 use crate::{
     config::{Identity, StoragePath},
     http,
     metrics::ApiClientMetricsCollector,
-    BatchSigningKey, Error,
+    parse_url, BatchSigningKey, Error,
 };
 
 // See discussion in SpecificManifest::batch_signing_public_key
@@ -548,13 +547,7 @@ fn fetch_manifest_without_https(
 ) -> Result<String, Error> {
     let manifest_url = format!("{}/{}", base_url, path);
 
-    http::simple_get_request(
-        Url::parse(&manifest_url)
-            .context(format!("failed to parse manifest url: {}", manifest_url))?,
-        logger,
-        service,
-        api_metrics,
-    )
+    http::simple_get_request(parse_url(manifest_url)?, logger, service, api_metrics)
 }
 
 /// Attempts to parse the provided string as a PEM encoded PKIX

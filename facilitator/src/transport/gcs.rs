@@ -6,8 +6,9 @@ use crate::{
     },
     logging::event,
     metrics::ApiClientMetricsCollector,
+    parse_url,
     transport::{Transport, TransportWriter},
-    Error,
+    Error, UrlParseError,
 };
 use anyhow::{anyhow, Context, Result};
 use slog::{debug, info, o, warn, Logger};
@@ -23,21 +24,21 @@ fn storage_api_base_url() -> Url {
     Url::parse("https://storage.googleapis.com/").expect("unable to parse storage API url")
 }
 
-fn gcp_object_url(bucket: &str, encoded_key: &str) -> Result<Url> {
-    let request_url = &format!(
+fn gcp_object_url(bucket: &str, encoded_key: &str) -> Result<Url, UrlParseError> {
+    let request_url = format!(
         "{}storage/v1/b/{}/o/{}",
         storage_api_base_url(),
         bucket,
         encoded_key
     );
 
-    Url::parse(request_url).context(format!("failed to parse: {}", request_url))
+    parse_url(request_url)
 }
 
-fn gcp_upload_object_url(storage_api_url: &str, bucket: &str) -> Result<Url> {
-    let request_url = &format!("{}upload/storage/v1/b/{}/o/", storage_api_url, bucket);
+fn gcp_upload_object_url(storage_api_url: &str, bucket: &str) -> Result<Url, UrlParseError> {
+    let request_url = format!("{}upload/storage/v1/b/{}/o/", storage_api_url, bucket);
 
-    Url::parse(request_url).context(format!("failed to parse: {}", request_url))
+    parse_url(request_url)
 }
 
 /// GCSTransport manages reading and writing from GCS buckets, with
@@ -273,10 +274,8 @@ impl StreamingTransferWriter {
             minimum_upload_chunk_size,
             buffer: Vec::with_capacity(minimum_upload_chunk_size * 2),
             object_upload_position: 0,
-            upload_session_uri: Url::parse(upload_session_uri).context(format!(
-                "failed to parse upload_session_uri url: {}",
-                &upload_session_uri
-            ))?,
+            upload_session_uri: Url::parse(upload_session_uri)
+                .map_err(|e| UrlParseError(e, upload_session_uri.to_owned()))?,
             agent,
             logger: parent_logger.clone(),
             is_finished: false,

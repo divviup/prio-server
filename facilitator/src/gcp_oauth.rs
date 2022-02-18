@@ -41,6 +41,7 @@ use crate::{
         AccessTokenProvider, Method, RequestParameters, RetryingAgent, StaticAccessTokenProvider,
     },
     metrics::ApiClientMetricsCollector,
+    parse_url, UrlParseError,
 };
 
 const DEFAULT_METADATA_BASE_URL: &str = "http://metadata.google.internal:80";
@@ -264,10 +265,7 @@ impl ProvideDefaultAccessToken for ServiceAccountKeyFileDefaultAccessTokenProvid
             encode(&header, &claims, &encoding_key).context("failed to construct and sign JWT")?;
 
         let request = self.agent.prepare_request(RequestParameters {
-            url: Url::parse(&self.key_file.token_uri).context(format!(
-                "failed to parse key_file.token_uri: {}",
-                &self.key_file.token_uri
-            ))?,
+            url: parse_url(self.key_file.token_uri.clone())?,
             method: Method::Post,
             ..Default::default()
         })?;
@@ -329,11 +327,10 @@ impl ProvideDefaultAccessToken
             .context("failed to get AWS credentials")?;
 
         // Next, we construct a GetCallerIdentity token
-        let sts_request_url = Url::parse(&format!(
+        let sts_request_url = parse_url(format!(
             "https://sts.{}.amazonaws.com?Action=GetCallerIdentity&Version=2011-06-15",
             aws_region.name()
-        ))
-        .context("failed to parse STS request URL")?;
+        ))?;
 
         let get_caller_identity_token = get_caller_identity_token(
             &sts_request_url,
@@ -359,8 +356,7 @@ impl ProvideDefaultAccessToken
         let request = self
             .agent
             .prepare_request(RequestParameters {
-                url: Url::parse(format!("https://sts.googleapis.com/v1/{}", endpoint).as_str())
-                    .context("failed to construct sts.googleapis.com URL")?,
+                url: parse_url(format!("https://sts.googleapis.com/v1/{}", endpoint))?,
                 method: Method::Post,
                 // This request is unauthenticated, except for the signature and
                 // token on the inner subjectToken
@@ -527,14 +523,14 @@ impl GcpAccessTokenProvider {
     fn access_token_url_for_service_account(
         base: &str,
         service_account_to_impersonate: &str,
-    ) -> Result<Url> {
+    ) -> Result<Url, UrlParseError> {
         let request_url = format!(
             "{}{}",
             base,
             Self::access_token_path_for_service_account(service_account_to_impersonate)
         );
 
-        Url::parse(&request_url).context(format!("failed to parse: {}", request_url))
+        parse_url(request_url)
     }
 
     /// Returns the path relative to an API base URL from which access tokens for
@@ -780,14 +776,14 @@ impl ImpersonatedServiceAccountIdentityTokenProvider {
     /// Returns the URL from which identity tokens for the provided GCP service
     /// account may be obtained.
     /// API reference: https://cloud.google.com/iam/docs/reference/credentials/rest/v1/projects.serviceAccounts/generateAccessToken
-    fn identity_token_url_for_service_account(&self) -> Result<Url> {
+    fn identity_token_url_for_service_account(&self) -> Result<Url, UrlParseError> {
         let request_url = format!(
             "{}{}",
             self.iam_service_base_url,
             Self::identity_token_path_for_service_account(&self.impersonated_service_account)
         );
 
-        Url::parse(&request_url).context(format!("failed to parse: {}", request_url))
+        parse_url(request_url)
     }
 
     /// Returns the path relative to an API base URL from which identity tokens for
