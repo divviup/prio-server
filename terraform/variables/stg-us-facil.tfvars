@@ -94,6 +94,8 @@ batch_signing_key_rotation_policy = {
   delete_min_count = 2
 }
 
+single_object_validation_batch_localities = ["gondor", "narnia"]
+
 prometheus_helm_chart_version           = "15.0.2"
 grafana_helm_chart_version              = "6.20.5"
 cloudwatch_exporter_helm_chart_version  = "0.17.2"
