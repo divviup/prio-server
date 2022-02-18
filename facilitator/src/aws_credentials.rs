@@ -354,23 +354,19 @@ impl Display for Provider {
                 // discard whatever Variable.resolve() might return. In
                 // practice, it will always be Variable::static and so no error
                 // is possible.
-                let role_arn = p
-                    .get_ref()
-                    .get_ref()
-                    .get_ref()
-                    .role_arn
-                    .resolve()
-                    .map_err(|_| fmt::Error)?;
+                let role_arn_res = p.get_ref().get_ref().get_ref().role_arn.resolve();
+                let role_arn = role_arn_res
+                    .as_ref()
+                    .map(String::as_str)
+                    .unwrap_or_else(|_| "(error resolving variable)");
                 write!(f, "{} via OIDC web identity", role_arn)
             }
             Self::WebIdentityFromKubernetesEnvironment(p) => {
-                let role_arn = p
-                    .get_ref()
-                    .get_ref()
-                    .get_ref()
-                    .role_arn
-                    .resolve()
-                    .map_err(|_| fmt::Error)?;
+                let role_arn_res = p.get_ref().get_ref().get_ref().role_arn.resolve();
+                let role_arn = role_arn_res
+                    .as_ref()
+                    .map(String::as_str)
+                    .unwrap_or_else(|_| "(error resolving variable)");
                 write!(
                     f,
                     "{} via web identity from Kubernetes environment",
