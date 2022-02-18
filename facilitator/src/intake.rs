@@ -8,7 +8,6 @@ use crate::{
     transport::{SignableTransport, VerifiableAndDecryptableTransport},
     BatchSigningKey, Error, DATE_FORMAT,
 };
-use anyhow::{anyhow, Result};
 use chrono::NaiveDateTime;
 use prio::{
     encrypt::{PrivateKey, PublicKey},
@@ -30,6 +29,8 @@ pub enum IntakeError {
     PrioVerification(prio::server::ServerError),
     #[error("error setting up Prio server: {0}")]
     PrioSetup(prio::server::ServerError),
+    #[error("invalid bin count {0}")]
+    InvalidBinCount(i32),
 }
 
 /// BatchIntaker is responsible for validating a batch of data packet shares
@@ -59,7 +60,7 @@ impl<'a> BatchIntaker<'a> {
         is_first: bool,
         permit_malformed_batch: bool,
         parent_logger: &Logger,
-    ) -> Result<BatchIntaker<'a>> {
+    ) -> Result<BatchIntaker<'a>, IntakeError> {
         let logger = parent_logger.new(o!(
             event::TRACE_ID => trace_id.to_string(),
             event::AGGREGATION_NAME => aggregation_name.to_owned(),
@@ -138,9 +139,8 @@ impl<'a> BatchIntaker<'a> {
         let (ingestion_header, ingestion_packets) =
             self.intake_batch.read(self.intake_public_keys)?;
         if ingestion_header.bins <= 0 {
-            return Err(Error::AnyhowError(anyhow!(
-                "invalid bin count {}",
-                ingestion_header.bins
+            return Err(Error::Intake(IntakeError::InvalidBinCount(
+                ingestion_header.bins,
             )));
         }
 
