@@ -150,7 +150,7 @@ resource "aws_sqs_queue_policy" "dead_letter" {
           Service = "sns.amazonaws.com"
         }
         Action = [
-          "sqs::SendMessage"
+          "sqs:SendMessage"
         ]
         Resource = aws_sqs_queue.dead_letter.arn
         Condition = {

@@ -325,7 +325,7 @@ impl<T: Task> TaskQueue<T> for GcpPubSubTaskQueue<T> {
                     &request,
                     "publish",
                     &ureq::json!({
-                        "messages": [{"data": handle.raw_body}]
+                        "messages": [{"data": base64::encode(&handle.raw_body)}]
                     }),
                 )
                 .context(format!("failed to forward task {:?}", handle))?;
