@@ -3,7 +3,6 @@ use dyn_clone::DynClone;
 use slog::Logger;
 use std::{
     convert::From,
-    default::Default,
     fmt::Debug,
     time::{Duration, Instant},
 };
@@ -97,6 +96,14 @@ impl RetryingAgent {
             request = request.set("Authorization", &format!("Bearer {}", token));
         }
         Ok(request)
+    }
+
+    /// Prepares a request for the given `Url` and `Method`. Returns a
+    /// `ureq::Request`. The caller may customize this request further
+    /// before sending it. No access token is used. Note that this
+    /// method is infalliable.
+    pub(crate) fn prepare_anonymous_request(&self, url: Url, method: Method) -> Request {
+        self.agent.request_url(method.to_primitive_string(), &url)
     }
 
     fn is_http_status_retryable(&self, http_status: u16) -> bool {
@@ -242,18 +249,6 @@ pub(crate) struct RequestParameters<'a> {
     pub token_provider: Option<&'a dyn AccessTokenProvider>,
 }
 
-impl Default for RequestParameters<'_> {
-    fn default() -> Self {
-        let default_url = Url::parse("https://example.com").expect("example url did not parse");
-
-        RequestParameters {
-            url: default_url,
-            method: Method::Get,
-            token_provider: None,
-        }
-    }
-}
-
 /// simple_get_request does a HTTP request to a URL and returns the body as a
 // string.
 pub(crate) fn simple_get_request(
@@ -263,13 +258,7 @@ pub(crate) fn simple_get_request(
     api_metrics: &ApiClientMetricsCollector,
 ) -> Result<String, Error> {
     let agent = RetryingAgent::new(service, api_metrics);
-    let request = agent
-        .prepare_request(RequestParameters {
-            url,
-            method: Method::Get,
-            ..Default::default()
-        })
-        .context("creating simple_get_request failed")?;
+    let request = agent.prepare_anonymous_request(url, Method::Get);
 
     Ok(agent
         .call(logger, &request, "simple_get_request")?

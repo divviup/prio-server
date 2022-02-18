@@ -187,8 +187,6 @@ pub enum GcpAuthError {
     FederationRequest(ureq::Error),
     #[error("unexpected token type {0}")]
     UnexpectedTokenType(String),
-    #[error("credential error while preparing a request for credentials: {0}")]
-    Nested(Box<GcpAuthError>), // This should be unreachable
     #[error("no service account to impersonate was provided")]
     MissingAccountToImpersonate, // This should be unreachable
     #[error(transparent)]
@@ -246,11 +244,10 @@ impl ProvideDefaultAccessToken for GkeMetadataServiceDefaultAccessTokenProvider 
             "obtaining default account access token from GKE metadata service"
         );
 
-        let mut request = self.agent.prepare_request(RequestParameters {
-            url: Self::default_access_token_url(self.metadata_service_base_url),
-            method: Method::Get,
-            ..Default::default()
-        })?;
+        let mut request = self.agent.prepare_anonymous_request(
+            Self::default_access_token_url(self.metadata_service_base_url),
+            Method::Get,
+        );
 
         request = request.set("Metadata-Flavor", "Google");
 
@@ -298,12 +295,7 @@ impl ProvideDefaultAccessToken for ServiceAccountKeyFileDefaultAccessTokenProvid
 
         let request = self
             .agent
-            .prepare_request(RequestParameters {
-                url: parse_url(self.key_file.token_uri.clone())?,
-                method: Method::Post,
-                ..Default::default()
-            })
-            .map_err(|e| GcpAuthError::Nested(Box::new(e)))?;
+            .prepare_anonymous_request(parse_url(self.key_file.token_uri.clone())?, Method::Post);
 
         self.agent
             .send_form(
@@ -753,11 +745,7 @@ impl ProvideGcpIdentityToken for GkeMetadataServiceIdentityTokenProvider {
 
         let request = self
             .agent
-            .prepare_request(RequestParameters {
-                url,
-                method: Method::Get,
-                ..Default::default()
-            })?
+            .prepare_anonymous_request(url, Method::Get)
             .set("Metadata-Flavor", "Google");
 
         self.agent

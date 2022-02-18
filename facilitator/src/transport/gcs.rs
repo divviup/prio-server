@@ -366,11 +366,9 @@ impl StreamingTransferWriter {
             content_range_header_total_length_field
         );
 
-        let mut request = self.agent.prepare_request(RequestParameters {
-            url: self.upload_session_uri.clone(),
-            method: Method::Put,
-            ..Default::default()
-        })?;
+        let mut request = self
+            .agent
+            .prepare_anonymous_request(self.upload_session_uri.clone(), Method::Put);
         request = request.set("Content-Range", &content_range);
 
         let http_response = self
@@ -471,12 +469,7 @@ impl TransportWriter for StreamingTransferWriter {
         // https://cloud.google.com/storage/docs/performing-resumable-uploads#cancel-upload
         let request = self
             .agent
-            .prepare_request(RequestParameters {
-                url: self.upload_session_uri.clone(),
-                method: Method::Delete,
-                ..Default::default()
-            })
-            .map_err(|e| TransportError::Gcs(e.into()))?;
+            .prepare_anonymous_request(self.upload_session_uri.clone(), Method::Delete);
 
         let http_response = self
             .agent
