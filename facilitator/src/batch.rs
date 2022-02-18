@@ -4,8 +4,8 @@ use crate::{
         IngestionHeader, InvalidPacket, Packet, SumPart, ValidationHeader, ValidationPacket,
     },
     metrics::BatchReaderMetricsCollector,
-    transport::{Transport, TransportWriter},
-    BatchSigningKey, DigestWriter, Error, DATE_FORMAT,
+    transport::{Transport, TransportError, TransportWriter},
+    BatchSigningKey, DigestWriter, DATE_FORMAT,
 };
 use anyhow::{anyhow, Context, Result};
 use avro_rs::{Reader, Writer};
@@ -222,10 +222,8 @@ impl<'a, H: Header, P: Packet> BatchReader<'a, H, P> {
                         // empty when we check the digest below, so this won't
                         // let someone get away with something sneaky by
                         // deleting a packet file.
-                        if let Some(lib_err) = err.downcast_ref::<Error>() {
-                            if !matches!(lib_err, Error::ObjectNotFoundError(_, _)) {
-                                packet_get_result?;
-                            }
+                        if let TransportError::ObjectNotFoundError(_, _) = &err {
+                            packet_get_result?;
                         };
                     }
                 }

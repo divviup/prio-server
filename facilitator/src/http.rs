@@ -10,7 +10,9 @@ use std::{
 use ureq::{serde_json, Agent, AgentBuilder, Request, Response};
 use url::Url;
 
-use crate::{metrics::ApiClientMetricsCollector, retries::retry_request, Error};
+use crate::{
+    gcp_oauth::GcpAuthError, metrics::ApiClientMetricsCollector, retries::retry_request, Error,
+};
 
 /// Method contains the HTTP methods supported by this crate.
 #[derive(Debug)]
@@ -83,7 +85,10 @@ impl RetryingAgent {
     /// `::send_string` to get retries.
     /// Returns an Error if the AccessTokenProvider returns an error when
     /// supplying the request with an access token.
-    pub(crate) fn prepare_request(&self, parameters: RequestParameters) -> Result<Request, Error> {
+    pub(crate) fn prepare_request(
+        &self,
+        parameters: RequestParameters,
+    ) -> Result<Request, GcpAuthError> {
         let mut request = self
             .agent
             .request_url(parameters.method.to_primitive_string(), &parameters.url);
@@ -115,12 +120,12 @@ impl RetryingAgent {
         request: &Request,
         endpoint: &'static str,
         body: &serde_json::Value,
-    ) -> Result<Response, Error> {
-        Ok(retry_request(
+    ) -> Result<Response, ureq::Error> {
+        retry_request(
             logger,
             || self.do_request_with_metrics(endpoint, || request.clone().send_json(body.clone())),
             |ureq_error| self.is_error_retryable(ureq_error),
-        )?)
+        )
     }
 
     /// Send the provided request with the provided bytes as the body.
@@ -130,12 +135,12 @@ impl RetryingAgent {
         request: &Request,
         endpoint: &'static str,
         data: &[u8],
-    ) -> Result<Response, Error> {
-        Ok(retry_request(
+    ) -> Result<Response, ureq::Error> {
+        retry_request(
             logger,
             || self.do_request_with_metrics(endpoint, || request.clone().send_bytes(data)),
             |ureq_error| self.is_error_retryable(ureq_error),
-        )?)
+        )
     }
 
     /// Send the provided data as a form encoded body.
@@ -145,12 +150,12 @@ impl RetryingAgent {
         request: &Request,
         endpoint: &'static str,
         data: &[(&str, &str)],
-    ) -> Result<Response, Error> {
-        Ok(retry_request(
+    ) -> Result<Response, ureq::Error> {
+        retry_request(
             logger,
             || self.do_request_with_metrics(endpoint, || request.clone().send_form(data)),
             |ureq_error| self.is_error_retryable(ureq_error),
-        )?)
+        )
     }
 
     /// Send the provided request with no body.
@@ -159,12 +164,12 @@ impl RetryingAgent {
         logger: &Logger,
         request: &Request,
         endpoint: &'static str,
-    ) -> Result<Response, Error> {
-        Ok(retry_request(
+    ) -> Result<Response, ureq::Error> {
+        retry_request(
             logger,
             || self.do_request_with_metrics(endpoint, || request.clone().call()),
             |ureq_error| self.is_error_retryable(ureq_error),
-        )?)
+        )
     }
 
     /// Perform some operation `op`, logging metrics on the request status and
@@ -199,7 +204,7 @@ impl RetryingAgent {
 /// Defines a behavior responsible for produing bearer authorization tokens
 pub(crate) trait AccessTokenProvider: Debug + DynClone + Send + Sync {
     /// Returns a valid bearer authroization token
-    fn ensure_access_token(&self) -> Result<String>;
+    fn ensure_access_token(&self) -> Result<String, GcpAuthError>;
 }
 
 dyn_clone::clone_trait_object!(AccessTokenProvider);
@@ -213,7 +218,7 @@ pub(crate) struct StaticAccessTokenProvider {
 }
 
 impl AccessTokenProvider for StaticAccessTokenProvider {
-    fn ensure_access_token(&self) -> Result<String> {
+    fn ensure_access_token(&self) -> Result<String, GcpAuthError> {
         Ok(self.token.clone())
     }
 }

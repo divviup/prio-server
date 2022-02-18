@@ -35,7 +35,7 @@ use ureq::Response;
 use url::Url;
 
 use crate::{
-    aws_credentials::{self, get_caller_identity_token},
+    aws_credentials::{self, get_caller_identity_token, StsError},
     config::{Identity, WorkloadIdentityPoolParameters},
     http::{
         AccessTokenProvider, Method, RequestParameters, RetryingAgent, StaticAccessTokenProvider,
@@ -122,9 +122,9 @@ struct ServiceAccountKeyFile {
 }
 
 impl TryFrom<Box<dyn Read>> for ServiceAccountKeyFile {
-    type Error = anyhow::Error;
+    type Error = crate::Error;
     fn try_from(reader: Box<dyn Read>) -> Result<Self, Self::Error> {
-        serde_json::from_reader(reader).context("failed to deserialize JSON key file")
+        serde_json::from_reader(reader).map_err(crate::Error::BadKeyFile)
     }
 }
 
@@ -166,11 +166,44 @@ impl Serialize for AccessScope {
     }
 }
 
+/// Errors related to GCP cloud service authentication.
+#[derive(Debug, thiserror::Error)]
+pub enum GcpAuthError {
+    #[error("failed to parse PEM RSA key: {0}")]
+    PemRsaKeyParse(jsonwebtoken::errors::Error),
+    #[error("failed to construct and sign JWT: {0}")]
+    JwtSign(jsonwebtoken::errors::Error),
+    #[error("failed to obtain default account access token from GKE metadata service: {0}")]
+    MetadataRequest(ureq::Error),
+    #[error("failed to obtain access token with service account key file: {0}")]
+    TokenRequest(ureq::Error),
+    #[error("failed to deserialize response from GCP token service: {0}")]
+    TokenResponseDeserialization(std::io::Error),
+    #[error("failed to get access token to impersonate service account {1}: {0}")]
+    ImpersonationRequest(ureq::Error, String),
+    #[error("failed to deserialize response from IAM API: {0}")]
+    ImpersonationResponseDeserialization(std::io::Error),
+    #[error("failed to obtain federated access token from sts.googleapis.com: {0}")]
+    FederationRequest(ureq::Error),
+    #[error("unexpected token type {0}")]
+    UnexpectedTokenType(String),
+    #[error("credential error while preparing a request for credentials: {0}")]
+    Nested(Box<GcpAuthError>), // This should be unreachable
+    #[error("no service account to impersonate was provided")]
+    MissingAccountToImpersonate, // This should be unreachable
+    #[error(transparent)]
+    Url(#[from] UrlParseError),
+    #[error("failed to get AWS credentials: {0}")]
+    Aws(rusoto_core::credential::CredentialsError),
+    #[error(transparent)]
+    Sts(#[from] StsError),
+}
+
 /// Implementations of ProvideDefaultAccessToken obtain a default access token,
 /// used either to authenticate to GCP services or to obtain a further service
 /// account access token from GCP IAM.
 trait ProvideDefaultAccessToken: Debug + DynClone + Send + Sync {
-    fn default_access_token(&self) -> Result<Response>;
+    fn default_access_token(&self) -> Result<Response, GcpAuthError>;
 }
 
 dyn_clone::clone_trait_object!(ProvideDefaultAccessToken);
@@ -207,7 +240,7 @@ impl GkeMetadataServiceDefaultAccessTokenProvider {
 }
 
 impl ProvideDefaultAccessToken for GkeMetadataServiceDefaultAccessTokenProvider {
-    fn default_access_token(&self) -> Result<Response> {
+    fn default_access_token(&self) -> Result<Response, GcpAuthError> {
         debug!(
             self.logger,
             "obtaining default account access token from GKE metadata service"
@@ -223,7 +256,7 @@ impl ProvideDefaultAccessToken for GkeMetadataServiceDefaultAccessTokenProvider 
 
         self.agent
             .call(&self.logger, &request, DEFAULT_ACCESS_TOKEN_PATH)
-            .context("failed to obtain default account access token from GKE metadata service")
+            .map_err(GcpAuthError::MetadataRequest)
     }
 }
 
@@ -238,7 +271,7 @@ struct ServiceAccountKeyFileDefaultAccessTokenProvider {
 }
 
 impl ProvideDefaultAccessToken for ServiceAccountKeyFileDefaultAccessTokenProvider {
-    fn default_access_token(&self) -> Result<Response> {
+    fn default_access_token(&self) -> Result<Response, GcpAuthError> {
         debug!(
             self.logger,
             "obtaining access token with service account key file"
@@ -259,16 +292,18 @@ impl ProvideDefaultAccessToken for ServiceAccountKeyFileDefaultAccessTokenProvid
         };
 
         let encoding_key = EncodingKey::from_rsa_pem(self.key_file.private_key.as_bytes())
-            .context("failed to parse PEM RSA key")?;
+            .map_err(GcpAuthError::PemRsaKeyParse)?;
 
-        let token =
-            encode(&header, &claims, &encoding_key).context("failed to construct and sign JWT")?;
+        let token = encode(&header, &claims, &encoding_key).map_err(GcpAuthError::JwtSign)?;
 
-        let request = self.agent.prepare_request(RequestParameters {
-            url: parse_url(self.key_file.token_uri.clone())?,
-            method: Method::Post,
-            ..Default::default()
-        })?;
+        let request = self
+            .agent
+            .prepare_request(RequestParameters {
+                url: parse_url(self.key_file.token_uri.clone())?,
+                method: Method::Post,
+                ..Default::default()
+            })
+            .map_err(|e| GcpAuthError::Nested(Box::new(e)))?;
 
         self.agent
             .send_form(
@@ -280,7 +315,7 @@ impl ProvideDefaultAccessToken for ServiceAccountKeyFileDefaultAccessTokenProvid
                     ("assertion", &token),
                 ],
             )
-            .context("failed to obtain access token with service account key file")
+            .map_err(GcpAuthError::TokenRequest)
     }
 }
 
@@ -309,7 +344,7 @@ impl Debug for AwsIamFederationViaWorkloadIdentityPoolDefaultAccessTokenProvider
 impl ProvideDefaultAccessToken
     for AwsIamFederationViaWorkloadIdentityPoolDefaultAccessTokenProvider
 {
-    fn default_access_token(&self) -> Result<Response> {
+    fn default_access_token(&self) -> Result<Response, GcpAuthError> {
         debug!(
             self.logger,
             "getting GCP workload identity pool federated token"
@@ -324,7 +359,7 @@ impl ProvideDefaultAccessToken
         let credentials = self
             .runtime_handle
             .block_on(self.aws_credentials_provider.credentials())
-            .context("failed to get AWS credentials")?;
+            .map_err(GcpAuthError::Aws)?;
 
         // Next, we construct a GetCallerIdentity token
         let sts_request_url = parse_url(format!(
@@ -366,7 +401,7 @@ impl ProvideDefaultAccessToken
 
         self.agent
             .send_json_request(&self.logger, &request, endpoint, &request_body)
-            .context("failed to obtain federated access token from sts.googleapis.com")
+            .map_err(GcpAuthError::FederationRequest)
     }
 }
 
@@ -441,7 +476,7 @@ impl AccessTokenProvider for GcpAccessTokenProvider {
     /// authenticate to the GCP IAM API to retrieve an Oauth token. If no
     /// impersonation is taking place, provides the default service account
     /// Oauth token.
-    fn ensure_access_token(&self) -> Result<String> {
+    fn ensure_access_token(&self) -> Result<String, GcpAuthError> {
         if self.account_to_impersonate.is_some() {
             self.ensure_impersonated_service_account_access_token()
         } else {
@@ -546,7 +581,7 @@ impl GcpAccessTokenProvider {
     /// is valid. Otherwise obtains and returns a new one.
     /// The returned value is an owned reference because the token owned by this
     /// struct could change while the caller is still holding the returned token
-    fn ensure_default_access_token(&self) -> Result<String> {
+    fn ensure_default_access_token(&self) -> Result<String, GcpAuthError> {
         debug!(self.logger, "obtaining read lock on default access token");
         if let Some(token) = &*self.default_access_token.read().unwrap() {
             debug!(self.logger, "obtained read lock on default access token");
@@ -572,10 +607,10 @@ impl GcpAccessTokenProvider {
 
         let response = http_response
             .into_json::<AccessTokenResponse>()
-            .context("failed to deserialize response from GCP token service")?;
+            .map_err(GcpAuthError::TokenResponseDeserialization)?;
 
         if response.token_type != "Bearer" {
-            return Err(anyhow!("unexpected token type {}", response.token_type));
+            return Err(GcpAuthError::UnexpectedTokenType(response.token_type));
         }
 
         *default_access_token = Some(AccessToken {
@@ -588,9 +623,9 @@ impl GcpAccessTokenProvider {
 
     /// Returns the current access token for the impersonated service account,
     /// if it is valid. Otherwise obtains and returns a new one.
-    fn ensure_impersonated_service_account_access_token(&self) -> Result<String> {
+    fn ensure_impersonated_service_account_access_token(&self) -> Result<String, GcpAuthError> {
         if self.account_to_impersonate.is_none() {
-            return Err(anyhow!("no service account to impersonate was provided"));
+            return Err(GcpAuthError::MissingAccountToImpersonate);
         }
 
         debug!(
@@ -623,7 +658,7 @@ impl GcpAccessTokenProvider {
         );
         let service_account_to_impersonate = match self.account_to_impersonate.as_str() {
             Some(account) => account,
-            None => return Err(anyhow!("no service account to impersonate was provided")),
+            None => return Err(GcpAuthError::MissingAccountToImpersonate),
         };
 
         let request = self.agent.prepare_request(RequestParameters {
@@ -650,14 +685,13 @@ impl GcpAccessTokenProvider {
                     "scope": [self.scope]
                 }),
             )
-            .context(format!(
-                "failed to get access token to impersonate service account {}",
-                service_account_to_impersonate
-            ))?;
+            .map_err(|e| {
+                GcpAuthError::ImpersonationRequest(e, service_account_to_impersonate.to_owned())
+            })?;
 
         let response = http_response
             .into_json::<GenerateAccessTokenResponse>()
-            .context("failed to deserialize response from IAM API")?;
+            .map_err(GcpAuthError::ImpersonationResponseDeserialization)?;
 
         *impersonated_account_token = Some(AccessToken {
             token: response.access_token.clone(),
@@ -1036,8 +1070,8 @@ jbxbE/VdW03+iXZyrnDNFAFAsRR+XgjeYheAUVLelg9qBjM7jYNf
     struct FakeDefaultAccessTokenProvider {}
 
     impl ProvideDefaultAccessToken for FakeDefaultAccessTokenProvider {
-        fn default_access_token(&self) -> Result<Response> {
-            Response::new(
+        fn default_access_token(&self) -> Result<Response, GcpAuthError> {
+            Ok(Response::new(
                 200,
                 "OK",
                 r#"{
@@ -1048,7 +1082,7 @@ jbxbE/VdW03+iXZyrnDNFAFAsRR+XgjeYheAUVLelg9qBjM7jYNf
 }
 "#,
             )
-            .context("failed to create response")
+            .expect("failed to create response"))
         }
     }
 

@@ -33,8 +33,6 @@ pub enum Error {
     AnyhowError(#[from] anyhow::Error),
     #[error("HTTP resource error: {0}")]
     HttpError(#[from] ureq::Error),
-    #[error("object {0} not found: {1}")]
-    ObjectNotFoundError(String, anyhow::Error),
     #[error("error parsing time: {0}")]
     TimeParse(#[from] chrono::ParseError),
     #[error("command line parsing error: {0}")]
@@ -47,6 +45,8 @@ pub enum Error {
     Aggregation(AggError),
     #[error(transparent)]
     Url(#[from] UrlParseError),
+    #[error("failed to deserialize JSON key file: {0}")]
+    BadKeyFile(serde_json::Error),
 }
 
 impl Error {
