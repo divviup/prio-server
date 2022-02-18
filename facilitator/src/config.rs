@@ -64,10 +64,6 @@ impl Identity {
     pub fn is_some(&self) -> bool {
         self.inner.is_some()
     }
-
-    pub(crate) fn is_none(&self) -> bool {
-        self.inner.is_none()
-    }
 }
 
 /// Parameters necessary to configure federation from AWS IAM to GCP IAM using
@@ -391,7 +387,7 @@ mod tests {
 
     #[test]
     fn identity() {
-        assert!(Identity::from_str("").unwrap().is_none());
+        assert!(Identity::from_str("").unwrap().as_str().is_none());
 
         assert_eq!(
             Identity::from_str("identity").unwrap().as_str(),

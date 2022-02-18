@@ -187,8 +187,6 @@ pub enum GcpAuthError {
     FederationRequest(ureq::Error),
     #[error("unexpected token type {0}")]
     UnexpectedTokenType(String),
-    #[error("no service account to impersonate was provided")]
-    MissingAccountToImpersonate, // This should be unreachable
     #[error(transparent)]
     Url(#[from] UrlParseError),
     #[error("failed to get AWS credentials: {0}")]
@@ -469,8 +467,8 @@ impl AccessTokenProvider for GcpAccessTokenProvider {
     /// impersonation is taking place, provides the default service account
     /// Oauth token.
     fn ensure_access_token(&self) -> Result<String, GcpAuthError> {
-        if self.account_to_impersonate.is_some() {
-            self.ensure_impersonated_service_account_access_token()
+        if let Some(account_to_impersonate) = self.account_to_impersonate.as_str() {
+            self.ensure_impersonated_service_account_access_token(account_to_impersonate)
         } else {
             self.ensure_default_access_token()
         }
@@ -615,11 +613,10 @@ impl GcpAccessTokenProvider {
 
     /// Returns the current access token for the impersonated service account,
     /// if it is valid. Otherwise obtains and returns a new one.
-    fn ensure_impersonated_service_account_access_token(&self) -> Result<String, GcpAuthError> {
-        if self.account_to_impersonate.is_none() {
-            return Err(GcpAuthError::MissingAccountToImpersonate);
-        }
-
+    fn ensure_impersonated_service_account_access_token(
+        &self,
+        service_account_to_impersonate: &str,
+    ) -> Result<String, GcpAuthError> {
         debug!(
             self.logger,
             "obtaining read lock on impersonated account token"
@@ -648,10 +645,6 @@ impl GcpAccessTokenProvider {
             self.logger,
             "obtained write lock on impersonated account token"
         );
-        let service_account_to_impersonate = match self.account_to_impersonate.as_str() {
-            Some(account) => account,
-            None => return Err(GcpAuthError::MissingAccountToImpersonate),
-        };
 
         let request = self.agent.prepare_request(RequestParameters {
             url: Self::access_token_url_for_service_account(
@@ -1110,14 +1103,22 @@ jbxbE/VdW03+iXZyrnDNFAFAsRR+XgjeYheAUVLelg9qBjM7jYNf
             iam_service_base_url: leak_string(mockito::server_url()),
         };
 
-        assert_matches!(provider.ensure_impersonated_service_account_access_token(), Ok(token) => {
-            assert_eq!(token, "fake-impersonated-token")
-        });
+        assert_matches!(
+            provider.ensure_impersonated_service_account_access_token(
+                provider.account_to_impersonate.as_str().unwrap(),
+            ), Ok(token) => {
+                assert_eq!(token, "fake-impersonated-token")
+            }
+        );
 
         // Get the token again and we should not see any more network requests
-        assert_matches!(provider.ensure_impersonated_service_account_access_token(), Ok(token) => {
-            assert_eq!(token, "fake-impersonated-token")
-        });
+        assert_matches!(
+            provider.ensure_impersonated_service_account_access_token(
+                provider.account_to_impersonate.as_str().unwrap(),
+            ), Ok(token) => {
+                assert_eq!(token, "fake-impersonated-token")
+            }
+        );
 
         mocked_post_impersonated.assert();
     }
