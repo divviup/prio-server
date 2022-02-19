@@ -1,3 +1,5 @@
+#![allow(clippy::too_many_arguments)]
+
 use anyhow::Result;
 use ring::{digest, signature::EcdsaKeyPair};
 use std::io::Write;
