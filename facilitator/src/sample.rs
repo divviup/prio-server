@@ -96,7 +96,6 @@ pub struct SampleGenerator<'a> {
 impl<'a> SampleGenerator<'a> {
     /// Creates a new SampleGenerator. See the documentation on struct
     /// SampleGenerator for discussion of each parameter.
-    #[allow(clippy::too_many_arguments)]
     pub fn new(
         aggregation_name: &'a str,
         dimension: i32,

@@ -35,7 +35,6 @@ pub struct BatchIntaker<'a> {
 }
 
 impl<'a> BatchIntaker<'a> {
-    #[allow(clippy::too_many_arguments)]
     pub fn new(
         trace_id: &'a Uuid,
         aggregation_name: &'a str,

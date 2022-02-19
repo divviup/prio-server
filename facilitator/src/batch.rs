@@ -620,7 +620,6 @@ mod tests {
         ];
     }
 
-    #[allow(clippy::too_many_arguments)] // Grandfathered in
     fn roundtrip_batch<'a, H, P>(
         header: &H,
         packets: &[P],

@@ -1,3 +1,5 @@
+#![allow(clippy::too_many_arguments)]
+
 use anyhow::{anyhow, Context, Result};
 use chrono::{prelude::Utc, NaiveDateTime};
 use clap::{value_t, App, Arg, ArgGroup, ArgMatches, SubCommand};
@@ -1532,7 +1534,6 @@ fn validate_sample_worker(
     Ok(())
 }
 
-#[allow(clippy::too_many_arguments)]
 fn validate_sample(
     logger: &Logger,
     sample_generator_mismatched_sum_count: &IntCounterVec,
@@ -1608,7 +1609,6 @@ fn validate_sample(
     Ok(())
 }
 
-#[allow(clippy::too_many_arguments)]
 fn intake_batch<F>(
     trace_id: &Uuid,
     aggregation_id: &str,
@@ -1825,7 +1825,6 @@ fn intake_batch_worker(
     Ok(())
 }
 
-#[allow(clippy::too_many_arguments)]
 fn aggregate<F>(
     trace_id: &Uuid,
     aggregation_id: &str,
@@ -2339,7 +2338,6 @@ enum PathOrInOut {
     InOut(InOut),
 }
 
-#[allow(clippy::too_many_arguments)]
 fn transport_from_args(
     identity: Identity,
     entity: Entity,
@@ -2376,7 +2374,6 @@ fn transport_from_args(
     )
 }
 
-#[allow(clippy::too_many_arguments)]
 fn transport_for_path(
     path: StoragePath,
     identity: Identity,
