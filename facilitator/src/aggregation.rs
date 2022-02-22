@@ -127,7 +127,8 @@ impl<'a> BatchAggregator<'a> {
                 self.trace_id,
                 &self.logger,
             )
-            .read(&self.ingestion_transport.transport.batch_signing_public_keys)?;
+            .read(&self.ingestion_transport.transport.batch_signing_public_keys)
+            .map_err(|e| Error::AnyhowError(e.into()))?;
             let mut peer_validation_batch_reader = BatchReader::new(
                 Batch::new_validation(self.aggregation_name, batch_id, batch_date, !self.is_first),
                 &*self.peer_validation_transport.transport,
@@ -140,7 +141,8 @@ impl<'a> BatchAggregator<'a> {
                     .set_metrics_collector(&collector.peer_validation_batches_reader_metrics);
             }
             let (peer_validation_hdr, peer_validation_packets) = peer_validation_batch_reader
-                .read(&self.peer_validation_transport.batch_signing_public_keys)?;
+                .read(&self.peer_validation_transport.batch_signing_public_keys)
+                .map_err(|e| Error::AnyhowError(e.into()))?;
 
             if servers.is_none() {
                 // Ideally, we would use the encryption_key_id in the ingestion packet
@@ -241,7 +243,7 @@ impl<'a> BatchAggregator<'a> {
                 },
                 invalid_uuids.into_iter().map(|u| InvalidPacket { uuid: u }),
             )
-            .map_err(Error::AnyhowError)
+            .map_err(|e| Error::AnyhowError(e.into()))
     }
 
     /// Aggregate the batch for the provided batch_id into the provided server.

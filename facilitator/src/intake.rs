@@ -1,12 +1,12 @@
 use crate::{
-    batch::{Batch, BatchReader, BatchWriter},
+    batch::{Batch, BatchReadError, BatchReader, BatchWriteError, BatchWriter},
     idl::{
         IdlError, IngestionDataSharePacket, IngestionHeader, ValidationHeader, ValidationPacket,
     },
     logging::event,
     metrics::IntakeMetricsCollector,
     transport::{SignableTransport, VerifiableAndDecryptableTransport},
-    BatchSigningKey, Error, DATE_FORMAT,
+    BatchSigningKey, DATE_FORMAT,
 };
 use chrono::NaiveDateTime;
 use prio::{
@@ -31,6 +31,10 @@ pub enum IntakeError {
     PrioSetup(prio::server::ServerError),
     #[error("invalid bin count {0}")]
     InvalidBinCount(i32),
+    #[error(transparent)]
+    BatchRead(#[from] BatchReadError),
+    #[error(transparent)]
+    BatchWrite(#[from] BatchWriteError),
 }
 
 /// BatchIntaker is responsible for validating a batch of data packet shares
@@ -130,7 +134,7 @@ impl<'a> BatchIntaker<'a> {
     /// and packet file, then computes validation shares and sends them to the
     /// peer share processor. The provided callback is invoked once for every
     /// thousand processed packets, unless set_callback_cadence has been called.
-    pub fn generate_validation_share<F>(&mut self, mut callback: F) -> Result<(), Error>
+    pub fn generate_validation_share<F>(&mut self, mut callback: F) -> Result<(), IntakeError>
     where
         F: FnMut(&Logger),
     {
@@ -139,9 +143,7 @@ impl<'a> BatchIntaker<'a> {
         let (ingestion_header, ingestion_packets) =
             self.intake_batch.read(self.intake_public_keys)?;
         if ingestion_header.bins <= 0 {
-            return Err(Error::Intake(IntakeError::InvalidBinCount(
-                ingestion_header.bins,
-            )));
+            return Err(IntakeError::InvalidBinCount(ingestion_header.bins));
         }
 
         // Ideally, we would use the encryption_key_id in the ingestion packet
@@ -240,7 +242,6 @@ mod tests {
             DEFAULT_PHA_ECIES_PRIVATE_KEY, DEFAULT_TRACE_ID,
         },
         transport::{LocalFileTransport, SignableTransport, VerifiableTransport},
-        Error,
     };
     use assert_matches::assert_matches;
     use prio::{encrypt::PublicKey, server::ServerError, util::SerializeError};
@@ -461,7 +462,7 @@ mod tests {
         .unwrap();
 
         let err = pha_ingestor.generate_validation_share(|_| {}).unwrap_err();
-        assert_matches!(err, Error::Intake(IntakeError::PacketDecryption(_)));
+        assert_matches!(err, IntakeError::PacketDecryption(_));
     }
 
     #[test]
@@ -555,9 +556,9 @@ mod tests {
         let err = pha_ingestor.generate_validation_share(|_| {}).unwrap_err();
         assert_matches!(
             err,
-            Error::Intake(IntakeError::PrioVerification(ServerError::Serialize(
+            IntakeError::PrioVerification(ServerError::Serialize(
                 SerializeError::UnpackInputSizeMismatch
-            )))
+            ))
         );
     }
 }

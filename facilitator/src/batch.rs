@@ -7,7 +7,6 @@ use crate::{
     transport::{Transport, TransportError, TransportWriter},
     BatchSigningKey, DigestWriter, DATE_FORMAT,
 };
-use anyhow::{anyhow, Context, Result};
 use avro_rs::{Reader, Writer};
 use chrono::NaiveDateTime;
 use ring::{
@@ -18,7 +17,8 @@ use ring::{
 use slog::{o, warn, Logger};
 use std::{
     collections::HashMap,
-    io::{Cursor, Read},
+    fmt::Display,
+    io::{self, Cursor, Read},
     marker::PhantomData,
 };
 use uuid::Uuid;
@@ -124,6 +124,41 @@ impl<H: Header, P: Packet> Batch<H, P> {
     }
 }
 
+/// Identifies which batch file an error is associated with.
+#[derive(Debug)]
+pub enum BatchFileKind {
+    Packet,
+    Header,
+    Signature,
+}
+
+impl Display for BatchFileKind {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> Result<(), std::fmt::Error> {
+        match self {
+            BatchFileKind::Packet => write!(f, "packet"),
+            BatchFileKind::Header => write!(f, "header"),
+            BatchFileKind::Signature => write!(f, "signature"),
+        }
+    }
+}
+
+/// Errors that may occur when reading a batch.
+#[derive(Debug, thiserror::Error)]
+pub enum BatchReadError {
+    #[error("failed to get {1} from transport: {0}")]
+    Transport(Box<TransportError>, BatchFileKind),
+    #[error("failed to read {1} from transport: {0}")]
+    Io(io::Error, BatchFileKind),
+    #[error(transparent)]
+    Idl(#[from] IdlError),
+    #[error("invalid signature on header with key {0}")]
+    InvalidSignature(String),
+    #[error("key identifier {0} not present in key map {:?}")]
+    UnknownKeyIdentifier(String, Vec<String>),
+    #[error("packet file digest in header {0} does not match actual packet file digest {1}")]
+    DigestMismatch(String, String),
+}
+
 /// Allows reading files, including signature validation, from an ingestion or
 /// validation batch containing a header, a packet file and a signature.
 pub struct BatchReader<'a, H: Header, P: Packet> {
@@ -173,11 +208,12 @@ impl<'a, H: Header, P: Packet> BatchReader<'a, H, P> {
     pub fn read(
         &self,
         public_keys: &HashMap<String, UnparsedPublicKey<Vec<u8>>>,
-    ) -> Result<(H, Vec<P>)> {
+    ) -> Result<(H, Vec<P>), BatchReadError> {
         // Read the batch signature.
         let signature = BatchSignature::read(
             self.transport
-                .get(self.batch.signature_key(), self.trace_id)?,
+                .get(self.batch.signature_key(), self.trace_id)
+                .map_err(|e| BatchReadError::Transport(Box::new(e), BatchFileKind::Signature))?,
         )?;
 
         // Read the header & packets, if not included in the signature.
@@ -190,9 +226,10 @@ impl<'a, H: Header, P: Packet> BatchReader<'a, H, P> {
             } else {
                 let mut header_bytes = Vec::new();
                 self.transport
-                    .get(self.batch.header_key(), self.trace_id)?
+                    .get(self.batch.header_key(), self.trace_id)
+                    .map_err(|e| BatchReadError::Transport(Box::new(e), BatchFileKind::Header))?
                     .read_to_end(&mut header_bytes)
-                    .context("failed to read header from transport")?;
+                    .map_err(|e| BatchReadError::Io(e, BatchFileKind::Header))?;
 
                 // We read all of the packets, rather than streaming bytes as we
                 // need them to yield a packet, because we need to check that the
@@ -208,7 +245,7 @@ impl<'a, H: Header, P: Packet> BatchReader<'a, H, P> {
                     Ok(mut reader) => {
                         reader
                             .read_to_end(&mut packet_bytes)
-                            .context("failed to read packets from transport")?;
+                            .map_err(|e| BatchReadError::Io(e, BatchFileKind::Packet))?;
                     }
                     Err(ref err) => {
                         // We treat ObjectNotFoundErrors as "empty" packet
@@ -223,7 +260,9 @@ impl<'a, H: Header, P: Packet> BatchReader<'a, H, P> {
                         // let someone get away with something sneaky by
                         // deleting a packet file.
                         if !matches!(&err, TransportError::ObjectNotFoundError(_, _)) {
-                            packet_get_result?;
+                            packet_get_result.map_err(|e| {
+                                BatchReadError::Transport(Box::new(e), BatchFileKind::Packet)
+                            })?;
                         };
                     }
                 }
@@ -233,16 +272,15 @@ impl<'a, H: Header, P: Packet> BatchReader<'a, H, P> {
 
         // Check the header's signature, and parse it if the signature is valid.
         let key_identifier = signature.key_identifier;
-        if let Err(err) = public_keys
-            .get(&key_identifier)
-            .with_context(|| {
-                format!(
-                    "key identifier {} not present in key map {:?}",
-                    key_identifier,
-                    public_keys.keys(),
-                )
-            })?
+        let public_key = public_keys.get(&key_identifier).ok_or_else(|| {
+            BatchReadError::UnknownKeyIdentifier(
+                key_identifier.clone(),
+                public_keys.keys().cloned().collect(),
+            )
+        })?;
+        if public_key
             .verify(&header_bytes, &signature.batch_header_signature)
+            .is_err()
         {
             if let Some(collector) = self.metrics_collector {
                 collector
@@ -250,14 +288,11 @@ impl<'a, H: Header, P: Packet> BatchReader<'a, H, P> {
                     .with_label_values(&["header"])
                     .inc();
             }
-            let message = format!(
-                "invalid signature on header with key {}: {:?}",
-                key_identifier, err
-            );
+            let signature_error = BatchReadError::InvalidSignature(key_identifier);
             if self.permit_malformed_batch {
-                warn!(self.logger, "{}", message);
+                warn!(self.logger, "{}", signature_error);
             } else {
-                return Err(anyhow!("{}", message));
+                return Err(signature_error);
             }
         }
         let header = H::read(Cursor::new(header_bytes))?;
@@ -271,15 +306,14 @@ impl<'a, H: Header, P: Packet> BatchReader<'a, H, P> {
                     .with_label_values(&["packet_file"])
                     .inc();
             }
-            let message = format!(
-                "packet file digest in header {} does not match actual packet file digest {}",
+            let digest_error = BatchReadError::DigestMismatch(
                 hex::encode(header.packet_file_digest()),
-                hex::encode(packet_digest)
+                hex::encode(packet_digest),
             );
             if self.permit_malformed_batch {
-                warn!(self.logger, "{}", message);
+                warn!(self.logger, "{}", digest_error);
             } else {
-                return Err(anyhow!("{}", message));
+                return Err(digest_error);
             }
         }
 
@@ -303,6 +337,23 @@ impl<'a, H: Header, P: Packet> BatchReader<'a, H, P> {
 
         Ok((header, packets))
     }
+}
+
+/// Errors that may occur when writing a batch.
+#[derive(Debug, thiserror::Error)]
+pub enum BatchWriteError {
+    #[error("couldn't flush packet writer: {0}")]
+    Flush(avro_rs::Error),
+    #[error("couldn't write {1}: {0}")]
+    Idl(IdlError, BatchFileKind),
+    #[error("couldn't write {1}: {0}")]
+    Io(io::Error, BatchFileKind),
+    #[error("couldn't sign header")]
+    Signing,
+    #[error("couldn't upload {1} file: {0}")]
+    Upload(Box<TransportError>, BatchFileKind),
+    #[error("couldn't complete {1} file upload: {0}")]
+    CompleteUpload(Box<TransportError>, BatchFileKind),
 }
 
 /// Allows writing files, including signature file construction, from an
@@ -350,7 +401,7 @@ impl<'a, H: Header, P: Packet> BatchWriter<'a, H, P> {
         key: &BatchSigningKey,
         header: H,
         packets: I,
-    ) -> Result<()> {
+    ) -> Result<(), BatchWriteError> {
         if self.single_object_write {
             self.single_object_write(key, header, packets)
         } else {
@@ -363,7 +414,7 @@ impl<'a, H: Header, P: Packet> BatchWriter<'a, H, P> {
         key: &BatchSigningKey,
         mut header: H,
         packets: I,
-    ) -> Result<()> {
+    ) -> Result<(), BatchWriteError> {
         // Serialize packets in memory.
         let mut packet_bytes = Vec::new();
         let mut digest_writer = DigestWriter::new(&mut packet_bytes);
@@ -371,11 +422,9 @@ impl<'a, H: Header, P: Packet> BatchWriter<'a, H, P> {
         for packet in packets {
             packet
                 .write(&mut packet_writer)
-                .context("couldn't write packet")?;
+                .map_err(|e| BatchWriteError::Idl(e, BatchFileKind::Packet))?;
         }
-        packet_writer
-            .flush()
-            .context("couldn't flush packet writer")?;
+        packet_writer.flush().map_err(BatchWriteError::Flush)?;
 
         // If the caller requested it, we insert a bogus packet file digest into
         // the peer validaton batch headers instead of the real computed
@@ -392,13 +441,13 @@ impl<'a, H: Header, P: Packet> BatchWriter<'a, H, P> {
         let mut header_bytes = Vec::new();
         header
             .write(&mut header_bytes)
-            .context("couldn't serialize header")?;
+            .map_err(|e| BatchWriteError::Idl(e, BatchFileKind::Header))?;
         // TODO(brandon): per the advice of ring's doc comments, create a single SystemRandom &
         // reuse it throughout the application rather than creating a new SystemRandom each time.
         let header_signature = key
             .key
             .sign(&SystemRandom::new(), &header_bytes)
-            .context("couldn't sign header")?;
+            .map_err(|_| BatchWriteError::Signing)?;
 
         // Write signature, including serialized header & packets.
         let batch_signature = BatchSignature {
@@ -409,13 +458,14 @@ impl<'a, H: Header, P: Packet> BatchWriter<'a, H, P> {
         };
         let mut transport_writer = self
             .transport
-            .put(self.batch.signature_key(), self.trace_id)?;
+            .put(self.batch.signature_key(), self.trace_id)
+            .map_err(|e| BatchWriteError::Upload(Box::new(e), BatchFileKind::Signature))?;
         batch_signature
             .write(&mut transport_writer)
-            .context("couldn't write signature")?;
+            .map_err(|e| BatchWriteError::Idl(e, BatchFileKind::Signature))?;
         transport_writer
             .complete_upload()
-            .context("failed to complete signature upload")
+            .map_err(|e| BatchWriteError::CompleteUpload(Box::new(e), BatchFileKind::Signature))
     }
 
     fn multi_object_write<I: IntoIterator<Item = P>>(
@@ -423,24 +473,22 @@ impl<'a, H: Header, P: Packet> BatchWriter<'a, H, P> {
         key: &BatchSigningKey,
         mut header: H,
         packets: I,
-    ) -> Result<()> {
+    ) -> Result<(), BatchWriteError> {
         // Write packets.
         let mut transport_writer = self
             .transport
             .put(self.batch.packet_file_key(), self.trace_id)
-            .context("couldn't start writing to packet file")?;
+            .map_err(|e| BatchWriteError::Upload(Box::new(e), BatchFileKind::Packet))?;
         let mut digest_writer = DigestWriter::new(&mut transport_writer);
         let mut packet_writer = Writer::new(P::schema(), &mut digest_writer);
 
         for packet in packets {
             packet
                 .write(&mut packet_writer)
-                .context("couldn't write packet")?;
+                .map_err(|e| BatchWriteError::Idl(e, BatchFileKind::Packet))?;
         }
 
-        packet_writer
-            .flush()
-            .context("couldn't flush packet writer")?;
+        packet_writer.flush().map_err(BatchWriteError::Flush)?;
         // If the caller requested it, we insert a bogus packet file digest into
         // the peer validaton batch headers instead of the real computed
         // digest. This is meant to simulate a buggy peer data share processor,
@@ -452,7 +500,7 @@ impl<'a, H: Header, P: Packet> BatchWriter<'a, H, P> {
         };
         transport_writer
             .complete_upload()
-            .context("couldn't complete packet file upload")?;
+            .map_err(|e| BatchWriteError::CompleteUpload(Box::new(e), BatchFileKind::Packet))?;
 
         // Write header.
         // TODO(brandon): per the advice of ring's doc comments, create a single SystemRandom &
@@ -461,19 +509,22 @@ impl<'a, H: Header, P: Packet> BatchWriter<'a, H, P> {
         let mut header_bytes = Vec::new();
         header
             .write(&mut header_bytes)
-            .context("couldn't serialize header")?;
+            .map_err(|e| BatchWriteError::Idl(e, BatchFileKind::Header))?;
         let header_signature = key
             .key
             .sign(&SystemRandom::new(), &header_bytes)
-            .context("couldn't sign header")?;
+            .map_err(|_| BatchWriteError::Signing)?;
 
-        let mut transport_writer = self.transport.put(self.batch.header_key(), self.trace_id)?;
+        let mut transport_writer = self
+            .transport
+            .put(self.batch.header_key(), self.trace_id)
+            .map_err(|e| BatchWriteError::Upload(Box::new(e), BatchFileKind::Header))?;
         transport_writer
             .write_all(&header_bytes)
-            .context("couldn't write batch header")?;
+            .map_err(|e| BatchWriteError::Io(e, BatchFileKind::Header))?;
         transport_writer
             .complete_upload()
-            .context("couldn't complete batch header upload")?;
+            .map_err(|e| BatchWriteError::CompleteUpload(Box::new(e), BatchFileKind::Header))?;
 
         // Write signature.
         let batch_signature = BatchSignature {
@@ -484,13 +535,14 @@ impl<'a, H: Header, P: Packet> BatchWriter<'a, H, P> {
         };
         let mut transport_writer = self
             .transport
-            .put(self.batch.signature_key(), self.trace_id)?;
+            .put(self.batch.signature_key(), self.trace_id)
+            .map_err(|e| BatchWriteError::Upload(Box::new(e), BatchFileKind::Signature))?;
         batch_signature
             .write(&mut transport_writer)
-            .context("couldn't write signature")?;
+            .map_err(|e| BatchWriteError::Idl(e, BatchFileKind::Signature))?;
         transport_writer
             .complete_upload()
-            .context("failed to complete signature upload")?;
+            .map_err(|e| BatchWriteError::CompleteUpload(Box::new(e), BatchFileKind::Signature))?;
 
         Ok(())
     }

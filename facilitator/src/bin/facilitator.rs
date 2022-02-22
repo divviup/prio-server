@@ -1579,7 +1579,8 @@ fn validate_sample(
         trace_id,
         logger,
     )
-    .read(pha_pubkey_map)?;
+    .read(pha_pubkey_map)
+    .map_err(|e| Error::AnyhowError(e.into()))?;
 
     let (facilitator_sum_part, _) = BatchReader::new(
         Batch::new_sum(
@@ -1594,7 +1595,8 @@ fn validate_sample(
         trace_id,
         logger,
     )
-    .read(facilitator_pubkey_map)?;
+    .read(facilitator_pubkey_map)
+    .map_err(|e| Error::AnyhowError(e.into()))?;
 
     let pha_accumulated_share: Vec<FieldPriov2> = pha_sum_part
         .sum
@@ -1741,7 +1743,7 @@ where
         }
     }
 
-    result
+    Ok(result?)
 }
 
 fn intake_batch_subcommand(
