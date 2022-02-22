@@ -1996,7 +1996,8 @@ where
         &mut peer_validation_transport,
         &mut aggregation_transport,
         logger,
-    )?;
+    )
+    .map_err(|e| Error::AnyhowError(e.into()))?;
 
     if let Some(collector) = metrics_collector {
         aggregator.set_metrics_collector(collector);
@@ -2021,7 +2022,7 @@ where
         }
     }
 
-    result
+    result.map_err(|e| Error::AnyhowError(e.into()))
 }
 
 fn aggregate_subcommand(
