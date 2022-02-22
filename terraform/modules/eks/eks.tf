@@ -52,15 +52,13 @@ data "aws_eks_cluster_auth" "cluster_auth" {
   name = "prio-${var.environment}"
 }
 
-# Provider aws lacks data.aws_iam_openid_connect_provider, so we must construct
-# the OIDC provider ARN
-# https://github.com/hashicorp/terraform-provider-aws/issues/17747
-data "aws_partition" "current" {}
-data "aws_caller_identity" "current" {}
+data "aws_iam_openid_connect_provider" "oidc" {
+  url = data.aws_eks_cluster.cluster.identity[0].oidc[0].issuer
+}
 
 locals {
-  oidc_provider_url = replace(data.aws_eks_cluster.cluster.identity[0].oidc[0].issuer, "https://", "")
-  oidc_provider_arn = "arn:${data.aws_partition.current.id}:iam::${data.aws_caller_identity.current.account_id}:oidc-provider/${local.oidc_provider_url}"
+  oidc_provider_url = replace(data.aws_iam_openid_connect_provider.oidc.url, "https://", "")
+  oidc_provider_arn = data.aws_iam_openid_connect_provider.oidc.arn
 }
 
 output "oidc_provider" {
