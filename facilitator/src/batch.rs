@@ -222,7 +222,7 @@ impl<'a, H: Header, P: Packet> BatchReader<'a, H, P> {
                         // empty when we check the digest below, so this won't
                         // let someone get away with something sneaky by
                         // deleting a packet file.
-                        if let TransportError::ObjectNotFoundError(_, _) = &err {
+                        if !matches!(&err, TransportError::ObjectNotFoundError(_, _)) {
                             packet_get_result?;
                         };
                     }
