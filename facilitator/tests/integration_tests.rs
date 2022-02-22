@@ -7,18 +7,20 @@ use facilitator::{
     logging::setup_test_logging,
     sample::{SampleGenerator, SampleOutput},
     test_utils::{
+        bogus_packet_decryption_private_key, bogus_packet_encryption_public_key,
+        default_facilitator_packet_decryption_private_key,
         default_facilitator_packet_encryption_public_key, default_facilitator_signing_private_key,
         default_facilitator_signing_public_key, default_ingestor_private_key,
-        default_ingestor_public_key, default_pha_packet_encryption_public_key,
-        default_pha_signing_private_key, default_pha_signing_public_key,
-        DEFAULT_FACILITATOR_ECIES_PRIVATE_KEY, DEFAULT_PHA_ECIES_PRIVATE_KEY,
+        default_ingestor_public_key, default_pha_packet_decryption_private_key,
+        default_pha_packet_encryption_public_key, default_pha_signing_private_key,
+        default_pha_signing_public_key,
     },
     transport::{
         LocalFileTransport, SignableTransport, VerifiableAndDecryptableTransport,
         VerifiableTransport,
     },
 };
-use prio::{encrypt::PrivateKey, util::reconstruct_shares};
+use prio::{encrypt::PublicKey, util::reconstruct_shares};
 use slog::info;
 use std::collections::{HashMap, HashSet};
 use tempfile::TempDir;
@@ -28,14 +30,33 @@ const TRACE_ID: Uuid = Uuid::from_bytes([97; 16]);
 
 #[test]
 fn end_to_end() {
-    end_to_end_test(None, None)
+    end_to_end_test(EndToEndTestOptions {
+        drop_nth_pha_packet: None,
+        drop_nth_facilitator_packet: None,
+        use_wrong_encryption_key_for_second_batch: false,
+    })
 }
 
 #[test]
 fn inconsistent_ingestion_batches() {
     // Have sample generation drop every third and every fourth packet from the
     // PHA and facilitator ingestion batches, respectively.
-    end_to_end_test(Some(3), Some(4))
+    end_to_end_test(EndToEndTestOptions {
+        drop_nth_pha_packet: Some(3),
+        drop_nth_facilitator_packet: Some(4),
+        use_wrong_encryption_key_for_second_batch: false,
+    })
+}
+
+#[test]
+fn wrong_encryption_key() {
+    // Use the wrong encryption key for the second batch. The first batch should
+    // still get aggregated.
+    end_to_end_test(EndToEndTestOptions {
+        drop_nth_pha_packet: None,
+        drop_nth_facilitator_packet: None,
+        use_wrong_encryption_key_for_second_batch: true,
+    })
 }
 
 /// This test verifies that aggregations fail as expected if some subset of the
@@ -132,8 +153,8 @@ fn aggregation_including_invalid_batch() {
             batch_signing_public_keys: ingestor_pub_keys.clone(),
         },
         packet_decryption_keys: vec![
-            PrivateKey::from_base64(DEFAULT_PHA_ECIES_PRIVATE_KEY).unwrap(),
-            PrivateKey::from_base64(DEFAULT_FACILITATOR_ECIES_PRIVATE_KEY).unwrap(),
+            default_pha_packet_decryption_private_key(),
+            default_facilitator_packet_decryption_private_key(),
         ],
     };
 
@@ -146,8 +167,8 @@ fn aggregation_including_invalid_batch() {
             batch_signing_public_keys: ingestor_pub_keys,
         },
         packet_decryption_keys: vec![
-            PrivateKey::from_base64(DEFAULT_PHA_ECIES_PRIVATE_KEY).unwrap(),
-            PrivateKey::from_base64(DEFAULT_FACILITATOR_ECIES_PRIVATE_KEY).unwrap(),
+            default_pha_packet_decryption_private_key(),
+            default_facilitator_packet_decryption_private_key(),
         ],
     };
 
@@ -312,7 +333,28 @@ fn aggregation_including_invalid_batch() {
         .contains("key identifier default-facilitator-signing-key not present in key map"));
 }
 
-fn end_to_end_test(drop_nth_pha: Option<usize>, drop_nth_facilitator: Option<usize>) {
+fn sample_output(
+    temp_dir: &TempDir,
+    packet_encryption_public_key: PublicKey,
+    drop_nth_packet: Option<usize>,
+) -> SampleOutput {
+    SampleOutput {
+        transport: SignableTransport {
+            transport: Box::new(LocalFileTransport::new(temp_dir.path().to_path_buf())),
+            batch_signing_key: default_ingestor_private_key(),
+        },
+        packet_encryption_public_key,
+        drop_nth_packet,
+    }
+}
+
+struct EndToEndTestOptions {
+    drop_nth_pha_packet: Option<usize>,
+    drop_nth_facilitator_packet: Option<usize>,
+    use_wrong_encryption_key_for_second_batch: bool,
+}
+
+fn end_to_end_test(test_options: EndToEndTestOptions) {
     let logger = setup_test_logging();
     let pha_tempdir = TempDir::new().unwrap();
     let facilitator_tempdir = TempDir::new().unwrap();
@@ -332,45 +374,65 @@ fn end_to_end_test(drop_nth_pha: Option<usize>, drop_nth_facilitator: Option<usi
         default_ingestor_public_key(),
     );
 
-    let pha_output = SampleOutput {
-        transport: SignableTransport {
-            transport: Box::new(LocalFileTransport::new(pha_tempdir.path().to_path_buf())),
-            batch_signing_key: default_ingestor_private_key(),
+    let batch_1_pha_output = sample_output(
+        &pha_tempdir,
+        default_pha_packet_encryption_public_key(),
+        test_options.drop_nth_pha_packet,
+    );
+    let batch_2_pha_output = sample_output(
+        &pha_tempdir,
+        if test_options.use_wrong_encryption_key_for_second_batch {
+            bogus_packet_encryption_public_key()
+        } else {
+            default_pha_packet_encryption_public_key()
         },
-        packet_encryption_public_key: default_pha_packet_encryption_public_key(),
+        test_options.drop_nth_pha_packet,
+    );
 
-        drop_nth_packet: drop_nth_pha,
-    };
-
-    let facilitator_output = SampleOutput {
-        transport: SignableTransport {
-            transport: Box::new(LocalFileTransport::new(
-                facilitator_tempdir.path().to_path_buf(),
-            )),
-            batch_signing_key: default_ingestor_private_key(),
+    let batch_1_facilitator_output = sample_output(
+        &facilitator_tempdir,
+        default_facilitator_packet_encryption_public_key(),
+        test_options.drop_nth_facilitator_packet,
+    );
+    let batch_2_facilitator_output = sample_output(
+        &facilitator_tempdir,
+        if test_options.use_wrong_encryption_key_for_second_batch {
+            bogus_packet_encryption_public_key()
+        } else {
+            default_facilitator_packet_encryption_public_key()
         },
-        packet_encryption_public_key: default_facilitator_packet_encryption_public_key(),
-        drop_nth_packet: drop_nth_facilitator,
-    };
+        test_options.drop_nth_facilitator_packet,
+    );
 
     let first_batch_packet_count = 16;
 
-    let sample_generator = SampleGenerator::new(
+    let batch_1_sample_generator = SampleGenerator::new(
         &aggregation_name,
         10,
         0.11,
         100,
         100,
-        &pha_output,
-        &facilitator_output,
+        &batch_1_pha_output,
+        &batch_1_facilitator_output,
         &logger,
     );
 
-    let batch_1_reference_sum = sample_generator
+    let batch_1_reference_sum = batch_1_sample_generator
         .generate_ingestion_sample(&TRACE_ID, &batch_1_uuid, &date, first_batch_packet_count)
         .unwrap();
 
-    let batch_2_reference_sum = sample_generator
+    let batch_2_sample_generator = SampleGenerator::new(
+        &aggregation_name,
+        10,
+        0.11,
+        100,
+        100,
+        &batch_2_pha_output,
+        &batch_2_facilitator_output,
+        &logger,
+    );
+
+    let batch_2_reference_sum = batch_2_sample_generator
         .generate_ingestion_sample(&TRACE_ID, &batch_2_uuid, &date, 14)
         .unwrap();
 
@@ -379,15 +441,20 @@ fn end_to_end_test(drop_nth_pha: Option<usize>, drop_nth_facilitator: Option<usi
         default_ingestor_private_key().identifier,
         default_ingestor_public_key(),
     );
+    let packet_decryption_keys = vec![
+        default_pha_packet_decryption_private_key(),
+        default_facilitator_packet_decryption_private_key(),
+        // We provide the bogus decryption key at intake time because we want
+        // to test decryption failures during aggregation
+        bogus_packet_decryption_private_key(),
+    ];
+
     let mut pha_ingest_transport = VerifiableAndDecryptableTransport {
         transport: VerifiableTransport {
             transport: Box::new(LocalFileTransport::new(pha_tempdir.path().to_path_buf())),
             batch_signing_public_keys: ingestor_pub_keys.clone(),
         },
-        packet_decryption_keys: vec![
-            PrivateKey::from_base64(DEFAULT_PHA_ECIES_PRIVATE_KEY).unwrap(),
-            PrivateKey::from_base64(DEFAULT_FACILITATOR_ECIES_PRIVATE_KEY).unwrap(),
-        ],
+        packet_decryption_keys: packet_decryption_keys.clone(),
     };
 
     let mut facilitator_ingest_transport = VerifiableAndDecryptableTransport {
@@ -397,10 +464,7 @@ fn end_to_end_test(drop_nth_pha: Option<usize>, drop_nth_facilitator: Option<usi
             )),
             batch_signing_public_keys: ingestor_pub_keys,
         },
-        packet_decryption_keys: vec![
-            PrivateKey::from_base64(DEFAULT_PHA_ECIES_PRIVATE_KEY).unwrap(),
-            PrivateKey::from_base64(DEFAULT_FACILITATOR_ECIES_PRIVATE_KEY).unwrap(),
-        ],
+        packet_decryption_keys,
     };
 
     let mut pha_peer_validate_signable_transport = SignableTransport {
@@ -513,6 +577,15 @@ fn end_to_end_test(drop_nth_pha: Option<usize>, drop_nth_facilitator: Option<usi
         batch_signing_key: default_pha_signing_private_key(),
     };
 
+    let packet_decryption_keys = vec![
+        default_pha_packet_decryption_private_key(),
+        default_facilitator_packet_decryption_private_key(),
+        // No more bogus decryption key
+    ];
+
+    pha_ingest_transport.packet_decryption_keys = packet_decryption_keys.clone();
+    facilitator_ingest_transport.packet_decryption_keys = packet_decryption_keys;
+
     let mut aggregation_callback_count = 0;
     BatchAggregator::new(
         &TRACE_ID,
@@ -575,10 +648,6 @@ fn end_to_end_test(drop_nth_pha: Option<usize>, drop_nth_facilitator: Option<usi
     );
     let (pha_sum_part, pha_invalid_packets) =
         pha_aggregation_batch_reader.read(&pha_pub_keys).unwrap();
-    assert_eq!(
-        pha_sum_part.total_individual_clients,
-        batch_1_reference_sum.contributions as i64 + batch_2_reference_sum.contributions as i64
-    );
     let pha_sum_fields = pha_sum_part.sum().unwrap();
 
     let facilitator_aggregation_batch_reader = BatchReader::new(
@@ -598,21 +667,46 @@ fn end_to_end_test(drop_nth_pha: Option<usize>, drop_nth_facilitator: Option<usi
     let (facilitator_sum_part, facilitator_invalid_packets) = facilitator_aggregation_batch_reader
         .read(&facilitator_pub_keys)
         .unwrap();
-    assert_eq!(
-        facilitator_sum_part.total_individual_clients,
-        batch_1_reference_sum.contributions as i64 + batch_2_reference_sum.contributions as i64
-    );
     let facilitator_sum_fields = facilitator_sum_part.sum().unwrap();
 
     let reconstructed = reconstruct_shares(&facilitator_sum_fields, &pha_sum_fields).unwrap();
 
-    let reference_sum =
-        reconstruct_shares(&batch_1_reference_sum.sum, &batch_2_reference_sum.sum).unwrap();
+    // If the second batch was encrypted under the wrong, key, then the
+    // aggregate should only include the sum over the first batch, the first
+    // batch's UUID, and the count of contributions from the first batch
+    let (reference_sum, expected_batch_uuids, expected_total_individual_clients) = if test_options
+        .use_wrong_encryption_key_for_second_batch
+    {
+        (
+            batch_1_reference_sum.sum,
+            vec![batch_1_uuid],
+            batch_1_reference_sum.contributions as i64,
+        )
+    } else {
+        (
+            reconstruct_shares(&batch_1_reference_sum.sum, &batch_2_reference_sum.sum).unwrap(),
+            vec![batch_1_uuid, batch_2_uuid],
+            batch_1_reference_sum.contributions as i64 + batch_2_reference_sum.contributions as i64,
+        )
+    };
     assert_eq!(
         reconstructed, reference_sum,
         "reconstructed shares do not match original data.\npha sum: {:?}\n
             facilitator sum: {:?}\nreconstructed sum: {:?}\nreference sum: {:?}",
         pha_sum_fields, facilitator_sum_fields, reconstructed, reference_sum
+    );
+
+    assert_eq!(expected_batch_uuids, facilitator_sum_part.batch_uuids);
+    assert_eq!(expected_batch_uuids, pha_sum_part.batch_uuids);
+
+    assert_eq!(
+        pha_sum_part.total_individual_clients,
+        expected_total_individual_clients
+    );
+
+    assert_eq!(
+        facilitator_sum_part.total_individual_clients,
+        expected_total_individual_clients
     );
 
     assert_eq!(
