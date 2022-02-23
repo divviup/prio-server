@@ -2,7 +2,7 @@ environment     = "prod-us"
 state_bucket    = "prod-us-us-west1-prio-terraform"
 gcp_region      = "us-west1"
 gcp_project     = "prio-prod-us"
-localities      = ["ta-ta", "us-ct", "us-md", "us-va", "us-wa", "us-ca", "us-ut", "us-wi", "us-ma", "us-nm", "us-hi", "us-co", "us-dc", "us-la", "us-mo"]
+localities      = ["ta-ta", "us-ct", "us-md", "us-va", "us-wa", "us-ca", "us-ut", "us-wi", "us-ma", "us-nm", "us-hi", "us-co", "us-dc", "us-la", "us-mo", "us-ak"]
 aws_region      = "us-west-1"
 manifest_domain = "isrg-prio.org"
 managed_dns_zone = {
@@ -109,6 +109,12 @@ ingestors = {
         min_aggregate_worker_count = 1
         max_aggregate_worker_count = 3
       }
+      us-ak = {
+        min_intake_worker_count    = 1
+        max_intake_worker_count    = 12
+        min_aggregate_worker_count = 1
+        max_aggregate_worker_count = 3
+      }
     }
   }
   g-enpa = {
@@ -208,6 +214,12 @@ ingestors = {
         min_aggregate_worker_count = 1
         max_aggregate_worker_count = 3
       }
+      us-ak = {
+        min_intake_worker_count    = 1
+        max_intake_worker_count    = 6
+        min_aggregate_worker_count = 1
+        max_aggregate_worker_count = 3
+      }
     }
   }
 }
@@ -222,9 +234,9 @@ is_first                                  = false
 use_aws                                   = false
 default_aggregation_period                = "8h"
 default_aggregation_grace_period          = "4h"
-workflow_manager_version                  = "0.6.25"
-facilitator_version                       = "0.6.25"
-key_rotator_version                       = "0.6.25"
+workflow_manager_version                  = "0.6.26"
+facilitator_version                       = "0.6.26"
+key_rotator_version                       = "0.6.26"
 prometheus_server_persistent_disk_size_gb = 1000
 victorops_routing_key                     = "prio-prod-us"
 
