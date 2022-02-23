@@ -2,7 +2,7 @@ environment     = "prod-us"
 state_bucket    = "prod-us-us-west1-prio-terraform"
 gcp_region      = "us-west1"
 gcp_project     = "prio-prod-us"
-localities      = ["ta-ta", "us-ct", "us-md", "us-va", "us-wa", "us-ca", "us-ut", "us-wi", "us-ma", "us-nm", "us-hi", "us-co", "us-dc", "us-la", "us-mo", "us-ak"]
+localities      = ["ta-ta", "us-ct", "us-md", "us-va", "us-wa", "us-ca", "us-ut", "us-wi", "us-ma", "us-nm", "us-hi", "us-co", "us-dc", "us-la", "us-mo"]
 aws_region      = "us-west-1"
 manifest_domain = "isrg-prio.org"
 managed_dns_zone = {
@@ -109,12 +109,6 @@ ingestors = {
         min_aggregate_worker_count = 1
         max_aggregate_worker_count = 3
       }
-      us-ak = {
-        min_intake_worker_count    = 1
-        max_intake_worker_count    = 12
-        min_aggregate_worker_count = 1
-        max_aggregate_worker_count = 3
-      }
     }
   }
   g-enpa = {
@@ -209,12 +203,6 @@ ingestors = {
         max_aggregate_worker_count = 3
       }
       us-mo = {
-        min_intake_worker_count    = 1
-        max_intake_worker_count    = 6
-        min_aggregate_worker_count = 1
-        max_aggregate_worker_count = 3
-      }
-      us-ak = {
         min_intake_worker_count    = 1
         max_intake_worker_count    = 6
         min_aggregate_worker_count = 1
