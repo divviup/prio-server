@@ -220,9 +220,9 @@ impl<T: Task> TaskQueue<T> for GcpPubSubTaskQueue<T> {
         // The JSON task is encoded as Base64 in the pubsub message
         let received_message = &received_messages[0];
         let task_bytes = base64::decode(&received_message.message.data)
-            .context("failed to decode PubSub message")?;
+            .context("failed to decode PubSub message from base64")?;
         let task_json =
-            String::from_utf8(task_bytes).context("utf-8 decoding error with PubSub message")?;
+            String::from_utf8(task_bytes).context("failed to decode PubSub message from UTF-8")?;
         let task: T = serde_json::from_reader(task_json.as_bytes())
             .context(format!("failed to decode task {:?} from JSON", task_json))?;
 

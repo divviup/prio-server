@@ -145,9 +145,9 @@ impl Display for BatchFileKind {
 /// Errors that may occur when reading a batch.
 #[derive(Debug, thiserror::Error)]
 pub enum BatchReadError {
-    #[error("failed to get {1} from transport: {0}")]
+    #[error("failed to get {1} file from transport: {0}")]
     Transport(Box<TransportError>, BatchFileKind),
-    #[error("failed to read {1} from transport: {0}")]
+    #[error("failed to read {1} file from transport: {0}")]
     Io(io::Error, BatchFileKind),
     #[error(transparent)]
     Idl(#[from] IdlError),
