@@ -155,13 +155,16 @@ impl<'a> BatchAggregator<'a> {
             ));
             }
 
-            self.aggregate_share(
+            if self.aggregate_share(
                 servers.as_mut().unwrap(),
                 &mut invalid_uuids,
                 ingestion_packets,
                 peer_validation_packets,
-            )?;
-            included_batch_uuids.push(batch_id.to_owned());
+            )? {
+                // Include the batch UUID only if the batch was aggregated into
+                // the sum part
+                included_batch_uuids.push(batch_id.to_owned());
+            }
             ingestion_header.get_or_insert(ingestion_hdr);
             callback(&self.logger);
         }
@@ -230,14 +233,18 @@ impl<'a> BatchAggregator<'a> {
 
     /// Aggregate the batch for the provided batch_id into the provided server.
     /// The UUIDs of packets for which aggregation fails are recorded in the
-    /// provided invalid_uuids vector.
+    /// provided invalid_uuids vector. Returns `Ok(true)` if `ingestion_packets`
+    /// were aggregated into the server, `Ok(false)` if `ingestion_packets` was
+    /// rejected (in which case other batches in the aggregation window should
+    /// still be summed) and `Err` if something went wrong (in which case the
+    /// overall aggregation should be aborted).
     fn aggregate_share(
         &mut self,
         servers: &mut Vec<Server<FieldPriov2>>,
         invalid_uuids: &mut Vec<Uuid>,
         ingestion_packets: Vec<IngestionDataSharePacket>,
         peer_validation_packets: Vec<ValidationPacket>,
-    ) -> Result<()> {
+    ) -> Result<bool> {
         // We can't be sure that the peer validation, own validation and
         // ingestion batches contain all the same packets or that they are in
         // the same order. There could also be duplicate packets. Compared to
@@ -273,7 +280,7 @@ impl<'a> BatchAggregator<'a> {
                         // validation batch from this ingestion batch.
                         warn!(self.logger, "Skipping ingestion batch due to undecryptable packet";
                             event::PACKET_UUID => packet_uuid.to_string());
-                        return Ok(());
+                        return Ok(false);
                     }
                     return Err(e);
                 }
@@ -358,6 +365,6 @@ impl<'a> BatchAggregator<'a> {
                 .set(processed_ingestion_packets.len() as i64);
         }
 
-        Ok(())
+        Ok(true)
     }
 }

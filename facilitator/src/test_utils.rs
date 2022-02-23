@@ -16,6 +16,10 @@ pub const DEFAULT_PHA_ECIES_PRIVATE_KEY: &str =
 pub const DEFAULT_FACILITATOR_ECIES_PRIVATE_KEY: &str =
     "BNNOqoU54GPo+1gTPv+hCgA9U2ZCKd76yOMrWa1xTWgeb4LhFLMQIQoRwDVaW64g\
     /WTdcxT4rDULoycUNFB60LER6hPEHg/ObBnRPV1rwS3nj9Bj0tbjVPPyL9p8QW8B+w==";
+const BOGUS_ECIES_PRIVATE_KEY: &str =
+    "BMbqB/fIy8fVJEKlrE7e0XusKF4KaUO7GPBc0WEGSqCPKAcujBmq8IfjuUS1fTLo\
+    rzGGNVDt5Vq5GWnR8lSwL016Rm88BqVTzF49kGeAUm7TTK11eAAvEG6zd/dU8A8lQg==";
+
 pub const DEFAULT_INGESTOR_PRIVATE_KEY: &str =
     "MIGHAgEAMBMGByqGSM49AgEGCCqGSM49AwEHBG0wawIBAQQggoa08rQR90Asvhy5b\
     WIgFBDeGaO8FnVEF3PVpNVmDGChRANCAAQ2mZfm4UC73PkWsYz3Uub6UTIAFQCPGxo\
@@ -147,12 +151,28 @@ pub fn default_pha_signing_public_key() -> UnparsedPublicKey<Vec<u8>> {
     )
 }
 
+pub fn default_pha_packet_decryption_private_key() -> PrivateKey {
+    PrivateKey::from_base64(DEFAULT_PHA_ECIES_PRIVATE_KEY).unwrap()
+}
+
 pub fn default_pha_packet_encryption_public_key() -> PublicKey {
-    PublicKey::from(&PrivateKey::from_base64(DEFAULT_PHA_ECIES_PRIVATE_KEY).unwrap())
+    PublicKey::from(&default_pha_packet_decryption_private_key())
+}
+
+pub fn default_facilitator_packet_decryption_private_key() -> PrivateKey {
+    PrivateKey::from_base64(DEFAULT_FACILITATOR_ECIES_PRIVATE_KEY).unwrap()
 }
 
 pub fn default_facilitator_packet_encryption_public_key() -> PublicKey {
-    PublicKey::from(&PrivateKey::from_base64(DEFAULT_FACILITATOR_ECIES_PRIVATE_KEY).unwrap())
+    PublicKey::from(&default_facilitator_packet_decryption_private_key())
+}
+
+pub fn bogus_packet_decryption_private_key() -> PrivateKey {
+    PrivateKey::from_base64(BOGUS_ECIES_PRIVATE_KEY).unwrap()
+}
+
+pub fn bogus_packet_encryption_public_key() -> PublicKey {
+    PublicKey::from(&bogus_packet_decryption_private_key())
 }
 
 #[cfg(test)]
