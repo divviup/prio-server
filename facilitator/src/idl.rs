@@ -1,4 +1,4 @@
-use crate::intake::IntakeError;
+use crate::{intake::IntakeError, ErrorClassification};
 use avro_rs::{
     from_value,
     types::{Record, Value, ValueKind},
@@ -172,6 +172,25 @@ pub enum IdlError {
     /// The value for r_pit was out of range.
     #[error("illegal r_pit value {0}")]
     OverflowingRPit(i64),
+}
+
+impl ErrorClassification for IdlError {
+    fn is_retryable(&self) -> bool {
+        match self {
+            // These errors all indicate issues with an Avro file's structure not matching our
+            // expectations. This won't change, so we don't need to retry.
+            IdlError::Eof
+            | IdlError::MalformedHeader(_)
+            | IdlError::MalformedPacket(_)
+            | IdlError::ExtraData
+            | IdlError::WrongValueType
+            | IdlError::OverflowingRPit(_) => false,
+            // Many different avro_rs::Error variants encapsulate I/O errors from the underlying
+            // stream. We will retry all avro_rs errors for now, rather than attempt to classify
+            // them.
+            IdlError::Avro(_, _) => true,
+        }
+    }
 }
 
 pub trait Header: Sized {

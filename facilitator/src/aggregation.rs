@@ -5,7 +5,7 @@ use crate::{
     logging::event,
     metrics::AggregateMetricsCollector,
     transport::{SignableTransport, VerifiableAndDecryptableTransport, VerifiableTransport},
-    BatchSigningKey,
+    BatchSigningKey, ErrorClassification,
 };
 use chrono::NaiveDateTime;
 use prio::{
@@ -42,6 +42,29 @@ pub enum AggError {
     Intake(IntakeError),
     #[error("invalid verification message: {0}")]
     InvalidVerification(TryFromIntError),
+}
+
+impl ErrorClassification for AggError {
+    fn is_retryable(&self) -> bool {
+        match self {
+            // If the batches and dates in this task are empty, retrying the task won't help.
+            AggError::EmptyBatchesAndDates => false,
+            // These indicate an issue with the peer server's validation message. Retries are not
+            // necessary in this case.
+            AggError::HeaderMismatch(_) | AggError::InvalidVerification(_) => false,
+            // libprio-rs errors may be due to getrandom failures.
+            AggError::PrioSetup(_) | AggError::PrioAccumulate(_) | AggError::Validation(_, _) => {
+                true
+            }
+            // This error is only reachable if we try to aggregate with zero servers, which
+            // indicates a configuration error with this process. Retry again later.
+            AggError::ValidationUnknown(_) => true,
+            // Dispatch to wrapped error types.
+            AggError::BatchRead(e) => e.is_retryable(),
+            AggError::BatchWrite(e) => e.is_retryable(),
+            AggError::Intake(e) => e.is_retryable(),
+        }
+    }
 }
 
 pub struct BatchAggregator<'a> {

@@ -5,7 +5,7 @@ use crate::{
     },
     metrics::BatchReaderMetricsCollector,
     transport::{Transport, TransportError, TransportWriter},
-    BatchSigningKey, DigestWriter, DATE_FORMAT,
+    BatchSigningKey, DigestWriter, ErrorClassification, DATE_FORMAT,
 };
 use avro_rs::{Reader, Writer};
 use chrono::NaiveDateTime;
@@ -157,6 +157,23 @@ pub enum BatchReadError {
     UnknownKeyIdentifier(String, Vec<String>),
     #[error("packet file digest in header {0} does not match actual packet file digest {1}")]
     DigestMismatch(String, String),
+}
+
+impl ErrorClassification for BatchReadError {
+    fn is_retryable(&self) -> bool {
+        match self {
+            // For errors that are straightforwardly I/O issues, retry them later.
+            BatchReadError::Transport(_, _) | BatchReadError::Io(_, _) => true,
+            // Bad signatures or digests cannot be resolved with retries.
+            BatchReadError::InvalidSignature(_) | BatchReadError::DigestMismatch(_, _) => false,
+            // If the key identifier is not recognized, that could be due to either an issue
+            // with the submitted data or out-of-date configuration in this process's memory.
+            // Retry later in case it is due to the latter.
+            BatchReadError::UnknownKeyIdentifier(_, _) => true,
+            // Dispatch to wrapped error.
+            BatchReadError::Idl(e) => e.is_retryable(),
+        }
+    }
 }
 
 /// Allows reading files, including signature validation, from an ingestion or
@@ -354,6 +371,22 @@ pub enum BatchWriteError {
     Upload(Box<TransportError>, BatchFileKind),
     #[error("couldn't complete {1} file upload: {0}")]
     CompleteUpload(Box<TransportError>, BatchFileKind),
+}
+
+impl ErrorClassification for BatchWriteError {
+    fn is_retryable(&self) -> bool {
+        match self {
+            //Retry I/O errors, network errors, and cloud API errors.
+            BatchWriteError::Flush(_)
+            | BatchWriteError::Io(_, _)
+            | BatchWriteError::Upload(_, _)
+            | BatchWriteError::CompleteUpload(_, _) => true,
+            // Dispatch to the wrapped error.
+            BatchWriteError::Idl(e, _) => e.is_retryable(),
+            // Signing errors could be due to getrandom failures.
+            BatchWriteError::Signing => true,
+        }
+    }
 }
 
 /// Allows writing files, including signature file construction, from an

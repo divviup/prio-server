@@ -49,9 +49,32 @@ pub enum Error {
     BadKeyFile(serde_json::Error),
 }
 
-impl Error {
-    pub fn is_retryable(&self) -> bool {
-        !matches!(self, Error::Intake(IntakeError::PacketDecryption(_)))
+/// This trait captures whether a given error is due to corruption in client-provided data, in
+/// which case it is unnecessary to retry its processing, or due to I/O errors or cloud service
+/// API errors, in which case processing should be retried at a later time.
+pub trait ErrorClassification {
+    fn is_retryable(&self) -> bool;
+}
+
+impl ErrorClassification for Error {
+    fn is_retryable(&self) -> bool {
+        match self {
+            // Catch-all error type -- retries OK.
+            Error::AnyhowError(_) => true,
+            // Errors from ureq are obviously retryable.
+            Error::HttpError(_) => true,
+            // These errors likely indicate a problem with how this process was invoked, its
+            // environment, or subsequent parsing of data from an outside source. As such,
+            // the batch itself should be retried.
+            Error::Clap(_)
+            | Error::MissingArguments(_)
+            | Error::TimeParse(_)
+            | Error::BadKeyFile(_)
+            | Error::Url(_) => true,
+            // Dispatch to the wrapped error type.
+            Error::Intake(e) => e.is_retryable(),
+            Error::Aggregation(e) => e.is_retryable(),
+        }
     }
 }
 

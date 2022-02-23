@@ -6,7 +6,7 @@ use crate::{
     logging::event,
     metrics::IntakeMetricsCollector,
     transport::{SignableTransport, VerifiableAndDecryptableTransport},
-    BatchSigningKey, DATE_FORMAT,
+    BatchSigningKey, ErrorClassification, DATE_FORMAT,
 };
 use chrono::NaiveDateTime;
 use prio::{
@@ -35,6 +35,22 @@ pub enum IntakeError {
     BatchRead(#[from] BatchReadError),
     #[error(transparent)]
     BatchWrite(#[from] BatchWriteError),
+}
+
+impl ErrorClassification for IntakeError {
+    fn is_retryable(&self) -> bool {
+        match self {
+            // Packet decryption errors are the canonical case of errors that don't merit retries.
+            // Batches with zero bins are likewise not going to benefit from retries.
+            IntakeError::PacketDecryption(_) | IntakeError::InvalidBinCount(_) => false,
+            // libprio-rs errors may be due to getrandom failures.
+            IntakeError::PrioSetup(_) | IntakeError::PrioVerification(_) => true,
+            // Dispatch to wrapped errors.
+            IntakeError::Idl(e) => e.is_retryable(),
+            IntakeError::BatchRead(e) => e.is_retryable(),
+            IntakeError::BatchWrite(e) => e.is_retryable(),
+        }
+    }
 }
 
 /// BatchIntaker is responsible for validating a batch of data packet shares

@@ -47,7 +47,7 @@ use facilitator::{
         GcsTransport, LocalFileTransport, S3Transport, SignableTransport, Transport,
         VerifiableAndDecryptableTransport, VerifiableTransport,
     },
-    BatchSigningKey, Error, DATE_FORMAT,
+    BatchSigningKey, Error, ErrorClassification, DATE_FORMAT,
 };
 
 fn num_validator<F: FromStr>(s: String) -> Result<(), String> {
