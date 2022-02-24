@@ -20,7 +20,7 @@ use tokio::runtime::Handle;
 pub struct AwsSqsTaskQueue<T: Task> {
     region: Region,
     queue_url: String,
-    dead_letter_topic: Option<String>,
+    rejected_topic: Option<String>,
     runtime_handle: Handle,
     credentials_provider: aws_credentials::Provider,
     logger: Logger,
@@ -32,7 +32,7 @@ impl<T: Task> AwsSqsTaskQueue<T> {
     pub fn new(
         region: &str,
         queue_url: &str,
-        dead_letter_topic: Option<&str>,
+        rejected_topic: Option<&str>,
         runtime_handle: &Handle,
         credentials_provider: aws_credentials::Provider,
         parent_logger: &Logger,
@@ -47,7 +47,7 @@ impl<T: Task> AwsSqsTaskQueue<T> {
         Ok(AwsSqsTaskQueue {
             region,
             queue_url: queue_url.to_owned(),
-            dead_letter_topic: dead_letter_topic.map(str::to_owned),
+            rejected_topic: rejected_topic.map(str::to_owned),
             runtime_handle: runtime_handle.clone(),
             credentials_provider,
             logger,
@@ -187,22 +187,22 @@ impl<T: Task> TaskQueue<T> for AwsSqsTaskQueue<T> {
             .context("failed to extend deadline on task")
     }
 
-    fn forward_to_dead_letter_queue(&self, task: TaskHandle<T>) -> Result<()> {
+    fn forward_to_rejected_queue(&self, task: TaskHandle<T>) -> Result<()> {
         let logger = self
             .logger
             .new(o!(event::TASK_ACKNOWLEDGEMENT_ID => task.acknowledgment_id.to_owned()));
 
-        let topic = if let Some(topic) = &self.dead_letter_topic {
+        let topic = if let Some(topic) = &self.rejected_topic {
             topic
         } else {
             info!(
-                self.logger, "not forwarding to dead letter queue, topic not configured";
+                self.logger, "not forwarding to rejected queue, topic not configured";
                 event::TASK_ACKNOWLEDGEMENT_ID => &task.acknowledgment_id,
             );
             return self.nacknowledge_task(task);
         };
 
-        info!(logger, "forwarding to dead letter queue");
+        info!(logger, "forwarding to rejected queue");
 
         let client = self.sns_client()?;
         retry_request(

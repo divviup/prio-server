@@ -95,33 +95,6 @@ resource "aws_sns_topic_subscription" "task" {
   raw_message_delivery = true
 }
 
-# This topic allows the facilitator to immediately deliver a message to the
-# dead letter queue in certain circumstances, rather than waiting for the task
-# queue's automatic retries to do so upon repeated failure.
-resource "aws_sns_topic" "dead_letter" {
-  name = "${var.environment}-${var.data_share_processor_name}-${var.task}-dead-letter"
-}
-
-resource "aws_sns_topic_policy" "dead_letter" {
-  arn = aws_sns_topic.dead_letter.arn
-
-  policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [
-      {
-        Effect = "Allow"
-        Principal = {
-          AWS = var.subscriber_iam_role
-        }
-        Action = [
-          "SNS:Publish",
-        ]
-        Resource = aws_sns_topic.dead_letter.arn
-      }
-    ]
-  })
-}
-
 resource "aws_sqs_queue" "dead_letter" {
   name                       = "${aws_sns_topic.task.name}-dead-letter"
   visibility_timeout_seconds = 600
@@ -143,7 +116,50 @@ resource "aws_sqs_queue_policy" "dead_letter" {
           "sqs:SendMessage"
         ]
         Resource = aws_sqs_queue.dead_letter.arn
-      },
+      }
+    ]
+  })
+}
+
+# The facilitator deployments will forward tasks to this topic and
+# subscription if there is an issue with a batch such that it
+# cannot be processed.
+resource "aws_sns_topic" "rejected" {
+  name = "${aws_sqs_queue.task.name}-rejected"
+}
+
+resource "aws_sns_topic_policy" "rejected" {
+  arn = aws_sns_topic.rejected.arn
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Principal = {
+          AWS = var.subscriber_iam_role
+        }
+        Action = [
+          "SNS:Publish",
+        ]
+        Resource = aws_sns_topic.rejected.arn
+      }
+    ]
+  })
+}
+
+resource "aws_sqs_queue" "rejected" {
+  name                       = "${aws_sqs_queue.task.name}-rejected"
+  visibility_timeout_seconds = 600
+  message_retention_seconds  = 1209600
+}
+
+resource "aws_sqs_queue_policy" "rejected" {
+  queue_url = aws_sqs_queue.rejected.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
       {
         Effect = "Allow"
         Principal = {
@@ -152,10 +168,10 @@ resource "aws_sqs_queue_policy" "dead_letter" {
         Action = [
           "sqs:SendMessage"
         ]
-        Resource = aws_sqs_queue.dead_letter.arn
+        Resource = aws_sqs_queue.rejected.arn
         Condition = {
           ArnEquals = {
-            "aws:SourceArn" = aws_sns_topic.dead_letter.arn
+            "aws:SourceArn" = aws_sns_topic.rejected.arn
           }
         }
       }
@@ -163,10 +179,10 @@ resource "aws_sqs_queue_policy" "dead_letter" {
   })
 }
 
-resource "aws_sns_topic_subscription" "dead_letter" {
-  topic_arn            = aws_sns_topic.dead_letter.arn
+resource "aws_sns_topic_subscription" "rejected" {
+  topic_arn            = aws_sns_topic.rejected.arn
   protocol             = "sqs"
-  endpoint             = aws_sqs_queue.dead_letter.arn
+  endpoint             = aws_sqs_queue.rejected.arn
   raw_message_delivery = true
 }
 
@@ -178,7 +194,7 @@ output "queue" {
     subscription_kind = "aws-sqs"
     # aws_sqs_queue.id yields the SQS queue *URL*, not an ARN or name, which is
     # what clients need in order to dequeue messages
-    subscription      = aws_sqs_queue.task.id
-    dead_letter_topic = aws_sns_topic.dead_letter.arn
+    subscription   = aws_sqs_queue.task.id
+    rejected_topic = aws_sns_topic.rejected.arn
   }
 }

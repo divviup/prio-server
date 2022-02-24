@@ -35,9 +35,9 @@ pub trait TaskQueue<T: Task>: Debug + DynClone + Send + Sync {
     /// retried later.
     fn nacknowledge_task(&self, handle: TaskHandle<T>) -> Result<()>;
 
-    /// Immediately forward a task to the associated dead letter queue, and
+    /// Immediately forward a task to the associated rejected queue, and
     /// remove it from the task queue.
-    fn forward_to_dead_letter_queue(&self, handle: TaskHandle<T>) -> Result<()>;
+    fn forward_to_rejected_queue(&self, handle: TaskHandle<T>) -> Result<()>;
 
     /// Signal to the task queue that more time is needed to handle the task.
     fn extend_task_deadline(&self, handle: &TaskHandle<T>, increment: &Duration) -> Result<()>;
