@@ -294,40 +294,35 @@ impl<T: Task> TaskQueue<T> for GcpPubSubTaskQueue<T> {
             event::TASK_ACKNOWLEDGEMENT_ID => handle.acknowledgment_id.to_owned(),
         ));
 
-        if let Some(topic) = &self.dead_letter_topic {
-            info!(
-                logger, "forwarding to dead letter queue";
-            );
-
-            let request = self.agent.prepare_request(RequestParameters {
-                url: gcp_pubsub_publish_url(
-                    &self.pubsub_api_endpoint,
-                    &self.gcp_project_id,
-                    topic,
-                )?,
-                method: Method::Post,
-                token_provider: Some(&self.access_token_provider),
-            })?;
-
-            self.agent
-                .send_json_request(
-                    &logger,
-                    &request,
-                    "publish",
-                    &ureq::json!({
-                        "messages": [{"data": base64::encode(&handle.raw_body)}]
-                    }),
-                )
-                .context(format!("failed to forward task {:?}", handle))?;
-
-            self.acknowledge_task(handle)
+        let topic = if let Some(topic) = &self.dead_letter_topic {
+            topic
         } else {
             info!(
                 logger, "not forwarding to dead letter queue, topic not configured";
-                event::TASK_ACKNOWLEDGEMENT_ID => &handle.acknowledgment_id,
             );
-            self.nacknowledge_task(handle)
-        }
+            return self.nacknowledge_task(handle);
+        };
+
+        info!(logger, "forwarding to dead letter queue");
+
+        let request = self.agent.prepare_request(RequestParameters {
+            url: gcp_pubsub_publish_url(&self.pubsub_api_endpoint, &self.gcp_project_id, topic)?,
+            method: Method::Post,
+            token_provider: Some(&self.access_token_provider),
+        })?;
+
+        self.agent
+            .send_json_request(
+                &logger,
+                &request,
+                "publish",
+                &ureq::json!({
+                    "messages": [{"data": base64::encode(&handle.raw_body)}]
+                }),
+            )
+            .context(format!("failed to forward task {:?}", handle))?;
+
+        self.acknowledge_task(handle)
     }
 }
 

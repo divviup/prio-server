@@ -188,45 +188,48 @@ impl<T: Task> TaskQueue<T> for AwsSqsTaskQueue<T> {
     }
 
     fn forward_to_dead_letter_queue(&self, task: TaskHandle<T>) -> Result<()> {
-        if let Some(topic) = &self.dead_letter_topic {
-            info!(
-                self.logger, "forwarding to dead letter queue";
-                event::TASK_ACKNOWLEDGEMENT_ID => &task.acknowledgment_id,
-            );
+        let logger = self
+            .logger
+            .new(o!(event::TASK_ACKNOWLEDGEMENT_ID => task.acknowledgment_id.to_owned()));
 
-            let client = self.sns_client()?;
-            retry_request(
-                &self
-                    .logger
-                    .new(o!(event::ACTION => "submit forwarded message")),
-                &self.api_metrics,
-                "sns.amazonaws.com",
-                "Publish",
-                &self.runtime_handle,
-                || {
-                    client.publish(PublishInput {
-                        message: task.raw_body.clone(),
-                        message_attributes: None,
-                        message_deduplication_id: None,
-                        message_group_id: None,
-                        message_structure: None,
-                        phone_number: None,
-                        subject: None,
-                        target_arn: None,
-                        topic_arn: Some(topic.clone()),
-                    })
-                },
-            )
-            .context("failed to forward message to SNS")?;
-
-            self.acknowledge_task(task)
+        let topic = if let Some(topic) = &self.dead_letter_topic {
+            topic
         } else {
             info!(
                 self.logger, "not forwarding to dead letter queue, topic not configured";
                 event::TASK_ACKNOWLEDGEMENT_ID => &task.acknowledgment_id,
             );
-            self.nacknowledge_task(task)
-        }
+            return self.nacknowledge_task(task);
+        };
+
+        info!(logger, "forwarding to dead letter queue");
+
+        let client = self.sns_client()?;
+        retry_request(
+            &self
+                .logger
+                .new(o!(event::ACTION => "submit forwarded message")),
+            &self.api_metrics,
+            "sns.amazonaws.com",
+            "Publish",
+            &self.runtime_handle,
+            || {
+                client.publish(PublishInput {
+                    message: task.raw_body.clone(),
+                    message_attributes: None,
+                    message_deduplication_id: None,
+                    message_group_id: None,
+                    message_structure: None,
+                    phone_number: None,
+                    subject: None,
+                    target_arn: None,
+                    topic_arn: Some(topic.clone()),
+                })
+            },
+        )
+        .context("failed to forward message to SNS")?;
+
+        self.acknowledge_task(task)
     }
 }
 

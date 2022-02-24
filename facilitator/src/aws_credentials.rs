@@ -11,7 +11,7 @@ use anyhow::{Context, Result};
 use async_trait::async_trait;
 use chrono::{prelude::Utc, DateTime};
 use hmac::{digest::InvalidLength, Hmac, Mac};
-use http::header::{HeaderMap, HeaderName};
+use http::header::{HeaderMap, HeaderName, InvalidHeaderValue};
 use rusoto_core::{
     credential::{
         AutoRefreshingProvider, AwsCredentials, ChainProvider, CredentialsError,
@@ -621,14 +621,14 @@ pub enum StsError {
     MissingHost(Url),
     #[error("no query params in request URL")]
     MissingQuery,
-    #[error("failed to parse host as header value")]
-    BadHeaderHost,
-    #[error("failed to parse formatted date as header value")]
-    BadHeaderDate,
-    #[error("failed to parse Amazon security token as header value")]
-    BadHeaderToken,
-    #[error("failed to parse workload identity pool provider as header value")]
-    BadHeaderTarget,
+    #[error("failed to parse host as header value: {0}")]
+    BadHeaderHost(InvalidHeaderValue),
+    #[error("failed to parse formatted date as header value: {0}")]
+    BadHeaderDate(InvalidHeaderValue),
+    #[error("failed to parse Amazon security token as header value: {0}")]
+    BadHeaderToken(InvalidHeaderValue),
+    #[error("failed to parse workload identity pool provider as header value: {0}")]
+    BadHeaderTarget(InvalidHeaderValue),
     #[error(transparent)]
     ParseRegion(#[from] ParseRegionError),
     #[error("failed to construct AWS request signing key: {0}")]
@@ -709,7 +709,7 @@ fn get_caller_identity_token_at_time(
     let mut headers = HeaderMap::new();
     headers.insert(
         HeaderName::from_static(HOST_HEADER),
-        host.parse().map_err(|_| StsError::BadHeaderHost)?,
+        host.parse().map_err(StsError::BadHeaderHost)?,
     );
     headers.insert(
         HeaderName::from_static(AMAZON_DATE_HEADER),
@@ -717,19 +717,19 @@ fn get_caller_identity_token_at_time(
             .format(LONG_DATETIME)
             .to_string()
             .parse()
-            .map_err(|_| StsError::BadHeaderDate)?,
+            .map_err(StsError::BadHeaderDate)?,
     );
     headers.insert(
         HeaderName::from_static(AMAZON_SECURITY_TOKEN_HEADER),
         aws_security_token
             .parse()
-            .map_err(|_| StsError::BadHeaderToken)?,
+            .map_err(StsError::BadHeaderToken)?,
     );
     headers.insert(
         HeaderName::from_static(GOOGLE_TARGET_RESOURCE_HEADER),
         workload_identity_pool_provider
             .parse()
-            .map_err(|_| StsError::BadHeaderTarget)?,
+            .map_err(StsError::BadHeaderTarget)?,
     );
 
     // Create a canonical signature v4 request.

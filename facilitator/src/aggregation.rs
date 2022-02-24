@@ -1,6 +1,9 @@
 use crate::{
     batch::{Batch, BatchReadError, BatchReader, BatchWriteError, BatchWriter},
-    idl::{IngestionDataSharePacket, IngestionHeader, InvalidPacket, SumPart, ValidationPacket},
+    idl::{
+        IngestionDataSharePacket, IngestionHeader, InvalidPacket, SumPart, ValidationHeader,
+        ValidationPacket,
+    },
     intake::IntakeError,
     logging::event,
     metrics::AggregateMetricsCollector,
@@ -21,19 +24,19 @@ use std::{
 use uuid::Uuid;
 
 #[derive(Debug, thiserror::Error)]
-pub enum AggError {
+pub enum AggregationError {
     #[error("batch_ids_and_dates is empty")]
     EmptyBatchesAndDates,
-    #[error("ingestion header does not match peer validation header. {0}")]
-    HeaderMismatch(String),
+    #[error(
+        "ingestion header does not match peer validation header. Ingestion: {0:?}\nPeer:{1:?}"
+    )]
+    HeaderMismatch(IngestionHeader, ValidationHeader),
     #[error("error setting up Prio server: {0}")]
     PrioSetup(prio::server::ServerError),
     #[error("error accumulating shares: {0}")]
-    PrioAccumulate(prio::server::ServerError),
-    #[error("trace id {1} failed to validate packets: {0}")]
-    Validation(prio::server::ServerError, Uuid),
-    #[error("trace id {0} failed to validate packets: unknown validation error")]
-    ValidationUnknown(Uuid),
+    PrioAccumulate(anyhow::Error),
+    #[error("failed to validate packets: {0}")]
+    Validation(anyhow::Error),
     #[error(transparent)]
     BatchRead(#[from] BatchReadError),
     #[error(transparent)]
@@ -44,25 +47,24 @@ pub enum AggError {
     InvalidVerification(TryFromIntError),
 }
 
-impl ErrorClassification for AggError {
+impl ErrorClassification for AggregationError {
     fn is_retryable(&self) -> bool {
         match self {
             // If the batches and dates in this task are empty, retrying the task won't help.
-            AggError::EmptyBatchesAndDates => false,
+            AggregationError::EmptyBatchesAndDates => false,
             // These indicate an issue with the peer server's validation message. Retries are not
             // necessary in this case.
-            AggError::HeaderMismatch(_) | AggError::InvalidVerification(_) => false,
-            // libprio-rs errors may be due to getrandom failures.
-            AggError::PrioSetup(_) | AggError::PrioAccumulate(_) | AggError::Validation(_, _) => {
-                true
+            AggregationError::HeaderMismatch(_, _) | AggregationError::InvalidVerification(_) => {
+                false
             }
-            // This error is only reachable if we try to aggregate with zero servers, which
-            // indicates a configuration error with this process. Retry again later.
-            AggError::ValidationUnknown(_) => true,
+            // libprio-rs errors may be due to getrandom failures.
+            AggregationError::PrioSetup(_)
+            | AggregationError::PrioAccumulate(_)
+            | AggregationError::Validation(_) => true,
             // Dispatch to wrapped error types.
-            AggError::BatchRead(e) => e.is_retryable(),
-            AggError::BatchWrite(e) => e.is_retryable(),
-            AggError::Intake(e) => e.is_retryable(),
+            AggregationError::BatchRead(e) => e.is_retryable(),
+            AggregationError::BatchWrite(e) => e.is_retryable(),
+            AggregationError::Intake(e) => e.is_retryable(),
         }
     }
 }
@@ -97,7 +99,7 @@ impl<'a> BatchAggregator<'a> {
         peer_validation_transport: &'a mut VerifiableTransport,
         aggregation_transport: &'a mut SignableTransport,
         parent_logger: &Logger,
-    ) -> Result<Self, AggError> {
+    ) -> Result<Self, AggregationError> {
         let logger = parent_logger.new(o!(
             event::TRACE_ID => trace_id.to_string(),
             event::AGGREGATION_NAME => aggregation_name.to_owned(),
@@ -143,13 +145,13 @@ impl<'a> BatchAggregator<'a> {
         &mut self,
         batch_ids_and_dates: &[(Uuid, NaiveDateTime)],
         mut callback: F,
-    ) -> Result<(), AggError>
+    ) -> Result<(), AggregationError>
     where
         F: FnMut(&Logger),
     {
         info!(self.logger, "processing aggregation task");
         if batch_ids_and_dates.is_empty() {
-            return Err(AggError::EmptyBatchesAndDates);
+            return Err(AggregationError::EmptyBatchesAndDates);
         }
         let mut invalid_uuids = Vec::new();
         let mut included_batch_uuids = Vec::new();
@@ -191,16 +193,16 @@ impl<'a> BatchAggregator<'a> {
                         .iter()
                         .map(|k| Server::new(ingestion_hdr.bins as usize, self.is_first, k.clone()))
                         .collect::<Result<_, _>>()
-                        .map_err(AggError::PrioSetup)?,
+                        .map_err(AggregationError::PrioSetup)?,
                 );
             }
 
             // Make sure all the parameters in the headers line up.
             if !ingestion_hdr.check_parameters(&peer_validation_hdr) {
-                return Err(AggError::HeaderMismatch(format!(
-                    "Ingestion: {:?}\nPeer:{:?}",
-                    ingestion_hdr, peer_validation_hdr
-                )));
+                return Err(AggregationError::HeaderMismatch(
+                    ingestion_hdr,
+                    peer_validation_hdr,
+                ));
             }
 
             if self.aggregate_share(
@@ -246,11 +248,11 @@ impl<'a> BatchAggregator<'a> {
             self.is_first,
             self.ingestion_transport.packet_decryption_keys[0].clone(),
         )
-        .map_err(AggError::PrioSetup)?;
+        .map_err(AggregationError::PrioSetup)?;
         for server in servers.unwrap().iter() {
             accumulator_server
                 .merge_total_shares(server.total_shares())
-                .map_err(AggError::PrioAccumulate)?;
+                .map_err(|e| AggregationError::PrioAccumulate(e.into()))?;
         }
         let sum = accumulator_server
             .total_shares()
@@ -294,7 +296,7 @@ impl<'a> BatchAggregator<'a> {
         invalid_uuids: &mut Vec<Uuid>,
         ingestion_packets: Vec<IngestionDataSharePacket>,
         peer_validation_packets: Vec<ValidationPacket>,
-    ) -> Result<bool, AggError> {
+    ) -> Result<bool, AggregationError> {
         // We can't be sure that the peer validation, own validation and
         // ingestion batches contain all the same packets or that they are in
         // the same order. There could also be duplicate packets. Compared to
@@ -332,7 +334,7 @@ impl<'a> BatchAggregator<'a> {
                             event::PACKET_UUID => packet_uuid.to_string());
                         return Ok(false);
                     }
-                    return Err(AggError::Intake(e));
+                    return Err(AggregationError::Intake(e));
                 }
             }
         }
@@ -373,9 +375,9 @@ impl<'a> BatchAggregator<'a> {
                 match server.aggregate(
                     &ingestion_packet.encrypted_payload,
                     &VerificationMessage::try_from(peer_validation_packet)
-                        .map_err(AggError::InvalidVerification)?,
+                        .map_err(AggregationError::InvalidVerification)?,
                     &VerificationMessage::try_from(&own_validation_packet)
-                        .map_err(AggError::InvalidVerification)?,
+                        .map_err(AggregationError::InvalidVerification)?,
                 ) {
                     Ok(valid) => {
                         if !valid {
@@ -399,8 +401,12 @@ impl<'a> BatchAggregator<'a> {
             }
             if !did_aggregate_shares {
                 match last_err {
-                    Some(e) => return Err(AggError::Validation(e, *self.trace_id)),
-                    None => return Err(AggError::ValidationUnknown(*self.trace_id)),
+                    Some(e) => return Err(AggregationError::Validation(e.into())),
+                    None => {
+                        return Err(AggregationError::Validation(anyhow::anyhow!(
+                            "unknown validation error"
+                        )))
+                    }
                 }
             }
         }

@@ -1,6 +1,6 @@
 #![allow(clippy::too_many_arguments)]
 
-use aggregation::AggError;
+use aggregation::AggregationError;
 use anyhow::Result;
 use intake::IntakeError;
 use ring::{digest, signature::EcdsaKeyPair};
@@ -42,7 +42,7 @@ pub enum Error {
     #[error(transparent)]
     Intake(#[from] IntakeError),
     #[error(transparent)]
-    Aggregation(AggError),
+    Aggregation(AggregationError),
     #[error(transparent)]
     Url(#[from] UrlParseError),
     #[error("failed to deserialize JSON key file: {0}")]

@@ -100,8 +100,7 @@ impl RetryingAgent {
 
     /// Prepares a request for the given `Url` and `Method`. Returns a
     /// `ureq::Request`. The caller may customize this request further
-    /// before sending it. No access token is used. Note that this
-    /// method is infalliable.
+    /// before sending it. No access token is used.
     pub(crate) fn prepare_anonymous_request(&self, url: Url, method: Method) -> Request {
         self.agent.request_url(method.to_primitive_string(), &url)
     }

@@ -1,7 +1,7 @@
 use crate::{
     idl::{
-        AvroErrorContext, BatchSignature, Header, IdlError, IngestionDataSharePacket,
-        IngestionHeader, InvalidPacket, Packet, SumPart, ValidationHeader, ValidationPacket,
+        BatchSignature, Header, IdlError, IngestionDataSharePacket, IngestionHeader, InvalidPacket,
+        Packet, SumPart, ValidationHeader, ValidationPacket,
     },
     metrics::BatchReaderMetricsCollector,
     transport::{Transport, TransportError, TransportWriter},
@@ -167,9 +167,8 @@ impl ErrorClassification for BatchReadError {
             // Bad signatures or digests cannot be resolved with retries.
             BatchReadError::InvalidSignature(_) | BatchReadError::DigestMismatch(_, _) => false,
             // If the key identifier is not recognized, that could be due to either an issue
-            // with the submitted data or out-of-date configuration in this process's memory.
-            // Retry later in case it is due to the latter.
-            BatchReadError::UnknownKeyIdentifier(_, _) => true,
+            // with the submitted data or a serious configuration issue.
+            BatchReadError::UnknownKeyIdentifier(_, _) => false,
             // Dispatch to wrapped error.
             BatchReadError::Idl(e) => e.is_retryable(),
         }
@@ -344,9 +343,9 @@ impl<'a, H: Header, P: Packet> BatchReader<'a, H, P> {
             Vec::new()
         } else {
             Reader::with_schema(P::schema(), Cursor::new(&packet_bytes))
-                .map_err(|e| IdlError::Avro(e, AvroErrorContext::ReadHeader))?
+                .map_err(|e| IdlError::Avro(e, "reading avro header"))?
                 .map(|res| {
-                    let val = res.map_err(|e| IdlError::Avro(e, AvroErrorContext::ReadRecord))?;
+                    let val = res.map_err(|e| IdlError::Avro(e, "reading record"))?;
                     P::try_from(val)
                 })
                 .collect::<Result<Vec<P>, _>>()?
