@@ -30,7 +30,9 @@ pub enum AggregationError {
     #[error(
         "ingestion header does not match peer validation header. Ingestion: {0:?}\nPeer:{1:?}"
     )]
-    HeaderMismatch(IngestionHeader, ValidationHeader),
+    IngestionValidationHeaderMismatch(IngestionHeader, ValidationHeader),
+    #[error("ingestion header parameters do not match. First ingestion header: {0:?}\nSecond ingestion header:{1:?}")]
+    IngestionIngestionHeaderMismatch(IngestionHeader, IngestionHeader),
     #[error("error setting up Prio server: {0}")]
     PrioSetup(prio::server::ServerError),
     #[error("error accumulating shares: {0}")]
@@ -54,9 +56,9 @@ impl ErrorClassification for AggregationError {
             AggregationError::EmptyBatchesAndDates => false,
             // These indicate an issue with the peer server's validation message. Retries are not
             // necessary in this case.
-            AggregationError::HeaderMismatch(_, _) | AggregationError::InvalidVerification(_) => {
-                false
-            }
+            AggregationError::IngestionValidationHeaderMismatch(_, _)
+            | AggregationError::IngestionIngestionHeaderMismatch(_, _)
+            | AggregationError::InvalidVerification(_) => false,
             // libprio-rs errors may be due to getrandom failures.
             AggregationError::PrioSetup(_)
             | AggregationError::PrioAccumulate(_)
@@ -157,9 +159,9 @@ impl<'a> BatchAggregator<'a> {
         let mut included_batch_uuids = Vec::new();
 
         let mut servers = None;
-        let mut ingestion_header = None;
+        let mut last_ingestion_header: Option<IngestionHeader> = None;
         for (batch_id, batch_date) in batch_ids_and_dates {
-            let (ingestion_hdr, ingestion_packets): (IngestionHeader, _) = BatchReader::new(
+            let (ingestion_hdr, ingestion_packets) = BatchReader::new(
                 Batch::new_ingestion(self.aggregation_name, batch_id, batch_date),
                 &*self.ingestion_transport.transport.transport,
                 self.permit_malformed_batch,
@@ -198,10 +200,22 @@ impl<'a> BatchAggregator<'a> {
             }
 
             // Make sure all the parameters in the headers line up.
-            if !ingestion_hdr.check_parameters(&peer_validation_hdr) {
-                return Err(AggregationError::HeaderMismatch(
+            if !ingestion_hdr.check_parameters_against_validation(&peer_validation_hdr) {
+                return Err(AggregationError::IngestionValidationHeaderMismatch(
                     ingestion_hdr,
                     peer_validation_hdr,
+                ));
+            }
+            if !last_ingestion_header
+                .as_ref()
+                .map(|h| h.check_parameters_against_ingestion(&ingestion_hdr))
+                .unwrap_or(
+                    true, /* no previous ingestion header means we pass validation */
+                )
+            {
+                return Err(AggregationError::IngestionIngestionHeaderMismatch(
+                    last_ingestion_header.unwrap(),
+                    ingestion_hdr,
                 ));
             }
 
@@ -215,10 +229,10 @@ impl<'a> BatchAggregator<'a> {
                 // the sum part
                 included_batch_uuids.push(batch_id.to_owned());
             }
-            ingestion_header.get_or_insert(ingestion_hdr);
+            last_ingestion_header.get_or_insert(ingestion_hdr);
             callback(&self.logger);
         }
-        let ingestion_header = ingestion_header.unwrap();
+        let last_ingestion_header = last_ingestion_header.unwrap();
 
         if let Some(collector) = self.metrics_collector {
             collector
@@ -244,7 +258,7 @@ impl<'a> BatchAggregator<'a> {
         // matter which private key we use here as we're not decrypting any
         // packets with this Server instance, just accumulating data vectors.
         let mut accumulator_server = Server::new(
-            ingestion_header.bins as usize,
+            last_ingestion_header.bins as usize,
             self.is_first,
             self.ingestion_transport.packet_decryption_keys[0].clone(),
         )
@@ -265,12 +279,12 @@ impl<'a> BatchAggregator<'a> {
             self.share_processor_signing_key,
             SumPart {
                 batch_uuids: included_batch_uuids,
-                name: ingestion_header.name,
-                bins: ingestion_header.bins,
-                epsilon: ingestion_header.epsilon,
-                prime: ingestion_header.prime,
-                number_of_servers: ingestion_header.number_of_servers,
-                hamming_weight: ingestion_header.hamming_weight,
+                name: last_ingestion_header.name,
+                bins: last_ingestion_header.bins,
+                epsilon: last_ingestion_header.epsilon,
+                prime: last_ingestion_header.prime,
+                number_of_servers: last_ingestion_header.number_of_servers,
+                hamming_weight: last_ingestion_header.hamming_weight,
                 sum,
                 aggregation_start_time: self.aggregation_start.timestamp_millis(),
                 aggregation_end_time: self.aggregation_end.timestamp_millis(),

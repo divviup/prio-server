@@ -268,7 +268,10 @@ pub struct IngestionHeader {
 
 impl IngestionHeader {
     #[allow(clippy::float_cmp)]
-    pub fn check_parameters(&self, validation_header: &ValidationHeader) -> bool {
+    pub fn check_parameters_against_validation(
+        &self,
+        validation_header: &ValidationHeader,
+    ) -> bool {
         self.batch_uuid == validation_header.batch_uuid
             && self.name == validation_header.name
             && self.bins == validation_header.bins
@@ -276,6 +279,18 @@ impl IngestionHeader {
             && self.prime == validation_header.prime
             && self.number_of_servers == validation_header.number_of_servers
             && self.hamming_weight == validation_header.hamming_weight
+    }
+
+    pub fn check_parameters_against_ingestion(
+        &self,
+        other_ingestion_header: &IngestionHeader,
+    ) -> bool {
+        self.name == other_ingestion_header.name
+            && self.bins == other_ingestion_header.bins
+            && self.epsilon == other_ingestion_header.epsilon
+            && self.prime == other_ingestion_header.prime
+            && self.number_of_servers == other_ingestion_header.number_of_servers
+            && self.hamming_weight == other_ingestion_header.hamming_weight
     }
 }
 
