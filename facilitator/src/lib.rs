@@ -49,9 +49,17 @@ pub enum Error {
     BadKeyFile(serde_json::Error),
 }
 
-/// This trait captures whether a given error is due to corruption in client-provided data, in
-/// which case it is unnecessary to retry its processing, or due to I/O errors or cloud service
-/// API errors, in which case processing should be retried at a later time.
+/// This trait captures whether a given error should result in a work queue task should be NACK'd,
+/// and retried later according to the queue's redrive policy, or removed from the work queue and
+/// sent directly to a rejected task queue. (For example, cloud storage errors should be retried
+/// later, but errors due to corruption of client-provided data need not be retried)
+///
+/// If a task  repeatedly results in an error that is marked as retryable, it is expected that it
+/// will be sent to a dead letter queue, and unconditionally result in alerting. For tasks that
+/// result in errors that are marked as not retryable, we expect a small number of such errors from
+/// misconfigured or faulty clients. Thus, we will tolerate a small number of rejected tasks, and
+/// only alert on a high rate of task rejection, indicating a broader configuration issue or other
+/// problem.
 pub trait ErrorClassification {
     fn is_retryable(&self) -> bool;
 }
