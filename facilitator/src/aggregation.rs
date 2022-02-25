@@ -159,7 +159,7 @@ impl<'a> BatchAggregator<'a> {
         let mut included_batch_uuids = Vec::new();
 
         let mut servers = None;
-        let mut ingestion_header: Option<IngestionHeader> = None;
+        let mut last_ingestion_header: Option<IngestionHeader> = None;
         for (batch_id, batch_date) in batch_ids_and_dates {
             let (ingestion_hdr, ingestion_packets) = BatchReader::new(
                 Batch::new_ingestion(self.aggregation_name, batch_id, batch_date),
@@ -206,7 +206,7 @@ impl<'a> BatchAggregator<'a> {
                     peer_validation_hdr,
                 ));
             }
-            if !ingestion_header
+            if !last_ingestion_header
                 .as_ref()
                 .map(|h| h.check_parameters_against_ingestion(&ingestion_hdr))
                 .unwrap_or(
@@ -214,7 +214,7 @@ impl<'a> BatchAggregator<'a> {
                 )
             {
                 return Err(AggregationError::IngestionIngestionHeaderMismatch(
-                    ingestion_header.unwrap(),
+                    last_ingestion_header.unwrap(),
                     ingestion_hdr,
                 ));
             }
@@ -229,10 +229,10 @@ impl<'a> BatchAggregator<'a> {
                 // the sum part
                 included_batch_uuids.push(batch_id.to_owned());
             }
-            ingestion_header.get_or_insert(ingestion_hdr);
+            last_ingestion_header.get_or_insert(ingestion_hdr);
             callback(&self.logger);
         }
-        let ingestion_header = ingestion_header.unwrap();
+        let last_ingestion_header = last_ingestion_header.unwrap();
 
         if let Some(collector) = self.metrics_collector {
             collector
@@ -258,7 +258,7 @@ impl<'a> BatchAggregator<'a> {
         // matter which private key we use here as we're not decrypting any
         // packets with this Server instance, just accumulating data vectors.
         let mut accumulator_server = Server::new(
-            ingestion_header.bins as usize,
+            last_ingestion_header.bins as usize,
             self.is_first,
             self.ingestion_transport.packet_decryption_keys[0].clone(),
         )
@@ -279,12 +279,12 @@ impl<'a> BatchAggregator<'a> {
             self.share_processor_signing_key,
             SumPart {
                 batch_uuids: included_batch_uuids,
-                name: ingestion_header.name,
-                bins: ingestion_header.bins,
-                epsilon: ingestion_header.epsilon,
-                prime: ingestion_header.prime,
-                number_of_servers: ingestion_header.number_of_servers,
-                hamming_weight: ingestion_header.hamming_weight,
+                name: last_ingestion_header.name,
+                bins: last_ingestion_header.bins,
+                epsilon: last_ingestion_header.epsilon,
+                prime: last_ingestion_header.prime,
+                number_of_servers: last_ingestion_header.number_of_servers,
+                hamming_weight: last_ingestion_header.hamming_weight,
                 sum,
                 aggregation_start_time: self.aggregation_start.timestamp_millis(),
                 aggregation_end_time: self.aggregation_end.timestamp_millis(),
