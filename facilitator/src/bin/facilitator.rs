@@ -1732,14 +1732,18 @@ where
     let result = batch_intaker.generate_validation_share(callback);
 
     if let Some(collector) = metrics_collector {
-        match result {
+        match &result {
             Ok(()) => collector
                 .intake_tasks_finished
                 .with_label_values(&["success", aggregation_id])
                 .inc(),
-            Err(_) => collector
+            Err(e) if e.is_retryable() => collector
                 .intake_tasks_finished
                 .with_label_values(&["error", aggregation_id])
+                .inc(),
+            Err(_) => collector
+                .intake_tasks_finished
+                .with_label_values(&["rejected", aggregation_id])
                 .inc(),
         }
     }
@@ -2011,14 +2015,18 @@ where
     let result = aggregator.generate_sum_part(&parsed_batches, callback);
 
     if let Some(collector) = metrics_collector {
-        match result {
+        match &result {
             Ok(()) => collector
                 .aggregate_tasks_finished
                 .with_label_values(&["success", aggregation_id])
                 .inc(),
-            Err(_) => collector
+            Err(e) if e.is_retryable() => collector
                 .aggregate_tasks_finished
                 .with_label_values(&["error", aggregation_id])
+                .inc(),
+            Err(_) => collector
+                .aggregate_tasks_finished
+                .with_label_values(&["rejected", aggregation_id])
                 .inc(),
         }
     }

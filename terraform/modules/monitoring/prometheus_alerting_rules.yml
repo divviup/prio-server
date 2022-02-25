@@ -14,8 +14,8 @@ groups:
         instance {{ $labels.locality }}-{{ $labels.ingestor }} in environment
         ${environment} last ran successfully"
   - alert: facilitator_intake_failure_rate
-    expr: rate(facilitator_intake_tasks_finished{status="success"}[1h])
-      / rate(facilitator_intake_tasks_finished[1h]) < 0.95
+    expr: (sum without (status) (rate(facilitator_intake_tasks_finished{status="success"}[1h])))
+      / (sum without (status) (rate(facilitator_intake_tasks_finished[1h]))) < 0.95
     for: 5m
     labels:
       severity: page
@@ -25,11 +25,11 @@ groups:
         {{ $labels.kubernetes_namespace }}-{{ $labels.kubernetes_name }}"
       description: "intake worker instance {{ $labels.kubernetes_namespace }}-
         {{ $labels.kubernetes_name }} in environment ${environment} is failing
-        more than 95% of the time in the last hour"
+        more than 5% of the time in the last hour"
   - alert: facilitator_aggregate_failure_rate
     # aggregations run much less often than intake so use a larger window of time
-    expr: rate(facilitator_aggregate_tasks_finished{status="success"}[${aggregation_period}])
-      / rate(facilitator_aggregate_tasks_finished[${aggregation_period}]) < 0.95
+    expr: (sum without (status) (rate(facilitator_aggregate_tasks_finished{status="success"}[${aggregation_period}])))
+      / (sum without (status) (rate(facilitator_aggregate_tasks_finished[${aggregation_period}]))) < 0.95
     for: 5m
     labels:
       severity: page
@@ -39,7 +39,33 @@ groups:
         {{ $labels.kubernetes_namespace }}-{{ $labels.kubernetes_name }}"
       description: "aggregate worker instance {{ $labels.kubernetes_namespace}}-
         {{ $labels.kubernetes_name }} in environment ${environment} is failing
-        more than 95% of the time in the last 8 hours"
+        more than 5% of the time in the last 8 hours"
+  - alert: facilitator_intake_rejection_rate
+    expr: (sum without (status) (rate(facilitator_intake_tasks_finished{status="rejected"}[1h])))
+      / (sum without (status) (rate(facilitator_intake_tasks_finished[1h]))) > 0.01
+    for: 5m
+    labels:
+      severity: page
+      environment: ${environment}
+    annotations:
+      summary: "High rejection rate for intake worker
+        {{ $labels.kubernetes_namespace }}-{{ $labels.kubernetes_name }}"
+      description: "intake worker instance {{ $labels.kubernetes_namespace }}-
+        {{ $labels.kubernetes_name }} in environment ${environment} has
+        rejected more than 1% of tasks in the last hour"
+  - alert: facilitator_aggregate_rejection_rate
+    expr: (sum without (status) (rate(facilitator_aggregate_tasks_finished{status="rejected"}[${aggregation_period}])))
+      / (sum without (status) (rate(facilitator_aggregate_tasks_finished[${aggregation_period}]))) > 0.01
+    for: 5m
+    labels:
+      severity: page
+      environment: ${environment}
+    annotations:
+      summary: "High rejection rate for aggregate worker
+        {{ $labels.kubernetes_namespace }}-{{ $labels.kubernetes_name }}"
+      description: "aggregate worker instance {{ $labels.kubernetes_namespace }}-
+        {{ $labels.kubernetes_name }} in environment ${environment} has
+        rejected more than 1% of tasks in the last 8 hours"
   - alert: intake_task_queue_growth
     expr: min_over_time(stackdriver_pubsub_subscription_pubsub_googleapis_com_subscription_num_undelivered_messages{subscription_id!~".*-dead-letter",subscription_id=~".*-intake"}[30m]) > 0
     for: 3h
