@@ -622,7 +622,7 @@ mod tests {
     use prio::encrypt::{PrivateKey, PublicKey};
     use ring::signature::{EcdsaKeyPair, ECDSA_P256_SHA256_ASN1_SIGNING};
     use rusoto_core::Region;
-    use std::{array::IntoIter, str::FromStr};
+    use std::str::FromStr;
 
     fn http_url_fetcher(
         base_url: &str,
@@ -1804,7 +1804,7 @@ mod tests {
             ingestion_identity: Identity::none(),
             peer_validation_bucket: StoragePath::from_str("gs://irrelevant").unwrap(),
             peer_validation_identity: Identity::none(),
-            batch_signing_public_keys: IntoIter::new([
+            batch_signing_public_keys: IntoIterator::into_iter([
                 (
                     "batch-signing-key-1".to_owned(),
                     BatchSigningPublicKey {
@@ -1821,7 +1821,7 @@ mod tests {
                 ),
             ])
             .collect(),
-            packet_encryption_keys: IntoIter::new([
+            packet_encryption_keys: IntoIterator::into_iter([
                 (
                     "packet-encryption-key-1".to_owned(),
                     PacketEncryptionCertificateSigningRequest {

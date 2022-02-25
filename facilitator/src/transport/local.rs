@@ -29,7 +29,7 @@ impl LocalFileTransport {
     /// attempts to convert the provided key into a relative path valid for the
     /// current platform.
     fn relative_path(key: &str) -> PathBuf {
-        PathBuf::from(key.replace("/", &MAIN_SEPARATOR.to_string()))
+        PathBuf::from(key.replace('/', &MAIN_SEPARATOR.to_string()))
     }
 }
 

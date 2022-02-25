@@ -142,7 +142,7 @@ macro_rules! shared_help {
 }
 
 fn upper_snake_case(s: &str) -> String {
-    s.to_uppercase().replace("-", "_")
+    s.to_uppercase().replace('-', "_")
 }
 
 impl<'a, 'b> AppArgumentAdder for App<'a, 'b> {
