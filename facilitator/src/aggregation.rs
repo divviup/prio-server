@@ -107,9 +107,9 @@ impl<'a> BatchAggregator<'a> {
         let mut included_batch_uuids = Vec::new();
 
         let mut servers = None;
-        let mut ingestion_header = None;
+        let mut ingestion_header: Option<IngestionHeader> = None;
         for (batch_id, batch_date) in batch_ids_and_dates {
-            let (ingestion_hdr, ingestion_packets): (IngestionHeader, _) = BatchReader::new(
+            let (ingestion_hdr, ingestion_packets) = BatchReader::new(
                 Batch::new_ingestion(self.aggregation_name, batch_id, batch_date),
                 &*self.ingestion_transport.transport.transport,
                 self.permit_malformed_batch,
@@ -147,12 +147,25 @@ impl<'a> BatchAggregator<'a> {
             }
 
             // Make sure all the parameters in the headers line up.
-            if !ingestion_hdr.check_parameters(&peer_validation_hdr) {
+            if !ingestion_hdr.check_parameters_against_validation(&peer_validation_hdr) {
                 return Err(anyhow!(
-                "ingestion header does not match peer validation header. Ingestion: {:?}\nPeer:{:?}",
-                ingestion_hdr,
-                peer_validation_hdr
-            ));
+                    "ingestion header does not match peer validation header. Ingestion: {:?}\nPeer:{:?}",
+                    ingestion_hdr,
+                    peer_validation_hdr
+                ));
+            }
+            if !ingestion_header
+                .as_ref()
+                .map(|h| h.check_parameters_against_ingestion(&ingestion_hdr))
+                .unwrap_or(
+                    true, /* no previous ingestion header means we pass validation */
+                )
+            {
+                return Err(anyhow!(
+                    "ingestion header parameters do not match. First ingestion header: {:?}\nSecond ingestion header:{:?}",
+                    ingestion_header.unwrap(),
+                    ingestion_hdr,
+                ));
             }
 
             if self.aggregate_share(

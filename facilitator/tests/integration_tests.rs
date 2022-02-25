@@ -34,6 +34,7 @@ fn end_to_end() {
         drop_nth_pha_packet: None,
         drop_nth_facilitator_packet: None,
         use_wrong_encryption_key_for_second_batch: false,
+        use_wrong_epsilon_for_second_batch: false,
     })
 }
 
@@ -45,6 +46,7 @@ fn inconsistent_ingestion_batches() {
         drop_nth_pha_packet: Some(3),
         drop_nth_facilitator_packet: Some(4),
         use_wrong_encryption_key_for_second_batch: false,
+        use_wrong_epsilon_for_second_batch: false,
     })
 }
 
@@ -56,6 +58,17 @@ fn wrong_encryption_key() {
         drop_nth_pha_packet: None,
         drop_nth_facilitator_packet: None,
         use_wrong_encryption_key_for_second_batch: true,
+        use_wrong_epsilon_for_second_batch: false,
+    })
+}
+
+#[test]
+fn mismatched_epsilon() {
+    end_to_end_test(EndToEndTestOptions {
+        drop_nth_pha_packet: None,
+        drop_nth_facilitator_packet: None,
+        use_wrong_encryption_key_for_second_batch: false,
+        use_wrong_epsilon_for_second_batch: true,
     })
 }
 
@@ -352,6 +365,7 @@ struct EndToEndTestOptions {
     drop_nth_pha_packet: Option<usize>,
     drop_nth_facilitator_packet: Option<usize>,
     use_wrong_encryption_key_for_second_batch: bool,
+    use_wrong_epsilon_for_second_batch: bool,
 }
 
 fn end_to_end_test(test_options: EndToEndTestOptions) {
@@ -404,12 +418,13 @@ fn end_to_end_test(test_options: EndToEndTestOptions) {
         test_options.drop_nth_facilitator_packet,
     );
 
-    let first_batch_packet_count = 16;
+    const FIRST_BATCH_PACKET_COUNT: usize = 16;
+    const EPSILON: f64 = 0.11;
 
     let batch_1_sample_generator = SampleGenerator::new(
         &aggregation_name,
         10,
-        0.11,
+        EPSILON,
         100,
         100,
         &batch_1_pha_output,
@@ -418,13 +433,17 @@ fn end_to_end_test(test_options: EndToEndTestOptions) {
     );
 
     let batch_1_reference_sum = batch_1_sample_generator
-        .generate_ingestion_sample(&TRACE_ID, &batch_1_uuid, &date, first_batch_packet_count)
+        .generate_ingestion_sample(&TRACE_ID, &batch_1_uuid, &date, FIRST_BATCH_PACKET_COUNT)
         .unwrap();
 
     let batch_2_sample_generator = SampleGenerator::new(
         &aggregation_name,
         10,
-        0.11,
+        if test_options.use_wrong_epsilon_for_second_batch {
+            EPSILON + 5.2 // 5.2 is arbitrary, any value other than 0 should work
+        } else {
+            EPSILON
+        },
         100,
         100,
         &batch_2_pha_output,
@@ -499,7 +518,7 @@ fn end_to_end_test(test_options: EndToEndTestOptions) {
 
     assert_eq!(
         intake_callback_count,
-        (first_batch_packet_count - batch_1_reference_sum.pha_dropped_packets.len()) / 2
+        (FIRST_BATCH_PACKET_COUNT - batch_1_reference_sum.pha_dropped_packets.len()) / 2
     );
 
     BatchIntaker::new(
@@ -587,7 +606,7 @@ fn end_to_end_test(test_options: EndToEndTestOptions) {
     facilitator_ingest_transport.packet_decryption_keys = packet_decryption_keys;
 
     let mut aggregation_callback_count = 0;
-    BatchAggregator::new(
+    let aggregation_result = BatchAggregator::new(
         &TRACE_ID,
         instance_name,
         &aggregation_name,
@@ -601,8 +620,18 @@ fn end_to_end_test(test_options: EndToEndTestOptions) {
         &logger,
     )
     .unwrap()
-    .generate_sum_part(&batch_ids_and_dates, |_| aggregation_callback_count += 1)
-    .unwrap();
+    .generate_sum_part(&batch_ids_and_dates, |_| aggregation_callback_count += 1);
+
+    if test_options.use_wrong_epsilon_for_second_batch {
+        // Mismatched parameters (like incorrect epsilon) will cause aggregation to fail.
+        // Check that this is the case, and halt further testing since we don't have an
+        // aggregation to check.
+        aggregation_result.unwrap_err();
+        return;
+    } else {
+        // We expect the aggregation to have succeeded.
+        aggregation_result.unwrap();
+    }
 
     assert_eq!(aggregation_callback_count, 2);
 
