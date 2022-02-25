@@ -666,6 +666,7 @@ dependencies = [
  "rusoto_core",
  "rusoto_mock",
  "rusoto_s3",
+ "rusoto_sns",
  "rusoto_sqs",
  "rusoto_sts",
  "serde",
@@ -1898,6 +1899,20 @@ dependencies = [
  "serde",
  "sha2 0.9.8",
  "tokio",
+]
+
+[[package]]
+name = "rusoto_sns"
+version = "0.47.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0f0bea954002f259d138d87c6b79e0bc02517e8edb31175ac006ad79ce946377"
+dependencies = [
+ "async-trait",
+ "bytes",
+ "futures",
+ "rusoto_core",
+ "serde_urlencoded",
+ "xml-rs",
 ]
 
 [[package]]

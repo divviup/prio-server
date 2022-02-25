@@ -7,11 +7,11 @@ use crate::{
     metrics::ApiClientMetricsCollector,
     retries,
 };
-use anyhow::{anyhow, Context, Result};
+use anyhow::{Context, Result};
 use async_trait::async_trait;
 use chrono::{prelude::Utc, DateTime};
-use hmac::{Hmac, Mac};
-use http::header::{HeaderMap, HeaderName};
+use hmac::{digest::InvalidLength, Hmac, Mac};
+use http::header::{HeaderMap, HeaderName, InvalidHeaderValue};
 use rusoto_core::{
     credential::{
         AutoRefreshingProvider, AwsCredentials, ChainProvider, CredentialsError,
@@ -21,6 +21,7 @@ use rusoto_core::{
         error::XmlErrorDeserializer,
         util::{find_start_element, XmlResponse},
     },
+    region::ParseRegionError,
     Region, RusotoError, RusotoResult,
 };
 #[cfg(test)]
@@ -611,6 +612,31 @@ fn retryable<T>(error: &RusotoError<T>) -> bool {
     }
 }
 
+/// Errors encountered when creating a sts:GetCallerIdentity token.
+#[derive(Debug, thiserror::Error)]
+pub enum StsError {
+    #[error("no security token in AWS credentials")]
+    MissingAccessToken,
+    #[error("no host in provided URL {0}")]
+    MissingHost(Url),
+    #[error("no query params in request URL")]
+    MissingQuery,
+    #[error("failed to parse host as header value: {0}")]
+    BadHeaderHost(InvalidHeaderValue),
+    #[error("failed to parse formatted date as header value: {0}")]
+    BadHeaderDate(InvalidHeaderValue),
+    #[error("failed to parse Amazon security token as header value: {0}")]
+    BadHeaderToken(InvalidHeaderValue),
+    #[error("failed to parse workload identity pool provider as header value: {0}")]
+    BadHeaderTarget(InvalidHeaderValue),
+    #[error(transparent)]
+    ParseRegion(#[from] ParseRegionError),
+    #[error("failed to construct AWS request signing key: {0}")]
+    KeyConstruction(InvalidLength),
+    #[error("failed to construct HMAC from signing key: {0}")]
+    HmacConstruction(InvalidLength),
+}
+
 /// Construct a GetCallerIdentity token, as specified in GCP's workload identity
 /// pool guide. This entails constructing a signed sts:GetCallerIdentity AWS API
 /// request, using the form that has no body (sts.googleapis.com will reject the
@@ -644,7 +670,7 @@ pub(crate) fn get_caller_identity_token(
     workload_identity_pool_provider: &str,
     aws_region: &Region,
     credentials: &AwsCredentials,
-) -> Result<serde_json::Value> {
+) -> Result<serde_json::Value, StsError> {
     get_caller_identity_token_at_time(
         Utc::now(),
         sts_request_url,
@@ -660,7 +686,7 @@ fn get_caller_identity_token_at_time(
     workload_identity_pool_provider: &str,
     aws_region: &Region,
     credentials: &AwsCredentials,
-) -> Result<serde_json::Value> {
+) -> Result<serde_json::Value, StsError> {
     // Rusoto provides a SignedRequest struct that can construct and sign
     // correct sts:GetCallerIdentity requests, but unfortunately it insists on
     // using the form with a body, which sts.googleapis.com rejects. Instead we
@@ -671,10 +697,10 @@ fn get_caller_identity_token_at_time(
     let aws_security_token = credentials
         .token()
         .as_ref()
-        .ok_or_else(|| anyhow!("no security token in AWS credentials"))?;
+        .ok_or(StsError::MissingAccessToken)?;
     let host = sts_request_url
         .host_str()
-        .ok_or_else(|| anyhow!("no host in provided URL {}", sts_request_url))?;
+        .ok_or_else(|| StsError::MissingHost(sts_request_url.clone()))?;
     let request_time_long = request_time.format(LONG_DATETIME).to_string();
 
     // Construct the headers that we will sign over. Arbitrary headers may be
@@ -683,8 +709,7 @@ fn get_caller_identity_token_at_time(
     let mut headers = HeaderMap::new();
     headers.insert(
         HeaderName::from_static(HOST_HEADER),
-        host.parse()
-            .context("failed to parse host as header value")?,
+        host.parse().map_err(StsError::BadHeaderHost)?,
     );
     headers.insert(
         HeaderName::from_static(AMAZON_DATE_HEADER),
@@ -692,19 +717,19 @@ fn get_caller_identity_token_at_time(
             .format(LONG_DATETIME)
             .to_string()
             .parse()
-            .context("failed to parse formatted date as header value")?,
+            .map_err(StsError::BadHeaderDate)?,
     );
     headers.insert(
         HeaderName::from_static(AMAZON_SECURITY_TOKEN_HEADER),
         aws_security_token
             .parse()
-            .context("failed to parse Amazon security token as header value")?,
+            .map_err(StsError::BadHeaderToken)?,
     );
     headers.insert(
         HeaderName::from_static(GOOGLE_TARGET_RESOURCE_HEADER),
         workload_identity_pool_provider
             .parse()
-            .context("failed to parse workload identity pool provider as header value")?,
+            .map_err(StsError::BadHeaderTarget)?,
     );
 
     // Create a canonical signature v4 request.
@@ -715,7 +740,7 @@ fn get_caller_identity_token_at_time(
     let canonical_request = format!(
         "POST\n{uri}\n{query_string}\n{headers}\n\n{signed}\ne3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
         uri = sts_request_url.path(),
-        query_string = sts_request_url.query().ok_or_else(|| anyhow!("no query params in request URL"))?,
+        query_string = sts_request_url.query().ok_or(StsError::MissingQuery)?,
         headers = canonical_header_string(&headers),
         signed = signed_header_string(&headers),
     );
@@ -739,17 +764,14 @@ fn get_caller_identity_token_at_time(
     let signing_key = signing_key(
         &request_time,
         credentials.aws_secret_access_key(),
-        &aws_region
-            .name()
-            .parse()
-            .context("failed to parse AWS region")?,
+        &aws_region.name().parse()?,
         "sts",
     )
-    .context("failed to construct AWS request signing key")?;
+    .map_err(StsError::KeyConstruction)?;
 
     // "Sign" (HMAC) the string to sign
-    let mut hmac: Hmac<Sha256> = Hmac::new_from_slice(&signing_key)
-        .map_err(|e| anyhow!("failed to construct HMAC from signing key: {}", e))?;
+    let mut hmac: Hmac<Sha256> =
+        Hmac::new_from_slice(&signing_key).map_err(StsError::HmacConstruction)?;
     hmac.update(string_to_sign.as_bytes());
     let signature = hex::encode(hmac.finalize().into_bytes());
 
@@ -827,20 +849,17 @@ pub fn signing_key(
     secret_key: &str,
     region: &Region,
     service: &str,
-) -> Result<Vec<u8>> {
+) -> Result<Vec<u8>, InvalidLength> {
     let secret = format!("AWS4{}", secret_key);
-    let mut date_hmac: Hmac<Sha256> =
-        Hmac::new_from_slice(secret.as_bytes()).map_err(|e| anyhow! {"{}",e})?;
+    let mut date_hmac: Hmac<Sha256> = Hmac::new_from_slice(secret.as_bytes())?;
     date_hmac.update(datetime.format(SHORT_DATE).to_string().as_bytes());
-    let mut region_hmac: Hmac<Sha256> =
-        Hmac::new_from_slice(&date_hmac.finalize().into_bytes()).map_err(|e| anyhow! {"{}",e})?;
+    let mut region_hmac: Hmac<Sha256> = Hmac::new_from_slice(&date_hmac.finalize().into_bytes())?;
     region_hmac.update(region.name().as_bytes());
     let mut service_hmac: Hmac<Sha256> =
-        Hmac::new_from_slice(&region_hmac.finalize().into_bytes()).map_err(|e| anyhow! {"{}",e})?;
+        Hmac::new_from_slice(&region_hmac.finalize().into_bytes())?;
     service_hmac.update(service.as_bytes());
     let mut signing_hmac: Hmac<Sha256> =
-        Hmac::new_from_slice(&service_hmac.finalize().into_bytes())
-            .map_err(|e| anyhow! {"{}",e})?;
+        Hmac::new_from_slice(&service_hmac.finalize().into_bytes())?;
     signing_hmac.update(b"aws4_request");
     Ok(signing_hmac.finalize().into_bytes().to_vec())
 }

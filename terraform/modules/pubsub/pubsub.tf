@@ -91,6 +91,31 @@ resource "google_pubsub_subscription" "dead_letter" {
   }
 }
 
+# The facilitator deployments will forward tasks to this topic and
+# subscription if there is an issue with a batch such that it
+# cannot be processed.
+resource "google_pubsub_topic" "rejected" {
+  name = "${google_pubsub_topic.task.name}-rejected"
+}
+
+resource "google_pubsub_topic_iam_binding" "rejected" {
+  topic = google_pubsub_topic.rejected.name
+  role  = "roles/pubsub.publisher"
+  members = [
+    "serviceAccount:${var.subscriber_service_account}"
+  ]
+}
+
+resource "google_pubsub_subscription" "rejected" {
+  name                 = google_pubsub_topic.rejected.name
+  topic                = google_pubsub_topic.rejected.name
+  ack_deadline_seconds = 600
+  # Subscription should never expire
+  expiration_policy {
+    ttl = ""
+  }
+}
+
 output "queue" {
   value = {
     name              = google_pubsub_topic.task.name
@@ -98,5 +123,6 @@ output "queue" {
     topic             = google_pubsub_topic.task.name
     subscription_kind = "gcp-pubsub"
     subscription      = google_pubsub_subscription.task.name
+    rejected_topic    = google_pubsub_topic.rejected.name
   }
 }

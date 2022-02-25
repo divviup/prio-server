@@ -1,12 +1,15 @@
 use crate::{
-    batch::{Batch, BatchReader, BatchWriter},
-    idl::{IngestionDataSharePacket, IngestionHeader, InvalidPacket, SumPart, ValidationPacket},
+    batch::{Batch, BatchReadError, BatchReader, BatchWriteError, BatchWriter},
+    idl::{
+        IngestionDataSharePacket, IngestionHeader, InvalidPacket, SumPart, ValidationHeader,
+        ValidationPacket,
+    },
+    intake::IntakeError,
     logging::event,
     metrics::AggregateMetricsCollector,
     transport::{SignableTransport, VerifiableAndDecryptableTransport, VerifiableTransport},
-    BatchSigningKey, Error,
+    BatchSigningKey, ErrorClassification,
 };
-use anyhow::{anyhow, Context, Result};
 use chrono::NaiveDateTime;
 use prio::{
     field::FieldPriov2,
@@ -16,8 +19,55 @@ use slog::{info, o, warn, Logger};
 use std::{
     collections::{HashMap, HashSet},
     convert::TryFrom,
+    num::TryFromIntError,
 };
 use uuid::Uuid;
+
+#[derive(Debug, thiserror::Error)]
+pub enum AggregationError {
+    #[error("batch_ids_and_dates is empty")]
+    EmptyBatchesAndDates,
+    #[error(
+        "ingestion header does not match peer validation header. Ingestion: {0:?}\nPeer:{1:?}"
+    )]
+    HeaderMismatch(IngestionHeader, ValidationHeader),
+    #[error("error setting up Prio server: {0}")]
+    PrioSetup(prio::server::ServerError),
+    #[error("error accumulating shares: {0}")]
+    PrioAccumulate(anyhow::Error),
+    #[error("failed to validate packets: {0}")]
+    Validation(anyhow::Error),
+    #[error(transparent)]
+    BatchRead(#[from] BatchReadError),
+    #[error(transparent)]
+    BatchWrite(#[from] BatchWriteError),
+    #[error("intake error in aggregation context: {0}")]
+    Intake(IntakeError),
+    #[error("invalid verification message: {0}")]
+    InvalidVerification(TryFromIntError),
+}
+
+impl ErrorClassification for AggregationError {
+    fn is_retryable(&self) -> bool {
+        match self {
+            // If the batches and dates in this task are empty, retrying the task won't help.
+            AggregationError::EmptyBatchesAndDates => false,
+            // These indicate an issue with the peer server's validation message. Retries are not
+            // necessary in this case.
+            AggregationError::HeaderMismatch(_, _) | AggregationError::InvalidVerification(_) => {
+                false
+            }
+            // libprio-rs errors may be due to getrandom failures.
+            AggregationError::PrioSetup(_)
+            | AggregationError::PrioAccumulate(_)
+            | AggregationError::Validation(_) => true,
+            // Dispatch to wrapped error types.
+            AggregationError::BatchRead(e) => e.is_retryable(),
+            AggregationError::BatchWrite(e) => e.is_retryable(),
+            AggregationError::Intake(e) => e.is_retryable(),
+        }
+    }
+}
 
 pub struct BatchAggregator<'a> {
     trace_id: &'a Uuid,
@@ -49,7 +99,7 @@ impl<'a> BatchAggregator<'a> {
         peer_validation_transport: &'a mut VerifiableTransport,
         aggregation_transport: &'a mut SignableTransport,
         parent_logger: &Logger,
-    ) -> Result<Self> {
+    ) -> Result<Self, AggregationError> {
         let logger = parent_logger.new(o!(
             event::TRACE_ID => trace_id.to_string(),
             event::AGGREGATION_NAME => aggregation_name.to_owned(),
@@ -95,13 +145,13 @@ impl<'a> BatchAggregator<'a> {
         &mut self,
         batch_ids_and_dates: &[(Uuid, NaiveDateTime)],
         mut callback: F,
-    ) -> Result<()>
+    ) -> Result<(), AggregationError>
     where
         F: FnMut(&Logger),
     {
         info!(self.logger, "processing aggregation task");
         if batch_ids_and_dates.is_empty() {
-            return Err(anyhow!("batch_ids_and_dates is empty"));
+            return Err(AggregationError::EmptyBatchesAndDates);
         }
         let mut invalid_uuids = Vec::new();
         let mut included_batch_uuids = Vec::new();
@@ -142,17 +192,17 @@ impl<'a> BatchAggregator<'a> {
                         .packet_decryption_keys
                         .iter()
                         .map(|k| Server::new(ingestion_hdr.bins as usize, self.is_first, k.clone()))
-                        .collect::<Result<_, _>>()?,
+                        .collect::<Result<_, _>>()
+                        .map_err(AggregationError::PrioSetup)?,
                 );
             }
 
             // Make sure all the parameters in the headers line up.
             if !ingestion_hdr.check_parameters(&peer_validation_hdr) {
-                return Err(anyhow!(
-                "ingestion header does not match peer validation header. Ingestion: {:?}\nPeer:{:?}",
-                ingestion_hdr,
-                peer_validation_hdr
-            ));
+                return Err(AggregationError::HeaderMismatch(
+                    ingestion_hdr,
+                    peer_validation_hdr,
+                ));
             }
 
             if self.aggregate_share(
@@ -198,11 +248,11 @@ impl<'a> BatchAggregator<'a> {
             self.is_first,
             self.ingestion_transport.packet_decryption_keys[0].clone(),
         )
-        .context("failed to construct Prio server")?;
+        .map_err(AggregationError::PrioSetup)?;
         for server in servers.unwrap().iter() {
             accumulator_server
                 .merge_total_shares(server.total_shares())
-                .context("failed to accumulate shares")?;
+                .map_err(|e| AggregationError::PrioAccumulate(e.into()))?;
         }
         let sum = accumulator_server
             .total_shares()
@@ -228,7 +278,9 @@ impl<'a> BatchAggregator<'a> {
                 total_individual_clients: self.total_individual_clients,
             },
             invalid_uuids.into_iter().map(|u| InvalidPacket { uuid: u }),
-        )
+        )?;
+
+        Ok(())
     }
 
     /// Aggregate the batch for the provided batch_id into the provided server.
@@ -244,7 +296,7 @@ impl<'a> BatchAggregator<'a> {
         invalid_uuids: &mut Vec<Uuid>,
         ingestion_packets: Vec<IngestionDataSharePacket>,
         peer_validation_packets: Vec<ValidationPacket>,
-    ) -> Result<bool> {
+    ) -> Result<bool, AggregationError> {
         // We can't be sure that the peer validation, own validation and
         // ingestion batches contain all the same packets or that they are in
         // the same order. There could also be duplicate packets. Compared to
@@ -272,7 +324,7 @@ impl<'a> BatchAggregator<'a> {
             match ingestion_packet.generate_validation_packet(servers) {
                 Ok(p) => ingestion_and_own_validation_packets.push((ingestion_packet, p)),
                 Err(e) => {
-                    if let Some(Error::PacketDecryptionError(packet_uuid)) = e.downcast_ref() {
+                    if let IntakeError::PacketDecryption(packet_uuid) = e {
                         // This ingestion batch contains a packet that can't be
                         // decrypted. Ignore the entire ingestion batch, on the
                         // assumption that our peer will do the same, since we
@@ -282,7 +334,7 @@ impl<'a> BatchAggregator<'a> {
                             event::PACKET_UUID => packet_uuid.to_string());
                         return Ok(false);
                     }
-                    return Err(e);
+                    return Err(AggregationError::Intake(e));
                 }
             }
         }
@@ -322,8 +374,10 @@ impl<'a> BatchAggregator<'a> {
             for server in servers.iter_mut() {
                 match server.aggregate(
                     &ingestion_packet.encrypted_payload,
-                    &VerificationMessage::try_from(peer_validation_packet)?,
-                    &VerificationMessage::try_from(&own_validation_packet)?,
+                    &VerificationMessage::try_from(peer_validation_packet)
+                        .map_err(AggregationError::InvalidVerification)?,
+                    &VerificationMessage::try_from(&own_validation_packet)
+                        .map_err(AggregationError::InvalidVerification)?,
                 ) {
                     Ok(valid) => {
                         if !valid {
@@ -340,21 +394,20 @@ impl<'a> BatchAggregator<'a> {
                         break;
                     }
                     Err(e) => {
-                        last_err = Some(Err(e));
+                        last_err = Some(e);
                         continue;
                     }
                 }
             }
             if !did_aggregate_shares {
-                return last_err
-                    // Unwrap the optional, providing an error if it is None
-                    .context("unknown validation error")?
-                    // Wrap either the default error or what we got from
-                    // server.aggregate
-                    .context(format!(
-                        "trace id {} failed to validate packets",
-                        self.trace_id
-                    ));
+                match last_err {
+                    Some(e) => return Err(AggregationError::Validation(e.into())),
+                    None => {
+                        return Err(AggregationError::Validation(anyhow::anyhow!(
+                            "unknown validation error"
+                        )))
+                    }
+                }
             }
         }
 

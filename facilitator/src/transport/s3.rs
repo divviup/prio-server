@@ -5,9 +5,7 @@ use crate::{
     config::S3Path,
     logging::event,
     transport::{Transport, TransportWriter},
-    Error,
 };
-use anyhow::{Context, Result};
 use bytes::Bytes;
 use derivative::Derivative;
 use futures::future::FutureExt;
@@ -15,9 +13,10 @@ use http::{HeaderMap, StatusCode};
 use hyper_rustls::HttpsConnectorBuilder;
 use rusoto_core::{request::BufferedHttpResponse, ByteStream, RusotoError};
 use rusoto_s3::{
-    AbortMultipartUploadRequest, CompleteMultipartUploadError, CompleteMultipartUploadRequest,
-    CompletedMultipartUpload, CompletedPart, CreateMultipartUploadRequest, GetObjectError,
-    GetObjectRequest, S3Client, UploadPartRequest, S3,
+    AbortMultipartUploadError, AbortMultipartUploadRequest, CompleteMultipartUploadError,
+    CompleteMultipartUploadRequest, CompletedMultipartUpload, CompletedPart,
+    CreateMultipartUploadError, CreateMultipartUploadRequest, GetObjectError, GetObjectRequest,
+    S3Client, UploadPartError, UploadPartRequest, S3,
 };
 use slog::{debug, info, o, warn, Logger};
 use std::{
@@ -31,6 +30,29 @@ use tokio::{
     runtime::Handle,
 };
 use uuid::Uuid;
+
+use super::TransportError;
+
+/// Errors encountered when using S3 as a batch transport.
+#[derive(Debug, thiserror::Error)]
+pub enum S3Error {
+    #[error("error getting S3 object: {0}")]
+    GetObject(RusotoError<GetObjectError>),
+    #[error("no body in GetObjectResponse")]
+    GetObjectNoBody,
+    #[error("error creating multipart upload to s3://{1}, {0}")]
+    CreateMultipartUpload(RusotoError<CreateMultipartUploadError>, String),
+    #[error("no upload ID in CreateMultipartUploadResponse")]
+    MissingUploadId,
+    #[error("error completing upload: {0}")]
+    CompleteMultipartUpload(RusotoError<CompleteMultipartUploadError>),
+    #[error(transparent)]
+    AbortMultipartUpload(RusotoError<AbortMultipartUploadError>),
+    #[error("failed to upload part: {0}")]
+    UploadPart(RusotoError<UploadPartError>),
+    #[error("no ETag in UploadPartOutput")]
+    MissingETag,
+}
 
 /// Implementation of Transport that reads and writes objects from Amazon S3.
 #[derive(Clone, Derivative)]
@@ -66,7 +88,7 @@ impl S3Transport {
     }
 
     /// Construct an S3Client for this transport
-    fn client(&self) -> Result<S3Client> {
+    fn client(&self) -> Result<S3Client, S3Error> {
         // Rusoto uses Hyper which uses connection pools. The default
         // timeout for those connections is 90 seconds[1]. Amazon S3's
         // API closes idle client connections after 20 seconds[2]. If we
@@ -108,7 +130,7 @@ impl Transport for S3Transport {
         self.path.to_string()
     }
 
-    fn get(&self, key: &str, trace_id: &Uuid) -> Result<Box<dyn Read>> {
+    fn get(&self, key: &str, trace_id: &Uuid) -> Result<Box<dyn Read>, TransportError> {
         let logger = self.logger.new(o!(
             event::STORAGE_KEY => key.to_owned(),
             event::TRACE_ID => trace_id.to_string(),
@@ -133,13 +155,15 @@ impl Transport for S3Transport {
         )
         .map_err(|err| {
             if matches!(err, RusotoError::Service(GetObjectError::NoSuchKey(_))) {
-                return Error::ObjectNotFoundError(key.to_owned(), anyhow::Error::from(err));
+                return TransportError::ObjectNotFoundError(
+                    key.to_owned(),
+                    anyhow::Error::from(err),
+                );
             }
-            Error::from(anyhow::Error::from(err))
-        })
-        .context("error getting S3 object")?;
+            S3Error::GetObject(err).into()
+        })?;
 
-        let body = get_output.body.context("no body in GetObjectResponse")?;
+        let body = get_output.body.ok_or(S3Error::GetObjectNoBody)?;
 
         Ok(Box::new(StreamingBodyReader::new(
             body,
@@ -147,7 +171,7 @@ impl Transport for S3Transport {
         )))
     }
 
-    fn put(&self, key: &str, trace_id: &Uuid) -> Result<Box<dyn TransportWriter>> {
+    fn put(&self, key: &str, trace_id: &Uuid) -> Result<Box<dyn TransportWriter>, TransportError> {
         let logger = self.logger.new(o!(
             event::STORAGE_KEY => key.to_owned(),
             event::TRACE_ID => trace_id.to_string(),
@@ -230,7 +254,7 @@ impl MultipartUploadWriter {
         runtime_handle: &Handle,
         parent_logger: &Logger,
         api_metrics: &ApiClientMetricsCollector,
-    ) -> Result<MultipartUploadWriter> {
+    ) -> Result<MultipartUploadWriter, S3Error> {
         let logger = parent_logger.new(o!());
         let runtime_handle = runtime_handle.clone();
 
@@ -252,19 +276,14 @@ impl MultipartUploadWriter {
                 })
             },
         )
-        .context(format!(
-            "error creating multipart upload to s3://{}",
-            bucket
-        ))?;
+        .map_err(|e| S3Error::CreateMultipartUpload(e, bucket.clone()))?;
 
         Ok(MultipartUploadWriter {
             runtime_handle,
             client,
             bucket,
             key,
-            upload_id: create_output
-                .upload_id
-                .context("no upload ID in CreateMultipartUploadResponse")?,
+            upload_id: create_output.upload_id.ok_or(S3Error::MissingUploadId)?,
             completed_parts: Vec::new(),
             // Upload parts must be at least buffer_capacity, but it's fine if
             // they're bigger, so overprovision the buffer to make it unlikely
@@ -278,7 +297,7 @@ impl MultipartUploadWriter {
     }
 
     /// Upload content in internal buffer, if any, to S3 in an UploadPart call.
-    fn upload_part(&mut self) -> Result<()> {
+    fn upload_part(&mut self) -> Result<(), TransportError> {
         if self.buffer.is_empty() {
             return Ok(());
         }
@@ -310,23 +329,28 @@ impl MultipartUploadWriter {
                 })
             },
         )
-        .context("failed to upload part")
         .map_err(|e| {
             // Clean up botched uploads
             if let Err(cancel) = self.cancel_upload() {
-                return cancel.context(e);
+                return TransportError::Cancellation {
+                    original: Box::new(S3Error::UploadPart(e).into()),
+                    cancellation: Box::new(cancel),
+                };
             }
-            e
+            S3Error::UploadPart(e).into()
         })?;
 
         let e_tag = upload_output
             .e_tag
-            .context("no ETag in UploadPartOutput")
+            .ok_or(S3Error::MissingETag)
             .map_err(|e| {
                 if let Err(cancel) = self.cancel_upload() {
-                    return cancel.context(e);
+                    return TransportError::Cancellation {
+                        original: Box::new(e.into()),
+                        cancellation: Box::new(cancel),
+                    };
                 }
-                e
+                e.into()
             })?;
 
         let completed_part = CompletedPart {
@@ -345,9 +369,8 @@ impl Write for MultipartUploadWriter {
         // enough content.
         self.buffer.extend_from_slice(buf);
         if self.buffer.len() >= self.minimum_upload_part_size {
-            self.upload_part().map_err(|e| {
-                std::io::Error::new(std::io::ErrorKind::Other, Error::AnyhowError(e))
-            })?;
+            self.upload_part()
+                .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
         }
 
         Ok(buf.len())
@@ -359,7 +382,7 @@ impl Write for MultipartUploadWriter {
 }
 
 impl TransportWriter for MultipartUploadWriter {
-    fn complete_upload(&mut self) -> Result<()> {
+    fn complete_upload(&mut self) -> Result<(), TransportError> {
         // Write last part, if any
         self.upload_part()?;
 
@@ -411,13 +434,13 @@ impl TransportWriter for MultipartUploadWriter {
                     })
             },
         )
-        .context("error completing upload")?;
+        .map_err(|e| TransportError::S3(S3Error::CompleteMultipartUpload(e)))?;
 
         self.is_finished = true;
         Ok(())
     }
 
-    fn cancel_upload(&mut self) -> Result<()> {
+    fn cancel_upload(&mut self) -> Result<(), TransportError> {
         self.is_finished = true;
 
         debug!(self.logger, "canceling upload");
@@ -431,7 +454,8 @@ impl TransportWriter for MultipartUploadWriter {
                         upload_id: self.upload_id.clone(),
                         ..Default::default()
                     }),
-            )?;
+            )
+            .map_err(|e| TransportError::S3(S3Error::AbortMultipartUpload(e)))?;
         Ok(())
     }
 }
@@ -458,7 +482,6 @@ mod tests {
     use mockito::{mock, Matcher, Mock};
     use regex;
     use rusoto_core::{request::HttpClient, Region};
-    use rusoto_s3::CreateMultipartUploadError;
     use std::io::Read;
 
     // The testing strategy is to wire Rusoto to talk to a Mockito-managed HTTP
@@ -611,7 +634,7 @@ mod tests {
         )
         .expect_err("expected error");
         assert!(
-            err.is::<rusoto_core::RusotoError<CreateMultipartUploadError>>(),
+            matches!(err, S3Error::CreateMultipartUpload(_, _)),
             "found unexpected error {:?}",
             err
         );
