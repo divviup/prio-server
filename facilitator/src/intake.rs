@@ -1,12 +1,13 @@
 use crate::{
-    batch::{Batch, BatchReader, BatchWriter},
-    idl::{IngestionDataSharePacket, IngestionHeader, ValidationHeader, ValidationPacket},
+    batch::{Batch, BatchReadError, BatchReader, BatchWriteError, BatchWriter},
+    idl::{
+        IdlError, IngestionDataSharePacket, IngestionHeader, ValidationHeader, ValidationPacket,
+    },
     logging::event,
     metrics::IntakeMetricsCollector,
     transport::{SignableTransport, VerifiableAndDecryptableTransport},
-    BatchSigningKey, DATE_FORMAT,
+    BatchSigningKey, ErrorClassification, DATE_FORMAT,
 };
-use anyhow::{ensure, Context, Result};
 use chrono::NaiveDateTime;
 use prio::{
     encrypt::{PrivateKey, PublicKey},
@@ -17,6 +18,40 @@ use ring::signature::UnparsedPublicKey;
 use slog::{debug, info, o, Logger};
 use std::{collections::HashMap, iter::Iterator};
 use uuid::Uuid;
+
+#[derive(Debug, thiserror::Error)]
+pub enum IntakeError {
+    #[error(transparent)]
+    Idl(IdlError),
+    #[error("packet decryption failure for packet {0}")]
+    PacketDecryption(Uuid),
+    #[error("error generating verification message: {0}")]
+    PrioVerification(prio::server::ServerError),
+    #[error("error setting up Prio server: {0}")]
+    PrioSetup(prio::server::ServerError),
+    #[error("invalid bin count {0}")]
+    InvalidBinCount(i32),
+    #[error(transparent)]
+    BatchRead(#[from] BatchReadError),
+    #[error(transparent)]
+    BatchWrite(#[from] BatchWriteError),
+}
+
+impl ErrorClassification for IntakeError {
+    fn is_retryable(&self) -> bool {
+        match self {
+            // Packet decryption errors are the canonical case of errors that don't merit retries.
+            // Batches with zero bins are likewise not going to benefit from retries.
+            IntakeError::PacketDecryption(_) | IntakeError::InvalidBinCount(_) => false,
+            // libprio-rs errors may be due to getrandom failures.
+            IntakeError::PrioSetup(_) | IntakeError::PrioVerification(_) => true,
+            // Dispatch to wrapped errors.
+            IntakeError::Idl(e) => e.is_retryable(),
+            IntakeError::BatchRead(e) => e.is_retryable(),
+            IntakeError::BatchWrite(e) => e.is_retryable(),
+        }
+    }
+}
 
 /// BatchIntaker is responsible for validating a batch of data packet shares
 /// sent by the ingestion server and emitting validation shares to the other
@@ -45,7 +80,7 @@ impl<'a> BatchIntaker<'a> {
         is_first: bool,
         permit_malformed_batch: bool,
         parent_logger: &Logger,
-    ) -> Result<BatchIntaker<'a>> {
+    ) -> Result<BatchIntaker<'a>, IntakeError> {
         let logger = parent_logger.new(o!(
             event::TRACE_ID => trace_id.to_string(),
             event::AGGREGATION_NAME => aggregation_name.to_owned(),
@@ -115,7 +150,7 @@ impl<'a> BatchIntaker<'a> {
     /// and packet file, then computes validation shares and sends them to the
     /// peer share processor. The provided callback is invoked once for every
     /// thousand processed packets, unless set_callback_cadence has been called.
-    pub fn generate_validation_share<F>(&mut self, mut callback: F) -> Result<()>
+    pub fn generate_validation_share<F>(&mut self, mut callback: F) -> Result<(), IntakeError>
     where
         F: FnMut(&Logger),
     {
@@ -123,11 +158,9 @@ impl<'a> BatchIntaker<'a> {
 
         let (ingestion_header, ingestion_packets) =
             self.intake_batch.read(self.intake_public_keys)?;
-        ensure!(
-            ingestion_header.bins > 0,
-            "invalid bin count {}",
-            ingestion_header.bins
-        );
+        if ingestion_header.bins <= 0 {
+            return Err(IntakeError::InvalidBinCount(ingestion_header.bins));
+        }
 
         // Ideally, we would use the encryption_key_id in the ingestion packet
         // to figure out which private key to use for decryption, but that field
@@ -144,7 +177,7 @@ impl<'a> BatchIntaker<'a> {
                     PublicKey::from(k)
                 );
                 Server::new(ingestion_header.bins as usize, self.is_first, k.clone())
-                    .context("failed to construct Prio server")
+                    .map_err(IntakeError::PrioSetup)
             })
             .collect::<Result<_, _>>()?;
 
@@ -167,8 +200,7 @@ impl<'a> BatchIntaker<'a> {
                 processed_bytes += p.encrypted_payload.len() as u64;
                 p.generate_validation_packet(&mut servers)
             })
-            .collect::<Result<Vec<ValidationPacket>>>()
-            .context("couldn't generate validation packets")?;
+            .collect::<Result<Vec<ValidationPacket>, IntakeError>>()?;
 
         self.peer_validation_batch.write(
             self.peer_validation_batch_signing_key,
@@ -226,7 +258,6 @@ mod tests {
             DEFAULT_PHA_ECIES_PRIVATE_KEY, DEFAULT_TRACE_ID,
         },
         transport::{LocalFileTransport, SignableTransport, VerifiableTransport},
-        Error,
     };
     use assert_matches::assert_matches;
     use prio::{encrypt::PublicKey, server::ServerError, util::SerializeError};
@@ -447,10 +478,7 @@ mod tests {
         .unwrap();
 
         let err = pha_ingestor.generate_validation_share(|_| {}).unwrap_err();
-        assert_matches!(
-            err.downcast_ref::<Error>(),
-            Some(Error::PacketDecryptionError(_))
-        );
+        assert_matches!(err, IntakeError::PacketDecryption(_));
     }
 
     #[test]
@@ -543,8 +571,8 @@ mod tests {
 
         let err = pha_ingestor.generate_validation_share(|_| {}).unwrap_err();
         assert_matches!(
-            err.downcast(),
-            Ok(ServerError::Serialize(
+            err,
+            IntakeError::PrioVerification(ServerError::Serialize(
                 SerializeError::UnpackInputSizeMismatch
             ))
         );

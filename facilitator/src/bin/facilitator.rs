@@ -47,7 +47,7 @@ use facilitator::{
         GcsTransport, LocalFileTransport, S3Transport, SignableTransport, Transport,
         VerifiableAndDecryptableTransport, VerifiableTransport,
     },
-    BatchSigningKey, Error, DATE_FORMAT,
+    BatchSigningKey, Error, ErrorClassification, DATE_FORMAT,
 };
 
 fn num_validator<F: FromStr>(s: String) -> Result<(), String> {
@@ -435,6 +435,23 @@ impl<'a, 'b> AppArgumentAdder for App<'a, 'b> {
                 )
                 .default_value("")
                 .hide_default_value(true),
+        )
+        .arg(
+            Arg::with_name("rejected-topic")
+                .long("rejected-topic")
+                .env("REJECTED_TOPIC")
+                .help("Name of 'rejected' topic for forwarding permanently failed tasks")
+                .long_help(
+                    "Name of topic associated with the rejected task queue. \
+                    Tasks that result in non-retryable failures will be \
+                    forwarded to this topic, and acknowledged and removed \
+                    from the task queue. If no rejected task topic is, \
+                    provided, the task will not be acknowledged, and it is \
+                    expected the queue will eventually move the task to the \
+                    dead letter queue instead, once it has exhausted its \
+                    retries.",
+                )
+                .required(false),
         )
         // It's counterintuitive that users must explicitly opt into the
         // default credentials provider. This was done to preserve backward
@@ -1545,7 +1562,7 @@ fn validate_sample(
     facilitator_transport: &dyn Transport,
     facilitator_pubkey_map: &HashMap<String, UnparsedPublicKey<Vec<u8>>>,
     task: &AggregationTask,
-) -> Result<()> {
+) -> Result<(), Error> {
     // Read the sum-part batches from the sum-part buckets.
     let aggregation_start = NaiveDateTime::parse_from_str(&task.aggregation_start, DATE_FORMAT)?;
     let aggregation_end = NaiveDateTime::parse_from_str(&task.aggregation_end, DATE_FORMAT)?;
@@ -1563,7 +1580,8 @@ fn validate_sample(
         trace_id,
         logger,
     )
-    .read(pha_pubkey_map)?;
+    .read(pha_pubkey_map)
+    .map_err(|e| Error::AnyhowError(e.into()))?;
 
     let (facilitator_sum_part, _) = BatchReader::new(
         Batch::new_sum(
@@ -1578,7 +1596,8 @@ fn validate_sample(
         trace_id,
         logger,
     )
-    .read(facilitator_pubkey_map)?;
+    .read(facilitator_pubkey_map)
+    .map_err(|e| Error::AnyhowError(e.into()))?;
 
     let pha_accumulated_share: Vec<FieldPriov2> = pha_sum_part
         .sum
@@ -1622,7 +1641,7 @@ fn intake_batch<F>(
     api_metrics: &ApiClientMetricsCollector,
     parent_logger: &Logger,
     callback: F,
-) -> Result<(), anyhow::Error>
+) -> Result<(), Error>
 where
     F: FnMut(&Logger),
 {
@@ -1662,7 +1681,9 @@ where
         } else if let Some(path) = sub_matches.value_of(Entity::Peer.suffix(InOut::Output.str())) {
             StoragePath::from_str(path)?
         } else {
-            return Err(anyhow!("peer-output or peer-manifest-base-url required."));
+            return Err(Error::MissingArguments(
+                "peer-output or peer-manifest-base-url required.",
+            ));
         };
 
     let mut peer_validation_transport = SignableTransport {
@@ -1723,7 +1744,7 @@ where
         }
     }
 
-    result
+    Ok(result?)
 }
 
 fn intake_batch_subcommand(
@@ -1751,6 +1772,7 @@ fn intake_batch_subcommand(
         parent_logger,
         |_| {}, // no-op callback
     )
+    .map_err(Into::into)
 }
 
 fn intake_batch_worker(
@@ -1811,6 +1833,13 @@ fn intake_batch_worker(
 
             match result {
                 Ok(_) => queue.acknowledge_task(task_handle)?,
+                Err(err) if !err.is_retryable() => {
+                    error!(parent_logger, "error while processing intake task (non-retryable): {:?}", err;
+                        event::TASK_HANDLE => task_handle.clone(),
+                        event::TRACE_ID => trace_id.to_string(),
+                    );
+                    queue.forward_to_rejected_queue(task_handle)?;
+                }
                 Err(err) => {
                     error!(
                         parent_logger, "error while processing intake task: {:?}", err;
@@ -1839,7 +1868,7 @@ fn aggregate<F>(
     api_metrics: &ApiClientMetricsCollector,
     logger: &Logger,
     callback: F,
-) -> Result<()>
+) -> Result<(), Error>
 where
     F: FnMut(&Logger),
 {
@@ -1891,9 +1920,9 @@ where
             public_key_map_from_arg(public_key, public_key_identifier)?
         }
         _ => {
-            return Err(anyhow!(
+            return Err(Error::MissingArguments(
                 "peer-public-key and peer-public-key-identifier are \
-                        required if peer-manifest-base-url is not provided."
+                        required if peer-manifest-base-url is not provided.",
             ));
         }
     };
@@ -1912,8 +1941,8 @@ where
         }
         (_, Some(path)) => StoragePath::from_str(path)?,
         _ => {
-            return Err(anyhow!(
-                "portal-output or portal-manifest-base-url required"
+            return Err(Error::MissingArguments(
+                "portal-output or portal-manifest-base-url required",
             ))
         }
     };
@@ -1968,7 +1997,8 @@ where
         &mut peer_validation_transport,
         &mut aggregation_transport,
         logger,
-    )?;
+    )
+    .map_err(|e| Error::AnyhowError(e.into()))?;
 
     if let Some(collector) = metrics_collector {
         aggregator.set_metrics_collector(collector);
@@ -1993,7 +2023,7 @@ where
         }
     }
 
-    result
+    result.map_err(|e| Error::AnyhowError(e.into()))
 }
 
 fn aggregate_subcommand(
@@ -2039,6 +2069,7 @@ fn aggregate_subcommand(
         parent_logger,
         |_| {}, // no-op callback
     )
+    .map_err(Into::into)
 }
 
 fn aggregate_worker(
@@ -2106,6 +2137,13 @@ fn aggregate_worker(
 
             match result {
                 Ok(_) => queue.acknowledge_task(task_handle)?,
+                Err(err) if !err.is_retryable() => {
+                    error!(parent_logger, "error while processing task (non-retryable): {:?}", err;
+                        event::TRACE_ID => trace_id.to_string(),
+                        event::TASK_HANDLE => task_handle.clone(),
+                    );
+                    queue.forward_to_rejected_queue(task_handle)?;
+                }
                 Err(err) => {
                     error!(
                         parent_logger, "error while processing task: {:?}", err;
@@ -2471,6 +2509,7 @@ fn intake_task_queue_from_args(
     let queue_name = matches
         .value_of("task-queue-name")
         .ok_or_else(|| anyhow!("task-queue-name is required"))?;
+    let rejected_topic = matches.value_of("rejected-topic");
 
     match task_queue_kind {
         TaskQueueKind::GcpPubSub => {
@@ -2482,6 +2521,7 @@ fn intake_task_queue_from_args(
                 pubsub_api_endpoint,
                 gcp_project_id,
                 queue_name,
+                rejected_topic,
                 identity,
                 gcp_access_token_provider_factory,
                 logger,
@@ -2504,6 +2544,7 @@ fn intake_task_queue_from_args(
             Ok(Box::new(AwsSqsTaskQueue::new(
                 sqs_region,
                 queue_name,
+                rejected_topic,
                 runtime_handle,
                 credentials_provider,
                 logger,
@@ -2530,6 +2571,7 @@ fn aggregation_task_queue_from_args(
     let queue_name = matches
         .value_of("task-queue-name")
         .ok_or_else(|| anyhow!("task-queue-name is required"))?;
+    let rejected_topic = matches.value_of("rejected-topic");
 
     match task_queue_kind {
         TaskQueueKind::GcpPubSub => {
@@ -2541,6 +2583,7 @@ fn aggregation_task_queue_from_args(
                 pubsub_api_endpoint,
                 gcp_project_id,
                 queue_name,
+                rejected_topic,
                 identity,
                 gcp_access_token_provider_factory,
                 logger,
@@ -2563,6 +2606,7 @@ fn aggregation_task_queue_from_args(
             Ok(Box::new(AwsSqsTaskQueue::new(
                 sqs_region,
                 queue_name,
+                rejected_topic,
                 runtime_handle,
                 credentials_provider,
                 logger,

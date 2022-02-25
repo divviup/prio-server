@@ -1,8 +1,5 @@
-use crate::{
-    transport::{Transport, TransportWriter},
-    Error,
-};
-use anyhow::{Context, Result};
+use crate::transport::{Transport, TransportWriter};
+use anyhow::Result;
 use uuid::Uuid;
 
 use std::{
@@ -11,6 +8,19 @@ use std::{
     io::{ErrorKind, Read},
     path::{PathBuf, MAIN_SEPARATOR},
 };
+
+use super::TransportError;
+
+/// Errors that can arise when using the local filesystem as a batch transport.
+#[derive(Debug, thiserror::Error)]
+pub enum FileError {
+    #[error("opening {1}, {0}")]
+    OpenReading(std::io::Error, String),
+    #[error("creating parent directories {1}, {0}")]
+    Mkdirp(std::io::Error, String),
+    #[error("creating {1}, {0}")]
+    CreateFile(std::io::Error, String),
+}
 
 /// A transport implementation backed by the local filesystem.
 #[derive(Clone, Debug)]
@@ -38,38 +48,39 @@ impl Transport for LocalFileTransport {
         self.directory.to_string_lossy().to_string()
     }
 
-    fn get(&self, key: &str, _trace_id: &Uuid) -> Result<Box<dyn Read>> {
+    fn get(&self, key: &str, _trace_id: &Uuid) -> Result<Box<dyn Read>, TransportError> {
         let path = self.directory.join(LocalFileTransport::relative_path(key));
-        let f = File::open(path.as_path())
-            .map_err(|err| {
-                if err.kind() == ErrorKind::NotFound {
-                    return Error::ObjectNotFoundError(key.to_owned(), anyhow::Error::new(err));
-                }
-                Error::from(anyhow::Error::new(err))
-            })
-            .with_context(|| format!("opening {}", path.display()))?;
+        let f = File::open(path.as_path()).map_err(|err| {
+            if err.kind() == ErrorKind::NotFound {
+                return TransportError::ObjectNotFoundError(
+                    key.to_owned(),
+                    anyhow::Error::new(err),
+                );
+            }
+            TransportError::Local(FileError::OpenReading(err, path.display().to_string()))
+        })?;
         Ok(Box::new(f))
     }
 
-    fn put(&self, key: &str, _trace_id: &Uuid) -> Result<Box<dyn TransportWriter>> {
+    fn put(&self, key: &str, _trace_id: &Uuid) -> Result<Box<dyn TransportWriter>, TransportError> {
         let path = self.directory.join(LocalFileTransport::relative_path(key));
         if let Some(parent) = path.parent() {
             create_dir_all(parent)
-                .with_context(|| format!("creating parent directories {}", parent.display()))?;
+                .map_err(|e| FileError::Mkdirp(e, parent.display().to_string()))?;
         }
-        let f =
-            File::create(path.as_path()).with_context(|| format!("creating {}", path.display()))?;
+        let f = File::create(path.as_path())
+            .map_err(|e| FileError::CreateFile(e, path.display().to_string()))?;
         Ok(Box::new(f))
     }
 }
 
 impl TransportWriter for File {
-    fn complete_upload(&mut self) -> Result<()> {
+    fn complete_upload(&mut self) -> Result<(), TransportError> {
         // This method is a no-op for local files
         Ok(())
     }
 
-    fn cancel_upload(&mut self) -> Result<()> {
+    fn cancel_upload(&mut self) -> Result<(), TransportError> {
         // This method is a no-op for local files
         Ok(())
     }

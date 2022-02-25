@@ -1,9 +1,11 @@
 #![allow(clippy::too_many_arguments)]
 
+use aggregation::AggregationError;
 use anyhow::Result;
+use intake::IntakeError;
 use ring::{digest, signature::EcdsaKeyPair};
 use std::io::Write;
-use uuid::Uuid;
+use url::Url;
 
 pub mod aggregation;
 pub mod aws_credentials;
@@ -29,22 +31,67 @@ pub const DATE_FORMAT: &str = "%Y/%m/%d/%H/%M";
 pub enum Error {
     #[error(transparent)]
     AnyhowError(#[from] anyhow::Error),
-    #[error("avro error: {0}")]
-    AvroError(String, #[source] avro_rs::Error),
-    #[error("malformed header: {0}")]
-    MalformedHeaderError(String),
-    #[error("malformed data packet: {0}")]
-    MalformedDataPacketError(String),
-    #[error("malformed batch: {0}")]
-    MalformedBatchError(String),
-    #[error("end of file")]
-    EofError,
-    #[error("HTTP resource error")]
+    #[error("HTTP resource error: {0}")]
     HttpError(#[from] ureq::Error),
-    #[error("packet decryption failure for packet {0}")]
-    PacketDecryptionError(Uuid),
-    #[error("object {0} not found: {1}")]
-    ObjectNotFoundError(String, anyhow::Error),
+    #[error("error parsing time: {0}")]
+    TimeParse(#[from] chrono::ParseError),
+    #[error("command line parsing error: {0}")]
+    Clap(#[from] clap::Error),
+    #[error("missing arguments: {0}")]
+    MissingArguments(&'static str),
+    #[error(transparent)]
+    Intake(#[from] IntakeError),
+    #[error(transparent)]
+    Aggregation(AggregationError),
+    #[error(transparent)]
+    Url(#[from] UrlParseError),
+    #[error("failed to deserialize JSON key file: {0}")]
+    BadKeyFile(serde_json::Error),
+}
+
+/// This trait captures whether a given error should result in a work queue task should be NACK'd,
+/// and retried later according to the queue's redrive policy, or removed from the work queue and
+/// sent directly to a rejected task queue. (For example, cloud storage errors should be retried
+/// later, but errors due to corruption of client-provided data need not be retried)
+///
+/// If a task  repeatedly results in an error that is marked as retryable, it is expected that it
+/// will be sent to a dead letter queue, and unconditionally result in alerting. For tasks that
+/// result in errors that are marked as not retryable, we expect a small number of such errors from
+/// misconfigured or faulty clients. Thus, we will tolerate a small number of rejected tasks, and
+/// only alert on a high rate of task rejection, indicating a broader configuration issue or other
+/// problem.
+pub trait ErrorClassification {
+    fn is_retryable(&self) -> bool;
+}
+
+impl ErrorClassification for Error {
+    fn is_retryable(&self) -> bool {
+        match self {
+            // Catch-all error type -- retries OK.
+            Error::AnyhowError(_) => true,
+            // Errors from ureq are obviously retryable.
+            Error::HttpError(_) => true,
+            // These errors likely indicate a problem with how this process was invoked, its
+            // environment, or subsequent parsing of data from an outside source. As such,
+            // the batch itself should be retried.
+            Error::Clap(_)
+            | Error::MissingArguments(_)
+            | Error::TimeParse(_)
+            | Error::BadKeyFile(_)
+            | Error::Url(_) => true,
+            // Dispatch to the wrapped error type.
+            Error::Intake(e) => e.is_retryable(),
+            Error::Aggregation(e) => e.is_retryable(),
+        }
+    }
+}
+
+#[derive(Debug, thiserror::Error)]
+#[error("failed to parse: {1}, {0}")]
+pub struct UrlParseError(url::ParseError, String);
+
+pub fn parse_url(input: String) -> Result<Url, UrlParseError> {
+    Url::parse(&input).map_err(|e| UrlParseError(e, input))
 }
 
 /// A wrapper-writer that computes a SHA256 digest over the content it is provided.

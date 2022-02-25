@@ -3,7 +3,6 @@ mod local;
 mod s3;
 
 use crate::{manifest::BatchSigningPublicKeys, BatchSigningKey};
-use anyhow::Result;
 use derivative::Derivative;
 use dyn_clone::{clone_trait_object, DynClone};
 use prio::encrypt::PrivateKey;
@@ -15,8 +14,27 @@ use std::{
 use uuid::Uuid;
 
 pub use self::s3::S3Transport;
+use self::{gcs::GcsError, s3::S3Error};
 pub use gcs::GcsTransport;
 pub use local::LocalFileTransport;
+
+/// Common error type for I/O over any batch transport.
+#[derive(Debug, thiserror::Error)]
+pub enum TransportError {
+    #[error("object {0} not found: {1}")]
+    ObjectNotFoundError(String, anyhow::Error),
+    #[error(transparent)]
+    Local(#[from] local::FileError),
+    #[error(transparent)]
+    Gcs(#[from] GcsError),
+    #[error(transparent)]
+    S3(#[from] S3Error),
+    #[error("an error occurred while cancelling after another error: {original}, {cancellation}")]
+    Cancellation {
+        original: Box<TransportError>,
+        cancellation: Box<TransportError>,
+    },
+}
 
 /// A transport along with the public keys that can be used to verify signatures
 /// on the batches read from the transport.
@@ -47,22 +65,22 @@ pub trait TransportWriter: Write {
     /// up any related resources. Callers must call this method to successfully
     /// finish an upload. If this method is not called, the upload will be
     /// canceled when the TransportWriter value is dropped.
-    fn complete_upload(&mut self) -> Result<()>;
+    fn complete_upload(&mut self) -> Result<(), TransportError>;
 
     /// Cancel an upload operation, cleaning up any related resources. This
     /// method will be called automatically when the TransportWriter is dropped
     /// if complete_upload was not called successfully; errors will be logged.
     /// Callers may call this method manually in order to handle the case that
     /// an error occurs.
-    fn cancel_upload(&mut self) -> Result<()>;
+    fn cancel_upload(&mut self) -> Result<(), TransportError>;
 }
 
 impl<T: TransportWriter + ?Sized> TransportWriter for Box<T> {
-    fn complete_upload(&mut self) -> Result<()> {
+    fn complete_upload(&mut self) -> Result<(), TransportError> {
         (**self).complete_upload()
     }
 
-    fn cancel_upload(&mut self) -> Result<()> {
+    fn cancel_upload(&mut self) -> Result<(), TransportError> {
         (**self).cancel_upload()
     }
 }
@@ -78,11 +96,11 @@ pub trait Transport: Debug + DynClone + Send {
     /// Returns an std::io::Read instance from which the contents of the value
     /// of the provided key may be read. If no object is found, an error
     /// wrapping ObjectNotFoundError is returned.
-    fn get(&self, key: &str, trace_id: &Uuid) -> Result<Box<dyn Read>>;
+    fn get(&self, key: &str, trace_id: &Uuid) -> Result<Box<dyn Read>, TransportError>;
 
     /// Returns an std::io::Write instance into which the contents of the value
     /// may be written.
-    fn put(&self, key: &str, trace_id: &Uuid) -> Result<Box<dyn TransportWriter>>;
+    fn put(&self, key: &str, trace_id: &Uuid) -> Result<Box<dyn TransportWriter>, TransportError>;
 
     fn path(&self) -> String;
 }

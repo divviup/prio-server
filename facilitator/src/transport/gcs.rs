@@ -1,43 +1,86 @@
 use crate::{
     config::{GcsPath, Identity, WorkloadIdentityPoolParameters},
-    gcp_oauth::{AccessScope, GcpAccessTokenProvider, GcpAccessTokenProviderFactory},
+    gcp_oauth::{AccessScope, GcpAccessTokenProvider, GcpAccessTokenProviderFactory, GcpAuthError},
     http::{
         AccessTokenProvider, Method, RequestParameters, RetryingAgent, StaticAccessTokenProvider,
     },
     logging::event,
     metrics::ApiClientMetricsCollector,
+    parse_url,
     transport::{Transport, TransportWriter},
-    Error,
+    UrlParseError,
 };
-use anyhow::{anyhow, Context, Result};
 use slog::{debug, info, o, warn, Logger};
 use std::{
     io::{self, Read, Write},
+    num::ParseIntError,
     time::Duration,
 };
 use ureq::AgentBuilder;
 use url::Url;
 use uuid::Uuid;
 
+use super::TransportError;
+
 fn storage_api_base_url() -> Url {
     Url::parse("https://storage.googleapis.com/").expect("unable to parse storage API url")
 }
 
-fn gcp_object_url(bucket: &str, encoded_key: &str) -> Result<Url> {
-    let request_url = &format!(
+fn gcp_object_url(bucket: &str, encoded_key: &str) -> Result<Url, UrlParseError> {
+    let request_url = format!(
         "{}storage/v1/b/{}/o/{}",
         storage_api_base_url(),
         bucket,
         encoded_key
     );
 
-    Url::parse(request_url).context(format!("failed to parse: {}", request_url))
+    parse_url(request_url)
 }
 
-fn gcp_upload_object_url(storage_api_url: &str, bucket: &str) -> Result<Url> {
-    let request_url = &format!("{}upload/storage/v1/b/{}/o/", storage_api_url, bucket);
+fn gcp_upload_object_url(storage_api_url: &str, bucket: &str) -> Result<Url, UrlParseError> {
+    let request_url = format!("{}upload/storage/v1/b/{}/o/", storage_api_url, bucket);
 
-    Url::parse(request_url).context(format!("failed to parse: {}", request_url))
+    parse_url(request_url)
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum GcsRangeHeaderError {
+    #[error("No range header in response from GCS: {0:?}")]
+    Missing(std::io::Result<String>),
+    #[error("Range header {0} missing bytes prefix")]
+    BadPrefix(String),
+    #[error("End in range header {1} not a valid usize: {0}")]
+    InvalidEnd(ParseIntError, String),
+    #[error("End in range header {0} is invalid")]
+    OutOfRangeEnd(String),
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum GcsError {
+    #[error(transparent)]
+    Auth(#[from] GcpAuthError),
+    #[error("failed to fetch object {1} from GCS: {0}")]
+    Get(ureq::Error, Url),
+    #[error(transparent)]
+    Url(#[from] UrlParseError),
+    #[error("received HTTP 200 or 201 response with chunks remaining")]
+    EarlyChunkOk,
+    #[error("insufficient content accumulated in buffer to upload chunk")]
+    ChunkUnderrun,
+    #[error("no Location header in response when initiating streaming transfer")]
+    NoLocationHeader,
+    #[error(transparent)]
+    Range(#[from] GcsRangeHeaderError),
+    #[error("uploading to gs://{1} failed: {0}")]
+    Upload(ureq::Error, String),
+    #[error("failed in sending bytes to gcs upload session {1}: {0}")]
+    ChunkUpload(ureq::Error, Url),
+    #[error("failed to upload part to GCS: {0}\n{1:?}")]
+    ChunkUploadStatus(u16, std::io::Result<String>),
+    #[error("failed to cancel upload: {0}")]
+    Cancel(ureq::Error),
+    #[error("failed to cancel streaming transfer to GCS: {0:?}")]
+    CancelStatus(std::io::Result<String>),
 }
 
 /// GCSTransport manages reading and writing from GCS buckets, with
@@ -67,7 +110,7 @@ impl GcsTransport {
         gcp_access_token_provider_factory: &mut GcpAccessTokenProviderFactory,
         parent_logger: &Logger,
         api_metrics: &ApiClientMetricsCollector,
-    ) -> Result<Self> {
+    ) -> anyhow::Result<Self> {
         let logger = parent_logger.new(o!(
             event::STORAGE_PATH => path.to_string(),
             event::IDENTITY => identity.to_string(),
@@ -106,7 +149,7 @@ impl Transport for GcsTransport {
         self.path.to_string()
     }
 
-    fn get(&self, key: &str, trace_id: &Uuid) -> Result<Box<dyn Read>> {
+    fn get(&self, key: &str, trace_id: &Uuid) -> Result<Box<dyn Read>, TransportError> {
         let logger = self.logger.new(o!(
             event::TRACE_ID => trace_id.to_string(),
             event::STORAGE_KEY => key.to_owned(),
@@ -119,35 +162,36 @@ impl Transport for GcsTransport {
         let mut url = gcp_object_url(
             &self.path.bucket,
             &urlencoding::encode(&[&self.path.key, key].concat()),
-        )?;
+        )
+        .map_err(GcsError::Url)?;
 
         // Ensures response body will be content and not JSON metadata.
         // https://cloud.google.com/storage/docs/json_api/v1/objects/get#parameters
         url.query_pairs_mut().append_pair("alt", "media").finish();
 
-        let request = self.agent.prepare_request(RequestParameters {
-            url: url.clone(),
-            method: Method::Get,
-            token_provider: Some(&self.oauth_token_provider),
-        })?;
-
-        let response = self
+        let request = self
             .agent
-            .call(&logger, &request, "get")
-            .map_err(|err| {
-                if let Error::HttpError(ref ureq_err) = err {
-                    if matches!(ureq_err, ureq::Error::Status(404, _)) {
-                        return Error::ObjectNotFoundError(key.to_owned(), anyhow::Error::new(err));
-                    }
-                }
-                err
+            .prepare_request(RequestParameters {
+                url: url.clone(),
+                method: Method::Get,
+                token_provider: Some(&self.oauth_token_provider),
             })
-            .context(format!("failed to fetch object {} from GCS", url))?;
+            .map_err(|e| TransportError::Gcs(e.into()))?;
+
+        let response = self.agent.call(&logger, &request, "get").map_err(|err| {
+            if matches!(err, ureq::Error::Status(404, _)) {
+                return TransportError::ObjectNotFoundError(
+                    key.to_owned(),
+                    anyhow::Error::new(err),
+                );
+            }
+            TransportError::Gcs(GcsError::Get(err, url))
+        })?;
 
         Ok(Box::new(response.into_reader()))
     }
 
-    fn put(&self, key: &str, trace_id: &Uuid) -> Result<Box<dyn TransportWriter>> {
+    fn put(&self, key: &str, trace_id: &Uuid) -> Result<Box<dyn TransportWriter>, TransportError> {
         let logger = self.logger.new(o!(
             event::TRACE_ID => trace_id.to_string(),
             event::STORAGE_KEY => key.to_owned(),
@@ -160,7 +204,10 @@ impl Transport for GcsTransport {
         // expiring during the lifetime of that object, and so obtain a token
         // here instead of passing the token provider into the
         // StreamingTransferWriter.
-        let oauth_token = self.oauth_token_provider.ensure_access_token()?;
+        let oauth_token = self
+            .oauth_token_provider
+            .ensure_access_token()
+            .map_err(|e| TransportError::Gcs(e.into()))?;
         let writer = StreamingTransferWriter::new(
             self.path.bucket.to_owned(),
             [&self.path.key, key].concat(),
@@ -217,7 +264,7 @@ impl StreamingTransferWriter {
         oauth_token: String,
         agent: RetryingAgent,
         parent_logger: &Logger,
-    ) -> Result<StreamingTransferWriter> {
+    ) -> Result<StreamingTransferWriter, GcsError> {
         StreamingTransferWriter::new_with_api_url(
             bucket,
             object,
@@ -239,7 +286,7 @@ impl StreamingTransferWriter {
         storage_api_base_url: Url,
         agent: RetryingAgent,
         parent_logger: &Logger,
-    ) -> Result<StreamingTransferWriter> {
+    ) -> Result<StreamingTransferWriter, GcsError> {
         // Initiate the resumable, streaming upload.
         // https://cloud.google.com/storage/docs/performing-resumable-uploads#initiate-session
         let mut upload_url = gcp_upload_object_url(&storage_api_base_url.to_string(), &bucket)?;
@@ -258,7 +305,7 @@ impl StreamingTransferWriter {
 
         let http_response = agent
             .send_bytes(parent_logger, &request, "insert", &[])
-            .context(format!("uploading to gs://{} failed", bucket))?;
+            .map_err(|e| GcsError::Upload(e, bucket))?;
 
         // The upload session URI authenticates subsequent upload requests for
         // this upload, so we no longer need the impersonated service account's
@@ -267,31 +314,27 @@ impl StreamingTransferWriter {
         // https://cloud.google.com/storage/docs/resumable-uploads#session-uris
         let upload_session_uri = http_response
             .header("Location")
-            .context("no Location header in response when initiating streaming transfer")?;
+            .ok_or(GcsError::NoLocationHeader)?;
 
         Ok(StreamingTransferWriter {
             minimum_upload_chunk_size,
             buffer: Vec::with_capacity(minimum_upload_chunk_size * 2),
             object_upload_position: 0,
-            upload_session_uri: Url::parse(upload_session_uri).context(format!(
-                "failed to parse upload_session_uri url: {}",
-                &upload_session_uri
-            ))?,
+            upload_session_uri: Url::parse(upload_session_uri)
+                .map_err(|e| UrlParseError(e, upload_session_uri.to_owned()))?,
             agent,
             logger: parent_logger.clone(),
             is_finished: false,
         })
     }
 
-    fn upload_chunk(&mut self, last_chunk: bool) -> Result<()> {
+    fn upload_chunk(&mut self, last_chunk: bool) -> Result<(), GcsError> {
         if self.buffer.is_empty() {
             return Ok(());
         }
 
         if !last_chunk && self.buffer.len() < self.minimum_upload_chunk_size {
-            return Err(anyhow!(
-                "insufficient content accumulated in buffer to upload chunk"
-            ));
+            return Err(GcsError::ChunkUnderrun);
         }
 
         debug!(
@@ -323,20 +366,15 @@ impl StreamingTransferWriter {
             content_range_header_total_length_field
         );
 
-        let mut request = self.agent.prepare_request(RequestParameters {
-            url: self.upload_session_uri.clone(),
-            method: Method::Put,
-            ..Default::default()
-        })?;
+        let mut request = self
+            .agent
+            .prepare_anonymous_request(self.upload_session_uri.clone(), Method::Put);
         request = request.set("Content-Range", &content_range);
 
         let http_response = self
             .agent
             .send_bytes(&self.logger, &request, "insert-chunk", body)
-            .context(format!(
-                "failed in sending bytes to gcs upload session: {}",
-                &self.upload_session_uri
-            ))?;
+            .map_err(|e| GcsError::ChunkUpload(e, self.upload_session_uri.clone()))?;
 
         // On success we expect HTTP 308 Resume Incomplete and a Range: header,
         // unless this is the last part and the server accepts the entire
@@ -348,25 +386,19 @@ impl StreamingTransferWriter {
                 self.buffer.truncate(0);
                 Ok(())
             }
-            200 | 201 => Err(anyhow!(
-                "received HTTP 200 or 201 response with chunks remaining"
-            )),
-            308 if !http_response.has("Range") => Err(anyhow!(
-                "No range header in response from GCS: {:?}",
-                http_response.into_string()
-            )),
+            200 | 201 => Err(GcsError::EarlyChunkOk),
+            308 if !http_response.has("Range") => {
+                Err(GcsRangeHeaderError::Missing(http_response.into_string()).into())
+            }
             308 => {
                 let range_header = http_response.header("Range").unwrap();
                 // The range header is like "bytes=0-222", and represents the
                 // uploaded portion of the overall object, not the current chunk
                 let end = range_header
                     .strip_prefix("bytes=0-")
-                    .context(format!(
-                        "Range header {} missing bytes prefix",
-                        range_header
-                    ))?
+                    .ok_or_else(|| GcsRangeHeaderError::BadPrefix(range_header.to_owned()))?
                     .parse::<usize>()
-                    .context("End in range header {} not a valid usize")?;
+                    .map_err(|e| GcsRangeHeaderError::InvalidEnd(e, range_header.to_owned()))?;
                 // end is usize and so parse would fail if the value in the
                 // header was negative, but we still defend ourselves against
                 // it being less than it was before this chunk was uploaded, or
@@ -375,7 +407,7 @@ impl StreamingTransferWriter {
                 if end < self.object_upload_position
                     || end > self.object_upload_position + body.len() - 1
                 {
-                    return Err(anyhow!("End in range header {} is invalid", range_header));
+                    return Err(GcsRangeHeaderError::OutOfRangeEnd(range_header.to_owned()).into());
                 }
 
                 // If we have a little content left over, we can't just make
@@ -387,10 +419,9 @@ impl StreamingTransferWriter {
                 self.object_upload_position = end + 1;
                 Ok(())
             }
-            status => Err(anyhow!(
-                "failed to upload part to GCS: {} \n{:?}",
+            status => Err(GcsError::ChunkUploadStatus(
                 status,
-                http_response.into_string()
+                http_response.into_string(),
             )),
         }
     }
@@ -403,7 +434,7 @@ impl Write for StreamingTransferWriter {
         self.buffer.extend_from_slice(buf);
         while self.buffer.len() >= self.minimum_upload_chunk_size {
             self.upload_chunk(false)
-                .map_err(|e| io::Error::new(io::ErrorKind::Other, Error::AnyhowError(e)))?;
+                .map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
         }
 
         Ok(buf.len())
@@ -419,7 +450,7 @@ impl Write for StreamingTransferWriter {
 }
 
 impl TransportWriter for StreamingTransferWriter {
-    fn complete_upload(&mut self) -> Result<()> {
+    fn complete_upload(&mut self) -> Result<(), TransportError> {
         while !self.buffer.is_empty() {
             self.upload_chunk(true)?;
         }
@@ -427,7 +458,7 @@ impl TransportWriter for StreamingTransferWriter {
         Ok(())
     }
 
-    fn cancel_upload(&mut self) -> Result<()> {
+    fn cancel_upload(&mut self) -> Result<(), TransportError> {
         self.is_finished = true;
 
         debug!(
@@ -436,23 +467,21 @@ impl TransportWriter for StreamingTransferWriter {
         );
 
         // https://cloud.google.com/storage/docs/performing-resumable-uploads#cancel-upload
-        let request = self.agent.prepare_request(RequestParameters {
-            url: self.upload_session_uri.clone(),
-            method: Method::Delete,
-            ..Default::default()
-        })?;
+        let request = self
+            .agent
+            .prepare_anonymous_request(self.upload_session_uri.clone(), Method::Delete);
 
-        let http_response = self.agent.call(
-            &self.logger,
-            &request.set("Content-Length", "0"),
-            "cancel-upload",
-        )?;
+        let http_response = self
+            .agent
+            .call(
+                &self.logger,
+                &request.set("Content-Length", "0"),
+                "cancel-upload",
+            )
+            .map_err(|e| TransportError::Gcs(GcsError::Cancel(e)))?;
         match http_response.status() {
             499 => Ok(()),
-            _ => Err(anyhow!(
-                "failed to cancel streaming transfer to GCS: {:?}",
-                http_response
-            )),
+            _ => Err(GcsError::CancelStatus(http_response.into_string()).into()),
         }
     }
 }
