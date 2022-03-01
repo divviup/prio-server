@@ -381,6 +381,10 @@ terraform {
       source  = "gavinbunney/kubectl"
       version = "~> 1.13.1"
     }
+    external = {
+      source  = "hashicorp/external"
+      version = "2.2.0"
+    }
   }
 }
 
@@ -843,4 +847,12 @@ module "monitoring" {
   grafana_helm_chart_version              = var.grafana_helm_chart_version
   cloudwatch_exporter_helm_chart_version  = var.cloudwatch_exporter_helm_chart_version
   stackdriver_exporter_helm_chart_version = var.stackdriver_exporter_helm_chart_version
+}
+
+data "external" "git-describe" {
+  program = ["bash", "-c", "echo {\\\"result\\\":\\\"$(git describe --always --dirty)\\\"}"]
+}
+
+output "git-describe" {
+  value = data.external.git-describe.result.result
 }
