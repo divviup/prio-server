@@ -239,7 +239,7 @@ resource "aws_eks_cluster" "cluster" {
 
 resource "aws_cloudwatch_log_group" "cluster_logs" {
   name              = "/aws/eks/${var.resource_prefix}/cluster"
-  retention_in_days = 7
+  retention_in_days = 180
 }
 
 data "tls_certificate" "cluster" {
