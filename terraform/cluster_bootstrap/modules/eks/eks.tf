@@ -233,6 +233,13 @@ resource "aws_eks_cluster" "cluster" {
       key_arn = aws_kms_key.etcd_secrets.arn
     }
   }
+
+  depends_on = [aws_cloudwatch_log_group.cluster_logs]
+}
+
+resource "aws_cloudwatch_log_group" "cluster_logs" {
+  name              = "/aws/eks/${var.resource_prefix}/cluster"
+  retention_in_days = 7
 }
 
 data "tls_certificate" "cluster" {
