@@ -108,6 +108,10 @@ terraform {
       # Keep this version in sync with provider google
       version = "~> 4.11.0"
     }
+    external = {
+      source  = "hashicorp/external"
+      version = "2.2.0"
+    }
   }
 }
 
@@ -157,4 +161,12 @@ module "eks" {
 
 output "google_kms_key_ring_id" {
   value = var.use_aws ? "" : module.gke[0].google_kms_key_ring_id
+}
+
+data "external" "git-describe" {
+  program = ["bash", "-c", "echo {\\\"result\\\":\\\"$(git describe --always --dirty)\\\"}"]
+}
+
+output "git-describe" {
+  value = data.external.git-describe.result.result
 }
