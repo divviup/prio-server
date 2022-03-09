@@ -13,15 +13,15 @@ endif
 
 VARS="variables/$(ENV).tfvars"
 REGION="$(shell grep '^gcp_region' $(VARS) | awk -F'=' '{print $$2}' | sed 's/[[:space:]]//g')"
-ifeq ($(REGION),)
+ifeq ($(REGION),"")
 $(error $(BOLD)$(RED)REGION was not detected$(RESET))
 endif
 PROJECT="$(shell grep '^gcp_project' $(VARS) | awk -F'=' '{print $$2}' | sed 's/[[:space:]]//g')"
-ifeq ($(PROJECT),)
+ifeq ($(PROJECT),"")
 $(error $(BOLD)$(RED)PROJECT was not detected$(RESET))
 endif
 STATE_BUCKET="$(shell grep '^state_bucket' $(VARS) | awk -F'=' '{print $$2}' | sed 's/[[:space:]]//g')"
-ifeq ($(STATE_BUCKET),)
+ifeq ($(STATE_BUCKET),"")
 $(error $(BOLD)$(RED)STATE_BUCKET was not detected$(RESET))
 endif
 
