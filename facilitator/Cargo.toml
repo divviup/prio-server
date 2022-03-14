@@ -32,7 +32,7 @@ pkix = "0.1.2"
 prio = "0.5.0"
 prometheus = { version = "0.13", features = ["process"] }
 rand = "0.8"
-regex = "^1.5.4"
+regex = "^1.5.5"
 ring = { version = "0.16.20", features = ["std"] }
 rusoto_core = { version = "^0.47", default_features = false, features = ["rustls"] }
 rusoto_s3 = { version = "^0.47", default_features = false, features = ["rustls"] }
