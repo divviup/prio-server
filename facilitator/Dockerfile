@@ -36,7 +36,7 @@ RUN cargo build --manifest-path ./facilitator/Cargo.toml --release
 
 # Build a minimal container from Alpine containing only the stripped binary and
 # no intermediate build artifacts
-FROM alpine:3.15.0
+FROM alpine:3.15.1
 
 RUN apk add libgcc && apk update
 
