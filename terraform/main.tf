@@ -340,46 +340,46 @@ terraform {
   required_providers {
     aws = {
       source  = "hashicorp/aws"
-      version = "~> 4.5.0"
+      version = "4.5.0"
     }
     google = {
       source = "hashicorp/google"
       # Keep this version in sync with provider google-beta
-      version = "~> 4.13.0"
+      version = "4.13.0"
     }
     google-beta = {
       source = "hashicorp/google-beta"
       # Keep this version in sync with provider google
-      version = "~> 4.13.0"
+      version = "4.13.0"
     }
     helm = {
       source  = "hashicorp/helm"
-      version = "~> 2.4.1"
+      version = "2.4.1"
     }
     http = {
       source  = "hashicorp/http"
-      version = "~> 2.1.0"
+      version = "2.1.0"
     }
     kubernetes = {
       source  = "hashicorp/kubernetes"
-      version = "~> 2.8.0"
+      version = "2.8.0"
     }
     null = {
       source  = "hashicorp/null"
-      version = "~> 3.1.0"
+      version = "3.1.1"
     }
     random = {
       source  = "hashicorp/random"
-      version = "~> 3.1.0"
+      version = "3.1.2"
     }
     # `tls` provider needed to load EKS cluster OIDC provider certificate
     tls = {
       source  = "hashicorp/tls"
-      version = "~> 3.1.0"
+      version = "3.1.0"
     }
     kubectl = {
       source  = "gavinbunney/kubectl"
-      version = "~> 1.13.1"
+      version = "1.13.1"
     }
     external = {
       source  = "hashicorp/external"
