@@ -11,17 +11,17 @@ $(info $(BOLD)Example usage: \`ENV=demo make plan\`$(RESET))
 $(error $(BOLD)$(RED)ENV was not set$(RESET))
 endif
 
-VARS="variables/$(ENV).tfvars"
-REGION="$(shell grep '^gcp_region' $(VARS) | awk -F'=' '{print $$2}' | sed 's/[[:space:]]//g')"
-ifeq ($(REGION),)
+VARS=variables/$(ENV).tfvars
+REGION="$(shell grep '^gcp_region' "$(VARS)" | awk -F'=' '{print $$2}' | sed 's/[[:space:]]//g')"
+ifeq ($(REGION),"")
 $(error $(BOLD)$(RED)REGION was not detected$(RESET))
 endif
-PROJECT="$(shell grep '^gcp_project' $(VARS) | awk -F'=' '{print $$2}' | sed 's/[[:space:]]//g')"
-ifeq ($(PROJECT),)
+PROJECT="$(shell grep '^gcp_project' "$(VARS)" | awk -F'=' '{print $$2}' | sed 's/[[:space:]]//g')"
+ifeq ($(PROJECT),"")
 $(error $(BOLD)$(RED)PROJECT was not detected$(RESET))
 endif
-STATE_BUCKET="$(shell grep '^state_bucket' $(VARS) | awk -F'=' '{print $$2}' | sed 's/[[:space:]]//g')"
-ifeq ($(STATE_BUCKET),)
+STATE_BUCKET="$(shell grep '^state_bucket' "$(VARS)" | awk -F'=' '{print $$2}' | sed 's/[[:space:]]//g')"
+ifeq ($(STATE_BUCKET),"")
 $(error $(BOLD)$(RED)STATE_BUCKET was not detected$(RESET))
 endif
 
