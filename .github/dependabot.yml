@@ -22,7 +22,19 @@ updates:
     schedule:
       interval: "weekly"
   - package-ecosystem: "terraform"
+    directory: "/terraform/modules/kubernetes"
+    schedule:
+      interval: "weekly"
+  - package-ecosystem: "terraform"
+    directory: "/terraform/modules/monitoring"
+    schedule:
+      interval: "weekly"
+  - package-ecosystem: "terraform"
     directory: "/terraform/cluster_bootstrap"
+    schedule:
+      interval: "weekly"
+  - package-ecosystem: "terraform"
+    directory: "/terraform/cluster_bootstrap/modules/gke"
     schedule:
       interval: "weekly"
   - package-ecosystem: "gomod"
@@ -31,5 +43,9 @@ updates:
       interval: "weekly"
   - package-ecosystem: "docker"
     directory: "/workflow-manager"
+    schedule:
+      interval: "weekly"
+  - package-ecosystem: "github-actions"
+    directory: "/"
     schedule:
       interval: "weekly"
