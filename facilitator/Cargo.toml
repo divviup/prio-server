@@ -42,7 +42,7 @@ rusoto_sts = { version = "^0.47", default_features = false, features = ["rustls"
 sha2 = "0.10"
 slog = { version = "2.7.0", features = ["max_level_trace"] }
 slog-async = "2.7.0"
-slog-json = "2.6.0"
+slog-json = "2.6.1"
 slog-scope = "4.4.0"
 slog-stdlog = "4.1.0"
 slog-term = "2.9.0"
