@@ -16,7 +16,7 @@ jobs:
         working-directory: facilitator
     runs-on: ubuntu-latest
     steps:
-    - uses: actions/checkout@v2
+    - uses: actions/checkout@v3
     - name: Lint
       run: cargo fmt --message-format human -- --check
     - name: clippy
@@ -33,7 +33,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
-        uses: actions/checkout@v2
+        uses: actions/checkout@v3
       - name: Install lcov
         run: sudo apt install lcov -y
       - name: Install rust
@@ -70,7 +70,7 @@ jobs:
         working-directory: terraform
     runs-on: ubuntu-latest
     steps:
-    - uses: actions/checkout@v2
+    - uses: actions/checkout@v3
     - uses: hashicorp/setup-terraform@v1
       with:
         terraform_version: ~1.1.0
@@ -84,7 +84,7 @@ jobs:
   facilitator-docker:
     runs-on: ubuntu-latest
     steps:
-    - uses: actions/checkout@v2
+    - uses: actions/checkout@v3
     - name: Set up Docker build
       uses: docker/setup-buildx-action@v1
     - name: build
@@ -95,7 +95,7 @@ jobs:
   workflow-manager-docker:
     runs-on: ubuntu-latest
     steps:
-    - uses: actions/checkout@v2
+    - uses: actions/checkout@v3
     - name: Set up Docker build
       uses: docker/setup-buildx-action@v1
     - name: build
@@ -107,7 +107,7 @@ jobs:
       run:
         working-directory: workflow-manager
     steps:
-    - uses: actions/checkout@v2
+    - uses: actions/checkout@v3
     - name: Setup go
       uses: actions/setup-go@v1
       with:
@@ -126,7 +126,7 @@ jobs:
   key-rotator-docker:
     runs-on: ubuntu-latest
     steps:
-    - uses: actions/checkout@v2
+    - uses: actions/checkout@v3
     - name: Set up Docker build
       uses: docker/setup-buildx-action@v1
     - name: build
@@ -140,7 +140,7 @@ jobs:
       run:
         working-directory: key-rotator
     steps:
-    - uses: actions/checkout@v2
+    - uses: actions/checkout@v3
     - name: Setup go
       uses: actions/setup-go@v1
       with:
@@ -159,7 +159,7 @@ jobs:
   key-rotator-golangci-lint:
     runs-on: ubuntu-latest
     steps:
-    - uses: actions/checkout@v2
+    - uses: actions/checkout@v3
     - name: Run golangci-lint on key-rotator
       uses: golangci/golangci-lint-action@v2.5.2
       with:
@@ -170,7 +170,7 @@ jobs:
   workflow-manager-golangci-lint:
     runs-on: ubuntu-latest
     steps:
-    - uses: actions/checkout@v2
+    - uses: actions/checkout@v3
     - name: Run golangci-lint on workflow-manager
       uses: golangci/golangci-lint-action@v2.5.2
       with:
