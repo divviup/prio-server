@@ -161,7 +161,7 @@ jobs:
     steps:
     - uses: actions/checkout@v3
     - name: Run golangci-lint on key-rotator
-      uses: golangci/golangci-lint-action@v2.5.2
+      uses: golangci/golangci-lint-action@v3.1.0
       with:
         working-directory: key-rotator
         version: "v1.43.0"
@@ -172,7 +172,7 @@ jobs:
     steps:
     - uses: actions/checkout@v3
     - name: Run golangci-lint on workflow-manager
-      uses: golangci/golangci-lint-action@v2.5.2
+      uses: golangci/golangci-lint-action@v3.1.0
       with:
         working-directory: workflow-manager
         version: "v1.43.0"
