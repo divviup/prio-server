@@ -1,6 +1,7 @@
 groups:
 - name: default
   rules:
+  # See docs/monitoring.md for discussion of the PromQL expressions in these alerts.
   - alert: workflow_manager_heartbeat
     expr: (time() - workflow_manager_last_success_seconds) > 1800
     for: 5m
