@@ -15,7 +15,7 @@ use prio::{
     server::Server,
 };
 use ring::signature::UnparsedPublicKey;
-use slog::{debug, info, o, Logger};
+use slog::{debug, info, o, warn, Logger};
 use std::{collections::HashMap, iter::Iterator};
 use uuid::Uuid;
 
@@ -35,14 +35,20 @@ pub enum IntakeError {
     BatchRead(#[from] BatchReadError),
     #[error(transparent)]
     BatchWrite(#[from] BatchWriteError),
+    #[error("ingestion batch is empty {0}")]
+    EmptyIngestionBatch(Uuid),
 }
 
 impl ErrorClassification for IntakeError {
     fn is_retryable(&self) -> bool {
         match self {
-            // Packet decryption errors are the canonical case of errors that don't merit retries.
-            // Batches with zero bins are likewise not going to benefit from retries.
-            IntakeError::PacketDecryption(_) | IntakeError::InvalidBinCount(_) => false,
+            // Packet decryption errors are the canonical case of errors that'
+            // don't merit retries.
+            IntakeError::PacketDecryption(_)
+            // Batches with zero bins or zero packets are likewise not going to
+            // benefit from retries.
+            | IntakeError::InvalidBinCount(_)
+            | IntakeError::EmptyIngestionBatch(_) => false,
             // libprio-rs errors may be due to getrandom failures.
             IntakeError::PrioSetup(_) | IntakeError::PrioVerification(_) => true,
             // Dispatch to wrapped errors.
@@ -160,6 +166,13 @@ impl<'a> BatchIntaker<'a> {
             self.intake_batch.read(self.intake_public_keys)?;
         if ingestion_header.bins <= 0 {
             return Err(IntakeError::InvalidBinCount(ingestion_header.bins));
+        }
+
+        if ingestion_packets.is_empty() {
+            warn!(self.logger, "ingestion batch is empty");
+            return Err(IntakeError::EmptyIngestionBatch(
+                ingestion_header.batch_uuid,
+            ));
         }
 
         // Ideally, we would use the encryption_key_id in the ingestion packet
@@ -576,5 +589,97 @@ mod tests {
                 SerializeError::UnpackInputSizeMismatch
             ))
         );
+    }
+
+    #[test]
+    fn empty_ingestion_batch() {
+        let logger = setup_test_logging();
+        let pha_tempdir = tempfile::TempDir::new().unwrap();
+        let facilitator_tempdir = tempfile::TempDir::new().unwrap();
+
+        let aggregation_name = "fake-aggregation-1".to_owned();
+        let date = NaiveDateTime::from_timestamp(1234567890, 654321);
+        let batch_uuid = Uuid::new_v4();
+
+        let packet_encryption_csr = default_packet_encryption_certificate_signing_request();
+
+        let pha_output = SampleOutput {
+            transport: SignableTransport {
+                transport: Box::new(LocalFileTransport::new(pha_tempdir.path().to_path_buf())),
+                batch_signing_key: default_ingestor_private_key(),
+            },
+            packet_encryption_public_key: PublicKey::from_base64(
+                &packet_encryption_csr.base64_public_key().unwrap(),
+            )
+            .unwrap(),
+            drop_nth_packet: None,
+        };
+
+        let facilitator_output = SampleOutput {
+            transport: SignableTransport {
+                transport: Box::new(LocalFileTransport::new(
+                    facilitator_tempdir.path().to_path_buf(),
+                )),
+                batch_signing_key: default_ingestor_private_key(),
+            },
+            packet_encryption_public_key: PublicKey::from_base64(
+                &packet_encryption_csr.base64_public_key().unwrap(),
+            )
+            .unwrap(),
+            drop_nth_packet: None,
+        };
+
+        let sample_generator = SampleGenerator::new(
+            &aggregation_name,
+            10,
+            0.11,
+            100,
+            100,
+            &pha_output,
+            &facilitator_output,
+            &logger,
+        );
+
+        sample_generator
+            .generate_ingestion_sample(&DEFAULT_TRACE_ID, &batch_uuid, &date, 0)
+            .unwrap();
+
+        let mut ingestor_pub_keys = HashMap::new();
+        ingestor_pub_keys.insert(
+            default_ingestor_private_key().identifier,
+            default_ingestor_public_key(),
+        );
+        let mut pha_ingest_transport = VerifiableAndDecryptableTransport {
+            transport: VerifiableTransport {
+                transport: Box::new(LocalFileTransport::new(pha_tempdir.path().to_path_buf())),
+                batch_signing_public_keys: ingestor_pub_keys.clone(),
+            },
+            packet_decryption_keys: vec![PrivateKey::from_base64(
+                DEFAULT_PACKET_ENCRYPTION_CERTIFICATE_SIGNING_REQUEST_PRIVATE_KEY,
+            )
+            .unwrap()],
+        };
+
+        let mut pha_peer_validate_transport = SignableTransport {
+            transport: Box::new(LocalFileTransport::new(pha_tempdir.path().to_path_buf())),
+            batch_signing_key: default_pha_signing_private_key(),
+        };
+
+        let mut pha_ingestor = BatchIntaker::new(
+            &DEFAULT_TRACE_ID,
+            &aggregation_name,
+            &batch_uuid,
+            &date,
+            &mut pha_ingest_transport,
+            &mut pha_peer_validate_transport,
+            true,
+            false,
+            &logger,
+        )
+        .unwrap();
+
+        let error = pha_ingestor.generate_validation_share(|_| {}).unwrap_err();
+        assert_matches!(error, IntakeError::EmptyIngestionBatch(uuid) if uuid == batch_uuid);
+        assert!(!error.is_retryable());
     }
 }
