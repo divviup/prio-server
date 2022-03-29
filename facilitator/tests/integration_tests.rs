@@ -30,12 +30,7 @@ const TRACE_ID: Uuid = Uuid::from_bytes([97; 16]);
 
 #[test]
 fn end_to_end() {
-    end_to_end_test(EndToEndTestOptions {
-        drop_nth_pha_packet: None,
-        drop_nth_facilitator_packet: None,
-        use_wrong_encryption_key_for_second_batch: false,
-        use_wrong_epsilon_for_second_batch: false,
-    })
+    end_to_end_test(EndToEndTestOptions::default())
 }
 
 #[test]
@@ -45,8 +40,7 @@ fn inconsistent_ingestion_batches() {
     end_to_end_test(EndToEndTestOptions {
         drop_nth_pha_packet: Some(3),
         drop_nth_facilitator_packet: Some(4),
-        use_wrong_encryption_key_for_second_batch: false,
-        use_wrong_epsilon_for_second_batch: false,
+        ..Default::default()
     })
 }
 
@@ -55,20 +49,24 @@ fn wrong_encryption_key() {
     // Use the wrong encryption key for the second batch. The first batch should
     // still get aggregated.
     end_to_end_test(EndToEndTestOptions {
-        drop_nth_pha_packet: None,
-        drop_nth_facilitator_packet: None,
         use_wrong_encryption_key_for_second_batch: true,
-        use_wrong_epsilon_for_second_batch: false,
+        ..Default::default()
     })
 }
 
 #[test]
 fn mismatched_epsilon() {
     end_to_end_test(EndToEndTestOptions {
-        drop_nth_pha_packet: None,
-        drop_nth_facilitator_packet: None,
-        use_wrong_encryption_key_for_second_batch: false,
         use_wrong_epsilon_for_second_batch: true,
+        ..Default::default()
+    })
+}
+
+#[test]
+fn aggregate_empty_batch() {
+    end_to_end_test(EndToEndTestOptions {
+        send_pha_empty_second_batch: true,
+        ..Default::default()
     })
 }
 
@@ -361,11 +359,13 @@ fn sample_output(
     }
 }
 
+#[derive(Default)]
 struct EndToEndTestOptions {
     drop_nth_pha_packet: Option<usize>,
     drop_nth_facilitator_packet: Option<usize>,
     use_wrong_encryption_key_for_second_batch: bool,
     use_wrong_epsilon_for_second_batch: bool,
+    send_pha_empty_second_batch: bool,
 }
 
 fn end_to_end_test(test_options: EndToEndTestOptions) {
@@ -400,7 +400,12 @@ fn end_to_end_test(test_options: EndToEndTestOptions) {
         } else {
             default_pha_packet_encryption_public_key()
         },
-        test_options.drop_nth_pha_packet,
+        if test_options.send_pha_empty_second_batch {
+            // drop every 1-th packet, so drop everything
+            Some(1)
+        } else {
+            test_options.drop_nth_pha_packet
+        },
     );
 
     let batch_1_facilitator_output = sample_output(
@@ -521,7 +526,7 @@ fn end_to_end_test(test_options: EndToEndTestOptions) {
         (FIRST_BATCH_PACKET_COUNT - batch_1_reference_sum.pha_dropped_packets.len()) / 2
     );
 
-    BatchIntaker::new(
+    let result = BatchIntaker::new(
         &TRACE_ID,
         &aggregation_name,
         &batch_2_uuid,
@@ -533,8 +538,14 @@ fn end_to_end_test(test_options: EndToEndTestOptions) {
         &logger,
     )
     .unwrap()
-    .generate_validation_share(|_| {})
-    .unwrap();
+    .generate_validation_share(|_| {});
+
+    if test_options.send_pha_empty_second_batch {
+        // PHA intake of second batch should fail if it was empty
+        result.unwrap_err();
+    } else {
+        result.unwrap();
+    }
 
     BatchIntaker::new(
         &TRACE_ID,
@@ -633,7 +644,14 @@ fn end_to_end_test(test_options: EndToEndTestOptions) {
         aggregation_result.unwrap();
     }
 
-    assert_eq!(aggregation_callback_count, 2);
+    assert_eq!(
+        aggregation_callback_count,
+        if test_options.send_pha_empty_second_batch {
+            1
+        } else {
+            2
+        }
+    );
 
     let mut facilitator_aggregation_transport = SignableTransport {
         transport: Box::new(LocalFileTransport::new(
@@ -642,6 +660,11 @@ fn end_to_end_test(test_options: EndToEndTestOptions) {
         batch_signing_key: default_facilitator_signing_private_key(),
     };
 
+    let facilitator_batch_ids_and_dates = if test_options.send_pha_empty_second_batch {
+        vec![(batch_1_uuid, date)]
+    } else {
+        batch_ids_and_dates
+    };
     let mut aggregation_callback_count = 0;
     BatchAggregator::new(
         &TRACE_ID,
@@ -657,10 +680,15 @@ fn end_to_end_test(test_options: EndToEndTestOptions) {
         &logger,
     )
     .unwrap()
-    .generate_sum_part(&batch_ids_and_dates, |_| aggregation_callback_count += 1)
+    .generate_sum_part(&facilitator_batch_ids_and_dates, |_| {
+        aggregation_callback_count += 1
+    })
     .unwrap();
 
-    assert_eq!(aggregation_callback_count, 2);
+    assert_eq!(
+        aggregation_callback_count,
+        facilitator_batch_ids_and_dates.len()
+    );
 
     let pha_aggregation_batch_reader = BatchReader::new(
         Batch::new_sum(
@@ -705,6 +733,7 @@ fn end_to_end_test(test_options: EndToEndTestOptions) {
     // batch's UUID, and the count of contributions from the first batch
     let (reference_sum, expected_batch_uuids, expected_total_individual_clients) = if test_options
         .use_wrong_encryption_key_for_second_batch
+        || test_options.send_pha_empty_second_batch
     {
         (
             batch_1_reference_sum.sum,
