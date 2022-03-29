@@ -42,7 +42,7 @@ pub enum IntakeError {
 impl ErrorClassification for IntakeError {
     fn is_retryable(&self) -> bool {
         match self {
-            // Packet decryption errors are the canonical case of errors that'
+            // Packet decryption errors are the canonical case of errors that
             // don't merit retries.
             IntakeError::PacketDecryption(_)
             // Batches with zero bins or zero packets are likewise not going to

@@ -79,8 +79,8 @@ pub enum GcsError {
     ChunkUploadStatus(u16, std::io::Result<String>),
     #[error("failed to cancel upload: {0}")]
     Cancel(ureq::Error),
-    #[error("failed to cancel streaming transfer to GCS: {0:?}")]
-    CancelStatus(std::io::Result<String>),
+    #[error("failed to cancel streaming transfer to GCS: {0}\n{1:?}")]
+    CancelStatus(u16, std::io::Result<String>),
 }
 
 /// GCSTransport manages reading and writing from GCS buckets, with
@@ -251,6 +251,7 @@ struct StreamingTransferWriter {
     agent: RetryingAgent,
     logger: Logger,
     is_finished: bool,
+    did_upload_chunk: bool,
 }
 
 impl StreamingTransferWriter {
@@ -316,6 +317,8 @@ impl StreamingTransferWriter {
             .header("Location")
             .ok_or(GcsError::NoLocationHeader)?;
 
+        let logger = parent_logger.new(o!("upload_session_uri" => upload_session_uri.to_owned()));
+
         Ok(StreamingTransferWriter {
             minimum_upload_chunk_size,
             buffer: Vec::with_capacity(minimum_upload_chunk_size * 2),
@@ -323,8 +326,9 @@ impl StreamingTransferWriter {
             upload_session_uri: Url::parse(upload_session_uri)
                 .map_err(|e| UrlParseError(e, upload_session_uri.to_owned()))?,
             agent,
-            logger: parent_logger.clone(),
+            logger,
             is_finished: false,
+            did_upload_chunk: false,
         })
     }
 
@@ -337,10 +341,7 @@ impl StreamingTransferWriter {
             return Err(GcsError::ChunkUnderrun);
         }
 
-        debug!(
-            self.logger, "uploading object chunk";
-            "upload_session_uri" => self.upload_session_uri.to_string()
-        );
+        debug!(self.logger, "uploading object chunk");
 
         // When this is the last piece being uploaded, the Content-Range header
         // should include the total object size, but otherwise should have * to
@@ -375,6 +376,8 @@ impl StreamingTransferWriter {
             .agent
             .send_bytes(&self.logger, &request, "insert-chunk", body)
             .map_err(|e| GcsError::ChunkUpload(e, self.upload_session_uri.clone()))?;
+
+        self.did_upload_chunk = true;
 
         // On success we expect HTTP 308 Resume Incomplete and a Range: header,
         // unless this is the last part and the server accepts the entire
@@ -454,34 +457,47 @@ impl TransportWriter for StreamingTransferWriter {
         while !self.buffer.is_empty() {
             self.upload_chunk(true)?;
         }
+
         self.is_finished = true;
+
+        if !self.did_upload_chunk {
+            // Nothing was ever written to this writer, so cancel the upload (to
+            // clean up dangling uploads in GCS) and report success to the
+            // caller. No object will be written to GCS.
+            debug!(self.logger, "canceling empty upload");
+            self.cancel_upload()?;
+        }
+
         Ok(())
     }
 
     fn cancel_upload(&mut self) -> Result<(), TransportError> {
         self.is_finished = true;
 
-        debug!(
-            self.logger, "canceling upload";
-            "upload_session_uri" => self.upload_session_uri.to_string(),
-        );
+        debug!(self.logger, "canceling upload");
 
         // https://cloud.google.com/storage/docs/performing-resumable-uploads#cancel-upload
         let request = self
             .agent
             .prepare_anonymous_request(self.upload_session_uri.clone(), Method::Delete);
 
-        let http_response = self
-            .agent
-            .call(
-                &self.logger,
-                &request.set("Content-Length", "0"),
-                "cancel-upload",
+        match self.agent.call(
+            &self.logger,
+            &request.set("Content-Length", "0"),
+            "cancel-upload",
+        ) {
+            // GCS returns HTTP 499 on successful cancellation, and ureq returns
+            // HTTP statuses in the 400 or 500 range as Err.
+            Err(ureq::Error::Status(499, _)) => Ok(()),
+            Ok(http_response) => Err(GcsError::CancelStatus(
+                http_response.status(),
+                http_response.into_string(),
             )
-            .map_err(|e| TransportError::Gcs(GcsError::Cancel(e)))?;
-        match http_response.status() {
-            499 => Ok(()),
-            _ => Err(GcsError::CancelStatus(http_response.into_string()).into()),
+            .into()),
+            Err(ureq::Error::Status(status, body)) => {
+                Err(GcsError::CancelStatus(status, body.into_string()).into())
+            }
+            Err(e) => Err(GcsError::Cancel(e).into()),
         }
     }
 }
@@ -501,6 +517,7 @@ impl Drop for StreamingTransferWriter {
 mod tests {
     use super::*;
     use crate::logging::setup_test_logging;
+    use assert_matches::assert_matches;
     use mockito::{mock, Matcher};
 
     #[test]
@@ -620,5 +637,125 @@ mod tests {
         first_mocked_put.assert();
         second_mocked_put.assert();
         final_mocked_put.assert();
+    }
+
+    #[test]
+    fn empty_multi_part_upload() {
+        let logger = setup_test_logging();
+        let api_metrics =
+            ApiClientMetricsCollector::new_with_metric_name("empty_multi_chunk_upload").unwrap();
+
+        let fake_upload_session_uri = format!("{}/fake-session-uri", mockito::server_url());
+        let mocked_post = mock("POST", "/upload/storage/v1/b/fake-bucket/o/")
+            .match_header("Authorization", "Bearer fake-token")
+            .match_header("Content-Length", "0")
+            .match_query(Matcher::UrlEncoded(
+                "uploadType".to_owned(),
+                "resumable".to_owned(),
+            ))
+            .match_query(Matcher::UrlEncoded(
+                "name".to_owned(),
+                "fake-object".to_owned(),
+            ))
+            .with_status(200)
+            .with_header("Location", &fake_upload_session_uri)
+            .expect_at_most(1)
+            .create();
+
+        let mut writer = StreamingTransferWriter::new_with_api_url(
+            "fake-bucket".to_string(),
+            "fake-object".to_string(),
+            "fake-token".to_string(),
+            8_388_608,
+            Url::parse(&mockito::server_url()).expect("unable to parse mockito server url"),
+            RetryingAgent::new("multi_chunk_upload", &api_metrics),
+            &logger,
+        )
+        .unwrap();
+
+        mocked_post.assert();
+
+        let mocked_cancel = mock("DELETE", "/fake-session-uri")
+            .match_header("Content-Length", "0")
+            .with_status(499)
+            .expect_at_most(1)
+            .create();
+
+        writer.complete_upload().unwrap();
+
+        mocked_cancel.assert();
+    }
+
+    #[test]
+    fn upload_cancel_failure() {
+        let logger = setup_test_logging();
+        let api_metrics =
+            ApiClientMetricsCollector::new_with_metric_name("upload_cancel_failure").unwrap();
+
+        let fake_upload_session_uri = format!("{}/fake-session-uri", mockito::server_url());
+        let mocked_post = mock("POST", "/upload/storage/v1/b/fake-bucket/o/")
+            .match_header("Authorization", "Bearer fake-token")
+            .match_header("Content-Length", "0")
+            .match_query(Matcher::UrlEncoded(
+                "uploadType".to_owned(),
+                "resumable".to_owned(),
+            ))
+            .match_query(Matcher::UrlEncoded(
+                "name".to_owned(),
+                "fake-object".to_owned(),
+            ))
+            .with_status(200)
+            .with_header("Location", &fake_upload_session_uri)
+            .expect_at_most(1)
+            .create();
+
+        let mut writer = StreamingTransferWriter::new_with_api_url(
+            "fake-bucket".to_string(),
+            "fake-object".to_string(),
+            "fake-token".to_string(),
+            8_388_608,
+            Url::parse(&mockito::server_url()).expect("unable to parse mockito server url"),
+            RetryingAgent::new("multi_chunk_upload", &api_metrics),
+            &logger,
+        )
+        .unwrap();
+
+        mocked_post.assert();
+
+        // Respond to cancel with HTTP status that ureq represents as an error
+        // but is not 499
+        let mocked_cancel = mock("DELETE", "/fake-session-uri")
+            .match_header("Content-Length", "0")
+            .with_status(404)
+            .with_body("error body")
+            .expect_at_most(1)
+            .create();
+
+        assert_matches!(
+            writer.cancel_upload().unwrap_err(),
+            TransportError::Gcs(GcsError::CancelStatus(404, body)) => {
+                assert_eq!(body.unwrap(), "error body".to_string());
+            }
+        );
+
+        mocked_cancel.assert();
+
+        // Respond to cancel with HTTP status that indicates cancel failed but
+        // is not handled as an error by ureq
+        let mocked_cancel = mock("DELETE", "/fake-session-uri")
+            .match_header("Content-Length", "0")
+            .with_status(200)
+            .with_body("error body")
+            .expect_at_most(1)
+            .create();
+
+        assert_matches!(
+            writer.cancel_upload().unwrap_err(),
+            TransportError::Gcs(GcsError::CancelStatus(200, body)) => {
+                assert_eq!(body.unwrap(), "error body".to_string());
+            }
+        );
+
+        mocked_cancel.assert();
     }
 }
