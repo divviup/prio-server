@@ -64,7 +64,11 @@ pub trait TransportWriter: Write {
     /// Complete an upload operation, flushing any buffered writes and cleaning
     /// up any related resources. Callers must call this method to successfully
     /// finish an upload. If this method is not called, the upload will be
-    /// canceled when the TransportWriter value is dropped.
+    /// canceled when the TransportWriter value is dropped. It is an error to
+    /// call this without first having written some content.
+    ///
+    /// The `TransportWriter` cannot be used after this method is called,
+    /// regardlesss of whether it succeeds.
     fn complete_upload(&mut self) -> Result<(), TransportError>;
 
     /// Cancel an upload operation, cleaning up any related resources. This
@@ -72,6 +76,9 @@ pub trait TransportWriter: Write {
     /// if complete_upload was not called successfully; errors will be logged.
     /// Callers may call this method manually in order to handle the case that
     /// an error occurs.
+    ///
+    /// The `TransportWriter` cannot be used after this method is called,
+    /// regardlesss of whether it succeeds.
     fn cancel_upload(&mut self) -> Result<(), TransportError>;
 }
 

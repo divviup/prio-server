@@ -386,6 +386,14 @@ impl TransportWriter for MultipartUploadWriter {
         // Write last part, if any
         self.upload_part()?;
 
+        if self.completed_parts.is_empty() {
+            info!(self.logger, "canceling empty upload");
+            // Nothing was ever written to this writer, so cancel the upload (to
+            // clean up dangling uploads in S3) and report success to the
+            // caller. No object will be written to S3.
+            return self.cancel_upload();
+        }
+
         // Ignore output for now, but we might want the e_tag to check the
         // digest
         let completed_parts = mem::take(&mut self.completed_parts);
@@ -789,12 +797,8 @@ mod tests {
                 TEST_UPLOAD_ID,
                 vec![TEST_ETAG, TEST_ETAG_2],
             ),
-            // Well-formed response to CompleteMultipartUpload.
-            mock_complete_multipart_upload_request(TEST_BUCKET, TEST_KEY, TEST_UPLOAD_ID, vec![]),
-            // Failure response to CompleteMultipartUpload.
-            mock_complete_multipart_upload_request(TEST_BUCKET, TEST_KEY, TEST_UPLOAD_ID, vec![])
-                .with_status(400)
-                .with_body("first 400"),
+            // Expected because of final complete_upload call
+            mock_abort_multipart_upload_request(TEST_BUCKET, TEST_KEY, TEST_UPLOAD_ID),
         ]
         .into_iter()
         .map(Mock::create)
@@ -830,10 +834,9 @@ mod tests {
         // Flush will cause writer to UploadPart the last part and then complete
         // upload
         writer.complete_upload().unwrap();
-        // The buffer is empty now, so another flush will not cause an
-        // UploadPart call
+        // Further call to complete_upload fails because there are no uploaded
+        // parts
         writer.complete_upload().unwrap();
-        writer.complete_upload().unwrap_err();
 
         for mock in &mocks {
             mock.assert();
@@ -965,6 +968,48 @@ mod tests {
 
         for mock in &mocks {
             mock.assert()
+        }
+    }
+
+    #[test]
+    fn s3_transport_empty_multipart_upload() {
+        let logger = setup_test_logging();
+        let runtime = test_runtime();
+        let api_metrics =
+            ApiClientMetricsCollector::new_with_metric_name("s3_transport_empty_multipart_upload")
+                .unwrap();
+
+        let s3_path = S3Path {
+            region: Region::Custom {
+                name: TEST_REGION.into(),
+                endpoint: mockito::server_url(),
+            },
+            bucket: TEST_BUCKET.into(),
+            key: "".into(),
+        };
+
+        let mocks: Vec<Mock> = vec![
+            mock_create_multipart_upload_request(TEST_BUCKET, TEST_KEY, TEST_UPLOAD_ID),
+            // Expected because of completing upload immediately after put
+            mock_abort_multipart_upload_request(TEST_BUCKET, TEST_KEY, TEST_UPLOAD_ID),
+        ]
+        .into_iter()
+        .map(Mock::create)
+        .collect();
+
+        let transport = S3Transport::new(
+            s3_path,
+            aws_credentials::Provider::new_mock(&logger, &api_metrics),
+            runtime.handle(),
+            &logger,
+            &api_metrics,
+        );
+
+        let mut writer = transport.put(TEST_KEY, &DEFAULT_TRACE_ID).unwrap();
+        writer.complete_upload().unwrap();
+
+        for mock in &mocks {
+            mock.assert();
         }
     }
 }

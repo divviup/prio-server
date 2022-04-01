@@ -169,6 +169,12 @@ impl<'a> BatchAggregator<'a> {
                 &self.logger,
             )
             .read(&self.ingestion_transport.transport.batch_signing_public_keys)?;
+
+            if ingestion_packets.is_empty() {
+                warn!(self.logger, "Skipping empty ingestion batch"; event::BATCH_ID => batch_id.to_string());
+                continue;
+            }
+
             let mut peer_validation_batch_reader = BatchReader::new(
                 Batch::new_validation(self.aggregation_name, batch_id, batch_date, !self.is_first),
                 &*self.peer_validation_transport.transport,
