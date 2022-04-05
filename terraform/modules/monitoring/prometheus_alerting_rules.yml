@@ -145,7 +145,7 @@ groups:
     annotations:
       summary: "Container is in a restart loop"
       description: "Container {{ $labels.container }} is restarting repeatedly in
-        pod {{ $labels.pod }}, namespace {{ $labels.namespace }}, and environment ${environment}."
+        pod {{ $labels.pod }}, namespace {{ $labels.exported_namespace }}, and environment ${environment}."
   - alert: kubernetes_pod_waiting
     expr: min_over_time(kube_pod_container_status_waiting[15m]) * kube_pod_container_status_waiting * (kube_pod_container_status_waiting offset 15m) > 0
     labels:
@@ -154,4 +154,4 @@ groups:
     annotations:
       summary: "Container is stuck waiting"
       description: "Container {{ $labels.container }} has been waiting for fifteen minutes, in pod
-        {{ $labels.pod }}, namespace {{ $labels.namespace }}, and environment ${environment}."
+        {{ $labels.pod }}, namespace {{ $labels.exported_namespace }}, and environment ${environment}."
