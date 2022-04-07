@@ -200,7 +200,7 @@ impl<'a> BatchAggregator<'a> {
                         .packet_decryption_keys
                         .iter()
                         .map(|k| Server::new(ingestion_hdr.bins as usize, self.is_first, k.clone()))
-                        .collect::<Result<_, _>>()
+                        .collect::<Result<Vec<_>, _>>()
                         .map_err(AggregationError::PrioSetup)?,
                 );
             }
@@ -312,7 +312,7 @@ impl<'a> BatchAggregator<'a> {
     /// overall aggregation should be aborted).
     fn aggregate_share(
         &mut self,
-        servers: &mut Vec<Server<FieldPriov2>>,
+        servers: &mut [Server<FieldPriov2>],
         invalid_uuids: &mut Vec<Uuid>,
         ingestion_packets: Vec<IngestionDataSharePacket>,
         peer_validation_packets: Vec<ValidationPacket>,
