@@ -568,7 +568,7 @@ impl TryFrom<Value> for IngestionDataSharePacket {
 impl IngestionDataSharePacket {
     pub(crate) fn generate_validation_packet(
         &self,
-        servers: &mut Vec<Server<FieldPriov2>>,
+        servers: &mut [Server<FieldPriov2>],
     ) -> Result<ValidationPacket, IntakeError> {
         let r_pit = FieldPriov2::from(
             u32::try_from(self.r_pit)
