@@ -57,7 +57,7 @@ jobs:
         run: lcov --extract coverage.txt -o coverage.txt 'src/*'
       - name: Upload test coverage
         if: success()
-        uses: codecov/codecov-action@v2.1.0
+        uses: codecov/codecov-action@v3.0.0
         with:
           fail_ci_if_error: false
           file: ./facilitator/coverage.txt
@@ -116,7 +116,7 @@ jobs:
       run: go test -race --coverprofile=cover.out --covermode=atomic ./...
     - name: Upload test coverage
       if: success()
-      uses: codecov/codecov-action@v2.1.0
+      uses: codecov/codecov-action@v3.0.0
       with:
         fail_ci_if_error: false
         file: "workflow-manager/cover.out"
@@ -149,7 +149,7 @@ jobs:
       run: go test -race -coverprofile=cover.out --covermode=atomic ./...
     - name: Upload test coverage
       if: success()
-      uses: codecov/codecov-action@v2.1.0
+      uses: codecov/codecov-action@v3.0.0
       with:
         fail_ci_if_error: false
         file: "key-rotator/cover.out"
