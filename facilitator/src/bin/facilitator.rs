@@ -2638,3 +2638,11 @@ fn termination_instant_from_args(
 fn should_terminate(termination_instant: Option<Instant>) -> bool {
     termination_instant.map_or(false, |end| Instant::now() > end)
 }
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn cli_tests() {
+        trycmd::TestCases::new().case("tests/cmd/*.trycmd").run();
+    }
+}
