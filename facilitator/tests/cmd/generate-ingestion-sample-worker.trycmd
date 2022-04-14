@@ -1,0 +1,123 @@
+```
+$ facilitator generate-ingestion-sample-worker --help
+facilitator-generate-ingestion-sample-worker 
+Spawn a worker to generate sample data files
+
+USAGE:
+    facilitator generate-ingestion-sample-worker [OPTIONS] --aggregation-id <ID> --batch-end-time <MILLIS> --batch-start-time <MILLIS> --dimension <INT> --epsilon <DOUBLE> --generation-interval <INTERVAL> --packet-count <INT> <--facilitator-ecies-public-key <B64>|--facilitator-manifest-base-url <URL>> <--ingestor-manifest-base-url <URL>|--batch-signing-private-key <B64_PKCS8>> <--pha-ecies-public-key <B64>|--pha-manifest-base-url <URL>>
+
+FLAGS:
+    -h, --help       
+            Prints help information
+
+    -V, --version    
+            Prints version information
+
+
+OPTIONS:
+        --aggregation-id <ID>                                                         
+            Name of the aggregation
+
+        --batch-end-time <MILLIS>
+            End of timespan covered by the batch, in milliseconds since epoch
+
+        --batch-id <UUID>
+            UUID of the batch. If omitted, a UUID is randomly generated.
+
+        --batch-signing-private-key <B64_PKCS8>
+            Base64 encoded PKCS#8 document containing P-256 batch signing private key to be used by this server when
+            sending messages to other servers. [env: BATCH_SIGNING_PRIVATE_KEY=]
+        --batch-signing-private-key-default-identifier <ID>
+            Identifier for the default batch signing keypair to use, corresponding to an entry in this server's global
+            or specific manifest. Used only if --batch-signing-private-key-identifier is not specified. Used to
+            construct PrioBatchSignature messages. [env: BATCH_SIGNING_PRIVATE_KEY_DEFAULT_IDENTIFIER=]
+        --batch-signing-private-key-identifier <ID>
+            Identifier for the batch signing keypair to use, corresponding to an entry in this server's global or
+            specific manifest. Used to construct PrioBatchSignature messages. [env:
+            BATCH_SIGNING_PRIVATE_KEY_IDENTIFIER=]
+        --batch-start-time <MILLIS>
+            Start of timespan covered by the batch, in milliseconds since epoch
+
+        --date <DATE>
+            Date for the batch in YYYY/mm/dd/HH/MM format. If omitted, the current date is used.
+
+    -d, --dimension <INT>
+            Length in bits of the data packets to generate (a.k.a. "bins" in some contexts). Must be a natural number.
+
+        --epsilon <DOUBLE>
+            Differential privacy parameter for local randomization before aggregation
+
+        --facilitator-ecies-public-key <B64>
+            Base64 encoded X9.62 uncompressed public key for the facilitator server [env: FACILITATOR_ECIES_PUBLIC_KEY=]
+
+        --facilitator-gcp-sa-to-impersonate-before-assuming-role <SERVICE_ACCOUNT>
+            If facilitator-identity is an AWS IAM role and running in GCP, an identity token will be obtained for the
+            specified GCP service account to then assume the AWS IAM role using STS AssumeRoleWithWebIdentity. [env:
+            FACILITATOR_GCP_SA_TO_IMPERSONATE_BEFORE_ASSUMING_ROLE=]
+        --facilitator-identity <IAM_ROLE_OR_SERVICE_ACCOUNT>
+            Identity to assume when using S3 or GS APIs for bucket facilitator. May not be set if facilitator-use-
+            default-aws-credentials-provider is true. Should only be set when running in GKE. [env:
+            FACILITATOR_IDENTITY=]
+        --facilitator-manifest-base-url <URL>
+            Base URL of the Facilitator manifest [env: FACILITATOR_MANIFEST_BASE_URL=]
+
+        --facilitator-output <PATH>
+            Storage path (gs://, s3:// or local dir name) [env: FACILITATOR_OUTPUT=]
+
+        --facilitator-use-default-aws-credentials-provider <BOOL>
+            If true and facilitator-identity is unset, the default AWS credentials provider will be used when using S3
+            APIs for facilitator bucket. If false or unset and facilitator-identity is unset, a web identity provider
+            configured from the Kubernetes environment will be used. If false or unset and facilitator-identity is set,
+            a web identity provider configured from the GKE metadata service is used. May not be set to true if
+            facilitator-identity is set. Should only be set to true if running in AWS. [env:
+            FACILITATOR_USE_DEFAULT_AWS_CREDENTIALS_PROVIDER=]  [default: false]  [possible values: true, false]
+        --gcp-service-account-key-file <gcp-service-account-key-file>
+            Path to the JSON key file for the GCP service account that should be used by for accessing GCP or
+            impersonating other GCP service accounts. If omitted, the default account found in the GKE metadata service
+            will be used for authentication or impersonation. [env: GCP_SERVICE_ACCOUNT_KEY_FILE=]
+        --generation-interval <INTERVAL>
+            How often should samples be generated in seconds
+
+        --ingestor-manifest-base-url <URL>
+            Base URL of this ingestor's manifest [env: INGESTOR_MANIFEST_BASE_URL=]
+
+        --ingestor-name <STRING>                                                      
+            Name of this ingestor
+
+        --locality-name <STRING>
+            Name of the locality this ingestor is targeting
+
+    -p, --packet-count <INT>                                                          
+            Number of data packets to generate
+
+        --peer-gcp-sa-to-impersonate-before-assuming-role <SERVICE_ACCOUNT>
+            If peer-identity is an AWS IAM role and running in GCP, an identity token will be obtained for the specified
+            GCP service account to then assume the AWS IAM role using STS AssumeRoleWithWebIdentity. [env:
+            PEER_GCP_SA_TO_IMPERSONATE_BEFORE_ASSUMING_ROLE=]
+        --peer-identity <IAM_ROLE_OR_SERVICE_ACCOUNT>
+            Identity to assume when using S3 or GS APIs for bucket peer. May not be set if peer-use-default-aws-
+            credentials-provider is true. Should only be set when running in GKE. [env:
+            PEER_IDENTITY=]
+        --peer-output <PATH>
+            Storage path (gs://, s3:// or local dir name) [env: PEER_OUTPUT=]
+
+        --peer-use-default-aws-credentials-provider <BOOL>
+            If true and peer-identity is unset, the default AWS credentials provider will be used when using S3 APIs for
+            peer bucket. If false or unset and peer-identity is unset, a web identity provider configured from the
+            Kubernetes environment will be used. If false or unset and peer-identity is set, a web identity provider
+            configured from the GKE metadata service is used. May not be set to true if peer-identity is set. Should
+            only be set to true if running in AWS. [env: PEER_USE_DEFAULT_AWS_CREDENTIALS_PROVIDER=]  [default: false]
+            [possible values: true, false]
+        --pha-ecies-public-key <B64>
+            Base64 encoded X9.62 uncompressed public key for the PHA server [env: PHA_ECIES_PUBLIC_KEY=]
+
+        --pha-manifest-base-url <URL>
+            Base URL of the Public Health Authority manifest [env: PHA_MANIFEST_BASE_URL=]
+
+        --worker-maximum-lifetime <SECONDS>
+            Specifies the maximum lifetime of a worker in seconds. After this amount of time, workers will terminate
+            successfully. Termination may not be immediate: workers may choose to complete their current work item
+            before terminating, but in all cases workers will not start a new work item after their lifetime is
+            complete. [env: WORKER_MAXIMUM_LIFETIME=]
+
+```

@@ -1,0 +1,101 @@
+```
+$ facilitator validate-ingestion-sample-worker --help
+facilitator-validate-ingestion-sample-worker 
+Spawn a worker to validate aggregated ingestion samples
+
+USAGE:
+    facilitator validate-ingestion-sample-worker [OPTIONS] --instance-name <NAME> --packet-count <INT> --task-queue-kind <task-queue-kind> --task-queue-name <task-queue-name>
+
+FLAGS:
+    -h, --help       
+            Prints help information
+
+    -V, --version    
+            Prints version information
+
+
+OPTIONS:
+        --aws-sqs-region <aws-sqs-region>
+            AWS region in which to use SQS [env: AWS_SQS_REGION=]
+
+        --facilitator-gcp-sa-to-impersonate-before-assuming-role <SERVICE_ACCOUNT>
+            If facilitator-identity is an AWS IAM role and running in GCP, an identity token will be obtained for the
+            specified GCP service account to then assume the AWS IAM role using STS AssumeRoleWithWebIdentity. [env:
+            FACILITATOR_GCP_SA_TO_IMPERSONATE_BEFORE_ASSUMING_ROLE=]
+        --facilitator-identity <IAM_ROLE_OR_SERVICE_ACCOUNT>
+            Identity to assume when using S3 or GS APIs for bucket facilitator. May not be set if facilitator-use-
+            default-aws-credentials-provider is true. Should only be set when running in GKE. [env:
+            FACILITATOR_IDENTITY=]
+        --facilitator-manifest-base-url <URL>
+            Base URL of the Facilitator manifest [env: FACILITATOR_MANIFEST_BASE_URL=]
+
+        --facilitator-output <PATH>
+            Storage path (gs://, s3:// or local dir name) [env: FACILITATOR_OUTPUT=]
+
+        --facilitator-use-default-aws-credentials-provider <BOOL>
+            If true and facilitator-identity is unset, the default AWS credentials provider will be used when using S3
+            APIs for facilitator bucket. If false or unset and facilitator-identity is unset, a web identity provider
+            configured from the Kubernetes environment will be used. If false or unset and facilitator-identity is set,
+            a web identity provider configured from the GKE metadata service is used. May not be set to true if
+            facilitator-identity is set. Should only be set to true if running in AWS. [env:
+            FACILITATOR_USE_DEFAULT_AWS_CREDENTIALS_PROVIDER=]  [default: false]  [possible values: true, false]
+        --gcp-project-id <gcp-project-id>
+            The GCP Project ID in which the PubSub topic implementing the work queue was created. Required if the task
+            queue is a PubSub topic. [env: GCP_PROJECT_ID=]
+        --instance-name <NAME>
+            Name of this data share processor instance, to be used to look up manifests to discover resources owned by
+            this server and peers. e.g., the instance for the state "zc" and ingestor server "megacorp" would be "zc-
+            megacorp". [env: INSTANCE_NAME=]
+    -p, --packet-count <INT>                                                          
+            Number of data packets to generate
+
+        --pha-gcp-sa-to-impersonate-before-assuming-role <SERVICE_ACCOUNT>
+            If pha-identity is an AWS IAM role and running in GCP, an identity token will be obtained for the specified
+            GCP service account to then assume the AWS IAM role using STS AssumeRoleWithWebIdentity. [env:
+            PHA_GCP_SA_TO_IMPERSONATE_BEFORE_ASSUMING_ROLE=]
+        --pha-identity <IAM_ROLE_OR_SERVICE_ACCOUNT>
+            Identity to assume when using S3 or GS APIs for bucket pha. May not be set if pha-use-default-aws-
+            credentials-provider is true. Should only be set when running in GKE. [env:
+            PHA_IDENTITY=]
+        --pha-manifest-base-url <URL>
+            Base URL of the Public Health Authority manifest [env: PHA_MANIFEST_BASE_URL=]
+
+        --pha-output <PATH>
+            Storage path (gs://, s3:// or local dir name) [env: PHA_OUTPUT=]
+
+        --pha-use-default-aws-credentials-provider <BOOL>
+            If true and pha-identity is unset, the default AWS credentials provider will be used when using S3 APIs for
+            pha bucket. If false or unset and pha-identity is unset, a web identity provider configured from the
+            Kubernetes environment will be used. If false or unset and pha-identity is set, a web identity provider
+            configured from the GKE metadata service is used. May not be set to true if pha-identity is set. Should only
+            be set to true if running in AWS. [env: PHA_USE_DEFAULT_AWS_CREDENTIALS_PROVIDER=]  [default: false]
+            [possible values: true, false]
+        --pubsub-api-endpoint <pubsub-api-endpoint>
+            API endpoint for GCP PubSub. Optional. [env: PUBSUB_API_ENDPOINT=]  [default: https://pubsub.googleapis.com]
+
+        --rejected-topic <rejected-topic>
+            Name of topic associated with the rejected task queue. Tasks that result in non-retryable failures will be
+            forwarded to this topic, and acknowledged and removed from the task queue. If no rejected task topic is,
+            provided, the task will not be acknowledged, and it is expected the queue will eventually move the task to
+            the dead letter queue instead, once it has exhausted its retries. [env: REJECTED_TOPIC=]
+        --task-queue-identity <task-queue-identity>
+            Identity to assume when accessing task queue. Should only be set when running under GKE and task-queue-kind
+            is PubSub. [env: TASK_QUEUE_IDENTITY=]
+        --task-queue-kind <task-queue-kind>
+            kind of task queue to use [env: TASK_QUEUE_KIND=]  [possible values: gcp-pubsub, aws-sqs]
+
+        --task-queue-name <task-queue-name>
+            Name of queue from which tasks should be pulled. On GCP, a PubSub subscription ID. On AWS, an SQS queue URL.
+            [env: TASK_QUEUE_NAME=]
+        --task-queue-use-default-aws-credentials-provider <BOOL>
+            Whether to use the default AWS credentials provider when using SQS APIs. If unset and task-queue-kind is
+            SQS, uses a web identity provider configured from Kubernetes environment. Should not be set unless task-
+            queue-kind is SQS. [env: TASK_QUEUE_USE_DEFAULT_AWS_CREDENTIALS_PROVIDER=]  [default: false]  [possible
+            values: true, false]
+        --worker-maximum-lifetime <SECONDS>
+            Specifies the maximum lifetime of a worker in seconds. After this amount of time, workers will terminate
+            successfully. Termination may not be immediate: workers may choose to complete their current work item
+            before terminating, but in all cases workers will not start a new work item after their lifetime is
+            complete. [env: WORKER_MAXIMUM_LIFETIME=]
+
+```

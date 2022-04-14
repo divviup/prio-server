@@ -1,0 +1,32 @@
+```
+$ facilitator lint-manifest --help
+facilitator-lint-manifest 
+Validate and print out global or specific manifests
+
+USAGE:
+    facilitator lint-manifest [OPTIONS] --manifest-base-url <URL> --manifest-kind <KIND> --manifest-path <PATH>
+
+FLAGS:
+    -h, --help       
+            Prints help information
+
+    -V, --version    
+            Prints version information
+
+
+OPTIONS:
+        --instance <INSTANCE_NAME>    
+            the instance name whose manifest is to be fetched, e.g., "mi-google" for a data share processor specific
+            manifest or "mi" for an ingestor specific manifest. Required if manifest-kind=data-share-processor-specific
+            or ingestor-specific.
+        --manifest-base-url <URL>     
+            base URL relative to which manifests may be fetched over HTTPS. Should be in the form "https://foo.com".
+
+        --manifest-kind <KIND>        
+            kind of manifest to locate and parse [possible values: ingestor-global, ingestor-specific, data-share-
+            processor-global, data-share-processor-specific, portal-global]
+        --manifest-path <PATH>        
+            path to local manifest file to lint
+
+
+```

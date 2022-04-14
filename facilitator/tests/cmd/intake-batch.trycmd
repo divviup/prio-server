@@ -1,0 +1,135 @@
+```
+$ facilitator intake-batch --help
+facilitator-intake-batch 
+Validate an input share (from an ingestor's bucket) and emit a validation share.
+
+Storage arguments: Any flag ending in -input or -output can take an S3 bucket (s3://<region>/<bucket>), a Google Storage
+bucket (gs://), or a local directory name. The corresponding -identity flag specifies what identity to use with a
+bucket.
+
+        For S3 buckets: An identity flag may contain an AWS IAM role, specified using an ARN (i.e. "arn:...").
+Facilitator will assume that role using an OIDC auth token obtained from the GKE metadata service. Appropriate mappings
+need to be in place from Facilitator's k8s service account to its GCP service account to the IAM role. If the identity
+flag is omitted or is the empty string, use credentials from ~/.aws.
+
+        For GS buckets: An identity flag may contain a GCP service account (identified by an email address). Requests to
+Google Storage (gs://) are always authenticated as one of our service accounts by GKE's Workload Identity feature:
+https://cloud.google.com/kubernetes-engine/docs/how-to/workload-identity. If an identity flag is set, facilitator will
+use its default service account to impersonate a different account, which should have permissions to write to or read
+from the named bucket. If an identity flag is omitted or is the empty string, the default service account exposed by the
+GKE metadata service is used. Keys: All keys are P-256. Public keys are base64-encoded DER SPKI. Private keys are in the
+base64 encoded format expected by libprio-rs, or base64-encoded PKCS#8, as documented. 
+
+USAGE:
+    facilitator intake-batch [OPTIONS] --aggregation-id <ID> --batch-id <UUID> --batch-signing-private-key <B64_PKCS8> --batch-signing-private-key-default-identifier <ID> --date <DATE> --instance-name <NAME> --is-first <BOOL> --packet-decryption-keys <B64>...
+
+FLAGS:
+    -h, --help       
+            Prints help information
+
+    -V, --version    
+            Prints version information
+
+
+OPTIONS:
+        --aggregation-id <ID>                                                          
+            Name of the aggregation
+
+        --batch-id <UUID>                                                              
+            UUID of the batch.
+
+        --batch-signing-private-key <B64_PKCS8>
+            Base64 encoded PKCS#8 document containing P-256 batch signing private key to be used by this server when
+            sending messages to other servers. [env: BATCH_SIGNING_PRIVATE_KEY=]
+        --batch-signing-private-key-default-identifier <ID>
+            Identifier for the default batch signing keypair to use, corresponding to an entry in this server's global
+            or specific manifest. Used only if --batch-signing-private-key-identifier is not specified. Used to
+            construct PrioBatchSignature messages. [env: BATCH_SIGNING_PRIVATE_KEY_DEFAULT_IDENTIFIER=]
+        --batch-signing-private-key-identifier <ID>
+            Identifier for the batch signing keypair to use, corresponding to an entry in this server's global or
+            specific manifest. Used to construct PrioBatchSignature messages. [env:
+            BATCH_SIGNING_PRIVATE_KEY_IDENTIFIER=]
+        --date <DATE>
+            Date for the batch in YYYY/mm/dd/HH/MM format
+
+        --gcp-service-account-key-file <gcp-service-account-key-file>
+            Path to the JSON key file for the GCP service account that should be used by for accessing GCP or
+            impersonating other GCP service accounts. If omitted, the default account found in the GKE metadata service
+            will be used for authentication or impersonation. [env: GCP_SERVICE_ACCOUNT_KEY_FILE=]
+        --gcp-workload-identity-pool-provider <gcp-workload-identity-pool-provider>
+            Full resource name of a GCP workload identity pool provider that should be used for accessing GCP or
+            impersonating other GCP service accounts when running in Amazon EKS. The pool provider should be configured
+            to permit service account impersonation by the AWS IAM role or user that this facilitator authenticates as.
+            [env: GCP_WORKLOAD_IDENTITY_POOL_PROVIDER=]
+        --ingestor-gcp-sa-to-impersonate-before-assuming-role <SERVICE_ACCOUNT>
+            If ingestor-identity is an AWS IAM role and running in GCP, an identity token will be obtained for the
+            specified GCP service account to then assume the AWS IAM role using STS AssumeRoleWithWebIdentity. [env:
+            INGESTOR_GCP_SA_TO_IMPERSONATE_BEFORE_ASSUMING_ROLE=]
+        --ingestor-identity <IAM_ROLE_OR_SERVICE_ACCOUNT>
+            Identity to assume when using S3 or GS APIs for bucket ingestor. May not be set if ingestor-use-default-aws-
+            credentials-provider is true. Should only be set when running in GKE. [env:
+            INGESTOR_IDENTITY=]
+        --ingestor-input <PATH>
+            Storage path (gs://, s3:// or local dir name) [env: INGESTOR_INPUT=]
+
+        --ingestor-manifest-base-url <BASE_URL>
+            Base URL from which the ingestor vends manifests, enabling this data share processor to retrieve the global
+            or specific manifest for the server and obtain storage buckets and batch signing public keys. [env:
+            INGESTOR_MANIFEST_BASE_URL=]
+        --ingestor-public-key <B64>
+            Batch signing public key for the ingestor
+
+        --ingestor-public-key-identifier <KEY_ID>
+            Identifier for the ingestor's batch keypair
+
+        --ingestor-use-default-aws-credentials-provider <BOOL>
+            If true and ingestor-identity is unset, the default AWS credentials provider will be used when using S3 APIs
+            for ingestor bucket. If false or unset and ingestor-identity is unset, a web identity provider configured
+            from the Kubernetes environment will be used. If false or unset and ingestor-identity is set, a web identity
+            provider configured from the GKE metadata service is used. May not be set to true if ingestor-identity is
+            set. Should only be set to true if running in AWS. [env: INGESTOR_USE_DEFAULT_AWS_CREDENTIALS_PROVIDER=]
+            [default: false]  [possible values: true, false]
+        --instance-name <NAME>
+            Name of this data share processor instance, to be used to look up manifests to discover resources owned by
+            this server and peers. e.g., the instance for the state "zc" and ingestor server "megacorp" would be "zc-
+            megacorp". [env: INSTANCE_NAME=]
+        --is-first <BOOL>
+            Whether this is the "first" server receiving a share, i.e., the PHA. [env: IS_FIRST=]  [possible values:
+            true, false]
+        --packet-decryption-keys <B64>...                                              
+            List of packet decryption private keys, comma separated. When decrypting packets, all provided keys will be
+            tried until one works. [env: PACKET_DECRYPTION_KEYS=]
+        --peer-gcp-sa-to-impersonate-before-assuming-role <SERVICE_ACCOUNT>
+            If peer-identity is an AWS IAM role and running in GCP, an identity token will be obtained for the specified
+            GCP service account to then assume the AWS IAM role using STS AssumeRoleWithWebIdentity. [env:
+            PEER_GCP_SA_TO_IMPERSONATE_BEFORE_ASSUMING_ROLE=]
+        --peer-identity <IAM_ROLE_OR_SERVICE_ACCOUNT>
+            Identity to assume when using S3 or GS APIs for bucket peer. May not be set if peer-use-default-aws-
+            credentials-provider is true. Should only be set when running in GKE. [env:
+            PEER_IDENTITY=]
+        --peer-manifest-base-url <BASE_URL>
+            Base URL from which the peer vends manifests, enabling this data share processor to retrieve the global or
+            specific manifest for the server and obtain storage buckets and batch signing public keys. [env:
+            PEER_MANIFEST_BASE_URL=]
+        --peer-output <PATH>
+            Storage path (gs://, s3:// or local dir name) [env: PEER_OUTPUT=]
+
+        --peer-use-default-aws-credentials-provider <BOOL>
+            If true and peer-identity is unset, the default AWS credentials provider will be used when using S3 APIs for
+            peer bucket. If false or unset and peer-identity is unset, a web identity provider configured from the
+            Kubernetes environment will be used. If false or unset and peer-identity is set, a web identity provider
+            configured from the GKE metadata service is used. May not be set to true if peer-identity is set. Should
+            only be set to true if running in AWS. [env: PEER_USE_DEFAULT_AWS_CREDENTIALS_PROVIDER=]  [default: false]
+            [possible values: true, false]
+        --permit-malformed-batch <BOOL>
+            Whether to permit malformed batches. When malformed batches are permitted, facilitator does not abort batch
+            intake or aggregation if an a batch with an invalid signature or an incorrect packet file digest is
+            encountered. If the batch can still be parsed and is otherwise valid, it will be processed. [env:
+            PERMIT_MALFORMED_BATCH=]  [default: false]  [possible values: true, false]
+        --write-single-object-validation-batches <BOOL>
+            If set, validation batches will be written in a single-object format. (This makes writing a batch an atomic
+            operation.) If not set, validation batches will be written using the same three-object format used for
+            ingestion & sum part batches. [env: WRITE_SINGLE_OBJECT_VALIDATION_BATCHES=]  [default: false]  [possible
+            values: true, false]
+
+```
