@@ -354,7 +354,7 @@ terraform {
     }
     helm = {
       source  = "hashicorp/helm"
-      version = "2.5.0"
+      version = "2.5.1"
     }
     http = {
       source  = "hashicorp/http"
