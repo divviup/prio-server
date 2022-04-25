@@ -629,7 +629,13 @@ mod tests {
             String::from(TEST_KEY),
             50,
             S3Client::new_with(
-                HttpClient::new().unwrap(),
+                HttpClient::from_connector(
+                    HttpsConnectorBuilder::new()
+                        .with_native_roots()
+                        .https_or_http()
+                        .enable_http1()
+                        .build(),
+                ),
                 aws_credentials::Provider::new_mock(&logger, &api_metrics),
                 Region::Custom {
                     name: TEST_REGION.into(),
@@ -676,7 +682,13 @@ mod tests {
             String::from(TEST_KEY),
             50,
             S3Client::new_with(
-                HttpClient::new().unwrap(),
+                HttpClient::from_connector(
+                    HttpsConnectorBuilder::new()
+                        .with_native_roots()
+                        .https_or_http()
+                        .enable_http1()
+                        .build(),
+                ),
                 aws_credentials::Provider::new_mock(&logger, &api_metrics),
                 Region::Custom {
                     name: TEST_REGION.into(),
@@ -743,7 +755,13 @@ mod tests {
             String::from(TEST_KEY),
             50,
             S3Client::new_with(
-                HttpClient::new().unwrap(),
+                HttpClient::from_connector(
+                    HttpsConnectorBuilder::new()
+                        .with_native_roots()
+                        .https_or_http()
+                        .enable_http1()
+                        .build(),
+                ),
                 aws_credentials::Provider::new_mock(&logger, &api_metrics),
                 Region::Custom {
                     name: TEST_REGION.into(),
@@ -809,7 +827,13 @@ mod tests {
             String::from(TEST_KEY),
             50,
             S3Client::new_with(
-                HttpClient::new().unwrap(),
+                HttpClient::from_connector(
+                    HttpsConnectorBuilder::new()
+                        .with_native_roots()
+                        .https_or_http()
+                        .enable_http1()
+                        .build(),
+                ),
                 aws_credentials::Provider::new_mock(&logger, &api_metrics),
                 Region::Custom {
                     name: TEST_REGION.into(),
