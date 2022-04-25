@@ -58,6 +58,6 @@ default_portal_server_manifest_base_url        = "manifest.int.enpa-pha.io"
 prometheus_helm_chart_version           = "15.0.2"
 grafana_helm_chart_version              = "6.20.5"
 cloudwatch_exporter_helm_chart_version  = "0.17.2"
-stackdriver_exporter_helm_chart_version = "1.12.0"
+stackdriver_exporter_helm_chart_version = "2.2.0"
 
 allowed_aws_account_ids = ["024759592502"]
