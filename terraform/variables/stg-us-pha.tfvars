@@ -79,9 +79,9 @@ test_peer_environment = {
 }
 is_first                 = true
 use_aws                  = true
-workflow_manager_version = "0.6.34"
-facilitator_version      = "0.6.34"
-key_rotator_version      = "0.6.34"
+workflow_manager_version = "0.6.35"
+facilitator_version      = "0.6.35"
+key_rotator_version      = "0.6.35"
 victorops_routing_key    = "prio-staging"
 
 intake_max_age             = "75m"
