@@ -178,6 +178,23 @@ impl RetryingAgent {
         )
     }
 
+    /// Send the provided request with no body, and read the response into a string.
+    pub(crate) fn fetch_to_string(
+        &self,
+        logger: &Logger,
+        request: &Request,
+        endpoint: &'static str,
+    ) -> Result<String, ureq::Error> {
+        retry_request(
+            logger,
+            || {
+                let response = self.do_request_with_metrics(endpoint, || request.clone().call())?;
+                response.into_string().map_err(Into::into)
+            },
+            |ureq_error| self.is_error_retryable(ureq_error),
+        )
+    }
+
     /// Perform some operation `op`, logging metrics on the request status and
     /// latency.
     fn do_request_with_metrics<F>(
@@ -257,12 +274,11 @@ pub(crate) fn simple_get_request(
     api_metrics: &ApiClientMetricsCollector,
 ) -> Result<String, Error> {
     let agent = RetryingAgent::new(service, api_metrics);
-    let request = agent.prepare_anonymous_request(url, Method::Get);
+    let request = agent.prepare_anonymous_request(url.clone(), Method::Get);
 
     Ok(agent
-        .call(logger, &request, "simple_get_request")?
-        .into_string()
-        .context("failed to convert GET response body into string")?)
+        .fetch_to_string(logger, &request, "simple_get_request")
+        .context(format!("failed to fetch the contents of {}", &url))?)
 }
 
 #[cfg(test)]
@@ -362,5 +378,62 @@ mod tests {
 
         assert_eq!(response.status(), 200);
         assert_eq!(response.into_string().unwrap(), "fake body");
+    }
+
+    #[test]
+    fn simple_get_request_failure() {
+        let logger = setup_test_logging();
+        let api_metrics =
+            ApiClientMetricsCollector::new_with_metric_name("simple_get_request_failure").unwrap();
+
+        let base_url = Url::parse(&mockito::server_url()).unwrap();
+
+        let transient_500_bad = mock("GET", "/transient_500")
+            .with_status(500)
+            .with_body("error response")
+            .expect(1)
+            .create();
+        let transient_500_good = mock("GET", "/transient_500")
+            .with_status(200)
+            .with_body("success response")
+            .expect(1)
+            .create();
+
+        assert_eq!(
+            simple_get_request(
+                base_url.join("/transient_500").unwrap(),
+                &logger,
+                "mock-server",
+                &api_metrics,
+            )
+            .unwrap(),
+            "success response"
+        );
+        transient_500_bad.assert();
+        transient_500_good.assert();
+
+        let transient_bad_body = mock("GET", "/transient_body_error")
+            .with_status(200)
+            .with_body_from_fn(|_| Err(std::io::ErrorKind::ConnectionAborted.into()))
+            .expect(1)
+            .create();
+        let transient_good_body = mock("GET", "/transient_body_error")
+            .with_status(200)
+            .with_body("success response")
+            .expect(1)
+            .create();
+
+        assert_eq!(
+            simple_get_request(
+                base_url.join("/transient_body_error").unwrap(),
+                &logger,
+                "mock-server",
+                &api_metrics,
+            )
+            .unwrap(),
+            "success response"
+        );
+        transient_bad_body.assert();
+        transient_good_body.assert();
     }
 }
