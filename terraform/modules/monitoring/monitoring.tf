@@ -342,6 +342,7 @@ resource "kubernetes_config_map" "grafana_dashboard_default" {
   data = {
     "default_dashboard.json"        = file("${path.module}/default_dashboard.json")
     "resource_usage_dashboard.json" = file("${path.module}/resource_usage_dashboard.json")
+    "http_api_dashboard.json"       = file("${path.module}/http_api_dashboard.json")
   }
 }
 
