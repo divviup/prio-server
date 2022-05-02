@@ -168,7 +168,7 @@ jobs:
       uses: golangci/golangci-lint-action@v3.1.0
       with:
         working-directory: key-rotator
-        version: "v1.43.0"
+        version: "v1.45.2"
         args: "--config ../.golangci.yml --timeout 10m"
 
   workflow-manager-golangci-lint:
@@ -183,5 +183,5 @@ jobs:
       uses: golangci/golangci-lint-action@v3.1.0
       with:
         working-directory: workflow-manager
-        version: "v1.43.0"
+        version: "v1.45.2"
         args: "--config ../.golangci.yml --timeout 10m"
