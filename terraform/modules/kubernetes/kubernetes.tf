@@ -480,10 +480,10 @@ resource "kubectl_manifest" "intake_queue_depth_metric" {
   })
 }
 
-resource "kubernetes_horizontal_pod_autoscaler" "intake_batch_autoscaler" {
+resource "kubernetes_horizontal_pod_autoscaler_v2beta2" "intake_batch_hpa" {
   metadata {
     namespace = var.kubernetes_namespace
-    name      = "intake-batch-${var.ingestor}-autoscaler"
+    name      = "intake-batch-${var.ingestor}-hpa"
   }
 
   spec {
@@ -707,10 +707,10 @@ resource "kubectl_manifest" "aggregate_queue_depth_metric" {
   })
 }
 
-resource "kubernetes_horizontal_pod_autoscaler" "aggregate_autoscaler" {
+resource "kubernetes_horizontal_pod_autoscaler_v2beta2" "aggregate_hpa" {
   metadata {
     namespace = var.kubernetes_namespace
-    name      = "aggregate-${var.ingestor}-autoscaler"
+    name      = "aggregate-${var.ingestor}-hpa"
   }
 
   spec {
