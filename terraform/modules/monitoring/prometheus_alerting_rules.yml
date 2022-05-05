@@ -155,3 +155,12 @@ groups:
       summary: "Container is stuck waiting"
       description: "Container {{ $labels.container }} has been waiting for fifteen minutes, in pod
         {{ $labels.pod }}, namespace {{ $labels.exported_namespace }}, and environment ${environment}."
+  - alert: ingest_rate_low
+    expr: sum by (service, namespace) (rate(facilitator_intake_ingestion_packets_processed[16h])) < 0.25 * sum by (service, namespace) (rate(facilitator_intake_ingestion_packets_processed[16h] offset 1d))
+    labels:
+      severity: page
+      environment: ${environment}
+    annotations:
+      summary: "The rate of intake processing has dropped off steeply compared to yesterday."
+      description: "The number of packets from {{ $labels.service }} in locality
+        {{ $labels.namespace }} and environment ${environment} is low relative to past levels."
