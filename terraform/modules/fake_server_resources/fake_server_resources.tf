@@ -63,6 +63,11 @@ variable "aggregate_queues" {
   }))
 }
 
+variable "role_permissions_boundary_policy_arn" {
+  type    = string
+  default = null
+}
+
 # TODO(brandon): this module is messy in that it conflates own/peer with facilitator/pha. (In
 # practice, "own" = "facilitator" & "peer" = "pha".) This should be cleaned up to drop the own/peer
 # terminology in favor of facilitator/pha.
@@ -87,7 +92,7 @@ resource "aws_iam_role" "tester_role" {
   # requesting tokens from the GKE metadata service in
   # S3Transport::new_with_client
   # https://docs.aws.amazon.com/IAM/latest/UserGuide/reference_policies_iam-condition-keys.html
-  assume_role_policy = <<ROLE
+  assume_role_policy   = <<ROLE
 {
   "Version": "2012-10-17",
   "Statement": [
@@ -107,6 +112,7 @@ resource "aws_iam_role" "tester_role" {
   ]
 }
 ROLE
+  permissions_boundary = var.role_permissions_boundary_policy_arn
 }
 
 resource "aws_iam_role_policy" "bucket_role_policy" {

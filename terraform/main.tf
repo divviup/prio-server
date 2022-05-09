@@ -329,6 +329,15 @@ an additional "spot" node pool.
 DESCRIPTION
 }
 
+variable "role_permissions_boundary_policy_arn" {
+  type        = string
+  default     = null
+  description = <<-DESCRIPTION
+  Optional AWS IAM policy ARN, to be used as the permissions boundary policy
+  on any IAM roles created for a non-pure GCP environment.
+  DESCRIPTION
+}
+
 terraform {
   backend "gcs" {}
 
@@ -697,6 +706,7 @@ module "data_share_processors" {
   eks_oidc_provider                              = var.use_aws ? module.eks[0].oidc_provider : { url = "", arn = "" }
   gcp_workload_identity_pool_provider            = local.gcp_workload_identity_pool_provider
   single_object_validation_batch_localities      = toset(var.single_object_validation_batch_localities)
+  role_permissions_boundary_policy_arn           = var.role_permissions_boundary_policy_arn
 }
 
 # The portal owns two sum part buckets (one for each data share processor) and
@@ -789,21 +799,22 @@ locals {
 }
 
 module "fake_server_resources" {
-  count                         = local.is_env_with_ingestor ? 1 : 0
-  source                        = "./modules/fake_server_resources"
-  gcp_region                    = var.gcp_region
-  gcp_project                   = var.gcp_project
-  environment                   = var.environment
-  ingestor_pairs                = local.locality_ingestor_pairs
-  facilitator_manifest_base_url = local.manifest.base_url
-  container_registry            = var.container_registry
-  facilitator_image             = var.facilitator_image
-  facilitator_version           = var.facilitator_version
-  manifest_bucket               = local.manifest.bucket
-  other_environment             = var.test_peer_environment.env_without_ingestor
-  sum_part_bucket_writer_name   = google_service_account.sum_part_bucket_writer.name
-  sum_part_bucket_writer_email  = google_service_account.sum_part_bucket_writer.email
-  aggregate_queues              = { for v in module.data_share_processors : v.data_share_processor_name => v.aggregate_queue }
+  count                                = local.is_env_with_ingestor ? 1 : 0
+  source                               = "./modules/fake_server_resources"
+  gcp_region                           = var.gcp_region
+  gcp_project                          = var.gcp_project
+  environment                          = var.environment
+  ingestor_pairs                       = local.locality_ingestor_pairs
+  facilitator_manifest_base_url        = local.manifest.base_url
+  container_registry                   = var.container_registry
+  facilitator_image                    = var.facilitator_image
+  facilitator_version                  = var.facilitator_version
+  manifest_bucket                      = local.manifest.bucket
+  other_environment                    = var.test_peer_environment.env_without_ingestor
+  sum_part_bucket_writer_name          = google_service_account.sum_part_bucket_writer.name
+  sum_part_bucket_writer_email         = google_service_account.sum_part_bucket_writer.email
+  aggregate_queues                     = { for v in module.data_share_processors : v.data_share_processor_name => v.aggregate_queue }
+  role_permissions_boundary_policy_arn = var.role_permissions_boundary_policy_arn
 }
 
 module "portal_server_resources" {

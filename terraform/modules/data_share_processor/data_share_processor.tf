@@ -142,6 +142,11 @@ indicates that all localities should generate single-object validation batches.
 DESCRIPTION
 }
 
+variable "role_permissions_boundary_policy_arn" {
+  type    = string
+  default = null
+}
+
 # We need the ingestion server's manifest so that we can discover the GCP
 # service account it will use to upload ingestion batches. Some ingestors
 # (Apple) are singletons, and advertise a single global manifest which contains
@@ -279,6 +284,7 @@ resource "aws_iam_role" "bucket_role" {
       }
     ]
   })
+  permissions_boundary = var.role_permissions_boundary_policy_arn
 }
 
 # The bucket_role defined above is created in our AWS account and used to
