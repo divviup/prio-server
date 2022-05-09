@@ -350,7 +350,7 @@ terraform {
     google-beta = {
       source = "hashicorp/google-beta"
       # Keep this version in sync with provider google
-      version = "4.19.0"
+      version = "4.20.0"
     }
     helm = {
       source  = "hashicorp/helm"
