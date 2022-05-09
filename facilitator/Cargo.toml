@@ -26,7 +26,7 @@ hyper = "^0.14"
 hyper-rustls = { version = "^0.23", features = ["http2"] }
 jsonwebtoken = "8"
 lazy_static = "1"
-p256 = "0.10.1"
+p256 = "0.11.0"
 pem = "1.0"
 pkix = "0.1.2"
 prio = "0.6.1"
