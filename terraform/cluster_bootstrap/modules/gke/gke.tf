@@ -120,6 +120,7 @@ resource "google_container_node_pool" "worker_nodes" {
   }
   node_config {
     disk_size_gb = "25"
+    disk_type    = "pd-standard"
     image_type   = "COS_CONTAINERD"
     machine_type = var.cluster_settings.gcp_machine_type
     oauth_scopes = [
