@@ -156,8 +156,8 @@ groups:
       description: "Container {{ $labels.container }} has been waiting for fifteen minutes, in pod
         {{ $labels.pod }}, namespace {{ $labels.exported_namespace }}, and environment ${environment}."
   - alert: ingest_rate_low
-    expr: sum by (service, namespace) (rate(facilitator_intake_ingestion_packets_processed[16h])) < 0.25 *
-      sum by (service, namespace) (rate(facilitator_intake_ingestion_packets_processed[16h] offset 1d))
+    expr: sum by (service, namespace) (rate(facilitator_intake_ingestion_packets_processed[20h])) < 0.25 *
+      sum by (service, namespace) (rate(facilitator_intake_ingestion_packets_processed[20h] offset 1d))
     labels:
       severity: page
       environment: ${environment}
