@@ -105,7 +105,7 @@
             "uid": "P1809F7CD0C75ACF3"
           },
           "exemplar": true,
-          "expr": "sum by (exported_service, endpoint, status) (rate(facilitator_api_latency_ms_count{status!~\"200|success\"}[20m]) unless rate(facilitator_api_latency_ms_count{exported_service=\"storage.googleapis.com\", endpoint=\"cancel-upload\", status=\"499\"}[20m])) / ignoring(status) group_left sum by (exported_service, endpoint) (rate(facilitator_api_latency_ms_count[20m])) * 100",
+          "expr": "sum by (service, endpoint, status) (rate(facilitator_api_latency_ms_count{status!~\"200|success\"}[20m]) unless rate(facilitator_api_latency_ms_count{service=\"storage.googleapis.com\", endpoint=\"cancel-upload\", status=\"499\"}[20m])) / ignoring(status) group_left sum by (service, endpoint) (rate(facilitator_api_latency_ms_count[20m])) * 100",
           "interval": "",
           "legendFormat": "",
           "refId": "A"
@@ -194,7 +194,7 @@
             "uid": "P1809F7CD0C75ACF3"
           },
           "exemplar": true,
-          "expr": "sum by (exported_service, endpoint) (rate(facilitator_api_latency_ms_count[20m]))",
+          "expr": "sum by (service, endpoint) (rate(facilitator_api_latency_ms_count[20m]))",
           "interval": "",
           "legendFormat": "",
           "refId": "A"
