@@ -381,11 +381,6 @@ terraform {
       source  = "hashicorp/random"
       version = "3.2.0"
     }
-    # `tls` provider needed to load EKS cluster OIDC provider certificate
-    tls = {
-      source  = "hashicorp/tls"
-      version = "3.4.0"
-    }
     kubectl = {
       source  = "gavinbunney/kubectl"
       version = "1.14.0"
