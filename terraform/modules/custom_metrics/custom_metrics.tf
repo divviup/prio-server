@@ -157,7 +157,7 @@ resource "kubernetes_deployment" "gcp_custom_metrics_adapter" {
         service_account_name = module.account_mapping.kubernetes_service_account_name
         container {
           name              = "custom-metrics-adapter"
-          image             = "gcr.io/gke-release/custom-metrics-stackdriver-adapter:v0.12.0-gke.0"
+          image             = "gcr.io/gke-release/custom-metrics-stackdriver-adapter:v0.12.2-gke.0"
           image_pull_policy = "Always"
           command           = ["/adapter", "--use-new-resource-model=false"]
           resources {
