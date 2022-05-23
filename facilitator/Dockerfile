@@ -1,4 +1,4 @@
-FROM rust:1.60.0-alpine as builder
+FROM rust:1.61.0-alpine as builder
 
 RUN apk add libc-dev && apk update
 
