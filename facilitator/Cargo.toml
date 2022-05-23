@@ -32,7 +32,6 @@ pkix = "0.1.2"
 prio = "0.6.1"
 prometheus = { version = "0.13", features = ["process"] }
 rand = "0.8"
-regex = "^1.5.6"
 ring = { version = "0.16.20", features = ["std"] }
 rusoto_core = { version = "^0.48", default_features = false, features = ["rustls"] }
 rusoto_s3 = { version = "^0.48", default_features = false, features = ["rustls"] }
@@ -67,5 +66,6 @@ xml-rs = "0.8"
 assert_matches = "1.5.0"
 hex = "0.4.3"
 mockito = "0.31.0"
+regex = "^1.5.6"
 rusoto_mock = { version = "^0.48", default_features = false, features = ["rustls"] }
 serde_test = "1.0"

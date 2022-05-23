@@ -2,7 +2,7 @@ use anyhow::{Context, Result};
 use http::Response;
 use prometheus::{
     register_histogram_vec, register_int_counter_vec, register_int_gauge_vec, Encoder,
-    HistogramVec, IntCounterVec, IntGaugeVec, TextEncoder,
+    HistogramVec, IntCounterVec, IntGaugeVec, TextEncoder, TEXT_FORMAT,
 };
 use slog::{error, info, o, Logger};
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
@@ -25,14 +25,12 @@ pub fn start_metrics_scrape_endpoint(
         // Clone scrape_logger so it can safely be moved into the closure that
         // handles metrics scrapes.
         let scrape_logger_clone = scrape_logger.clone();
-        let endpoint = warp::get().and(warp::path("metrics")).map(move || {
-            match handle_scrape() {
-                Ok(body) => {
-                    Response::builder()
-                        // https://github.com/prometheus/docs/blob/master/content/docs/instrumenting/exposition_formats.md
-                        .header("Content-Type", "text/plain; version=0.0.4")
-                        .body(body)
-                }
+        let endpoint = warp::get()
+            .and(warp::path("metrics"))
+            .map(move || match handle_scrape() {
+                Ok(body) => Response::builder()
+                    .header("Content-Type", TEXT_FORMAT)
+                    .body(body),
                 Err(err) => {
                     error!(
                         scrape_logger_clone,
@@ -40,8 +38,7 @@ pub fn start_metrics_scrape_endpoint(
                     );
                     Response::builder().status(500).body(vec![])
                 }
-            }
-        });
+            });
 
         info!(scrape_logger, "serving metrics scrapes on 0.0.0.0:{}", port);
         warp::serve(endpoint)
