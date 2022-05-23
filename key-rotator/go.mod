@@ -5,7 +5,7 @@ go 1.17
 require (
 	cloud.google.com/go/secretmanager v1.4.0
 	cloud.google.com/go/storage v1.22.1
-	github.com/aws/aws-sdk-go v1.44.14
+	github.com/aws/aws-sdk-go v1.44.19
 	github.com/google/go-cmp v0.5.8
 	github.com/googleapis/gax-go/v2 v2.4.0
 	github.com/prometheus/client_golang v1.12.2
