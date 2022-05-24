@@ -195,7 +195,7 @@
             "uid": "P1809F7CD0C75ACF3"
           },
           "exemplar": true,
-          "expr": "sum by (namespace, pod, container) (irate(container_cpu_usage_seconds_total{container!=\"\"}[5m])) > sum by (namespace, pod, container) (label_replace(kube_pod_container_resource_requests{resource=\"cpu\"}, \"namespace\", \"$1\", \"exported_namespace\", \"(.*)\"))",
+          "expr": "sum by (namespace, pod, container) (irate(container_cpu_usage_seconds_total{container!=\"\"}[5m])) > sum by (namespace, pod, container) (kube_pod_container_resource_requests{resource=\"cpu\"})",
           "interval": "",
           "legendFormat": "",
           "refId": "A"
@@ -284,7 +284,7 @@
             "uid": "P1809F7CD0C75ACF3"
           },
           "exemplar": true,
-          "expr": "sum by (namespace, pod, container) (irate(container_cpu_usage_seconds_total{container!=\"\"}[5m])) unless sum by (namespace, pod, container) (label_replace(kube_pod_container_resource_requests{resource=\"cpu\"}, \"namespace\", \"$1\", \"exported_namespace\", \"(.*)\"))",
+          "expr": "sum by (namespace, pod, container) (irate(container_cpu_usage_seconds_total{container!=\"\"}[5m])) unless sum by (namespace, pod, container) (kube_pod_container_resource_requests{resource=\"cpu\"})",
           "interval": "",
           "legendFormat": "",
           "refId": "A"
@@ -463,7 +463,7 @@
             "uid": "P1809F7CD0C75ACF3"
           },
           "exemplar": true,
-          "expr": "(sum by (namespace, pod, container) (container_memory_usage_bytes{container!=\"\"}) > sum by (namespace, pod, container) (label_replace(kube_pod_container_resource_requests{resource=\"memory\"}, \"namespace\", \"$1\", \"exported_namespace\", \"(.*)\"))) / 1024 / 1024",
+          "expr": "(sum by (namespace, pod, container) (container_memory_usage_bytes{container!=\"\"}) > sum by (namespace, pod, container) (kube_pod_container_resource_requests{resource=\"memory\"})) / 1024 / 1024",
           "interval": "",
           "legendFormat": "",
           "refId": "A"
@@ -552,7 +552,7 @@
             "uid": "P1809F7CD0C75ACF3"
           },
           "exemplar": true,
-          "expr": "(sum by (namespace, pod, container) (container_memory_usage_bytes{container!=\"\"}) unless sum by (namespace, pod, container) (label_replace(kube_pod_container_resource_requests{resource=\"memory\"}, \"namespace\", \"$1\", \"exported_namespace\", \"(.*)\"))) / 1024 / 1024",
+          "expr": "(sum by (namespace, pod, container) (container_memory_usage_bytes{container!=\"\"}) unless sum by (namespace, pod, container) (kube_pod_container_resource_requests{resource=\"memory\"})) / 1024 / 1024",
           "interval": "",
           "legendFormat": "",
           "refId": "A"

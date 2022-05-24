@@ -55,7 +55,7 @@ default_aggregation_grace_period = "10m"
 default_peer_share_processor_manifest_base_url = "storage.googleapis.com/prio-staging-server-manifests"
 default_portal_server_manifest_base_url        = "manifest.int.enpa-pha.io"
 
-prometheus_helm_chart_version           = "15.0.2"
+prometheus_helm_chart_version           = "15.9.0"
 grafana_helm_chart_version              = "6.20.5"
 cloudwatch_exporter_helm_chart_version  = "0.17.2"
 stackdriver_exporter_helm_chart_version = "2.2.0"
