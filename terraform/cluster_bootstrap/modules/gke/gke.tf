@@ -110,13 +110,14 @@ resource "google_container_cluster" "cluster" {
 }
 
 resource "google_container_node_pool" "worker_nodes" {
-  name               = "${var.resource_prefix}-node-pool"
-  location           = var.gcp_region
-  cluster            = google_container_cluster.cluster.name
-  initial_node_count = var.cluster_settings.initial_node_count
+  name     = "${var.resource_prefix}-node-pool"
+  location = var.gcp_region
+  cluster  = google_container_cluster.cluster.name
+  # Since this is a regional cluster, this gives us one non-spot node per zone.
+  initial_node_count = 1
   autoscaling {
-    min_node_count = var.cluster_settings.min_node_count
-    max_node_count = var.cluster_settings.max_node_count
+    min_node_count = 1
+    max_node_count = 1
   }
   node_config {
     disk_size_gb = "25"
@@ -141,6 +142,56 @@ resource "google_container_node_pool" "worker_nodes" {
   }
 
   depends_on = [google_project_service.compute]
+  lifecycle {
+    ignore_changes = [initial_node_count]
+  }
+}
+
+resource "google_container_node_pool" "spot_worker_nodes" {
+  provider = google-beta
+
+  name               = "${var.resource_prefix}-spot-node-pool"
+  location           = var.gcp_region
+  cluster            = google_container_cluster.cluster.name
+  initial_node_count = var.cluster_settings.initial_node_count
+  autoscaling {
+    min_node_count = var.cluster_settings.min_node_count
+    max_node_count = var.cluster_settings.max_node_count
+  }
+  node_config {
+    spot = true
+    taint {
+      key = "spot-vm"
+      # We don't really need a value for this taint, but GKE's API requires one.
+      value  = true
+      effect = "NO_SCHEDULE"
+    }
+
+    disk_size_gb = "25"
+    disk_type    = "pd-standard"
+    image_type   = "COS_CONTAINERD"
+    machine_type = var.cluster_settings.gcp_machine_type
+    oauth_scopes = [
+      "storage-ro",
+      "logging-write",
+      "monitoring"
+    ]
+    # Configures nodes to obtain workload identity from GKE metadata service
+    # https://cloud.google.com/kubernetes-engine/docs/how-to/workload-identity
+    workload_metadata_config {
+      mode = "GKE_METADATA"
+    }
+
+    shielded_instance_config {
+      enable_secure_boot          = true
+      enable_integrity_monitoring = true
+    }
+  }
+
+  depends_on = [google_project_service.compute]
+  lifecycle {
+    ignore_changes = [initial_node_count]
+  }
 }
 
 resource "random_string" "kms_id" {

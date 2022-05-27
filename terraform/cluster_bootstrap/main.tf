@@ -64,6 +64,9 @@ Settings for the Kubernetes cluster.
   - `initial_node_count` is the initial number of worker nodes to provision
   - `min_node_count` is the minimum number of worker nodes
   - `max_node_count` is the maximum number of worker nodes
+  - On GKE, the above node counts are interpreted as the number of nodes per
+    zone. On EKS, the node counts are interpreted as totals across the
+    region.
   - `gcp_machine_type` is the type and size of VM to use as worker nodes in GKE
     clusters
   - `aws_machine_types` is the types and sizes of VMs to use as worker nodes in
