@@ -54,7 +54,7 @@ variable "gcp_project" {
 resource "random_string" "account_id" {
   length  = 16
   upper   = false
-  number  = false
+  numeric = false
   special = false
 }
 
