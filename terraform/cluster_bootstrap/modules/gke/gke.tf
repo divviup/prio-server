@@ -146,7 +146,7 @@ resource "google_container_node_pool" "worker_nodes" {
 resource "random_string" "kms_id" {
   length  = 8
   upper   = false
-  number  = false
+  numeric = false
   special = false
 }
 
