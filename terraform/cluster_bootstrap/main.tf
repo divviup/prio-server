@@ -104,12 +104,12 @@ terraform {
     google = {
       source = "hashicorp/google"
       # Keep this version in sync with provider google-beta
-      version = "4.21.0"
+      version = "4.25.0"
     }
     google-beta = {
       source = "hashicorp/google-beta"
       # Keep this version in sync with provider google
-      version = "4.21.0"
+      version = "4.25.0"
     }
     external = {
       source  = "hashicorp/external"

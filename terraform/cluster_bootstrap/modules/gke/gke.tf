@@ -148,8 +148,6 @@ resource "google_container_node_pool" "worker_nodes" {
 }
 
 resource "google_container_node_pool" "spot_worker_nodes" {
-  provider = google-beta
-
   name               = "${var.resource_prefix}-spot-node-pool"
   location           = var.gcp_region
   cluster            = google_container_cluster.cluster.name
