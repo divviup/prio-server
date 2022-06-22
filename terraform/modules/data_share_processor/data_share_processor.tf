@@ -185,9 +185,9 @@ data "http" "peer_share_processor_global_manifest" {
 locals {
   ingestor_global_manifest_exists = data.external.global_manifest_http_status.result.http_code == "200"
   ingestor_server_identity = local.ingestor_global_manifest_exists ? (
-    jsondecode(data.http.ingestor_global_manifest[0].body).server-identity
+    jsondecode(data.http.ingestor_global_manifest[0].response_body).server-identity
     ) : (
-    jsondecode(data.http.ingestor_specific_manifest[0].body).server-identity
+    jsondecode(data.http.ingestor_specific_manifest[0].response_body).server-identity
   )
   ingestor_gcp_service_account_id = lookup(local.ingestor_server_identity, "gcp-service-account-id", "")
   ingestor_aws_role_arn           = lookup(local.ingestor_server_identity, "aws-iam-entity", "")
@@ -204,7 +204,7 @@ locals {
 
   resource_prefix = "prio-${var.environment}-${var.data_share_processor_name}"
 
-  peer_share_processor_server_identity               = jsondecode(data.http.peer_share_processor_global_manifest.body).server-identity
+  peer_share_processor_server_identity               = jsondecode(data.http.peer_share_processor_global_manifest.response_body).server-identity
   peer_share_processor_gcp_service_account_email     = local.peer_share_processor_server_identity.gcp-service-account-email
   peer_share_processor_gcp_service_account_unique_id = lookup(local.peer_share_processor_server_identity, "gcp-service-account-id", "")
 

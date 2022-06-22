@@ -349,25 +349,25 @@ terraform {
   required_providers {
     aws = {
       source  = "hashicorp/aws"
-      version = "4.15.1"
+      version = "4.19.0"
     }
     google = {
       source = "hashicorp/google"
       # Keep this version in sync with provider google-beta
-      version = "4.25.0"
+      version = "4.26.0"
     }
     google-beta = {
       source = "hashicorp/google-beta"
       # Keep this version in sync with provider google
-      version = "4.25.0"
+      version = "4.26.0"
     }
     helm = {
       source  = "hashicorp/helm"
-      version = "2.5.1"
+      version = "2.6.0"
     }
     http = {
       source  = "hashicorp/http"
-      version = "2.1.0"
+      version = "2.2.0"
     }
     kubernetes = {
       source  = "hashicorp/kubernetes"
@@ -379,7 +379,7 @@ terraform {
     }
     random = {
       source  = "hashicorp/random"
-      version = "3.2.0"
+      version = "3.3.1"
     }
     kubectl = {
       source  = "gavinbunney/kubectl"

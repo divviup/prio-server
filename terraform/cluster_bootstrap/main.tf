@@ -99,12 +99,12 @@ terraform {
   required_providers {
     aws = {
       source  = "hashicorp/aws"
-      version = "4.15.1"
+      version = "4.19.0"
     }
     google = {
       source = "hashicorp/google"
       # Keep this version in sync with provider google-beta
-      version = "4.25.0"
+      version = "4.26.0"
     }
     google-beta = {
       source = "hashicorp/google-beta"
@@ -117,7 +117,7 @@ terraform {
     }
     random = {
       source  = "hashicorp/random"
-      version = "3.2.0"
+      version = "3.3.1"
     }
     tls = {
       source  = "hashicorp/tls"
