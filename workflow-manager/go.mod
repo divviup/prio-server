@@ -5,7 +5,7 @@ go 1.16
 require (
 	cloud.google.com/go/pubsub v1.23.0
 	cloud.google.com/go/storage v1.23.0
-	github.com/aws/aws-sdk-go v1.44.38
+	github.com/aws/aws-sdk-go v1.44.42
 	github.com/google/uuid v1.3.0
 	github.com/prometheus/client_golang v1.12.2
 	github.com/rs/zerolog v1.27.0
