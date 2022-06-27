@@ -303,7 +303,7 @@ resource "aws_eks_node_group" "node_group" {
   }
 
   taint {
-    key    = "spot-vm"
+    key    = "divviup.org/spot-vm"
     value  = true
     effect = "NO_SCHEDULE"
   }

@@ -361,7 +361,7 @@ resource "kubernetes_deployment" "intake_batch" {
       }
       spec {
         toleration {
-          key      = "spot-vm"
+          key      = "divviup.org/spot-vm"
           operator = "Exists"
           effect   = "NoSchedule"
         }
@@ -610,7 +610,7 @@ resource "kubernetes_deployment" "aggregate" {
       }
       spec {
         toleration {
-          key      = "spot-vm"
+          key      = "divviup.org/spot-vm"
           operator = "Exists"
           effect   = "NoSchedule"
         }

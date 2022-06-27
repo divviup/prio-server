@@ -159,7 +159,7 @@ resource "google_container_node_pool" "spot_worker_nodes" {
   node_config {
     spot = true
     taint {
-      key = "spot-vm"
+      key = "divviup.org/spot-vm"
       # We don't really need a value for this taint, but GKE's API requires one.
       value  = true
       effect = "NO_SCHEDULE"
