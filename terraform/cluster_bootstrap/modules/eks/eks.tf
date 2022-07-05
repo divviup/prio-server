@@ -302,6 +302,12 @@ resource "aws_eks_node_group" "node_group" {
     "k8s.io/cluster-autoscaler/enabled"                         = true,
   }
 
+  taint {
+    key    = "divviup.org/spot-vm"
+    value  = true
+    effect = "NO_SCHEDULE"
+  }
+
   lifecycle {
     ignore_changes = [
       # This will change as the node group autoscales. Ignore it so that

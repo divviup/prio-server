@@ -360,6 +360,25 @@ resource "kubernetes_deployment" "intake_batch" {
         }
       }
       spec {
+        toleration {
+          key      = "divviup.org/spot-vm"
+          operator = "Exists"
+          effect   = "NoSchedule"
+        }
+        affinity {
+          node_affinity {
+            preferred_during_scheduling_ignored_during_execution {
+              preference {
+                match_expressions {
+                  key      = var.use_aws ? "eks.amazonaws.com/capacityType" : "cloud.google.com/gke-spot"
+                  operator = "In"
+                  values   = [var.use_aws ? "SPOT" : "true"]
+                }
+              }
+              weight = 1
+            }
+          }
+        }
         service_account_name            = module.account_mapping.kubernetes_service_account_name
         automount_service_account_token = false
         container {
@@ -590,6 +609,25 @@ resource "kubernetes_deployment" "aggregate" {
         }
       }
       spec {
+        toleration {
+          key      = "divviup.org/spot-vm"
+          operator = "Exists"
+          effect   = "NoSchedule"
+        }
+        affinity {
+          node_affinity {
+            preferred_during_scheduling_ignored_during_execution {
+              preference {
+                match_expressions {
+                  key      = var.use_aws ? "eks.amazonaws.com/capacityType" : "cloud.google.com/gke-spot"
+                  operator = "In"
+                  values   = [var.use_aws ? "SPOT" : "true"]
+                }
+              }
+              weight = 1
+            }
+          }
+        }
         service_account_name            = module.account_mapping.kubernetes_service_account_name
         automount_service_account_token = false
         container {
