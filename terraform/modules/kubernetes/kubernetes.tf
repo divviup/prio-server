@@ -253,6 +253,28 @@ resource "kubernetes_cron_job" "workflow_manager" {
         template {
           metadata {}
           spec {
+            # Allow workflow-manager to run on both spot and non-spot nodes,
+            # and prefer non-spot nodes.
+            toleration {
+              key      = "divviup.org/spot-vm"
+              operator = "Exists"
+              effect   = "NoSchedule"
+            }
+            affinity {
+              node_affinity {
+                preferred_during_scheduling_ignored_during_execution {
+                  preference {
+                    match_expressions {
+                      key      = var.use_aws ? "eks.amazonaws.com/capacityType" : "cloud.google.com/gke-spot"
+                      operator = "NotIn"
+                      values   = [var.use_aws ? "SPOT" : "true"]
+                    }
+                  }
+                  weight = 1
+                }
+              }
+            }
+
             container {
               name  = "workflow-manager"
               image = "${var.container_registry}/${var.workflow_manager_image}:${var.workflow_manager_version}"
