@@ -158,33 +158,22 @@ var (
 		},
 		[]string{"aggregation_id"},
 	)
-
-	// Unlike all the other metrics, these are not specific to a particular
-	// aggregation, and so do not have the `aggregation_id` label, and so we do
-	// not need a Gauge*Vec*.
-	workflowManagerLastSuccess = promauto.NewGauge(prometheus.GaugeOpts{
-		Name: "workflow_manager_last_success_seconds",
-		Help: "Time of last successful run of workflow-manager in seconds since UNIX epoch",
-	})
-	workflowManagerLastFailure = promauto.NewGauge(prometheus.GaugeOpts{
-		Name: "workflow_manager_last_failure_seconds",
-		Help: "Time of last failed run of workflow-manager in seconds since UNIX epoch",
-	})
-	workflowManagerRuntime = promauto.NewGauge(prometheus.GaugeOpts{
-		Name: "workflow_manager_runtime_seconds",
-		Help: "How long successful workflow-manager runs take",
-	})
 )
-
-func fail(format string, args ...interface{}) {
-	workflowManagerLastFailure.SetToCurrentTime()
-	log.Fatal().Msgf(format, args...)
-}
 
 func prepareLogger() {
 	zerolog.LevelFieldName = "severity"
 	zerolog.TimestampFieldName = "timestamp"
 	zerolog.TimeFieldFormat = time.RFC3339Nano
+}
+
+// Registers the gauge `workflow_manager_last_failure_seconds` and updates
+// its value with the current time.
+func recordFailureMetric() {
+	var workflowManagerLastFailure = promauto.NewGauge(prometheus.GaugeOpts{
+		Name: "workflow_manager_last_failure_seconds",
+		Help: "Time of last failed run of workflow-manager in seconds since UNIX epoch",
+	})
+	workflowManagerLastFailure.SetToCurrentTime()
 }
 
 func main() {
@@ -197,17 +186,30 @@ func main() {
 		Msgf("starting %s version %s. Args: %s", os.Args[0], BuildInfo, os.Args[1:])
 	flag.Parse()
 
-	if *pushGateway != "" {
-		pusher := push.New(*pushGateway, "workflow-manager").
-			Gatherer(prometheus.DefaultGatherer).
-			Grouping("locality", *k8sNS).
-			Grouping("ingestor", *ingestorLabel)
-		defer func() {
+	var pusher *push.Pusher
+	// Closure that sends metrics to prometheus-gateway, if configured.
+	var pushMetrics = func() {
+		if pusher != nil {
 			err := pusher.Push()
 			if err != nil {
 				log.Err(err).Msg("error occurred with pushing to prometheus")
 			}
-		}()
+		}
+	}
+	if *pushGateway != "" {
+		pusher = push.New(*pushGateway, "workflow-manager").
+			Gatherer(prometheus.DefaultGatherer).
+			Grouping("locality", *k8sNS).
+			Grouping("ingestor", *ingestorLabel)
+		defer pushMetrics()
+	}
+
+	// Closure that logs a fatal error message, updates a Prometheus gauge,
+	// sends metrics, and exits the program. Note that this never returns.
+	var fail = func(format string, args ...interface{}) {
+		recordFailureMetric()
+		pushMetrics()
+		log.Fatal().Msgf(format, args...)
 	}
 
 	ownValidationBucket, err := storage.NewBucket(*ownValidationInput, *ownValidationIdentity, *dryRun)
@@ -234,6 +236,7 @@ func main() {
 		when, err := time.Parse(timeLayout, *aggregationOverrideTimestamp)
 		if err != nil {
 			fail("--aggregation-override-timestamp: couldn't parse %q as time: %v", *aggregationOverrideTimestamp, err)
+			return
 		}
 		aggregationInterval = wftime.OverrideAggregationWindow(when, *aggregationPeriod)
 	}
@@ -347,9 +350,21 @@ func main() {
 
 		if err != nil {
 			log.Err(err).Str("aggregation ID", aggregationID).Msgf("Failed to schedule aggregation tasks: %s", err)
+			recordFailureMetric()
 			return
 		}
 	}
+
+	// Create and register these gauges only upon success, to avoid
+	// clobbering them in case of failure.
+	var workflowManagerLastSuccess = promauto.NewGauge(prometheus.GaugeOpts{
+		Name: "workflow_manager_last_success_seconds",
+		Help: "Time of last successful run of workflow-manager in seconds since UNIX epoch",
+	})
+	var workflowManagerRuntime = promauto.NewGauge(prometheus.GaugeOpts{
+		Name: "workflow_manager_runtime_seconds",
+		Help: "How long successful workflow-manager runs take",
+	})
 
 	workflowManagerLastSuccess.SetToCurrentTime()
 
