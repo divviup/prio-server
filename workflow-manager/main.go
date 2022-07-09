@@ -187,7 +187,7 @@ func main() {
 	flag.Parse()
 
 	var pusher *push.Pusher
-	// Closure that sends metrics to prometheus-gateway, if configured.
+	// Closure that sends metrics to prometheus-pushgateway, if configured.
 	var pushMetrics = func() {
 		if pusher != nil {
 			err := pusher.Push()
