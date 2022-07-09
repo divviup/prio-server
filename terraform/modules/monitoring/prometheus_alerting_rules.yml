@@ -3,7 +3,7 @@ groups:
   rules:
   # See docs/monitoring.md for discussion of the PromQL expressions in these alerts.
   - alert: workflow_manager_heartbeat
-    expr: (time() - max_over_time(workflow_manager_last_success_seconds[1800s])) > 1800
+    expr: (time() - max_over_time(workflow_manager_last_success_seconds[3600s])) > 1800
     for: 5m
     labels:
       severity: page
