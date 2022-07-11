@@ -55,7 +55,7 @@ tracing = "0.1.34"
 tracing-error = "0.2.0"
 tracing-subscriber = { version = "0.3.14", features = ["env-filter", "json"] }
 trycmd = "0.13.4"
-ureq = { version = "^2.4", features = ["json"] }
+ureq = { version = "^2.5", features = ["json"] }
 url = "2.2.2"
 urlencoding = "2.1.0"
 uuid = { version = "0.8", features = ["serde", "v4"] }
