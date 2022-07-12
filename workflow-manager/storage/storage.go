@@ -150,7 +150,8 @@ func (b *S3Bucket) service() (s3iface.S3API, error) {
 		return nil, err
 	}
 
-	return s3.New(sess, config), nil
+	b.s3Service = s3.New(sess, config)
+	return b.s3Service, nil
 }
 
 func (b *S3Bucket) ListAggregationIDs() ([]string, error) {
