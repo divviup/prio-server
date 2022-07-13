@@ -155,6 +155,15 @@ groups:
       summary: "Container is stuck waiting"
       description: "Container {{ $labels.container }} has been waiting for fifteen minutes, in pod
         {{ $labels.pod }}, namespace {{ $labels.namespace }}, and environment ${environment}."
+  - alert: kubernetes_pod_pending
+    expr: kube_pod_status_phase{phase="Pending"} * (kube_pod_status_phase{phase="Pending"} offset 15m) > 0
+    labels:
+      severity: page
+      environment: ${environment}
+    annotations:
+      summary: "Pod is stuck pending scheduling"
+      description: "Pod {{ $labels.pod }} has been pending for fifteen minutes, in namespace
+        {{ $labels.namespace }} and environment ${environment}."
   - alert: ingest_rate_low
     expr: sum by (service, namespace) (rate(facilitator_intake_ingestion_packets_processed[20h])) < 0.25 *
       sum by (service, namespace) (rate(facilitator_intake_ingestion_packets_processed[20h] offset 1d))
