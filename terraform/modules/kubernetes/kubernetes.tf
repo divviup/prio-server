@@ -173,6 +173,14 @@ indicates that all localities should generate single-object validation batches.
 DESCRIPTION
 }
 
+variable "enable_heap_profiles" {
+  type = bool
+}
+
+variable "profile_nfs_server" {
+  type = string
+}
+
 # We repeat this declaration from main.tf to work around an issue where
 # Terraform will look for hashicorp/kubectl instead of gavinbunney/kubectl
 # https://github.com/gavinbunney/terraform-provider-kubectl/issues/39
@@ -289,7 +297,7 @@ resource "kubernetes_cron_job" "workflow_manager" {
                 }
               }
 
-              args = [
+              args = concat([
                 "--aggregation-period", var.aggregation_period,
                 "--grace-period", var.aggregation_grace_period,
                 "--intake-max-age", var.intake_max_age,
@@ -305,7 +313,30 @@ resource "kubernetes_cron_job" "workflow_manager" {
                 "--aggregate-tasks-topic", var.aggregate_queue.topic,
                 "--gcp-project-id", var.use_aws ? "" : data.google_project.project.project_id,
                 "--aws-sns-region", var.use_aws ? var.aws_region : "",
-              ]
+              ], var.enable_heap_profiles ? ["--memprofile", "/profiles/mem-$(NAMESPACE)-$(POD).pb.gz"] : [])
+              env {
+                name = "NAMESPACE"
+                value_from {
+                  field_ref {
+                    field_path = "metadata.namespace"
+                  }
+                }
+              }
+              env {
+                name = "POD"
+                value_from {
+                  field_ref {
+                    field_path = "metadata.name"
+                  }
+                }
+              }
+              dynamic "volume_mount" {
+                for_each = var.profile_nfs_server != null ? [0] : []
+                content {
+                  mount_path = "/profiles"
+                  name       = "profiles"
+                }
+              }
             }
             # If we use any other restart policy, then when the job is finally
             # deemed to be a failure, Kubernetes will destroy the job, pod and
@@ -318,6 +349,16 @@ resource "kubernetes_cron_job" "workflow_manager" {
             restart_policy                  = "Never"
             service_account_name            = module.account_mapping.kubernetes_service_account_name
             automount_service_account_token = true
+            dynamic "volume" {
+              for_each = var.profile_nfs_server != null ? [0] : []
+              content {
+                name = "profiles"
+                nfs {
+                  server = var.profile_nfs_server
+                  path   = "/"
+                }
+              }
+            }
           }
         }
       }
