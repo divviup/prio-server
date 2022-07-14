@@ -10,6 +10,8 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"runtime"
+	"runtime/pprof"
 	"strings"
 	"time"
 
@@ -49,6 +51,8 @@ var (
 	intakeTasksTopic       = flag.String("intake-tasks-topic", "", "Name of the topic to which intake-batch tasks should be published")
 	aggregateTasksTopic    = flag.String("aggregate-tasks-topic", "", "Name of the topic to which aggregate tasks should be published")
 	maxEnqueueWorkers      = flag.Int("max-enqueue-workers", 100, "Max number of workers that can be used to enqueue jobs")
+	cpuProfile             = flag.String("cpuprofile", "", "Write a CPU profile to `file`")
+	memProfile             = flag.String("memprofile", "", "Write a memory profile to `file`")
 
 	// Aggregation window flags, which determine which aggregation window will
 	// be aggregated (if not already aggregated). Normally, aggregation occurs
@@ -212,6 +216,24 @@ func main() {
 		log.Fatal().Msgf(format, args...)
 	}
 
+	if *cpuProfile != "" {
+		f, err := os.Create(*cpuProfile)
+		if err != nil {
+			fail("could not create CPU profile: %v", err)
+		}
+		defer func() {
+			err := f.Close()
+			if err != nil {
+				log.Err(err).Msg("could not close CPU profile")
+			}
+		}()
+		err = pprof.StartCPUProfile(f)
+		if err != nil {
+			fail("could not start CPU file: %v", err)
+		}
+		defer pprof.StopCPUProfile()
+	}
+
 	ownValidationBucket, err := storage.NewBucket(*ownValidationInput, *ownValidationIdentity, *dryRun)
 	if err != nil {
 		fail("--own-validation-input: %s", err)
@@ -370,6 +392,24 @@ func main() {
 
 	endTime := time.Now()
 	workflowManagerRuntime.Set(endTime.Sub(startTime).Seconds())
+
+	if *memProfile != "" {
+		f, err := os.Create(*memProfile)
+		if err != nil {
+			fail("could not create memory profile: %v", err)
+		}
+		defer func() {
+			err := f.Close()
+			if err != nil {
+				log.Err(err).Msg("could not close CPU profile")
+			}
+		}()
+		runtime.GC()
+		err = pprof.WriteHeapProfile(f)
+		if err != nil {
+			fail("could not write memory profile: %v", err)
+		}
+	}
 
 	log.Info().Msg("done")
 }
