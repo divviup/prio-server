@@ -219,17 +219,15 @@ func main() {
 	if *cpuProfile != "" {
 		f, err := os.Create(*cpuProfile)
 		if err != nil {
-			fail("could not create CPU profile: %v", err)
+			fail("Could not create CPU profile: %v", err)
 		}
 		defer func() {
-			err := f.Close()
-			if err != nil {
-				log.Err(err).Msg("could not close CPU profile")
+			if err := f.Close(); err != nil {
+				log.Err(err).Msg("Could not close CPU profile")
 			}
 		}()
-		err = pprof.StartCPUProfile(f)
-		if err != nil {
-			fail("could not start CPU file: %v", err)
+		if err := pprof.StartCPUProfile(f); err != nil {
+			fail("Could not start CPU file: %v", err)
 		}
 		defer pprof.StopCPUProfile()
 	}
@@ -396,18 +394,14 @@ func main() {
 	if *memProfile != "" {
 		f, err := os.Create(*memProfile)
 		if err != nil {
-			fail("could not create memory profile: %v", err)
+			fail("Could not create memory profile: %v", err)
 		}
-		defer func() {
-			err := f.Close()
-			if err != nil {
-				log.Err(err).Msg("could not close CPU profile")
-			}
-		}()
 		runtime.GC()
-		err = pprof.WriteHeapProfile(f)
-		if err != nil {
-			fail("could not write memory profile: %v", err)
+		if err := pprof.WriteHeapProfile(f); err != nil {
+			fail("Could not write memory profile: %v", err)
+		}
+		if err := f.Close(); err != nil {
+			log.Err(err).Msg("Could not close memory profile")
 		}
 	}
 
