@@ -6,6 +6,8 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"runtime"
+	"runtime/pprof"
 	"strings"
 	"sync"
 	"time"
@@ -65,6 +67,8 @@ var (
 	awsRegion                     = flag.String("aws-region", "", "If specified, the AWS `region` to use for manifest storage")
 	pushGateway                   = flag.String("push-gateway", "", "Set this to the gateway to use with prometheus. If left empty, metrics will not be pushed to prometheus.")
 	kubeconfig                    = flag.String("kubeconfig", "", "The `path` to user's kubeconfig file; if unspecified, assumed to be running in-cluster") // typical value is $HOME/.kube/config
+	cpuProfile                    = flag.String("cpuprofile", "", "Write a CPU profile to `file`")
+	memProfile                    = flag.String("memprofile", "", "Write a memory profile to `file`")
 
 	// Metrics.
 	pusher      *push.Pusher // populated only if --push-gateway is specified.
@@ -100,6 +104,22 @@ func main() {
 		// If we are running on someone's workstation, get nice pretty-printed
 		// log lines instead of structured JSON.
 		log.Logger = log.Output(zerolog.ConsoleWriter{Out: os.Stderr})
+	}
+
+	if *cpuProfile != "" {
+		f, err := os.Create(*cpuProfile)
+		if err != nil {
+			fail("Could not create CPU profile: %v", err)
+		}
+		defer func() {
+			if err := f.Close(); err != nil {
+				log.Err(err).Msg("Could not close CPU profile")
+			}
+		}()
+		if err := pprof.StartCPUProfile(f); err != nil {
+			fail("Could not start CPU file: %v", err)
+		}
+		defer pprof.StopCPUProfile()
 	}
 
 	switch {
@@ -276,6 +296,21 @@ func main() {
 	if err := tryPushMetrics(); err != nil {
 		log.Error().Err(err).Msgf("Couldn't push metrics: %v", err)
 	}
+
+	if *memProfile != "" {
+		f, err := os.Create(*memProfile)
+		if err != nil {
+			fail("Could not create memory profile: %v", err)
+		}
+		runtime.GC()
+		if err := pprof.WriteHeapProfile(f); err != nil {
+			fail("Could not write memory profile: %v", err)
+		}
+		if err := f.Close(); err != nil {
+			log.Err(err).Msg("Could not close memory profile")
+		}
+	}
+
 	log.Info().Msgf("Keys rotated successfully")
 }
 
