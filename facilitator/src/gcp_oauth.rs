@@ -29,9 +29,10 @@ use std::{
     io::Read,
     str,
     sync::{Arc, RwLock},
+    time::Duration as StdDuration,
 };
 use tokio::runtime::Handle;
-use ureq::Response;
+use ureq::{AgentBuilder, Response};
 use url::Url;
 
 use crate::{
@@ -523,7 +524,16 @@ impl GcpAccessTokenProvider {
                     Box::new(provider)
                 }
                 (None, None) => {
-                    let agent = RetryingAgent::new("metadata.google.internal", api_metrics);
+                    let agent = AgentBuilder::new()
+                        .timeout(StdDuration::from_secs(10))
+                        .build();
+                    let agent = RetryingAgent::new_with_agent(
+                        agent,
+                        // We have seen transient 404 errors from this endpoint previously.
+                        vec![404],
+                        "metadata.google.internal",
+                        api_metrics,
+                    );
                     let provider =
                         GkeMetadataServiceDefaultAccessTokenProvider::new(agent, logger.clone());
                     Box::new(provider)
