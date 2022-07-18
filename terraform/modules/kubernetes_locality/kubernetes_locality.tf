@@ -257,7 +257,7 @@ resource "kubernetes_cron_job" "key_rotator" {
                 }
               }
 
-              args = concat([
+              args = [
                 "--prio-environment=${var.environment}",
                 "--kubernetes-namespace=${var.kubernetes_namespace}",
                 "--manifest-bucket-url=${var.manifest_bucket.bucket_url}",
@@ -281,7 +281,8 @@ resource "kubernetes_cron_job" "key_rotator" {
                 "--packet-encryption-key-primary-min-age=${var.packet_encryption_key_rotation_policy.primary_min_age}",
                 "--packet-encryption-key-delete-min-age=${var.packet_encryption_key_rotation_policy.delete_min_age}",
                 "--packet-encryption-key-delete-min-count=${var.packet_encryption_key_rotation_policy.delete_min_count}",
-              ], var.enable_heap_profiles ? ["--memprofile", "/profiles/mem-$(NAMESPACE)-$(POD).pb.gz"] : [])
+                "--memprofile", var.enable_heap_profiles ? "/profiles/mem-$(NAMESPACE)-$(POD).pb.gz" : "",
+              ]
               env {
                 name = "NAMESPACE"
                 value_from {

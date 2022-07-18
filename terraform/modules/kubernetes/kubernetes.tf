@@ -297,7 +297,7 @@ resource "kubernetes_cron_job" "workflow_manager" {
                 }
               }
 
-              args = concat([
+              args = [
                 "--aggregation-period", var.aggregation_period,
                 "--grace-period", var.aggregation_grace_period,
                 "--intake-max-age", var.intake_max_age,
@@ -313,7 +313,8 @@ resource "kubernetes_cron_job" "workflow_manager" {
                 "--aggregate-tasks-topic", var.aggregate_queue.topic,
                 "--gcp-project-id", var.use_aws ? "" : data.google_project.project.project_id,
                 "--aws-sns-region", var.use_aws ? var.aws_region : "",
-              ], var.enable_heap_profiles ? ["--memprofile", "/profiles/mem-$(NAMESPACE)-$(POD).pb.gz"] : [])
+                "--memprofile", var.enable_heap_profiles ? "/profiles/mem-$(NAMESPACE)-$(POD).pb.gz" : "",
+              ]
               env {
                 name = "NAMESPACE"
                 value_from {
