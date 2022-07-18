@@ -147,6 +147,14 @@ variable "role_permissions_boundary_policy_arn" {
   default = null
 }
 
+variable "enable_heap_profiles" {
+  type = bool
+}
+
+variable "profile_nfs_server" {
+  type = string
+}
+
 # We need the ingestion server's manifest so that we can discover the GCP
 # service account it will use to upload ingestion batches. Some ingestors
 # (Apple) are singletons, and advertise a single global manifest which contains
@@ -424,6 +432,8 @@ module "kubernetes" {
   aws_region                                = var.aws_region
   gcp_workload_identity_pool_provider       = var.gcp_workload_identity_pool_provider
   single_object_validation_batch_localities = var.single_object_validation_batch_localities
+  enable_heap_profiles                      = var.enable_heap_profiles
+  profile_nfs_server                        = var.profile_nfs_server
 }
 
 output "data_share_processor_name" {

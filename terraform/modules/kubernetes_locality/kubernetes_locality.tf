@@ -96,6 +96,13 @@ variable "specific_manifest_templates" {
   type = map(any)
 }
 
+variable "enable_heap_profiles" {
+  type = bool
+}
+
+variable "profile_nfs_server" {
+  type = string
+}
 
 locals {
   iam_entity_name = "${var.environment}-${var.locality}-key-rotator"
@@ -274,7 +281,31 @@ resource "kubernetes_cron_job" "key_rotator" {
                 "--packet-encryption-key-primary-min-age=${var.packet_encryption_key_rotation_policy.primary_min_age}",
                 "--packet-encryption-key-delete-min-age=${var.packet_encryption_key_rotation_policy.delete_min_age}",
                 "--packet-encryption-key-delete-min-count=${var.packet_encryption_key_rotation_policy.delete_min_count}",
+                "--memprofile", var.enable_heap_profiles ? "/profiles/mem-$(NAMESPACE)-$(POD).pb.gz" : "",
               ]
+              env {
+                name = "NAMESPACE"
+                value_from {
+                  field_ref {
+                    field_path = "metadata.namespace"
+                  }
+                }
+              }
+              env {
+                name = "POD"
+                value_from {
+                  field_ref {
+                    field_path = "metadata.name"
+                  }
+                }
+              }
+              dynamic "volume_mount" {
+                for_each = var.profile_nfs_server != null ? [0] : []
+                content {
+                  mount_path = "/profiles"
+                  name       = "profiles"
+                }
+              }
             }
 
             # If we use any other restart policy, then when the job is finally
@@ -288,6 +319,16 @@ resource "kubernetes_cron_job" "key_rotator" {
             restart_policy                  = "Never"
             service_account_name            = module.key_rotator_account.kubernetes_service_account_name
             automount_service_account_token = true
+            dynamic "volume" {
+              for_each = var.profile_nfs_server != null ? [0] : []
+              content {
+                name = "profiles"
+                nfs {
+                  server = var.profile_nfs_server
+                  path   = "/"
+                }
+              }
+            }
           }
         }
       }

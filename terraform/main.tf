@@ -338,6 +338,15 @@ variable "role_permissions_boundary_policy_arn" {
   DESCRIPTION
 }
 
+variable "enable_heap_profiles" {
+  type        = bool
+  default     = false
+  description = <<-DESCRIPTION
+  If true, set up an NFS server, and have Go language CronJob pods save heap
+  profiles to an NFS volume.
+  DESCRIPTION
+}
+
 terraform {
   backend "gcs" {}
 
@@ -663,6 +672,8 @@ module "kubernetes_locality" {
   enable_key_rotator_localities         = toset(var.enable_key_rotation_localities)
   key_rotator_schedule                  = var.key_rotator_schedule
   specific_manifest_templates           = { for v in module.data_share_processors : v.data_share_processor_name => v.specific_manifest }
+  enable_heap_profiles                  = var.enable_heap_profiles
+  profile_nfs_server                    = length(module.nfs_server) > 0 ? module.nfs_server[0].server : null
 }
 
 module "data_share_processors" {
@@ -702,6 +713,8 @@ module "data_share_processors" {
   gcp_workload_identity_pool_provider            = local.gcp_workload_identity_pool_provider
   single_object_validation_batch_localities      = toset(var.single_object_validation_batch_localities)
   role_permissions_boundary_policy_arn           = var.role_permissions_boundary_policy_arn
+  enable_heap_profiles                           = var.enable_heap_profiles
+  profile_nfs_server                             = length(module.nfs_server) > 0 ? module.nfs_server[0].server : null
 }
 
 # The portal owns two sum part buckets (one for each data share processor) and
@@ -853,6 +866,19 @@ module "monitoring" {
   grafana_helm_chart_version              = var.grafana_helm_chart_version
   cloudwatch_exporter_helm_chart_version  = var.cloudwatch_exporter_helm_chart_version
   stackdriver_exporter_helm_chart_version = var.stackdriver_exporter_helm_chart_version
+}
+
+resource "kubernetes_namespace_v1" "nfs" {
+  count = var.enable_heap_profiles ? 1 : 0
+  metadata {
+    name = "nfs"
+  }
+}
+
+module "nfs_server" {
+  count     = var.enable_heap_profiles ? 1 : 0
+  source    = "./modules/nfs_server"
+  namespace = kubernetes_namespace_v1.nfs[0].metadata[0].name
 }
 
 data "external" "git-describe" {
