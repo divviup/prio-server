@@ -63,7 +63,7 @@ ingestors = {
 }
 cluster_settings = {
   initial_node_count  = 2
-  min_node_count      = 1
+  min_node_count      = 0
   max_node_count      = 3
   gcp_machine_type    = "e2-standard-2"
   aws_machine_types   = ["t3.medium"]
