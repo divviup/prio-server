@@ -225,7 +225,7 @@ ingestors = {
 }
 cluster_settings = {
   initial_node_count = 4
-  min_node_count     = 1
+  min_node_count     = 0
   max_node_count     = 5
   gcp_machine_type   = "e2-standard-8"
   aws_machine_types  = []
