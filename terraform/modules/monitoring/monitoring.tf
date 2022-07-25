@@ -98,8 +98,18 @@ receivers:
   victorops_configs:
   - api_key: "not-a-real-api-key"
     routing_key: "${var.victorops_routing_key}"
-    state_message: 'Alert: {{ .CommonLabels.alertname }}. Summary:{{ .CommonAnnotations.summary }}. RawData: {{ .CommonLabels }}'
-templates: []
+    # This is the default value for entity_display_name, made explicit.
+    entity_display_name: '{{ template "victorops.default.entity_display_name" . }}'
+    state_message: |-
+      Summary: {{ template "pretty-summary" . }}.
+      Description: {{ template "pretty-description" . }}
+      Common Labels: {{ .CommonLabels }}
+      Per-Alert Labels:
+      {{- $commonLabelsKeys := .CommonLabels.Names }}
+      {{ range .Alerts.Firing }}{{ .Labels.Remove $commonLabelsKeys }}
+      {{ end }}
+templates:
+- "/etc/config/templates.d/annotations.tmpl"
 CONFIG
   }
 
@@ -107,6 +117,56 @@ CONFIG
     ignore_changes = [
       data["alertmanager.yml"]
     ]
+  }
+}
+
+resource "kubernetes_config_map_v1" "prometheus_alertmanager_templates" {
+  metadata {
+    name      = "prometheus-alertmanager-templates"
+    namespace = kubernetes_namespace.monitoring.metadata[0].name
+  }
+
+  data = {
+    "annotations.tmpl" = <<TEMPLATE
+{{- define "pretty-summary" -}}
+  {{- if .CommonAnnotations.summary -}}
+    {{- .CommonAnnotations.summary -}}
+  {{- else -}}
+    {{- if gt (len .Alerts.Firing) 0 -}}
+      {{- with index .Alerts.Firing 0 -}}
+        {{- .Annotations.summary -}}
+      {{- end -}}
+      {{- $otherCount := slice .Alerts.Firing 1 | len -}}
+      {{- if $otherCount }} (and {{ $otherCount }} other{{ if ne $otherCount 1 }}s{{ end }}){{ end -}}
+    {{- else if gt (len .Alerts.Resolved) 0 -}}
+      {{- with index .Alerts.Resolved 0 -}}
+        {{- .Annotations.summary -}}
+      {{- end -}}
+      {{- $otherCount := slice .Alerts.Resolved 1 | len -}}
+      {{- if $otherCount }} (and {{ $otherCount }} other{{ if ne $otherCount 1 }}s{{ end }}){{ end -}}
+    {{- end -}}
+  {{- end -}}
+{{- end -}}
+{{- define "pretty-description" -}}
+  {{- if .CommonAnnotations.description -}}
+    {{- .CommonAnnotations.description -}}
+  {{- else -}}
+    {{- if gt (len .Alerts.Firing) 0 -}}
+      {{- with index .Alerts.Firing 0 -}}
+        {{- .Annotations.description -}}
+      {{- end -}}
+      {{- $otherCount := slice .Alerts.Firing 1 | len -}}
+      {{- if $otherCount }} (and {{ $otherCount }} other{{ if ne $otherCount 1 }}s{{ end }}){{ end -}}
+    {{- else if gt (len .Alerts.Resolved) 0 -}}
+      {{- with index .Alerts.Resolved 0 -}}
+        {{- .Annotations.description -}}
+      {{- end -}}
+      {{- $otherCount := slice .Alerts.Resolved 1 | len -}}
+      {{- if $otherCount }} (and {{ $otherCount }} other{{ if ne $otherCount 1 }}s{{ end }}){{ end -}}
+    {{- end -}}
+  {{- end -}}
+{{- end -}}
+TEMPLATE
   }
 }
 
@@ -251,7 +311,43 @@ resource "helm_release" "prometheus" {
 
   set {
     name  = "alertmanager.configFromSecret"
-    value = "prometheus-alertmanager-config"
+    value = kubernetes_secret.prometheus_alertmanager_config.metadata[0].name
+  }
+  set {
+    name  = "alertmanager.extraConfigmapMounts[0].name"
+    value = "template-files"
+  }
+  set {
+    name  = "alertmanager.extraConfigmapMounts[0].mountPath"
+    value = "/etc/config/templates.d"
+  }
+  set {
+    name  = "alertmanager.extraConfigmapMounts[0].configMap"
+    value = kubernetes_config_map_v1.prometheus_alertmanager_templates.metadata[0].name
+  }
+  set {
+    name  = "alertmanager.extraConfigmapMounts[0].readOnly"
+    value = "true"
+  }
+  set {
+    name  = "configmapReload.alertmanager.extraConfigmapMounts[0].name"
+    value = "template-files"
+  }
+  set {
+    name  = "configmapReload.alertmanager.extraConfigmapMounts[0].mountPath"
+    value = "/etc/config/templates.d"
+  }
+  set {
+    name  = "configmapReload.alertmanager.extraConfigmapMounts[0].configMap"
+    value = kubernetes_config_map_v1.prometheus_alertmanager_templates.metadata[0].name
+  }
+  set {
+    name  = "configmapReload.alertmanager.extraConfigmapMounts[0].readOnly"
+    value = "true"
+  }
+  set {
+    name  = "configmapReload.alertmanager.extraVolumeDirs[0]"
+    value = "/etc/config/templates.d"
   }
   set {
     name  = "alertmanager.configFileName"
