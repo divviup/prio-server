@@ -179,15 +179,33 @@ data "external" "global_manifest_http_status" {
 data "http" "ingestor_global_manifest" {
   count = local.ingestor_global_manifest_exists ? 1 : 0
   url   = "https://${var.ingestor_manifest_base_url}/global-manifest.json"
+  lifecycle {
+    postcondition {
+      condition     = self.status_code == 200
+      error_message = "Error fetching global manifest a second time"
+    }
+  }
 }
 
 data "http" "ingestor_specific_manifest" {
   count = local.ingestor_global_manifest_exists ? 0 : 1
   url   = "https://${var.ingestor_manifest_base_url}/${var.data_share_processor_name}-manifest.json"
+  lifecycle {
+    postcondition {
+      condition     = self.status_code == 200
+      error_message = "Error fetching both global manifest and ingestor-specific manifest"
+    }
+  }
 }
 
 data "http" "peer_share_processor_global_manifest" {
   url = "https://${var.peer_share_processor_manifest_base_url}/global-manifest.json"
+  lifecycle {
+    postcondition {
+      condition     = self.status_code == 200
+      error_message = "Error fetching peer data share processor's global manifest"
+    }
+  }
 }
 
 locals {

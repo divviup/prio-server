@@ -350,7 +350,7 @@ variable "enable_heap_profiles" {
 terraform {
   backend "gcs" {}
 
-  required_version = ">= 1.1.0"
+  required_version = ">= 1.2.0"
 
   # https://www.terraform.io/docs/language/expressions/type-constraints.html#experimental-optional-object-type-attributes
   experiments = [module_variable_optional_attrs]
@@ -376,7 +376,7 @@ terraform {
     }
     http = {
       source  = "hashicorp/http"
-      version = "2.2.0"
+      version = "3.0.1"
     }
     kubernetes = {
       source  = "hashicorp/kubernetes"
