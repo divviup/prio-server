@@ -15,6 +15,7 @@ variable "cluster_settings" {
     aws_machine_types              = list(string)
     eks_cluster_version            = optional(string)
     eks_vpc_cni_addon_version      = optional(string)
+    eks_ebs_csi_addon_version      = optional(string)
     eks_cluster_autoscaler_version = optional(string)
   })
 }
@@ -366,6 +367,42 @@ resource "aws_iam_role" "vpc_cni" {
         Condition = {
           StringEquals = {
             "${local.oidc_provider_url}:sub" = "system:serviceaccount:kube-system:aws-node"
+          }
+        }
+      }
+    ]
+  })
+}
+
+# The AWS EBS CSI plugin allows creating EBS-backed persistent volumes, and
+# supersedes the in-tree EBS plugin as of Kubernetes 1.23.
+resource "aws_eks_addon" "ebs_csi" {
+  cluster_name             = aws_eks_cluster.cluster.name
+  addon_name               = "aws-ebs-csi-driver"
+  addon_version            = var.cluster_settings.eks_ebs_csi_addon_version
+  service_account_role_arn = aws_iam_role.ebs_csi.arn
+  resolve_conflicts        = "OVERWRITE"
+}
+
+resource "aws_iam_role" "ebs_csi" {
+  name = "${var.resource_prefix}-ebs-csi"
+  managed_policy_arns = [
+    "arn:aws:iam::aws:policy/service-role/AmazonEBSCSIDriverPolicy"
+  ]
+
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Action = "sts:AssumeRoleWithWebIdentity"
+        Principal = {
+          Federated = aws_iam_openid_connect_provider.oidc.arn
+        }
+        Condition = {
+          StringEquals = {
+            "${local.oidc_provider_url}:aud" : "sts.amazonaws.com"
+            "${local.oidc_provider_url}:sub" : "system:serviceaccount:kube-system:ebs-csi-controller-sa"
           }
         }
       }
