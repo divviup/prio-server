@@ -84,7 +84,7 @@ pub trait Task:
 }
 
 /// Represents an intake batch task to be executed
-#[derive(Clone, Debug, Deserialize, PartialEq)]
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "kebab-case")]
 pub struct IntakeBatchTask {
     /// The trace identifier for the intake
@@ -111,7 +111,7 @@ impl Display for IntakeBatchTask {
 }
 
 /// Represents an aggregation task to be executed
-#[derive(Clone, Debug, Deserialize, PartialEq)]
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "kebab-case")]
 pub struct AggregationTask {
     /// The trace identifier for the aggregation
@@ -145,7 +145,7 @@ impl Display for AggregationTask {
 }
 
 /// Represents a batch included in an aggregation
-#[derive(Clone, Debug, Deserialize, PartialEq)]
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "kebab-case")]
 pub struct Batch {
     /// The identifier of the batch. Typically a UUID.

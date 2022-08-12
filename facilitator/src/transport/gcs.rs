@@ -290,7 +290,7 @@ impl StreamingTransferWriter {
     ) -> Result<StreamingTransferWriter, GcsError> {
         // Initiate the resumable, streaming upload.
         // https://cloud.google.com/storage/docs/performing-resumable-uploads#initiate-session
-        let mut upload_url = gcp_upload_object_url(&storage_api_base_url.to_string(), &bucket)?;
+        let mut upload_url = gcp_upload_object_url(storage_api_base_url.as_ref(), &bucket)?;
         upload_url
             .query_pairs_mut()
             .append_pair("uploadType", "resumable")
