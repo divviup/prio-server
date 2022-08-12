@@ -181,7 +181,7 @@ impl FromStr for S3Path {
     }
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct GcsPath {
     pub bucket: String,
     pub key: String,
@@ -231,7 +231,7 @@ impl FromStr for GcsPath {
     }
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum StoragePath {
     GcsPath(GcsPath),
     S3Path(S3Path),
@@ -263,7 +263,7 @@ impl<'de> Deserialize<'de> for StoragePath {
     }
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ManifestKind {
     IngestorGlobal,
     IngestorSpecific,
@@ -299,7 +299,7 @@ impl Display for ManifestKind {
     }
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum TaskQueueKind {
     GcpPubSub,
     AwsSqs,

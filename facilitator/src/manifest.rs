@@ -38,7 +38,7 @@ pub type BatchSigningPublicKeys = HashMap<String, UnparsedPublicKey<Vec<u8>>>;
 
 /// Represents the description of a batch signing public key in a specific
 /// manifest.
-#[derive(Clone, Debug, Deserialize, PartialEq)]
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields, rename_all = "kebab-case")]
 struct BatchSigningPublicKey {
     /// The PEM-armored base64 encoding of the ASN.1 encoding of the PKIX
@@ -48,7 +48,7 @@ struct BatchSigningPublicKey {
     expiration: String,
 }
 
-#[derive(Clone, Debug, Deserialize, PartialEq)]
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields, rename_all = "kebab-case")]
 pub struct PacketEncryptionCertificateSigningRequest {
     /// The PEM-armored base64 encoding of the ASN.1 encoding of a PKCS#10
@@ -91,7 +91,7 @@ pub type PacketEncryptionCertificateSigningRequests =
 /// peers at deploy time.
 /// See the design document for the full specification and format versions.
 /// https://docs.google.com/document/d/1MdfM3QT63ISU70l63bwzTrxr93Z7Tv7EDjLfammzo6Q/edit#heading=h.3j8dgxqo5h68
-#[derive(Clone, Debug, Deserialize, PartialEq)]
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields, rename_all = "kebab-case")]
 pub struct DataShareProcessorGlobalManifest {
     /// Format version of the manifest. Always 0 or 1.
@@ -141,7 +141,7 @@ impl DataShareProcessorGlobalManifest {
 
 /// Represents the server-identity map inside data share processor global
 /// manifest.
-#[derive(Clone, Debug, Deserialize, PartialEq)]
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields, rename_all = "kebab-case")]
 pub struct DataShareProcessorServerIdentity {
     /// The numeric account ID of the AWS account this data share processor will
@@ -162,7 +162,7 @@ pub struct DataShareProcessorServerIdentity {
 /// peers at runtime.
 /// See the design document for the full specification and format versions.
 /// https://docs.google.com/document/d/1MdfM3QT63ISU70l63bwzTrxr93Z7Tv7EDjLfammzo6Q/edit#heading=h.3j8dgxqo5h68
-#[derive(Clone, Debug, Deserialize, PartialEq)]
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields, rename_all = "kebab-case")]
 pub struct DataShareProcessorSpecificManifest {
     /// Format version of the manifest. Always 1 or 2.
@@ -471,7 +471,7 @@ impl IngestionServerManifest {
 }
 
 /// Represents the global manifest for a portal server.
-#[derive(Debug, Deserialize, PartialEq)]
+#[derive(Debug, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields, rename_all = "kebab-case")]
 pub struct PortalServerGlobalManifest {
     /// Format version of the manifest. Versions besides the currently supported

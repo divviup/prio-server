@@ -128,7 +128,7 @@ pub trait Packet: Sized + TryFrom<Value, Error = IdlError> {
 
 /// The file containing signatures over the ingestion batch header and packet
 /// file.
-#[derive(Debug, Serialize, Deserialize, PartialEq, Clone)]
+#[derive(Debug, Serialize, Deserialize, PartialEq, Eq, Clone)]
 pub struct BatchSignature {
     pub batch_header_signature: Vec<u8>,
     pub key_identifier: String,
