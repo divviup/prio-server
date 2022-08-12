@@ -56,6 +56,7 @@ variable "cluster_settings" {
     aws_machine_types              = list(string)
     eks_cluster_version            = optional(string)
     eks_vpc_cni_addon_version      = optional(string)
+    eks_ebs_csi_addon_version      = optional(string)
     eks_cluster_autoscaler_version = optional(string)
   })
   description = <<DESCRIPTION
@@ -76,6 +77,9 @@ Settings for the Kubernetes cluster.
     for available versions. Only used in EKS clusters.
   - `eks_vpc_cni_addon_version` is the Amazon VPC CNI add-on version to use. See
     https://docs.aws.amazon.com/eks/latest/userguide/managing-vpc-cni.html for
+    available versions. Only used in EKS clusters.
+  - `eks_ebs_csi_addon_version` is the Amazon EBS CSI driver add-on version to
+    use. See https://github.com/kubernetes-sigs/aws-ebs-csi-driver/releases for
     available versions. Only used in EKS clusters.
   - `eks_cluster_autoscaler_version` is the version of the Kubernetes cluster
     autoscaler to use. The version must match the minor version of Kubernetes.

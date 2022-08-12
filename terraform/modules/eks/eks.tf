@@ -15,6 +15,7 @@ variable "cluster_settings" {
     aws_machine_types              = list(string)
     eks_cluster_version            = optional(string)
     eks_vpc_cni_addon_version      = optional(string)
+    eks_ebs_csi_addon_version      = optional(string)
     eks_cluster_autoscaler_version = optional(string)
   })
 }

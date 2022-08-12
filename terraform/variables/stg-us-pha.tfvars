@@ -70,6 +70,8 @@ cluster_settings = {
   eks_cluster_version = "1.21"
   # https://docs.aws.amazon.com/eks/latest/userguide/managing-vpc-cni.html
   eks_vpc_cni_addon_version = "v1.10.1-eksbuild.1"
+  # https://github.com/kubernetes-sigs/aws-ebs-csi-driver/releases
+  eks_ebs_csi_addon_version = "v1.10.0-eksbuild.1"
   # https://github.com/kubernetes/autoscaler/releases/tag/cluster-autoscaler-1.21.2
   eks_cluster_autoscaler_version = "k8s.gcr.io/autoscaling/cluster-autoscaler:v1.21.2"
 }
