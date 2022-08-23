@@ -54,7 +54,7 @@ tokio = { version = "^1.16", features = ["full"] }
 tracing = "0.1.36"
 tracing-error = "0.2.0"
 tracing-subscriber = { version = "0.3.15", features = ["env-filter", "json"] }
-trycmd = "0.13.5"
+trycmd = "0.13.6"
 ureq = { version = "^2.5", features = ["json"] }
 url = "2.2.2"
 urlencoding = "2.1.0"
