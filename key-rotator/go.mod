@@ -1,6 +1,6 @@
 module github.com/abetterinternet/prio-server/key-rotator
 
-go 1.17
+go 1.19
 
 require (
 	cloud.google.com/go/secretmanager v1.5.0
