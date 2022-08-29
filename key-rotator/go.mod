@@ -12,7 +12,7 @@ require (
 	github.com/rs/zerolog v1.27.0
 	golang.org/x/sync v0.0.0-20220601150217-0de741cfad7f
 	google.golang.org/genproto v0.0.0-20220722212130-b98a9ff5e252
-	google.golang.org/grpc v1.48.0
+	google.golang.org/grpc v1.49.0
 	k8s.io/api v0.24.4
 	k8s.io/apimachinery v0.24.4
 	k8s.io/client-go v0.24.4
