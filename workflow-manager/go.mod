@@ -8,6 +8,6 @@ require (
 	github.com/aws/aws-sdk-go v1.44.86
 	github.com/google/uuid v1.3.0
 	github.com/prometheus/client_golang v1.13.0
-	github.com/rs/zerolog v1.27.0
+	github.com/rs/zerolog v1.28.0
 	google.golang.org/api v0.94.0
 )
