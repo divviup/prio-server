@@ -439,6 +439,7 @@ func scheduleTasks(config scheduleTasksConfig) error {
 	ingestionBatchesFound.WithLabelValues(config.aggregationID).Set(float64(intakeBatches.Batches.Len()))
 	incompleteIngestionBatchesFound.WithLabelValues(config.aggregationID).Set(float64(intakeBatches.IncompleteBatchCount))
 	log.Info().
+		Str("aggregation ID", config.aggregationID).
 		Int("ingestion batches", intakeBatches.Batches.Len()).
 		Int("incomplete ingestion batches", intakeBatches.IncompleteBatchCount).
 		Msg("discovered ingestion batches in intake window")
@@ -467,7 +468,10 @@ func scheduleTasks(config scheduleTasksConfig) error {
 
 	aggInterval := config.aggregationInterval(config.clock.Now())
 
-	log.Info().Str("aggregation interval", aggInterval.String()).Msgf("looking for batches to aggregate in interval %s", aggInterval)
+	log.Info().
+		Str("aggregation interval", aggInterval.String()).
+		Str("aggregation ID", config.aggregationID).
+		Msg("looking for batches to aggregate")
 
 	intakeFiles, err = config.intakeBucket.ListBatchFiles(config.aggregationID, aggInterval)
 	if err != nil {
@@ -482,6 +486,8 @@ func scheduleTasks(config scheduleTasksConfig) error {
 	aggregateIngestionBatchesFound.WithLabelValues(config.aggregationID).Set(float64(intakeBatches.Batches.Len()))
 	aggregateIncompleteIngestionBatchesFound.WithLabelValues(config.aggregationID).Set(float64(intakeBatches.IncompleteBatchCount))
 	log.Info().
+		Str("aggregation interval", aggInterval.String()).
+		Str("aggregation ID", config.aggregationID).
 		Int("ingestion batches", intakeBatches.Batches.Len()).
 		Int("incomplete ingestion batches", intakeBatches.IncompleteBatchCount).
 		Msg("discovered ingestion batches in aggregation window")
@@ -500,6 +506,8 @@ func scheduleTasks(config scheduleTasksConfig) error {
 	peerValidationsFound.WithLabelValues(config.aggregationID).Set(float64(peerValidationBatches.Batches.Len()))
 	incompletePeerValidationsFound.WithLabelValues(config.aggregationID).Set(float64(peerValidationBatches.IncompleteBatchCount))
 	log.Info().
+		Str("aggregation interval", aggInterval.String()).
+		Str("aggregation ID", config.aggregationID).
 		Int("peer validations", peerValidationBatches.Batches.Len()).
 		Int("incomplete peer validations", peerValidationBatches.IncompleteBatchCount).
 		Msg("discovered peer validations")
@@ -555,7 +563,7 @@ func enqueueAggregationTask(
 	enqueuer task.Enqueuer,
 ) error {
 	if len(readyBatches) == 0 {
-		log.Info().Msg("no batches to aggregate")
+		log.Info().Str("aggregation ID", aggregationID).Msg("no batches to aggregate")
 		return nil
 	}
 
