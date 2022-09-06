@@ -9,7 +9,7 @@ require (
 	github.com/google/go-cmp v0.5.8
 	github.com/googleapis/gax-go/v2 v2.5.1
 	github.com/prometheus/client_golang v1.13.0
-	github.com/rs/zerolog v1.27.0
+	github.com/rs/zerolog v1.28.0
 	golang.org/x/sync v0.0.0-20220601150217-0de741cfad7f
 	google.golang.org/genproto v0.0.0-20220722212130-b98a9ff5e252
 	google.golang.org/grpc v1.49.0
