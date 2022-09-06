@@ -367,7 +367,7 @@ terraform {
     google = {
       source = "hashicorp/google"
       # Keep this version in sync with provider google-beta
-      version = "4.33.0"
+      version = "4.34.0"
     }
     google-beta = {
       source = "hashicorp/google-beta"
@@ -384,7 +384,7 @@ terraform {
     }
     kubernetes = {
       source  = "hashicorp/kubernetes"
-      version = "2.13.0"
+      version = "2.13.1"
     }
     null = {
       source  = "hashicorp/null"
