@@ -6,7 +6,7 @@ require (
 	cloud.google.com/go/secretmanager v1.5.0
 	cloud.google.com/go/storage v1.26.0
 	github.com/aws/aws-sdk-go v1.44.91
-	github.com/google/go-cmp v0.5.8
+	github.com/google/go-cmp v0.5.9
 	github.com/googleapis/gax-go/v2 v2.5.1
 	github.com/prometheus/client_golang v1.13.0
 	github.com/rs/zerolog v1.28.0
