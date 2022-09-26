@@ -21,7 +21,7 @@ variable "cluster_settings" {
 }
 
 terraform {
-  experiments = [module_variable_optional_attrs]
+  required_version = ">= 1.3.1"
 }
 
 data "aws_region" "current" {}

@@ -95,10 +95,7 @@ DESCRIPTION
 terraform {
   backend "gcs" {}
 
-  required_version = ">= 1.1.0"
-
-  # https://www.terraform.io/docs/language/expressions/type-constraints.html#experimental-optional-object-type-attributes
-  experiments = [module_variable_optional_attrs]
+  required_version = ">= 1.3.1"
 
   required_providers {
     aws = {
