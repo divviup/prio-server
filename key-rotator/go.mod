@@ -3,7 +3,7 @@ module github.com/abetterinternet/prio-server/key-rotator
 go 1.19
 
 require (
-	cloud.google.com/go/secretmanager v1.6.0
+	cloud.google.com/go/secretmanager v1.7.0
 	cloud.google.com/go/storage v1.27.0
 	github.com/aws/aws-sdk-go v1.44.100
 	github.com/google/go-cmp v0.5.9
