@@ -5,6 +5,7 @@ updates:
     directory: "/facilitator"
     schedule:
       interval: "weekly"
+    open-pull-requests-limit: 10
   - package-ecosystem: "docker"
     directory: "/facilitator"
     schedule:
@@ -13,6 +14,7 @@ updates:
     directory: "/key-rotator"
     schedule:
       interval: "weekly"
+    open-pull-requests-limit: 10
   - package-ecosystem: "docker"
     directory: "/key-rotator"
     schedule:
@@ -21,14 +23,17 @@ updates:
     directory: "/terraform"
     schedule:
       interval: "weekly"
+    open-pull-requests-limit: 10
   - package-ecosystem: "terraform"
     directory: "/terraform/cluster_bootstrap"
     schedule:
       interval: "weekly"
+    open-pull-requests-limit: 10
   - package-ecosystem: "gomod"
     directory: "/workflow-manager"
     schedule:
       interval: "weekly"
+    open-pull-requests-limit: 10
   - package-ecosystem: "docker"
     directory: "/workflow-manager"
     schedule:
