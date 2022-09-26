@@ -153,7 +153,7 @@ pub enum BatchReadError {
     Idl(#[from] IdlError),
     #[error("invalid signature on header with key {0}")]
     InvalidSignature(String),
-    #[error("key identifier {0} not present in key map {:?}")]
+    #[error("key identifier {0} not present in key map {1:?}")]
     UnknownKeyIdentifier(String, Vec<String>),
     #[error("packet file digest in header {0} does not match actual packet file digest {1}")]
     DigestMismatch(String, String),
