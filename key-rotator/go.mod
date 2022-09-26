@@ -3,15 +3,15 @@ module github.com/abetterinternet/prio-server/key-rotator
 go 1.19
 
 require (
-	cloud.google.com/go/secretmanager v1.5.0
-	cloud.google.com/go/storage v1.26.0
+	cloud.google.com/go/secretmanager v1.6.0
+	cloud.google.com/go/storage v1.27.0
 	github.com/aws/aws-sdk-go v1.44.100
 	github.com/google/go-cmp v0.5.9
 	github.com/googleapis/gax-go/v2 v2.5.1
 	github.com/prometheus/client_golang v1.13.0
 	github.com/rs/zerolog v1.28.0
 	golang.org/x/sync v0.0.0-20220601150217-0de741cfad7f
-	google.golang.org/genproto v0.0.0-20220810155839-1856144b1d9c
+	google.golang.org/genproto v0.0.0-20220920201722-2b89144ce006
 	google.golang.org/grpc v1.49.0
 	k8s.io/api v0.25.1
 	k8s.io/apimachinery v0.25.1
@@ -19,7 +19,7 @@ require (
 )
 
 require (
-	cloud.google.com/go v0.102.1 // indirect
+	cloud.google.com/go v0.104.0 // indirect
 	cloud.google.com/go/compute v1.7.0 // indirect
 	cloud.google.com/go/iam v0.3.0 // indirect
 	github.com/Azure/go-autorest v14.2.0+incompatible // indirect
@@ -63,14 +63,14 @@ require (
 	github.com/spf13/pflag v1.0.5 // indirect
 	go.opencensus.io v0.23.0 // indirect
 	golang.org/x/crypto v0.0.0-20220315160706-3147a52a75dd // indirect
-	golang.org/x/net v0.0.0-20220722155237-a158d28d115b // indirect
-	golang.org/x/oauth2 v0.0.0-20220822191816-0ebed06d0094 // indirect
-	golang.org/x/sys v0.0.0-20220722155257-8c9f86f7a55f // indirect
+	golang.org/x/net v0.0.0-20220909164309-bea034e7d591 // indirect
+	golang.org/x/oauth2 v0.0.0-20220909003341-f21342109be1 // indirect
+	golang.org/x/sys v0.0.0-20220728004956-3c1f35247d10 // indirect
 	golang.org/x/term v0.0.0-20210927222741-03fcf44c2211 // indirect
 	golang.org/x/text v0.3.7 // indirect
 	golang.org/x/time v0.0.0-20220210224613-90d013bbcef8 // indirect
 	golang.org/x/xerrors v0.0.0-20220609144429-65e65417b02f // indirect
-	google.golang.org/api v0.94.0 // indirect
+	google.golang.org/api v0.97.0 // indirect
 	google.golang.org/appengine v1.6.7 // indirect
 	google.golang.org/protobuf v1.28.1 // indirect
 	gopkg.in/inf.v0 v0.9.1 // indirect
