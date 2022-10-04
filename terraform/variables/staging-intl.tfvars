@@ -46,9 +46,9 @@ cluster_settings = {
 is_first                 = false
 use_aws                  = true
 pure_gcp                 = true
-workflow_manager_version = "0.6.66"
-facilitator_version      = "0.6.66"
-key_rotator_version      = "0.6.66"
+workflow_manager_version = "0.6.67"
+facilitator_version      = "0.6.67"
+key_rotator_version      = "0.6.67"
 victorops_routing_key    = "prio-staging"
 
 default_aggregation_period       = "30m"
