@@ -2,7 +2,7 @@ environment     = "prod-intl"
 state_bucket    = "prod-intl-us-west1-prio-terraform"
 gcp_region      = "us-west1"
 gcp_project     = "prio-intl-prod"
-localities      = ["mn", "mx-coa", "mx-jal", "mx-pue", "mx-yuc"]
+localities      = ["mn", "mx-coa", "mx-jal", "mx-pue", "mx-yuc", "rw"]
 aws_region      = "us-west-2"
 manifest_domain = "isrg-prio.org"
 ingestors = {
@@ -39,6 +39,12 @@ ingestors = {
         min_aggregate_worker_count = 1
         max_aggregate_worker_count = 3
       }
+      rw = {
+        min_intake_worker_count    = 1
+        max_intake_worker_count    = 3
+        min_aggregate_worker_count = 1
+        max_aggregate_worker_count = 3
+      }
     }
   }
   apple = {
@@ -69,6 +75,12 @@ ingestors = {
         max_aggregate_worker_count = 3
       }
       mx-yuc = {
+        min_intake_worker_count    = 1
+        max_intake_worker_count    = 3
+        min_aggregate_worker_count = 1
+        max_aggregate_worker_count = 3
+      }
+      rw = {
         min_intake_worker_count    = 1
         max_intake_worker_count    = 3
         min_aggregate_worker_count = 1
