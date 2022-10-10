@@ -359,7 +359,7 @@ terraform {
   required_providers {
     aws = {
       source  = "hashicorp/aws"
-      version = "4.33.0"
+      version = "4.34.0"
     }
     google = {
       source = "hashicorp/google"
