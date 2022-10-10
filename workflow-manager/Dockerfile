@@ -1,4 +1,4 @@
-FROM golang:1.19.1 as builder
+FROM golang:1.19.2 as builder
 # set GOPATH to empty since we're building with modules.
 ENV GOPATH=
 WORKDIR /workspace/
