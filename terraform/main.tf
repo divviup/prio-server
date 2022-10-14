@@ -235,7 +235,7 @@ variable "packet_encryption_key_rotation_policy" {
   })
   default = {
     create_min_age   = "6480h" // 6480 hours = 9 months (w/ 30-day months, 24-hour days)
-    primary_min_age  = "0"
+    primary_min_age  = "23h"
     delete_min_age   = "9360h" // 9360 hours = 13 months (w/ 30-day months, 24-hour days)
     delete_min_count = 2
   }
