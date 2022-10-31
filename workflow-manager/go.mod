@@ -3,7 +3,7 @@ module github.com/letsencrypt/prio-server/workflow-manager
 go 1.19
 
 require (
-	cloud.google.com/go/pubsub v1.25.1
+	cloud.google.com/go/pubsub v1.26.0
 	cloud.google.com/go/storage v1.27.0
 	github.com/aws/aws-sdk-go v1.44.126
 	github.com/google/uuid v1.3.0
@@ -15,7 +15,7 @@ require (
 require (
 	cloud.google.com/go v0.104.0 // indirect
 	cloud.google.com/go/compute v1.10.0 // indirect
-	cloud.google.com/go/iam v0.3.0 // indirect
+	cloud.google.com/go/iam v0.5.0 // indirect
 	github.com/beorn7/perks v1.0.1 // indirect
 	github.com/cespare/xxhash/v2 v2.1.2 // indirect
 	github.com/golang/groupcache v0.0.0-20200121045136-8c9f03a8e57e // indirect
