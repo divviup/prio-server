@@ -416,10 +416,10 @@ impl TransportWriter for MultipartUploadWriter {
                     })
                     .map(|rslt| {
                         if let Ok(output) = rslt {
-                            if output.location == None
-                                && output.e_tag == None
-                                && output.bucket == None
-                                && output.key == None
+                            if output.location.is_none()
+                                && output.e_tag.is_none()
+                                && output.bucket.is_none()
+                                && output.key.is_none()
                             {
                                 // Due to an oddity in S3's CompleteMultipartUpload API, some
                                 // failed uploads can cause complete_multipart_upload to return

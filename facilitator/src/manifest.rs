@@ -564,7 +564,7 @@ fn public_key_from_pem(pem_key: &str) -> Result<UnparsedPublicKey<Vec<u8>>> {
     if pem_key.is_empty() {
         return Err(anyhow!("empty PEM input"));
     }
-    let pem = pem::parse(&pem_key).context(format!("failed to parse key as PEM: {}", pem_key))?;
+    let pem = pem::parse(pem_key).context(format!("failed to parse key as PEM: {}", pem_key))?;
     const WANT_PEM_TAG: &str = "PUBLIC KEY";
     if pem.tag != WANT_PEM_TAG {
         return Err(anyhow!(

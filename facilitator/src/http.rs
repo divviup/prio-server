@@ -84,6 +84,7 @@ impl RetryingAgent {
     /// `::send_string` to get retries.
     /// Returns an Error if the AccessTokenProvider returns an error when
     /// supplying the request with an access token.
+    #[allow(clippy::result_large_err)]
     pub(crate) fn prepare_request(
         &self,
         parameters: RequestParameters,
@@ -120,6 +121,7 @@ impl RetryingAgent {
     }
 
     /// Send the provided request with the provided JSON body.
+    #[allow(clippy::result_large_err)]
     pub(crate) fn send_json_request(
         &self,
         logger: &Logger,
@@ -135,6 +137,7 @@ impl RetryingAgent {
     }
 
     /// Send the provided request with the provided bytes as the body.
+    #[allow(clippy::result_large_err)]
     pub(crate) fn send_bytes(
         &self,
         logger: &Logger,
@@ -150,6 +153,7 @@ impl RetryingAgent {
     }
 
     /// Send the provided data as a form encoded body.
+    #[allow(clippy::result_large_err)]
     pub(crate) fn send_form(
         &self,
         logger: &Logger,
@@ -165,6 +169,7 @@ impl RetryingAgent {
     }
 
     /// Send the provided request with no body.
+    #[allow(clippy::result_large_err)]
     pub(crate) fn call(
         &self,
         logger: &Logger,
@@ -179,6 +184,7 @@ impl RetryingAgent {
     }
 
     /// Send the provided request with no body, and read the response into a string.
+    #[allow(clippy::result_large_err)]
     pub(crate) fn fetch_to_string(
         &self,
         logger: &Logger,
@@ -197,6 +203,7 @@ impl RetryingAgent {
 
     /// Perform some operation `op`, logging metrics on the request status and
     /// latency.
+    #[allow(clippy::result_large_err)]
     fn do_request_with_metrics<F>(
         &self,
         endpoint: &'static str,
@@ -225,6 +232,7 @@ impl RetryingAgent {
 }
 
 /// Defines a behavior responsible for produing bearer authorization tokens
+#[allow(clippy::result_large_err)]
 pub(crate) trait AccessTokenProvider: Debug + DynClone + Send + Sync {
     /// Returns a valid bearer authroization token
     fn ensure_access_token(&self) -> Result<String, GcpAuthError>;

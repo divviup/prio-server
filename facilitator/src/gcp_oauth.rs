@@ -200,6 +200,7 @@ pub enum GcpAuthError {
 /// used either to authenticate to GCP services or to obtain a further service
 /// account access token from GCP IAM.
 trait ProvideDefaultAccessToken: Debug + DynClone + Send + Sync {
+    #[allow(clippy::result_large_err)]
     fn default_access_token(&self) -> Result<Response, GcpAuthError>;
 }
 
@@ -581,6 +582,7 @@ impl GcpAccessTokenProvider {
     /// is valid. Otherwise obtains and returns a new one.
     /// The returned value is an owned reference because the token owned by this
     /// struct could change while the caller is still holding the returned token
+    #[allow(clippy::result_large_err)]
     fn ensure_default_access_token(&self) -> Result<String, GcpAuthError> {
         debug!(self.logger, "obtaining read lock on default access token");
         if let Some(token) = &*self.default_access_token.read().unwrap() {
@@ -623,6 +625,7 @@ impl GcpAccessTokenProvider {
 
     /// Returns the current access token for the impersonated service account,
     /// if it is valid. Otherwise obtains and returns a new one.
+    #[allow(clippy::result_large_err)]
     fn ensure_impersonated_service_account_access_token(
         &self,
         service_account_to_impersonate: &str,

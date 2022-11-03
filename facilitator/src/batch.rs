@@ -821,7 +821,7 @@ mod tests {
         };
         roundtrip_batch(
             &*INGESTION_HEADER,
-            &*INGESTION_DATA_SHARE_PACKETS,
+            &INGESTION_DATA_SHARE_PACKETS,
             base_path,
             &filenames,
             &batch_writer,
@@ -916,7 +916,7 @@ mod tests {
         };
         roundtrip_batch(
             &*VALIDATION_HEADER,
-            &*VALIDATION_PACKETS,
+            &VALIDATION_PACKETS,
             base_path,
             &filenames,
             &batch_writer,
@@ -1024,7 +1024,7 @@ mod tests {
         };
         roundtrip_batch(
             &*SUM_PART,
-            &*INVALID_PACKETS,
+            &INVALID_PACKETS,
             batch_path,
             &filenames,
             &batch_writer,

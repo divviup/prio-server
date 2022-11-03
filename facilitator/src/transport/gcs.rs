@@ -259,6 +259,7 @@ impl StreamingTransferWriter {
     /// the name of the GCS bucket. Object is the full name of the object being
     /// uploaded, which may contain path separators or file extensions.
     /// oauth_token is used to initiate the initial resumable upload request.
+    #[allow(clippy::result_large_err)]
     fn new(
         bucket: String,
         object: String,
@@ -279,6 +280,7 @@ impl StreamingTransferWriter {
         )
     }
 
+    #[allow(clippy::result_large_err)]
     fn new_with_api_url(
         bucket: String,
         object: String,
@@ -332,6 +334,7 @@ impl StreamingTransferWriter {
         })
     }
 
+    #[allow(clippy::result_large_err)]
     fn upload_chunk(&mut self, last_chunk: bool) -> Result<(), GcsError> {
         if self.buffer.is_empty() {
             return Ok(());

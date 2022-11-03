@@ -19,6 +19,7 @@ pub use gcs::GcsTransport;
 pub use local::LocalFileTransport;
 
 /// Common error type for I/O over any batch transport.
+#[allow(clippy::large_enum_variant)]
 #[derive(Debug, thiserror::Error)]
 pub enum TransportError {
     #[error("object {0} not found: {1}")]
