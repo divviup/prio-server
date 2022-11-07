@@ -89,14 +89,15 @@ func (i Interval) String() string {
 // TimestampPrefixes returns a list of timestamps, truncated to the hour,
 // representing hours included in the Interval. For example, if the Interval
 // were 2021/01/01/00/00 - 2021/01/01/06/00, this would return
-// []Timestamp {
-//      "2021/01/01/00",
-//      "2021/01/01/01",
-//      "2021/01/01/02",
-//      "2021/01/01/03",
-//      "2021/01/01/04",
-//      "2021/01/01/05",
-// }
+//
+//	[]Timestamp {
+//	     "2021/01/01/00",
+//	     "2021/01/01/01",
+//	     "2021/01/01/02",
+//	     "2021/01/01/03",
+//	     "2021/01/01/04",
+//	     "2021/01/01/05",
+//	}
 //
 // If the interval were 2021/01/01/00/00 - 2021/01/01/00/30 (less than one
 // hour), this would return

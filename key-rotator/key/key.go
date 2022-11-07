@@ -201,14 +201,14 @@ func (cfg RotationConfig) Validate() error {
 // config, returning a new key (or the same key, if no rotation is necessary).
 //
 // Keys are rotated according to the following policy:
-//  * If no key versions exist, or if the youngest key version is older than
-//    `create_min_age`, create a new key version.
-//  * While there are more than `delete_min_key_count` keys, and the oldest key
-//    version is older than `delete_min_age`, delete the oldest key version.
-//  * Determine the current primary version:
-//    * If there is a key version not younger than `primary_min_age`, select
-//      the youngest such key version as primary.
-//    * Otherwise, select the oldest key version as primary.
+//   - If no key versions exist, or if the youngest key version is older than
+//     `create_min_age`, create a new key version.
+//   - While there are more than `delete_min_key_count` keys, and the oldest key
+//     version is older than `delete_min_age`, delete the oldest key version.
+//   - Determine the current primary version:
+//   - If there is a key version not younger than `primary_min_age`, select
+//     the youngest such key version as primary.
+//   - Otherwise, select the oldest key version as primary.
 //
 // The returned key is guaranteed to include at least one version.
 func (k Key) Rotate(now time.Time, cfg RotationConfig) (Key, error) {
