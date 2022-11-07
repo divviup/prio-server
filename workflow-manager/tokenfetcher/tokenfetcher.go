@@ -2,7 +2,7 @@ package tokenfetcher
 
 import (
 	"fmt"
-	"io/ioutil"
+	"io"
 	"net/http"
 
 	"github.com/aws/aws-sdk-go/aws/credentials"
@@ -30,7 +30,7 @@ func (tf TokenFetcher) FetchToken(credentials.Context) ([]byte, error) {
 	if err != nil {
 		return nil, fmt.Errorf("fetching %s: %w", url, err)
 	}
-	bytes, err := ioutil.ReadAll(resp.Body)
+	bytes, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return nil, fmt.Errorf("reading body of %s: %w", url, err)
 	}

@@ -10,12 +10,12 @@ import (
 	"strings"
 	"testing"
 
+	smpb "cloud.google.com/go/secretmanager/apiv1/secretmanagerpb"
 	"github.com/aws/aws-sdk-go/aws/awserr"
 	"github.com/aws/aws-sdk-go/aws/request"
 	"github.com/aws/aws-sdk-go/service/secretsmanager"
 	"github.com/google/go-cmp/cmp"
 	"github.com/googleapis/gax-go/v2"
-	smpb "google.golang.org/genproto/googleapis/cloud/secretmanager/v1"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 	k8sapi "k8s.io/api/core/v1"
