@@ -8,7 +8,7 @@ require (
 	github.com/aws/aws-sdk-go v1.44.131
 	github.com/google/go-cmp v0.5.9
 	github.com/googleapis/gax-go/v2 v2.7.0
-	github.com/prometheus/client_golang v1.13.0
+	github.com/prometheus/client_golang v1.13.1
 	github.com/rs/zerolog v1.28.0
 	golang.org/x/sync v0.1.0
 	google.golang.org/genproto v0.0.0-20221027153422-115e99e71e1c
