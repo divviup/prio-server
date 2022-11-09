@@ -18,11 +18,9 @@ jobs:
     steps:
     - uses: actions/checkout@v3
     - name: Install rust
-      uses: actions-rs/toolchain@v1
+      uses: dtolnay/rust-toolchain@stable
       with:
-        toolchain: stable
-        override: true
-        default: true
+        components: clippy, rustfmt
     - name: Lint
       run: cargo fmt --message-format human -- --check
     - name: clippy
@@ -43,11 +41,7 @@ jobs:
       - name: Install lcov
         run: sudo apt install lcov -y
       - name: Install rust
-        uses: actions-rs/toolchain@v1
-        with:
-          toolchain: stable
-          override: true
-          default: true
+        uses: dtolnay/rust-toolchain@stable
       - name: Install grcov
         run: cargo install --locked grcov
       - name: Test
