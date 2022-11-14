@@ -7,7 +7,7 @@ require (
 	cloud.google.com/go/storage v1.27.0
 	github.com/aws/aws-sdk-go v1.44.131
 	github.com/google/uuid v1.3.0
-	github.com/prometheus/client_golang v1.13.1
+	github.com/prometheus/client_golang v1.14.0
 	github.com/rs/zerolog v1.28.0
 	google.golang.org/api v0.102.0
 )
@@ -28,7 +28,7 @@ require (
 	github.com/mattn/go-colorable v0.1.12 // indirect
 	github.com/mattn/go-isatty v0.0.14 // indirect
 	github.com/matttproud/golang_protobuf_extensions v1.0.1 // indirect
-	github.com/prometheus/client_model v0.2.0 // indirect
+	github.com/prometheus/client_model v0.3.0 // indirect
 	github.com/prometheus/common v0.37.0 // indirect
 	github.com/prometheus/procfs v0.8.0 // indirect
 	go.opencensus.io v0.23.0 // indirect
