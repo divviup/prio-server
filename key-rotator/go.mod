@@ -13,7 +13,7 @@ require (
 	golang.org/x/sync v0.1.0
 	google.golang.org/grpc v1.50.1
 	k8s.io/api v0.25.3
-	k8s.io/apimachinery v0.25.3
+	k8s.io/apimachinery v0.25.4
 	k8s.io/client-go v0.25.3
 )
 
