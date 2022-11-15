@@ -465,7 +465,10 @@ mod tests {
             .generate_ingestion_sample(
                 &DEFAULT_TRACE_ID,
                 &batch_uuid,
-                &NaiveDate::from_ymd(2009, 2, 13).and_hms(23, 31, 0),
+                &NaiveDate::from_ymd_opt(2009, 2, 13)
+                    .unwrap()
+                    .and_hms_opt(23, 31, 0)
+                    .unwrap(),
                 10,
             )
             .unwrap();
@@ -546,7 +549,10 @@ mod tests {
                 .generate_ingestion_sample(
                     &DEFAULT_TRACE_ID,
                     &batch_uuid,
-                    &NaiveDate::from_ymd(2009, 2, 13).and_hms(23, 31, 0),
+                    &NaiveDate::from_ymd_opt(2009, 2, 13)
+                        .unwrap()
+                        .and_hms_opt(23, 31, 0)
+                        .unwrap(),
                     PACKET_COUNT,
                 )
                 .unwrap()

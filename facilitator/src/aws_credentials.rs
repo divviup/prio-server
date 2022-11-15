@@ -1010,7 +1010,7 @@ mod tests {
         // against a recorded, strongly-believed-to-be-good token so we can at least prevent trivial
         // regressions.
         let token = get_caller_identity_token_at_time(
-            Utc.ymd(2021, 1, 1).and_hms(1, 1, 1),
+            Utc.with_ymd_and_hms(2021, 1, 1, 1, 1, 1).unwrap(),
             &sts_request_url,
             "fake-workload-identity-pool-provider",
             &Region::ApEast1,
