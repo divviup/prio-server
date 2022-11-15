@@ -82,9 +82,9 @@ fn aggregation_including_invalid_batch() {
 
     let instance_name = "fake-instance";
     let aggregation_name = "fake-aggregation-1";
-    let date = NaiveDateTime::from_timestamp(2234567890, 654321);
-    let start_date = NaiveDateTime::from_timestamp(1234567890, 654321);
-    let end_date = NaiveDateTime::from_timestamp(3234567890, 654321);
+    let date = NaiveDateTime::from_timestamp_opt(2234567890, 654321).unwrap();
+    let start_date = NaiveDateTime::from_timestamp_opt(1234567890, 654321).unwrap();
+    let end_date = NaiveDateTime::from_timestamp_opt(3234567890, 654321).unwrap();
 
     let mut ingestor_pub_keys = HashMap::new();
     ingestor_pub_keys.insert(
@@ -375,9 +375,9 @@ fn end_to_end_test(test_options: EndToEndTestOptions) {
 
     let instance_name = "fake-instance";
     let aggregation_name = "fake-aggregation-1".to_owned();
-    let date = NaiveDateTime::from_timestamp(2234567890, 654321);
-    let start_date = NaiveDateTime::from_timestamp(1234567890, 654321);
-    let end_date = NaiveDateTime::from_timestamp(3234567890, 654321);
+    let date = NaiveDateTime::from_timestamp_opt(2234567890, 654321).unwrap();
+    let start_date = NaiveDateTime::from_timestamp_opt(1234567890, 654321).unwrap();
+    let end_date = NaiveDateTime::from_timestamp_opt(3234567890, 654321).unwrap();
 
     let batch_1_uuid = Uuid::new_v4();
     let batch_2_uuid = Uuid::new_v4();

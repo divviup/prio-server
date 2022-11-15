@@ -282,7 +282,7 @@ mod tests {
         let facilitator_tempdir = tempfile::TempDir::new().unwrap();
 
         let aggregation_name = "fake-aggregation-1".to_owned();
-        let date = NaiveDateTime::from_timestamp(1234567890, 654321);
+        let date = NaiveDateTime::from_timestamp_opt(1234567890, 654321).unwrap();
         let batch_uuid = Uuid::new_v4();
 
         let packet_encryption_csr = default_packet_encryption_certificate_signing_request();
@@ -411,7 +411,7 @@ mod tests {
         let facilitator_tempdir = tempfile::TempDir::new().unwrap();
 
         let aggregation_name = "fake-aggregation-1".to_owned();
-        let date = NaiveDateTime::from_timestamp(1234567890, 654321);
+        let date = NaiveDateTime::from_timestamp_opt(1234567890, 654321).unwrap();
         let batch_uuid = Uuid::new_v4();
 
         let packet_encryption_csr = default_packet_encryption_certificate_signing_request();
@@ -501,7 +501,7 @@ mod tests {
         let facilitator_tempdir = tempfile::TempDir::new().unwrap();
 
         let aggregation_name = "fake-aggregation-1".to_owned();
-        let date = NaiveDateTime::from_timestamp(1234567890, 654321);
+        let date = NaiveDateTime::from_timestamp_opt(1234567890, 654321).unwrap();
         let batch_uuid = Uuid::new_v4();
 
         let packet_encryption_csr = default_packet_encryption_certificate_signing_request();
@@ -598,7 +598,7 @@ mod tests {
         let facilitator_tempdir = tempfile::TempDir::new().unwrap();
 
         let aggregation_name = "fake-aggregation-1".to_owned();
-        let date = NaiveDateTime::from_timestamp(1234567890, 654321);
+        let date = NaiveDateTime::from_timestamp_opt(1234567890, 654321).unwrap();
         let batch_uuid = Uuid::new_v4();
 
         let packet_encryption_csr = default_packet_encryption_certificate_signing_request();

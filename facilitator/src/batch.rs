@@ -600,8 +600,8 @@ mod tests {
     const BATCH_ID: Uuid = Uuid::from_bytes([0; 16]);
 
     lazy_static! {
-        static ref START_TIMESTAMP: NaiveDateTime = NaiveDateTime::from_timestamp(1234567890, 654321);
-        static ref END_TIMESTAMP: NaiveDateTime = NaiveDateTime::from_timestamp(2234567890, 654321);
+        static ref START_TIMESTAMP: NaiveDateTime = NaiveDateTime::from_timestamp_opt(1234567890, 654321).unwrap();
+        static ref END_TIMESTAMP: NaiveDateTime = NaiveDateTime::from_timestamp_opt(2234567890, 654321).unwrap();
 
         static ref INGESTION_HEADER: IngestionHeader = IngestionHeader {
             batch_uuid: BATCH_ID,
