@@ -13,10 +13,22 @@ use ring::signature::{
     EcdsaKeyPair, KeyPair, UnparsedPublicKey, ECDSA_P256_SHA256_ASN1,
     ECDSA_P256_SHA256_ASN1_SIGNING,
 };
+use signal_hook::{consts::SIGTERM, iterator::Signals};
 use slog::{debug, error, info, o, warn, Logger};
 use std::{
-    collections::HashMap, convert::TryFrom, env, fs, fs::File, io::Read, str::FromStr,
-    time::Duration, time::Instant,
+    collections::HashMap,
+    convert::TryFrom,
+    env, fs,
+    fs::File,
+    io::Read,
+    str::FromStr,
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc,
+    },
+    thread,
+    time::Duration,
+    time::Instant,
 };
 use timer::Timer;
 use tokio::runtime::{self, Handle};
@@ -1165,10 +1177,11 @@ fn generate_sample_worker(
     api_metrics: &ApiClientMetricsCollector,
     root_logger: &Logger,
 ) -> Result<(), anyhow::Error> {
+    let shutdown_flag = register_sigterm_handler(root_logger)?;
     let termination_instant = termination_instant_from_args(sub_matches)?;
     let interval = value_t!(sub_matches.value_of("generation-interval"), u64)?;
 
-    while !should_terminate(termination_instant) {
+    while !should_terminate(termination_instant, &shutdown_flag) {
         let trace_id = Uuid::new_v4();
         let result = generate_sample(
             &trace_id,
@@ -1488,7 +1501,8 @@ fn validate_sample_worker(
         &["aggregation_id", "instance_name"]
     )?;
 
-    while !should_terminate(termination_instant) {
+    let shutdown_flag = register_sigterm_handler(logger)?;
+    while !should_terminate(termination_instant, &shutdown_flag) {
         if let Some(task_handle) = queue.dequeue()? {
             let trace_id = task_handle.task.trace_id;
             let logger = logger
@@ -1804,7 +1818,8 @@ fn intake_batch_worker(
     crypto_self_check(sub_matches, parent_logger, api_metrics)
         .context("crypto self check failed")?;
 
-    while !should_terminate(termination_instant) {
+    let shutdown_flag = register_sigterm_handler(parent_logger)?;
+    while !should_terminate(termination_instant, &shutdown_flag) {
         if let Some(task_handle) = queue.dequeue()? {
             info!(parent_logger, "dequeued intake task";
                 event::TASK_HANDLE => task_handle.clone(),
@@ -2103,7 +2118,8 @@ fn aggregate_worker(
     crypto_self_check(sub_matches, parent_logger, api_metrics)
         .context("crypto self check failed")?;
 
-    while !should_terminate(termination_instant) {
+    let shutdown_flag = register_sigterm_handler(parent_logger)?;
+    while !should_terminate(termination_instant, &shutdown_flag) {
         if let Some(task_handle) = queue.dequeue()? {
             info!(
                 parent_logger, "dequeued aggregate task";
@@ -2635,8 +2651,32 @@ fn termination_instant_from_args(
         .map(|d| Instant::now() + d))
 }
 
-fn should_terminate(termination_instant: Option<Instant>) -> bool {
+struct ShutdownFlag(Arc<AtomicBool>);
+
+/// Registers a signal handler for SIGTERM, and returns a flag that indicates whether a signal has
+/// been received. Once the handler is registered, the application should check the flag regularly,
+/// and gracefully shut down if it's set.
+fn register_sigterm_handler(logger: &Logger) -> Result<ShutdownFlag> {
+    let shutdown_flag = Arc::new(AtomicBool::new(false));
+    let mut signals = Signals::new([SIGTERM]).context("failed to register signal handler")?;
+    thread::spawn({
+        let shutdown_flag = Arc::clone(&shutdown_flag);
+        let logger = logger.clone();
+        move || {
+            for signal in &mut signals {
+                if signal == SIGTERM {
+                    info!(logger, "got SIGTERM, starting graceful shutdown");
+                    shutdown_flag.store(true, Ordering::Relaxed);
+                }
+            }
+        }
+    });
+    Ok(ShutdownFlag(shutdown_flag))
+}
+
+fn should_terminate(termination_instant: Option<Instant>, shutdown_flag: &ShutdownFlag) -> bool {
     termination_instant.map_or(false, |end| Instant::now() > end)
+        || shutdown_flag.0.load(Ordering::Relaxed)
 }
 
 #[cfg(test)]
