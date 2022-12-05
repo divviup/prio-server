@@ -119,7 +119,15 @@ default_aggregation_grace_period = "4h"
 default_peer_share_processor_manifest_base_url = "storage.googleapis.com/prio-enpa-g-prod-manifests"
 default_portal_server_manifest_base_url        = "manifest.global.enpa-pha.io"
 
-enable_key_rotation_localities = ["*"]
+# Put all localities in dry-run mode
+enable_key_rotation_localities = [""]
+
+packet_encryption_key_rotation_policy = {
+  create_min_age   = "48h"   // 48 hours = 2 days. The affected keys were generated Friday Dec 2.
+  primary_min_age  = "5m"    // 0 seconds, promote to primary immediately
+  delete_min_age   = "9360h" // default value
+  delete_min_count = 2       // default value
+}
 
 prometheus_helm_chart_version           = "15.9.0"
 grafana_helm_chart_version              = "6.20.5"
