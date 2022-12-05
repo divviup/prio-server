@@ -119,14 +119,16 @@ default_aggregation_grace_period = "4h"
 default_peer_share_processor_manifest_base_url = "storage.googleapis.com/prio-enpa-g-prod-manifests"
 default_portal_server_manifest_base_url        = "manifest.global.enpa-pha.io"
 
-# Put all localities in dry-run mode
-enable_key_rotation_localities = ["mx-coa", "mx-pue", "mx-yuc"]
+enable_key_rotation_localities = ["*"]
 
+# The packet encryption key rotation policy is the default, except for the
+# delete_min_count. See https://github.com/divviup/prio-server/issues/2248 for
+# details.
 packet_encryption_key_rotation_policy = {
-  create_min_age   = "48h"   // 48 hours = 2 days. The affected keys were generated Friday Dec 2.
-  primary_min_age  = "5m"    // 0 seconds, promote to primary immediately
-  delete_min_age   = "9360h" // default value
-  delete_min_count = 3       // allow 3 concurrent keys so we don't delete the in-use version 0 key
+  create_min_age   = "6480h" # default value
+  primary_min_age  = "23h"   # default value
+  delete_min_age   = "9360h" # default value
+  delete_min_count = 3       # allow 3 concurrent keys so we don't delete the in-use version 0 key
 }
 
 prometheus_helm_chart_version           = "15.9.0"
