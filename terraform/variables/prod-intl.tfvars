@@ -120,7 +120,7 @@ default_peer_share_processor_manifest_base_url = "storage.googleapis.com/prio-en
 default_portal_server_manifest_base_url        = "manifest.global.enpa-pha.io"
 
 # Put all localities in dry-run mode
-enable_key_rotation_localities = [""]
+enable_key_rotation_localities = ["mx-coa", "mx-pue", "mx-yuc"]
 
 packet_encryption_key_rotation_policy = {
   create_min_age   = "48h"   // 48 hours = 2 days. The affected keys were generated Friday Dec 2.
