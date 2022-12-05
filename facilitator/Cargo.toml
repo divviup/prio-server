@@ -28,7 +28,7 @@ jsonwebtoken = "8"
 lazy_static = "1"
 p256 = "0.11.1"
 pem = "1.1"
-pkix = "0.1.2"
+pkix = "0.2.0"
 prio = "0.6.1"
 prometheus = { version = "0.13", features = ["process"] }
 rand = "0.8"
