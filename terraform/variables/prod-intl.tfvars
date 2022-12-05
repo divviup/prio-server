@@ -126,7 +126,7 @@ packet_encryption_key_rotation_policy = {
   create_min_age   = "48h"   // 48 hours = 2 days. The affected keys were generated Friday Dec 2.
   primary_min_age  = "5m"    // 0 seconds, promote to primary immediately
   delete_min_age   = "9360h" // default value
-  delete_min_count = 2       // default value
+  delete_min_count = 3       // allow 3 concurrent keys so we don't delete the in-use version 0 key
 }
 
 prometheus_helm_chart_version           = "15.9.0"
