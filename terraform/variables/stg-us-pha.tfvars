@@ -69,11 +69,11 @@ cluster_settings = {
   aws_machine_types   = ["t3.medium"]
   eks_cluster_version = "1.22"
   # https://docs.aws.amazon.com/eks/latest/userguide/managing-vpc-cni.html
-  eks_vpc_cni_addon_version = "v1.10.1-eksbuild.1"
-  # https://github.com/kubernetes-sigs/aws-ebs-csi-driver/releases
-  eks_ebs_csi_addon_version = "v1.10.0-eksbuild.1"
-  # https://github.com/kubernetes/autoscaler/releases/tag/cluster-autoscaler-1.21.2
-  eks_cluster_autoscaler_version = "k8s.gcr.io/autoscaling/cluster-autoscaler:v1.21.2"
+  eks_vpc_cni_addon_version = "v1.11.4-eksbuild.1"
+  # https://docs.aws.amazon.com/eks/latest/userguide/managing-ebs-csi.html#updating-ebs-csi-eks-add-on
+  eks_ebs_csi_addon_version = "v1.13.0-eksbuild.2"
+  # https://github.com/kubernetes/autoscaler/releases/tag/cluster-autoscaler-1.22.1
+  eks_cluster_autoscaler_version = "k8s.gcr.io/autoscaling/cluster-autoscaler:v1.22.1"
 }
 test_peer_environment = {
   env_with_ingestor    = "stg-us-facil"
