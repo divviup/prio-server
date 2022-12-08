@@ -307,7 +307,7 @@ resource "kubernetes_cluster_role_binding" "custom_metrics_adapter_resource_read
 resource "kubernetes_manifest" "external_metrics_crd" {
   count = var.use_aws ? 1 : 0
   manifest = {
-    apiVersion = "apiextensions.k8s.io/v1beta1"
+    apiVersion = "apiextensions.k8s.io/v1"
     kind       = "CustomResourceDefinition"
 
     metadata = {
@@ -315,14 +315,18 @@ resource "kubernetes_manifest" "external_metrics_crd" {
     }
 
     spec = {
-      group   = "metrics.aws"
-      version = "v1alpha1"
+      group = "metrics.aws"
       names = {
         kind     = "ExternalMetric"
         plural   = "externalmetrics"
         singular = "externalmetric"
       }
       scope = "Namespaced"
+      versions = [{
+        name    = "v1alpha1"
+        served  = true
+        storage = true
+      }]
     }
   }
 }
