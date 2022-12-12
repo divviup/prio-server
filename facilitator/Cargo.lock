@@ -1714,9 +1714,9 @@ dependencies = [
 
 [[package]]
 name = "pkix"
-version = "0.2.0"
+version = "0.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c21441df64ff3d68980da7840bdac1195bf23aa11ce0175e12ab497a0bb18076"
+checksum = "3627d36de10749cd6bba01a975d64c01f1deb95d22823dbfbb4d7a913a240850"
 dependencies = [
  "b64-ct",
  "bit-vec",
