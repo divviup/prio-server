@@ -895,7 +895,7 @@ mod tests {
             END_TIMESTAMP.format(DATE_FORMAT),
             BATCH_ID.to_hyphenated()
         );
-        let idx = if is_first { 0 } else { 1 };
+        let idx = i32::from(!is_first);
         let filenames = if single_object_write {
             vec![format!("validity_{}.sig", idx)]
         } else {
@@ -1003,7 +1003,7 @@ mod tests {
             START_TIMESTAMP.format(AGGREGATION_DATE_FORMAT),
             END_TIMESTAMP.format(AGGREGATION_DATE_FORMAT)
         );
-        let idx = if is_first { 0 } else { 1 };
+        let idx = i32::from(!is_first);
         let filenames = if single_object_write {
             vec![format!("sum_{}.sig", idx)]
         } else {
