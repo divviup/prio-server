@@ -323,7 +323,7 @@ impl MultipartUploadWriter {
                     bucket: self.bucket.to_string(),
                     key: self.key.to_string(),
                     upload_id: self.upload_id.clone(),
-                    part_number: part_number as i64,
+                    part_number,
                     body: Some(body.clone().into()),
                     ..Default::default()
                 })

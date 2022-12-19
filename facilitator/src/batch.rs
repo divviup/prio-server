@@ -56,7 +56,7 @@ impl Batch<ValidationHeader, ValidationPacket> {
             aggregation_name,
             batch_id,
             date,
-            &format!("validity_{}", if is_first { 0 } else { 1 }),
+            &format!("validity_{}", i32::from(!is_first)),
         )
     }
 }
@@ -77,16 +77,12 @@ impl Batch<SumPart, InvalidPacket> {
             aggregation_start.format(AGGREGATION_DATE_FORMAT),
             aggregation_end.format(AGGREGATION_DATE_FORMAT)
         );
-        let filename = format!("sum_{}", if is_first { 0 } else { 1 });
+        let filename = format!("sum_{}", i32::from(!is_first));
 
         Self {
             header_path: format!("{}.{}", batch_path, filename),
             signature_path: format!("{}.{}.sig", batch_path, filename),
-            packet_file_path: format!(
-                "{}.invalid_uuid_{}.avro",
-                batch_path,
-                if is_first { 0 } else { 1 }
-            ),
+            packet_file_path: format!("{}.invalid_uuid_{}.avro", batch_path, i32::from(!is_first)),
 
             phantom_header: PhantomData,
             phantom_packet: PhantomData,
