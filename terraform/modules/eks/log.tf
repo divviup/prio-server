@@ -172,7 +172,7 @@ resource "kubernetes_daemonset" "fluent_bit" {
 
         container {
           name              = "fluent-bit"
-          image             = "amazon/aws-for-fluent-bit:2.28.3"
+          image             = "amazon/aws-for-fluent-bit:2.29.0"
           image_pull_policy = "Always"
 
           env {
