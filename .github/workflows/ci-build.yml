@@ -35,6 +35,8 @@ jobs:
       run:
         working-directory: facilitator
     runs-on: ubuntu-latest
+    env:
+      GRCOV_VERSION: 0.8.13
     steps:
       - name: Checkout code
         uses: actions/checkout@v3
@@ -42,8 +44,15 @@ jobs:
         run: sudo apt install lcov -y
       - name: Install rust
         uses: dtolnay/rust-toolchain@stable
+      - name: Cache grcov
+        uses: actions/cache@v3
+        with:
+          path: ${{ runner.tool_cache }}/grcov
+          key: grcov-bin-${{ env.GRCOV_VERSION }}
+      - name: Add the tool cache directory to the search path
+        run: echo "${{ runner.tool_cache }}/grcov/bin/" >> $GITHUB_PATH
       - name: Install grcov
-        run: cargo install --locked grcov
+        run: cargo install --root ${{ runner.tool_cache }}/grcov --version ${{ env.GRCOV_VERSION }} --locked grcov
       - name: Test
         run: cargo test --all-features --no-fail-fast
         env:
