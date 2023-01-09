@@ -1,4 +1,5 @@
 use crate::{manifest::PacketEncryptionCertificateSigningRequest, BatchSigningKey};
+use base64::{prelude::BASE64_STANDARD, Engine};
 use prio::encrypt::{PrivateKey, PublicKey};
 use ring::signature::{
     EcdsaKeyPair, KeyPair, UnparsedPublicKey, ECDSA_P256_SHA256_ASN1,
@@ -87,7 +88,9 @@ pub fn default_ingestor_private_key() -> BatchSigningKey {
     BatchSigningKey {
         key: EcdsaKeyPair::from_pkcs8(
             &ECDSA_P256_SHA256_ASN1_SIGNING,
-            &base64::decode(DEFAULT_INGESTOR_PRIVATE_KEY).unwrap(),
+            &BASE64_STANDARD
+                .decode(DEFAULT_INGESTOR_PRIVATE_KEY)
+                .unwrap(),
         )
         // Since we know DEFAULT_INGESTOR_PRIVATE_KEY is valid, it
         // is ok to unwrap() here.
@@ -111,7 +114,9 @@ pub fn default_facilitator_signing_private_key() -> BatchSigningKey {
     BatchSigningKey {
         key: EcdsaKeyPair::from_pkcs8(
             &ECDSA_P256_SHA256_ASN1_SIGNING,
-            &base64::decode(DEFAULT_FACILITATOR_SIGNING_PRIVATE_KEY).unwrap(),
+            &BASE64_STANDARD
+                .decode(DEFAULT_FACILITATOR_SIGNING_PRIVATE_KEY)
+                .unwrap(),
         )
         .unwrap(),
         identifier: "default-facilitator-signing-key".to_owned(),
@@ -133,7 +138,9 @@ pub fn default_pha_signing_private_key() -> BatchSigningKey {
     BatchSigningKey {
         key: EcdsaKeyPair::from_pkcs8(
             &ECDSA_P256_SHA256_ASN1_SIGNING,
-            &base64::decode(DEFAULT_PHA_SIGNING_PRIVATE_KEY).unwrap(),
+            &BASE64_STANDARD
+                .decode(DEFAULT_PHA_SIGNING_PRIVATE_KEY)
+                .unwrap(),
         )
         .unwrap(),
         identifier: "default-pha-signing-key".to_owned(),
