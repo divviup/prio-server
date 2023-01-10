@@ -133,7 +133,7 @@ packet_encryption_key_rotation_policy = {
 
 prometheus_helm_chart_version           = "15.9.0"
 grafana_helm_chart_version              = "6.20.5"
-cloudwatch_exporter_helm_chart_version  = "0.17.2"
+cloudwatch_exporter_helm_chart_version  = "0.22.0"
 stackdriver_exporter_helm_chart_version = "2.2.0"
 
 allowed_aws_account_ids = ["718214359651"]
