@@ -40,7 +40,6 @@ prep: ## Prepare a new workspace (environment) if needed, configure the tfstate 
 	@terraform init \
 		-input=false \
 		-force-copy \
-		-upgrade \
 		-backend=true \
 		-backend-config="bucket=$(STATE_BUCKET)"
 
@@ -183,7 +182,6 @@ prep-cluster-bootstrap: ## Prepare a new workspace (environment) if needed, conf
 		init \
 		-input=false \
 		-force-copy \
-		-upgrade \
 		-backend=true \
 		-backend-config="bucket=$(STATE_BUCKET)" \
 		-backend-config="prefix=cluster-bootstrap"
