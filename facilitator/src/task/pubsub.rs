@@ -9,6 +9,7 @@ use crate::{
     UrlParseError,
 };
 use anyhow::{anyhow, Context, Result};
+use base64::{prelude::BASE64_STANDARD, Engine};
 use chrono::DateTime;
 use serde::Deserialize;
 use slog::{debug, info, o, Logger};
@@ -219,7 +220,8 @@ impl<T: Task> TaskQueue<T> for GcpPubSubTaskQueue<T> {
 
         // The JSON task is encoded as Base64 in the pubsub message
         let received_message = &received_messages[0];
-        let task_bytes = base64::decode(&received_message.message.data)
+        let task_bytes = BASE64_STANDARD
+            .decode(&received_message.message.data)
             .context("failed to decode PubSub message from base64")?;
         let task_json =
             String::from_utf8(task_bytes).context("failed to decode PubSub message from UTF-8")?;
@@ -317,7 +319,7 @@ impl<T: Task> TaskQueue<T> for GcpPubSubTaskQueue<T> {
                 &request,
                 "publish",
                 &ureq::json!({
-                    "messages": [{"data": base64::encode(&handle.raw_body)}]
+                    "messages": [{"data": BASE64_STANDARD.encode(&handle.raw_body)}]
                 }),
             )
             .context(format!("failed to forward task {:?}", handle))?;

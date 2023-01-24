@@ -10,7 +10,7 @@ async-trait = "0.1"
 atty = "0.2"
 avro-rs = { version = "0.13.0", features = ["snappy"] }
 backoff = { version = "0.4.0", features = ["tokio"] }
-base64 = "0.20.0"
+base64 = "0.21.0"
 bitvec = "1"
 bytes = "1.3.0"
 chrono = { version = "0.4", features = ["serde"] }
@@ -26,7 +26,7 @@ hyper = "^0.14"
 hyper-rustls = { version = "^0.23", features = ["http2"] }
 jsonwebtoken = "8"
 lazy_static = "1"
-p256 = "0.11.1"
+p256 = "0.12.0"
 pem = "1.1"
 pkix = "0.2.1"
 prio = "0.6.1"
@@ -51,12 +51,12 @@ serde_json = "1.0"
 tempfile = "3.3.0"
 thiserror = "1.0"
 timer = "0.2"
-tokio = { version = "^1.23", features = ["full"] }
+tokio = { version = "^1.24", features = ["full"] }
 tracing = "0.1.37"
 tracing-error = "0.2.0"
 tracing-subscriber = { version = "0.3.16", features = ["env-filter", "json"] }
-trycmd = "0.14.6"
-ureq = { version = "^2.5", features = ["json"] }
+trycmd = "0.14.10"
+ureq = { version = "^2.6", features = ["json"] }
 url = "2.3.1"
 urlencoding = "2.1.2"
 uuid = { version = "0.8", features = ["serde", "v4"] }
@@ -67,6 +67,6 @@ xml-rs = "0.8"
 assert_matches = "1.5.0"
 hex = "0.4.3"
 mockito = "0.31.1"
-regex = "^1.7.0"
+regex = "^1.7.1"
 rusoto_mock = { version = "^0.48", default_features = false, features = ["rustls"] }
 serde_test = "1.0"

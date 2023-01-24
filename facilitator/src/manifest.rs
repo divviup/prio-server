@@ -1,4 +1,5 @@
 use anyhow::{anyhow, Context, Result};
+use base64::{prelude::BASE64_STANDARD, Engine};
 use elliptic_curve::{
     pkcs8::DecodePublicKey,
     sec1::{EncodedPoint, ToEncodedPoint},
@@ -78,7 +79,7 @@ impl PacketEncryptionCertificateSigningRequest {
 
         let encoded_point: EncodedPoint<NistP256> = decoded_public_key.to_encoded_point(false);
 
-        let base64_public_key = base64::encode(encoded_point);
+        let base64_public_key = BASE64_STANDARD.encode(encoded_point);
 
         Ok(base64_public_key)
     }
@@ -1720,7 +1721,9 @@ mod tests {
         let batch_signing_key_1_private = BatchSigningKey {
             key: EcdsaKeyPair::from_pkcs8(
                 &ECDSA_P256_SHA256_ASN1_SIGNING,
-                &base64::decode(batch_signing_key_1_private_pem).unwrap(),
+                &BASE64_STANDARD
+                    .decode(batch_signing_key_1_private_pem)
+                    .unwrap(),
             )
             .unwrap(),
             identifier: "batch-signing-key-1".to_owned(),
@@ -1737,7 +1740,9 @@ mod tests {
         let batch_signing_key_2_private = BatchSigningKey {
             key: EcdsaKeyPair::from_pkcs8(
                 &ECDSA_P256_SHA256_ASN1_SIGNING,
-                &base64::decode(batch_signing_key_2_private_pem).unwrap(),
+                &BASE64_STANDARD
+                    .decode(batch_signing_key_2_private_pem)
+                    .unwrap(),
             )
             .unwrap(),
             identifier: "batch-signing-key-2".to_owned(),
@@ -1751,7 +1756,9 @@ mod tests {
         let batch_signing_key_unrelated_private = BatchSigningKey {
             key: EcdsaKeyPair::from_pkcs8(
                 &ECDSA_P256_SHA256_ASN1_SIGNING,
-                &base64::decode(batch_signing_key_unrelated_private_pem).unwrap(),
+                &BASE64_STANDARD
+                    .decode(batch_signing_key_unrelated_private_pem)
+                    .unwrap(),
             )
             .unwrap(),
             identifier: "batch-signing-key-unrelated".to_owned(),

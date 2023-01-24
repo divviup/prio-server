@@ -1,6 +1,7 @@
 #![allow(clippy::too_many_arguments)]
 
 use anyhow::{anyhow, Context, Result};
+use base64::{prelude::BASE64_STANDARD, Engine};
 use chrono::{prelude::Utc, NaiveDateTime};
 use clap::{value_t, App, Arg, ArgGroup, ArgMatches, SubCommand};
 use prio::{
@@ -2505,7 +2506,9 @@ fn decode_base64_key(s: &str) -> Result<Vec<u8>> {
             "'not-a-real-key'. Run deploy-tool to generate secrets"
         ));
     }
-    base64::decode(s).context("decoding key from base64")
+    BASE64_STANDARD
+        .decode(s)
+        .context("decoding key from base64")
 }
 
 // You can't make a trait object out of a trait that is generic in another trait

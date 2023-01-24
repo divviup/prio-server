@@ -502,9 +502,10 @@ resource "helm_release" "cloudwatch_exporter" {
       metrics = [
         # SQS queue depth
         {
-          aws_namespace   = "AWS/SQS"
-          aws_metric_name = "ApproximateNumberOfMessagesVisible"
-          aws_dimensions  = ["QueueName"]
+          aws_namespace          = "AWS/SQS"
+          aws_metric_name        = "ApproximateNumberOfMessagesVisible"
+          aws_dimensions         = ["QueueName"]
+          list_metrics_cache_ttl = 600 # 10 minutes
         }
       ]
     })

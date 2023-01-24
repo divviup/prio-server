@@ -108,9 +108,9 @@ cluster_settings = {
 is_first                 = false
 use_aws                  = true
 pure_gcp                 = true
-workflow_manager_version = "0.6.73"
-facilitator_version      = "0.6.73"
-key_rotator_version      = "0.6.73"
+workflow_manager_version = "0.6.77"
+facilitator_version      = "0.6.77"
+key_rotator_version      = "0.6.77"
 victorops_routing_key    = "prio-prod-intl"
 
 default_aggregation_period       = "8h"
@@ -133,7 +133,7 @@ packet_encryption_key_rotation_policy = {
 
 prometheus_helm_chart_version           = "15.9.0"
 grafana_helm_chart_version              = "6.20.5"
-cloudwatch_exporter_helm_chart_version  = "0.17.2"
+cloudwatch_exporter_helm_chart_version  = "0.22.0"
 stackdriver_exporter_helm_chart_version = "2.2.0"
 
 allowed_aws_account_ids = ["718214359651"]

@@ -1,4 +1,4 @@
-FROM rust:1.66.0-alpine as builder
+FROM rust:1.66.1-alpine as builder
 
 RUN apk add libc-dev && apk update
 
@@ -36,7 +36,7 @@ RUN cargo build --manifest-path ./facilitator/Cargo.toml --release
 
 # Build a minimal container from Alpine containing only the stripped binary and
 # no intermediate build artifacts
-FROM alpine:3.17.0
+FROM alpine:3.17.1
 
 RUN apk add libgcc && apk update
 

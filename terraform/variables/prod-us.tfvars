@@ -234,9 +234,9 @@ is_first                                  = false
 use_aws                                   = false
 default_aggregation_period                = "8h"
 default_aggregation_grace_period          = "4h"
-workflow_manager_version                  = "0.6.73"
-facilitator_version                       = "0.6.73"
-key_rotator_version                       = "0.6.73"
+workflow_manager_version                  = "0.6.77"
+facilitator_version                       = "0.6.77"
+key_rotator_version                       = "0.6.77"
 prometheus_server_persistent_disk_size_gb = 1000
 victorops_routing_key                     = "prio-prod-us"
 
@@ -247,7 +247,7 @@ enable_key_rotation_localities = ["*"]
 
 prometheus_helm_chart_version           = "15.9.0"
 grafana_helm_chart_version              = "6.20.5"
-cloudwatch_exporter_helm_chart_version  = "0.17.2"
+cloudwatch_exporter_helm_chart_version  = "0.22.0"
 stackdriver_exporter_helm_chart_version = "2.2.0"
 
 allowed_aws_account_ids = ["338276578713"]
