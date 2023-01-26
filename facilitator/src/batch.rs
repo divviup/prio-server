@@ -80,8 +80,8 @@ impl Batch<SumPart, InvalidPacket> {
         let filename = format!("sum_{}", i32::from(!is_first));
 
         Self {
-            header_path: format!("{}.{}", batch_path, filename),
-            signature_path: format!("{}.{}.sig", batch_path, filename),
+            header_path: format!("{batch_path}.{filename}"),
+            signature_path: format!("{batch_path}.{filename}.sig"),
             packet_file_path: format!("{}.invalid_uuid_{}.avro", batch_path, i32::from(!is_first)),
 
             phantom_header: PhantomData,
@@ -99,9 +99,9 @@ impl<H: Header, P: Packet> Batch<H, P> {
             batch_id.to_hyphenated()
         );
         Self {
-            header_path: format!("{}.{}", batch_path, filename),
-            signature_path: format!("{}.{}.sig", batch_path, filename),
-            packet_file_path: format!("{}.{}.avro", batch_path, filename),
+            header_path: format!("{batch_path}.{filename}"),
+            signature_path: format!("{batch_path}.{filename}.sig"),
+            packet_file_path: format!("{batch_path}.{filename}.avro"),
             phantom_header: PhantomData,
             phantom_packet: PhantomData,
         }
@@ -718,7 +718,7 @@ mod tests {
         // Verify file layout is as expected
         for extension in filenames {
             transport
-                .get(&format!("{}.{}", base_path, extension), &DEFAULT_TRACE_ID)
+                .get(&format!("{base_path}.{extension}"), &DEFAULT_TRACE_ID)
                 .unwrap_or_else(|_| panic!("could not get batch file {}", extension));
         }
 
@@ -897,12 +897,12 @@ mod tests {
         );
         let idx = i32::from(!is_first);
         let filenames = if single_object_write {
-            vec![format!("validity_{}.sig", idx)]
+            vec![format!("validity_{idx}.sig")]
         } else {
             vec![
-                format!("validity_{}", idx),
-                format!("validity_{}.avro", idx),
-                format!("validity_{}.sig", idx),
+                format!("validity_{idx}"),
+                format!("validity_{idx}.avro"),
+                format!("validity_{idx}.sig"),
             ]
         };
         let read_key = if keys_match {
@@ -1005,12 +1005,12 @@ mod tests {
         );
         let idx = i32::from(!is_first);
         let filenames = if single_object_write {
-            vec![format!("sum_{}.sig", idx)]
+            vec![format!("sum_{idx}.sig")]
         } else {
             vec![
-                format!("sum_{}", idx),
-                format!("invalid_uuid_{}.avro", idx),
-                format!("sum_{}.sig", idx),
+                format!("sum_{idx}"),
+                format!("invalid_uuid_{idx}.avro"),
+                format!("sum_{idx}.sig"),
             ]
         };
         let read_key = if keys_match {

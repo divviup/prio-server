@@ -282,7 +282,7 @@ impl FromStr for ManifestKind {
             "data-share-processor-global" => Ok(ManifestKind::DataShareProcessorGlobal),
             "data-share-processor-specific" => Ok(ManifestKind::DataShareProcessorSpecific),
             "portal-global" => Ok(ManifestKind::PortalServerGlobal),
-            _ => Err(anyhow!(format!("unrecognized manifest kind {}", s))),
+            _ => Err(anyhow!(format!("unrecognized manifest kind {s}"))),
         }
     }
 }
@@ -312,7 +312,7 @@ impl FromStr for TaskQueueKind {
         match s {
             "gcp-pubsub" => Ok(TaskQueueKind::GcpPubSub),
             "aws-sqs" => Ok(TaskQueueKind::AwsSqs),
-            _ => Err(anyhow!(format!("unrecognized task queue kind {}", s))),
+            _ => Err(anyhow!(format!("unrecognized task queue kind {s}"))),
         }
     }
 }

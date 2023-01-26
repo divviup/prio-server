@@ -191,10 +191,9 @@ pub struct BatchReaderMetricsCollector {
 impl BatchReaderMetricsCollector {
     pub fn new(ownership: &str) -> Result<Self> {
         let invalid_validation_batches = register_int_counter_vec!(
-            format!("facilitator_invalid_{}_validation_batches", ownership),
+            format!("facilitator_invalid_{ownership}_validation_batches"),
             format!(
-                "Number of invalid {} validation batches encountered during aggregation",
-                ownership
+                "Number of invalid {ownership} validation batches encountered during aggregation"
             ),
             &["reason"]
         )
@@ -218,7 +217,7 @@ impl ApiClientMetricsCollector {
 
     pub(crate) fn new_with_metric_name(name: &'static str) -> Result<Self> {
         let latency = register_histogram_vec!(
-            format!("facilitator_api_latency_ms{}", name),
+            format!("facilitator_api_latency_ms{name}"),
             "Latencies in milliseconds on successful API requests",
             &["service", "endpoint", "status"],
             // Buckets cribbed from Boulder's metrics.InternetFacingBuckets

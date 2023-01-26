@@ -128,7 +128,7 @@ impl<T: Task> TaskQueue<T> for AwsSqsTaskQueue<T> {
         };
 
         let task = serde_json::from_reader(body.as_bytes())
-            .context(format!("failed to decode JSON task {:?}", body))?;
+            .context(format!("failed to decode JSON task {body:?}"))?;
 
         Ok(Some(TaskHandle {
             task,
@@ -272,8 +272,7 @@ impl<T: Task> AwsSqsTaskQueue<T> {
         let client = self.sqs_client()?;
 
         let timeout = i64::try_from(visibility_timeout.as_secs()).context(format!(
-            "timeout value {:?} cannot be encoded into ChangeMessageVisibilityRequest",
-            visibility_timeout
+            "timeout value {visibility_timeout:?} cannot be encoded into ChangeMessageVisibilityRequest"
         ))?;
 
         retry_request(

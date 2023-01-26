@@ -204,7 +204,7 @@ impl DataShareProcessorSpecificManifest {
         logger: &Logger,
         api_metrics: &ApiClientMetricsCollector,
     ) -> Result<Self, Error> {
-        let manifest_path = format!("{}-manifest.json", peer_name);
+        let manifest_path = format!("{peer_name}-manifest.json");
         Self::from_slice(fetch_manifest(base_path, &manifest_path, logger, api_metrics)?.as_bytes())
     }
 
@@ -237,7 +237,7 @@ impl DataShareProcessorSpecificManifest {
                 Ok((
                     k.clone(),
                     public_key_from_pem(&v.public_key)
-                        .with_context(|| format!("couldn't parse key identifier {}", k))?,
+                        .with_context(|| format!("couldn't parse key identifier {k}"))?,
                 ))
             })
             .collect()
@@ -318,13 +318,11 @@ impl DataShareProcessorSpecificManifest {
         let test_message: Vec<u8> = (0..100).map(|_| rand::random::<u8>()).collect();
         'outer: for (identifier, csr) in self.packet_encryption_keys() {
             let public_key = PublicKey::from_base64(&csr.base64_public_key()?).context(format!(
-                "failed to decode packet encryption public key {} from specific manifest",
-                identifier,
+                "failed to decode packet encryption public key {identifier} from specific manifest",
             ))?;
 
             let encrypted = encrypt_share(&test_message, &public_key).context(format!(
-                "failed to encrypt test message to packet encryption public key {}",
-                identifier,
+                "failed to encrypt test message to packet encryption public key {identifier}",
             ))?;
 
             for private_key in packet_encryption_private_keys {
@@ -424,7 +422,7 @@ impl IngestionServerManifest {
                 Some(locality) => IngestionServerManifest::from_slice(
                     fetcher(
                         base_path,
-                        &format!("{}-manifest.json", locality),
+                        &format!("{locality}-manifest.json"),
                         logger,
                         api_metrics,
                     )?
@@ -456,7 +454,7 @@ impl IngestionServerManifest {
             keys.insert(
                 identifier.clone(),
                 public_key_from_pem(&public_key.public_key)
-                    .with_context(|| format!("couldn't parse key identifier {}", identifier))?,
+                    .with_context(|| format!("couldn't parse key identifier {identifier}"))?,
             );
         }
         Ok(keys)
@@ -546,7 +544,7 @@ fn fetch_manifest_without_https(
     service: &str,
     api_metrics: &ApiClientMetricsCollector,
 ) -> Result<String, Error> {
-    let manifest_url = format!("{}/{}", base_url, path);
+    let manifest_url = format!("{base_url}/{path}");
 
     http::simple_get_request(parse_url(manifest_url)?, logger, service, api_metrics)
 }
@@ -565,7 +563,7 @@ fn public_key_from_pem(pem_key: &str) -> Result<UnparsedPublicKey<Vec<u8>>> {
     if pem_key.is_empty() {
         return Err(anyhow!("empty PEM input"));
     }
-    let pem = pem::parse(pem_key).context(format!("failed to parse key as PEM: {}", pem_key))?;
+    let pem = pem::parse(pem_key).context(format!("failed to parse key as PEM: {pem_key}"))?;
     const WANT_PEM_TAG: &str = "PUBLIC KEY";
     if pem.tag != WANT_PEM_TAG {
         return Err(anyhow!(
@@ -865,21 +863,20 @@ mod tests {
     "format": 1,
     "packet-encryption-keys": {{
         "fake-key-1": {{
-            "certificate-signing-request": "-----BEGIN CERTIFICATE REQUEST-----\n{}\n-----END CERTIFICATE REQUEST-----\n"
+            "certificate-signing-request": "-----BEGIN CERTIFICATE REQUEST-----\n{DEFAULT_PACKET_ENCRYPTION_CSR}\n-----END CERTIFICATE REQUEST-----\n"
         }}
     }},
     "batch-signing-public-keys": {{
         "fake-key-2": {{
         "expiration": "",
-        "public-key": "-----BEGIN PUBLIC KEY-----\n{}\n-----END PUBLIC KEY-----\n"
+        "public-key": "-----BEGIN PUBLIC KEY-----\n{DEFAULT_INGESTOR_SUBJECT_PUBLIC_KEY_INFO}\n-----END PUBLIC KEY-----\n"
       }}
     }},
     "ingestion-bucket": "s3://us-west-1/ingestion",
     "ingestion-identity": "arn:aws:iam:something:fake",
     "peer-validation-bucket": "gs://validation/path/fragment"
 }}
-    "#,
-            DEFAULT_PACKET_ENCRYPTION_CSR, DEFAULT_INGESTOR_SUBJECT_PUBLIC_KEY_INFO
+    "#
         );
         let manifest = DataShareProcessorSpecificManifest::from_slice(json.as_bytes()).unwrap();
 
@@ -889,8 +886,7 @@ mod tests {
             BatchSigningPublicKey {
                 expiration: "".to_string(),
                 public_key: format!(
-                    "-----BEGIN PUBLIC KEY-----\n{}\n-----END PUBLIC KEY-----\n",
-                    DEFAULT_INGESTOR_SUBJECT_PUBLIC_KEY_INFO
+                    "-----BEGIN PUBLIC KEY-----\n{DEFAULT_INGESTOR_SUBJECT_PUBLIC_KEY_INFO}\n-----END PUBLIC KEY-----\n"
                 ),
             },
         );
@@ -899,8 +895,7 @@ mod tests {
             "fake-key-1".to_owned(),
             PacketEncryptionCertificateSigningRequest {
                 certificate_signing_request: format!(
-                    "-----BEGIN CERTIFICATE REQUEST-----\n{}\n-----END CERTIFICATE REQUEST-----\n",
-                    DEFAULT_PACKET_ENCRYPTION_CSR
+                    "-----BEGIN CERTIFICATE REQUEST-----\n{DEFAULT_PACKET_ENCRYPTION_CSR}\n-----END CERTIFICATE REQUEST-----\n"
                 ),
             },
         );

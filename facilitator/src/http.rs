@@ -94,7 +94,7 @@ impl RetryingAgent {
             .request_url(parameters.method.to_primitive_string(), &parameters.url);
         if let Some(token_provider) = parameters.token_provider {
             let token = token_provider.ensure_access_token()?;
-            request = request.set("Authorization", &format!("Bearer {}", token));
+            request = request.set("Authorization", &format!("Bearer {token}"));
         }
         Ok(request)
     }

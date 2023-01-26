@@ -62,7 +62,7 @@ where
             if is_retryable(&error) {
                 warn!(
                     logger, "encountered retryable error";
-                    "error" => format!("{:?}", error),
+                    "error" => format!("{error:?}"),
                 );
                 backoff::Error::transient(error)
             } else {
@@ -139,7 +139,7 @@ where
                 if is_retryable(&error) {
                     warn!(
                         logger, "encountered retryable error";
-                        "error" => format!("{:?}", error),
+                        "error" => format!("{error:?}"),
                     );
                     backoff::Error::transient(error)
                 } else {
