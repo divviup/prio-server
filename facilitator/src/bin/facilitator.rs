@@ -72,7 +72,7 @@ fn num_validator<F: FromStr>(s: String) -> Result<(), String> {
 fn date_validator(s: String) -> Result<(), String> {
     NaiveDateTime::parse_from_str(&s, DATE_FORMAT)
         .map(|_| ())
-        .map_err(|e| format!("{} {}", s, e))
+        .map_err(|e| format!("{s} {e}"))
 }
 
 fn uuid_validator(s: String) -> Result<(), String> {
@@ -289,11 +289,10 @@ impl<'a, 'b> AppArgumentAdder for App<'a, 'b> {
                 .env(gcp_sa_to_impersonate_before_assuming_role_env)
                 .value_name("SERVICE_ACCOUNT")
                 .long_help(leak_string(format!(
-                    "If {} is an AWS IAM role and running in GCP, an identity \
+                    "If {id} is an AWS IAM role and running in GCP, an identity \
                     token will be obtained for the specified GCP service \
                     account to then assume the AWS IAM role using STS \
-                    AssumeRoleWithWebIdentity.",
-                    id
+                    AssumeRoleWithWebIdentity."
                 )))
                 .default_value("")
                 .hide_default_value(true),
@@ -1113,7 +1112,7 @@ fn main() -> Result<(), anyhow::Error> {
         // been dropped upon return. slog-scope will panic in this case.
         // Instead, we handle displaying the error and returning an error code
         // manually here, while the guard is still alive.
-        eprintln!("Error: {:?}", error);
+        eprintln!("Error: {error:?}");
         std::process::exit(1);
     }
 
@@ -1232,7 +1231,7 @@ fn get_ecies_public_key(
                 let locality_name = locality_name.ok_or_else(|| {
                     anyhow!("locality-name must be provided with ingestor-manifest-base-url")
                 })?;
-                let peer_name = &format!("{}-{}", locality_name, ingestor_name);
+                let peer_name = &format!("{locality_name}-{ingestor_name}");
                 let manifest = DataShareProcessorSpecificManifest::from_https(
                     manifest_url,
                     peer_name,
@@ -1240,8 +1239,7 @@ fn get_ecies_public_key(
                     api_metrics,
                 )
                 .context(format!(
-                    "unable to read DataShareProcessorSpecificManifest from {}",
-                    manifest_url
+                    "unable to read DataShareProcessorSpecificManifest from {manifest_url}"
                 ))?;
 
                 let (key_identifier, packet_decryption_key) = manifest
@@ -1286,7 +1284,7 @@ fn get_ingestion_identity_and_bucket(
                 .ok_or_else(|| anyhow!("ingestor-name must be provided with manifest-base-url"))?;
             let locality_name = locality_name
                 .ok_or_else(|| anyhow!("locality-name must be provided with manifest-base-url"))?;
-            let peer_name = &format!("{}-{}", locality_name, ingestor_name);
+            let peer_name = &format!("{locality_name}-{ingestor_name}");
             let manifest_url = manifest_url.ok_or_else(|| {
                 anyhow!("If bucket is not provided, manifest_url must be provided")
             })?;
@@ -1298,8 +1296,7 @@ fn get_ingestion_identity_and_bucket(
                 api_metrics,
             )
             .context(format!(
-                "unable to read DataShareProcessorSpecificManifest from {}",
-                manifest_url
+                "unable to read DataShareProcessorSpecificManifest from {manifest_url}"
             ))?;
 
             Ok((
@@ -2235,7 +2232,7 @@ fn lint_manifest(
                     "one of manifest-base-url or manifest-path is required"
                 ));
             };
-            println!("{:#?}", manifest);
+            println!("{manifest:#?}");
         }
         ManifestKind::DataShareProcessorSpecific => {
             let instance = sub_matches
@@ -2267,7 +2264,7 @@ fn lint_manifest(
                     "one of manifest-base-url or manifest-path is required"
                 ));
             };
-            println!("Valid: Ok\n{:#?}", manifest);
+            println!("Valid: Ok\n{manifest:#?}");
         }
     }
 
@@ -2419,7 +2416,7 @@ fn transport_from_args(
             StoragePath::from_str(
                 matches
                     .value_of(path_arg)
-                    .context(format!("{} is required", path_arg))?,
+                    .context(format!("{path_arg} is required"))?,
             )?
         }
     };

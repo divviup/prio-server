@@ -73,7 +73,7 @@ impl Display for Severity {
             Severity::Warning => "WARNING",
             Severity::Error => "ERROR",
         };
-        write!(f, "{}", string)
+        write!(f, "{string}")
     }
 }
 

@@ -26,8 +26,7 @@ fn gcp_pubsub_pull_url(
     subscription_id: &str,
 ) -> Result<Url, UrlParseError> {
     let request_url = format!(
-        "{}/v1/projects/{}/subscriptions/{}:pull",
-        pubsub_api_endpoint, gcp_project_id, subscription_id
+        "{pubsub_api_endpoint}/v1/projects/{gcp_project_id}/subscriptions/{subscription_id}:pull"
     );
     parse_url(request_url)
 }
@@ -39,8 +38,7 @@ fn gcp_pubsub_ack_url(
     subscription_id: &str,
 ) -> Result<Url, UrlParseError> {
     let request_url = format!(
-        "{}/v1/projects/{}/subscriptions/{}:acknowledge",
-        pubsub_api_endpoint, gcp_project_id, subscription_id
+        "{pubsub_api_endpoint}/v1/projects/{gcp_project_id}/subscriptions/{subscription_id}:acknowledge"
     );
     parse_url(request_url)
 }
@@ -52,8 +50,7 @@ fn gcp_pubsub_modify_ack_deadline(
     subscription_id: &str,
 ) -> Result<Url, UrlParseError> {
     let request_url = format!(
-        "{}/v1/projects/{}/subscriptions/{}:modifyAckDeadline",
-        pubsub_api_endpoint, gcp_project_id, subscription_id
+        "{pubsub_api_endpoint}/v1/projects/{gcp_project_id}/subscriptions/{subscription_id}:modifyAckDeadline"
     );
     parse_url(request_url)
 }
@@ -64,10 +61,8 @@ fn gcp_pubsub_publish_url(
     gcp_project_id: &str,
     topic: &str,
 ) -> Result<Url, UrlParseError> {
-    let request_url = format!(
-        "{}/v1/projects/{}/topics/{}:publish",
-        pubsub_api_endpoint, gcp_project_id, topic
-    );
+    let request_url =
+        format!("{pubsub_api_endpoint}/v1/projects/{gcp_project_id}/topics/{topic}:publish");
     parse_url(request_url)
 }
 
@@ -226,7 +221,7 @@ impl<T: Task> TaskQueue<T> for GcpPubSubTaskQueue<T> {
         let task_json =
             String::from_utf8(task_bytes).context("failed to decode PubSub message from UTF-8")?;
         let task: T = serde_json::from_reader(task_json.as_bytes())
-            .context(format!("failed to decode task {:?} from JSON", task_json))?;
+            .context(format!("failed to decode task {task_json:?} from JSON"))?;
 
         let published_time =
             DateTime::parse_from_rfc3339(&received_message.message.publish_time)?.naive_utc();
@@ -266,7 +261,7 @@ impl<T: Task> TaskQueue<T> for GcpPubSubTaskQueue<T> {
                     "ackIds": [handle.acknowledgment_id]
                 }),
             )
-            .context(format!("failed to acknowledge task {:?}", handle,))?;
+            .context(format!("failed to acknowledge task {handle:?}",))?;
 
         Ok(())
     }
@@ -322,7 +317,7 @@ impl<T: Task> TaskQueue<T> for GcpPubSubTaskQueue<T> {
                     "messages": [{"data": BASE64_STANDARD.encode(&handle.raw_body)}]
                 }),
             )
-            .context(format!("failed to forward task {:?}", handle))?;
+            .context(format!("failed to forward task {handle:?}"))?;
 
         self.acknowledge_task(handle)
     }
@@ -363,10 +358,7 @@ impl<T: Task> GcpPubSubTaskQueue<T> {
                     "ackDeadlineSeconds": ack_deadline.as_secs(),
                 }),
             )
-            .context(format!(
-                "failed to modify ack deadline on task {:?}",
-                handle,
-            ))?;
+            .context(format!("failed to modify ack deadline on task {handle:?}",))?;
 
         Ok(())
     }

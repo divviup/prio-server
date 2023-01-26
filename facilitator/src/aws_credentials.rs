@@ -313,8 +313,7 @@ impl Provider {
         let oidc_token_variable = Variable::dynamic(move || {
             let token = token_provider.identity_token().map_err(|e| {
                 CredentialsError::new(format!(
-                    "failed to fetch {} identity token from GCP: {}",
-                    purpose, e
+                    "failed to fetch {purpose} identity token from GCP: {e}"
                 ))
             })?;
             Ok(Secret::from(token))
@@ -360,7 +359,7 @@ impl Display for Provider {
                     .as_ref()
                     .map(String::as_str)
                     .unwrap_or_else(|_| "(error resolving variable)");
-                write!(f, "{} via OIDC web identity", role_arn)
+                write!(f, "{role_arn} via OIDC web identity")
             }
             Self::WebIdentityFromKubernetesEnvironment(p) => {
                 let role_arn_res = p.get_ref().get_ref().get_ref().role_arn.resolve();
@@ -368,11 +367,7 @@ impl Display for Provider {
                     .as_ref()
                     .map(String::as_str)
                     .unwrap_or_else(|_| "(error resolving variable)");
-                write!(
-                    f,
-                    "{} via web identity from Kubernetes environment",
-                    role_arn
-                )
+                write!(f, "{role_arn} via web identity from Kubernetes environment")
             }
             #[cfg(test)]
             Self::Mock(_) => write!(f, "mock credentials"),
@@ -850,7 +845,7 @@ pub fn signing_key(
     region: &Region,
     service: &str,
 ) -> Result<Vec<u8>, InvalidLength> {
-    let secret = format!("AWS4{}", secret_key);
+    let secret = format!("AWS4{secret_key}");
     let mut date_hmac: Hmac<Sha256> = Hmac::new_from_slice(secret.as_bytes())?;
     date_hmac.update(datetime.format(SHORT_DATE).to_string().as_bytes());
     let mut region_hmac: Hmac<Sha256> = Hmac::new_from_slice(&date_hmac.finalize().into_bytes())?;

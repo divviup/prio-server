@@ -349,8 +349,7 @@ impl Header for IngestionHeader {
                         Value::Null => None,
                         v => {
                             return Err(IdlError::MalformedHeader(format!(
-                                "unexpected value {:?} for hamming weight",
-                                v
+                                "unexpected value {v:?} for hamming weight"
                             )));
                         }
                     }
@@ -360,8 +359,7 @@ impl Header for IngestionHeader {
                 ("packet_file_digest", Value::Bytes(v)) => packet_file_digest = Some(v),
                 (f, v) => {
                     return Err(IdlError::MalformedHeader(format!(
-                        "unexpected field {} -> {:?} in record",
-                        f, v
+                        "unexpected field {f} -> {v:?} in record"
                     )))
                 }
             }
@@ -683,8 +681,7 @@ impl Header for ValidationHeader {
                         Value::Null => None,
                         v => {
                             return Err(IdlError::MalformedHeader(format!(
-                                "unexpected value {:?} for hamming weight",
-                                v
+                                "unexpected value {v:?} for hamming weight"
                             )));
                         }
                     }
@@ -692,8 +689,7 @@ impl Header for ValidationHeader {
                 ("packet_file_digest", Value::Bytes(v)) => packet_file_digest = Some(v),
                 (f, v) => {
                     return Err(IdlError::MalformedHeader(format!(
-                        "unexpected field {} -> {:?} in record",
-                        f, v
+                        "unexpected field {f} -> {v:?} in record"
                     )))
                 }
             }
@@ -897,8 +893,7 @@ impl Header for SumPart {
                                     Ok(u)
                                 } else {
                                     Err(IdlError::MalformedHeader(format!(
-                                        "unexpected value in batch_uuids array {:?}",
-                                        value
+                                        "unexpected value in batch_uuids array {value:?}"
                                     )))
                                 }
                             })
@@ -916,8 +911,7 @@ impl Header for SumPart {
                         Value::Null => None,
                         v => {
                             return Err(IdlError::MalformedHeader(format!(
-                                "unexpected value {:?} for hamming weight",
-                                v
+                                "unexpected value {v:?} for hamming weight"
                             )));
                         }
                     }
@@ -931,8 +925,7 @@ impl Header for SumPart {
                                     Ok(l)
                                 } else {
                                     Err(IdlError::MalformedHeader(format!(
-                                        "unexpected value in sum array {:?}",
-                                        value
+                                        "unexpected value in sum array {value:?}"
                                     )))
                                 }
                             })
@@ -949,8 +942,7 @@ impl Header for SumPart {
                 ("total_individual_clients", Value::Long(v)) => total_individual_clients = Some(v),
                 (f, v) => {
                     return Err(IdlError::MalformedHeader(format!(
-                        "unexpected field {} -> {:?} in record",
-                        f, v
+                        "unexpected field {f} -> {v:?} in record"
                     )))
                 }
             }

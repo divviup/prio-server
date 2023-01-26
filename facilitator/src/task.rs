@@ -173,7 +173,7 @@ pub struct TaskHandle<T: Task> {
 // with minimal ceremony.
 impl<T: Task> Value for TaskHandle<T> {
     fn serialize(&self, _: &Record<'_>, key: Key, serializer: &mut dyn Serializer) -> slog::Result {
-        serializer.emit_str(key, &format!("{}", self))
+        serializer.emit_str(key, &format!("{self}"))
     }
 }
 

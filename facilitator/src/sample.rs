@@ -472,7 +472,7 @@ mod tests {
                 10,
             )
             .unwrap();
-        let expected_path = format!("fake-aggregation/2009/02/13/23/31/{}.batch", batch_uuid);
+        let expected_path = format!("fake-aggregation/2009/02/13/23/31/{batch_uuid}.batch");
 
         let transports = &mut [
             LocalFileTransport::new(tempdir.path().to_path_buf().join("pha")),

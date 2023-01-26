@@ -383,7 +383,7 @@ impl ProvideDefaultAccessToken
         let request = self
             .agent
             .prepare_request(RequestParameters {
-                url: parse_url(format!("https://sts.googleapis.com/v1/{}", endpoint))?,
+                url: parse_url(format!("https://sts.googleapis.com/v1/{endpoint}"))?,
                 method: Method::Post,
                 // This request is unauthenticated, except for the signature and
                 // token on the inner subjectToken
@@ -573,8 +573,7 @@ impl GcpAccessTokenProvider {
     /// the provided GCP service account may be obtained
     fn access_token_path_for_service_account(service_account_to_impersonate: &str) -> String {
         format!(
-            "/v1/projects/-/serviceAccounts/{}:generateAccessToken",
-            service_account_to_impersonate
+            "/v1/projects/-/serviceAccounts/{service_account_to_impersonate}:generateAccessToken"
         )
     }
 
@@ -817,10 +816,7 @@ impl ImpersonatedServiceAccountIdentityTokenProvider {
     /// Returns the path relative to an API base URL from which identity tokens for
     /// the provided GCP service account may be obtained
     fn identity_token_path_for_service_account(service_account_to_impersonate: &str) -> String {
-        format!(
-            "/v1/projects/-/serviceAccounts/{}:generateIdToken",
-            service_account_to_impersonate
-        )
+        format!("/v1/projects/-/serviceAccounts/{service_account_to_impersonate}:generateIdToken")
     }
 }
 

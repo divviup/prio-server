@@ -749,9 +749,8 @@ fn end_to_end_test(test_options: EndToEndTestOptions) {
     };
     assert_eq!(
         reconstructed, reference_sum,
-        "reconstructed shares do not match original data.\npha sum: {:?}\n
-            facilitator sum: {:?}\nreconstructed sum: {:?}\nreference sum: {:?}",
-        pha_sum_fields, facilitator_sum_fields, reconstructed, reference_sum
+        "reconstructed shares do not match original data.\npha sum: {pha_sum_fields:?}\n
+            facilitator sum: {facilitator_sum_fields:?}\nreconstructed sum: {reconstructed:?}\nreference sum: {reference_sum:?}"
     );
 
     assert_eq!(expected_batch_uuids, facilitator_sum_part.batch_uuids);

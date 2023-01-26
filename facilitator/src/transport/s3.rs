@@ -297,6 +297,7 @@ impl MultipartUploadWriter {
     }
 
     /// Upload content in internal buffer, if any, to S3 in an UploadPart call.
+    #[allow(clippy::result_large_err)]
     fn upload_part(&mut self) -> Result<(), TransportError> {
         if self.buffer.is_empty() {
             return Ok(());
@@ -519,15 +520,14 @@ mod tests {
 
     fn mock_create_multipart_upload_request(bucket: &str, key: &str, upload_id: &str) -> Mock {
         // https://docs.aws.amazon.com/AmazonS3/latest/API/API_CreateMultipartUpload.html
-        let path = format!("/{}/{}", bucket, key);
+        let path = format!("/{bucket}/{key}");
         let response_body = format!(
             r#"<?xml version="1.0" encoding="UTF-8"?>
 <InitiateMultipartUploadResult>
-   <Bucket>{}</Bucket>
-   <Key>{}</Key>
-   <UploadId>{}</UploadId>
-</InitiateMultipartUploadResult>"#,
-            bucket, key, upload_id
+   <Bucket>{bucket}</Bucket>
+   <Key>{key}</Key>
+   <UploadId>{upload_id}</UploadId>
+</InitiateMultipartUploadResult>"#
         );
         mock("POST", Matcher::Exact(path))
             .match_query(has_query_parameter("uploads"))
@@ -543,7 +543,7 @@ mod tests {
         part_number: u64,
     ) -> Mock {
         // https://docs.aws.amazon.com/AmazonS3/latest/API/API_UploadPart.html
-        let path = format!("/{}/{}", bucket, key);
+        let path = format!("/{bucket}/{key}");
         mock("PUT", Matcher::Exact(path)).match_query(Matcher::AllOf(vec![
             Matcher::UrlEncoded("partNumber".to_string(), part_number.to_string()),
             Matcher::UrlEncoded("uploadId".to_string(), upload_id.to_string()),
@@ -564,7 +564,7 @@ mod tests {
 
     fn mock_abort_multipart_upload_request(bucket: &str, key: &str, upload_id: &str) -> Mock {
         // https://docs.aws.amazon.com/AmazonS3/latest/API/API_AbortMultipartUpload.html
-        let path = format!("/{}/{}", bucket, key);
+        let path = format!("/{bucket}/{key}");
         mock("DELETE", Matcher::Exact(path))
             .match_query(Matcher::UrlEncoded(
                 "uploadId".to_string(),
@@ -580,16 +580,15 @@ mod tests {
         part_etags: Vec<&str>,
     ) -> Mock {
         // https://docs.aws.amazon.com/AmazonS3/latest/API/API_CompleteMultipartUpload.html
-        let path = format!("/{}/{}", bucket, key);
+        let path = format!("/{bucket}/{key}");
         let response_body = format!(
             r#"<?xml version="1.0" encoding="UTF-8"?>
 <CompleteMultipartUploadResult>
    <Location>fake-final-location</Location>
-   <Bucket>{}</Bucket>
-   <Key>{}</Key>
+   <Bucket>{bucket}</Bucket>
+   <Key>{key}</Key>
    <ETag>fake-final-etag</ETag>
-</CompleteMultipartUploadResult>"#,
-            bucket, key
+</CompleteMultipartUploadResult>"#
         );
         let body_matchers: Vec<Matcher> = part_etags
             .into_iter()
@@ -605,7 +604,7 @@ mod tests {
     }
 
     fn mock_get_object_request(bucket: &str, key: &str) -> Mock {
-        let path = format!("/{}/{}", bucket, key);
+        let path = format!("/{bucket}/{key}");
         mock("GET", Matcher::Exact(path)).match_query(Matcher::Missing)
     }
 
@@ -649,8 +648,7 @@ mod tests {
         .expect_err("expected error");
         assert!(
             matches!(err, S3Error::CreateMultipartUpload(_, _)),
-            "found unexpected error {:?}",
-            err
+            "found unexpected error {err:?}"
         );
 
         mocked_upload.assert();

@@ -94,7 +94,7 @@ impl RetryingAgent {
             .request_url(parameters.method.to_primitive_string(), &parameters.url);
         if let Some(token_provider) = parameters.token_provider {
             let token = token_provider.ensure_access_token()?;
-            request = request.set("Authorization", &format!("Bearer {}", token));
+            request = request.set("Authorization", &format!("Bearer {token}"));
         }
         Ok(request)
     }
@@ -275,6 +275,7 @@ pub(crate) struct RequestParameters<'a> {
 
 /// simple_get_request does a HTTP request to a URL and returns the body as a
 // string.
+#[allow(clippy::result_large_err)]
 pub(crate) fn simple_get_request(
     url: Url,
     logger: &Logger,

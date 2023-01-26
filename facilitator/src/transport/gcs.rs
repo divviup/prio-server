@@ -38,7 +38,7 @@ fn gcp_object_url(bucket: &str, encoded_key: &str) -> Result<Url, UrlParseError>
 }
 
 fn gcp_upload_object_url(storage_api_url: &str, bucket: &str) -> Result<Url, UrlParseError> {
-    let request_url = format!("{}upload/storage/v1/b/{}/o/", storage_api_url, bucket);
+    let request_url = format!("{storage_api_url}upload/storage/v1/b/{bucket}/o/");
 
     parse_url(request_url)
 }
