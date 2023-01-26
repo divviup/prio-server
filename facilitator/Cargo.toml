@@ -1,6 +1,6 @@
 [package]
 authors = ["Internet Security Research Group"]
-edition = "2018"
+edition = "2021"
 name = "facilitator"
 version = "0.1.0"
 

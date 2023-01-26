@@ -719,7 +719,7 @@ mod tests {
         for extension in filenames {
             transport
                 .get(&format!("{base_path}.{extension}"), &DEFAULT_TRACE_ID)
-                .unwrap_or_else(|_| panic!("could not get batch file {}", extension));
+                .unwrap_or_else(|_| panic!("could not get batch file {extension}"));
         }
 
         let mut key_map = HashMap::new();

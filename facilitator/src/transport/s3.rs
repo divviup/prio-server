@@ -647,8 +647,7 @@ mod tests {
         .expect_err("expected error");
         assert!(
             matches!(err, S3Error::CreateMultipartUpload(_, _)),
-            "found unexpected error {:?}",
-            err
+            "found unexpected error {err:?}"
         );
 
         mocked_upload.assert();
