@@ -297,6 +297,7 @@ impl MultipartUploadWriter {
     }
 
     /// Upload content in internal buffer, if any, to S3 in an UploadPart call.
+    #[allow(clippy::result_large_err)]
     fn upload_part(&mut self) -> Result<(), TransportError> {
         if self.buffer.is_empty() {
             return Ok(());

@@ -70,6 +70,7 @@ pub trait TransportWriter: Write {
     ///
     /// The `TransportWriter` cannot be used after this method is called,
     /// regardlesss of whether it succeeds.
+    #[allow(clippy::result_large_err)]
     fn complete_upload(&mut self) -> Result<(), TransportError>;
 
     /// Cancel an upload operation, cleaning up any related resources. This
@@ -80,6 +81,7 @@ pub trait TransportWriter: Write {
     ///
     /// The `TransportWriter` cannot be used after this method is called,
     /// regardlesss of whether it succeeds.
+    #[allow(clippy::result_large_err)]
     fn cancel_upload(&mut self) -> Result<(), TransportError>;
 }
 
@@ -104,10 +106,12 @@ pub trait Transport: Debug + DynClone + Send {
     /// Returns an std::io::Read instance from which the contents of the value
     /// of the provided key may be read. If no object is found, an error
     /// wrapping ObjectNotFoundError is returned.
+    #[allow(clippy::result_large_err)]
     fn get(&self, key: &str, trace_id: &Uuid) -> Result<Box<dyn Read>, TransportError>;
 
     /// Returns an std::io::Write instance into which the contents of the value
     /// may be written.
+    #[allow(clippy::result_large_err)]
     fn put(&self, key: &str, trace_id: &Uuid) -> Result<Box<dyn TransportWriter>, TransportError>;
 
     fn path(&self) -> String;

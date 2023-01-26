@@ -198,6 +198,7 @@ impl DataShareProcessorSpecificManifest {
     /// Load the specific manifest for the specified peer relative to the
     /// provided base path. Returns an error if the manifest could not be
     /// downloaded or parsed.
+    #[allow(clippy::result_large_err)]
     pub fn from_https(
         base_path: &str,
         peer_name: &str,
@@ -210,6 +211,7 @@ impl DataShareProcessorSpecificManifest {
 
     /// Loads the manifest from the provided String. Returns an error if
     /// the manifest could not be parsed.
+    #[allow(clippy::result_large_err)]
     pub fn from_slice(json: &[u8]) -> Result<Self, Error> {
         // Parse.
         let manifest: DataShareProcessorSpecificManifest =
@@ -400,6 +402,7 @@ impl IngestionServerManifest {
     /// it. First tries to load a global manifest, then falls back to a specific
     /// manifest for the specified locality. Returns an error if no manifest
     /// could be found at either location, or if either was unparseable.
+    #[allow(clippy::result_large_err)]
     pub fn from_https(
         base_path: &str,
         locality: Option<&str>,
@@ -409,6 +412,7 @@ impl IngestionServerManifest {
         IngestionServerManifest::from_http(base_path, locality, logger, fetch_manifest, api_metrics)
     }
 
+    #[allow(clippy::result_large_err)]
     fn from_http(
         base_path: &str,
         locality: Option<&str>,
@@ -435,6 +439,7 @@ impl IngestionServerManifest {
 
     /// Loads the manifest from the provided String. Returns an error if
     /// the manifest could not be parsed.
+    #[allow(clippy::result_large_err)]
     pub fn from_slice(json: &[u8]) -> Result<Self, Error> {
         let manifest: Self =
             serde_json::from_slice(json).context("failed to decode JSON manifest")?;
@@ -523,6 +528,7 @@ type ManifestFetcher = fn(&str, &str, &Logger, &ApiClientMetricsCollector) -> Re
 
 /// Obtains a manifest file from the provided URL, returning an error if the URL
 /// is not https or if a problem occurs during the transfer.
+#[allow(clippy::result_large_err)]
 fn fetch_manifest(
     base_url: &str,
     path: &str,
@@ -537,6 +543,7 @@ fn fetch_manifest(
     fetch_manifest_without_https(base_url, path, logger, service, api_metrics)
 }
 
+#[allow(clippy::result_large_err)]
 fn fetch_manifest_without_https(
     base_url: &str,
     path: &str,
@@ -616,6 +623,7 @@ mod tests {
     use rusoto_core::Region;
     use std::str::FromStr;
 
+    #[allow(clippy::result_large_err)]
     fn http_url_fetcher(
         base_url: &str,
         path: &str,

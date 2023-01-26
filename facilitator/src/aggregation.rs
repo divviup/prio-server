@@ -89,6 +89,7 @@ pub struct BatchAggregator<'a> {
 }
 
 impl<'a> BatchAggregator<'a> {
+    #[allow(clippy::result_large_err)]
     pub fn new(
         trace_id: &'a Uuid,
         instance_name: &str,
@@ -143,6 +144,7 @@ impl<'a> BatchAggregator<'a> {
     /// Compute the sum part for all the provided batch IDs and write it out to
     /// the aggregation transport. The provided callback is invoked after each
     /// batch is aggregated.
+    #[allow(clippy::result_large_err)]
     pub fn generate_sum_part<F>(
         &mut self,
         batch_ids_and_dates: &[(Uuid, NaiveDateTime)],
@@ -310,6 +312,7 @@ impl<'a> BatchAggregator<'a> {
     /// rejected (in which case other batches in the aggregation window should
     /// still be summed) and `Err` if something went wrong (in which case the
     /// overall aggregation should be aborted).
+    #[allow(clippy::result_large_err)]
     fn aggregate_share(
         &mut self,
         servers: &mut [Server<FieldPriov2>],

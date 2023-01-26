@@ -275,6 +275,7 @@ pub(crate) struct RequestParameters<'a> {
 
 /// simple_get_request does a HTTP request to a URL and returns the body as a
 // string.
+#[allow(clippy::result_large_err)]
 pub(crate) fn simple_get_request(
     url: Url,
     logger: &Logger,
