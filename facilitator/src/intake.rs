@@ -11,7 +11,7 @@ use crate::{
 use chrono::NaiveDateTime;
 use prio::{
     encrypt::{PrivateKey, PublicKey},
-    field::FieldPriov2,
+    field::FieldPrio2,
     server::Server,
 };
 use ring::signature::UnparsedPublicKey;
@@ -180,7 +180,7 @@ impl<'a> BatchIntaker<'a> {
         // is optional. Instead we try all the keys we have available until one
         // works.
         // https://github.com/abetterinternet/prio-server/issues/73
-        let mut servers: Vec<Server<FieldPriov2>> = self
+        let mut servers: Vec<Server<FieldPrio2>> = self
             .packet_decryption_keys
             .iter()
             .map(|k| {

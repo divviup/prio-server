@@ -12,7 +12,7 @@ use crate::{
 };
 use chrono::NaiveDateTime;
 use prio::{
-    field::FieldPriov2,
+    field::FieldPrio2,
     server::{Server, VerificationMessage},
 };
 use slog::{info, o, warn, Logger};
@@ -315,7 +315,7 @@ impl<'a> BatchAggregator<'a> {
     #[allow(clippy::result_large_err)]
     fn aggregate_share(
         &mut self,
-        servers: &mut [Server<FieldPriov2>],
+        servers: &mut [Server<FieldPrio2>],
         invalid_uuids: &mut Vec<Uuid>,
         ingestion_packets: Vec<IngestionDataSharePacket>,
         peer_validation_packets: Vec<ValidationPacket>,

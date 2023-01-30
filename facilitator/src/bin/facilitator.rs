@@ -6,7 +6,7 @@ use chrono::{prelude::Utc, NaiveDateTime};
 use clap::{value_t, App, Arg, ArgGroup, ArgMatches, SubCommand};
 use prio::{
     encrypt::{PrivateKey, PublicKey},
-    field::FieldPriov2,
+    field::FieldPrio2,
     util::reconstruct_shares,
 };
 use prometheus::{register_int_counter_vec, IntCounterVec};
@@ -1611,15 +1611,15 @@ fn validate_sample(
     .read(facilitator_pubkey_map)
     .map_err(|e| Error::AnyhowError(e.into()))?;
 
-    let pha_accumulated_share: Vec<FieldPriov2> = pha_sum_part
+    let pha_accumulated_share: Vec<FieldPrio2> = pha_sum_part
         .sum
         .into_iter()
-        .map(|v| FieldPriov2::from(u32::try_from(v).unwrap()))
+        .map(|v| FieldPrio2::from(u32::try_from(v).unwrap()))
         .collect();
-    let facilitator_accumulated_share: Vec<FieldPriov2> = facilitator_sum_part
+    let facilitator_accumulated_share: Vec<FieldPrio2> = facilitator_sum_part
         .sum
         .into_iter()
-        .map(|v| FieldPriov2::from(u32::try_from(v).unwrap()))
+        .map(|v| FieldPrio2::from(u32::try_from(v).unwrap()))
         .collect();
     let actual_sum =
         reconstruct_shares(&pha_accumulated_share, &facilitator_accumulated_share).unwrap();
