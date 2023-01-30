@@ -8,7 +8,7 @@ require (
 	github.com/aws/aws-sdk-go v1.44.184
 	github.com/google/uuid v1.3.0
 	github.com/prometheus/client_golang v1.14.0
-	github.com/rs/zerolog v1.28.0
+	github.com/rs/zerolog v1.29.0
 	google.golang.org/api v0.108.0
 )
 
