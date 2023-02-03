@@ -401,6 +401,28 @@ resource "helm_release" "prometheus" {
       }
     })
   ]
+
+  # Prometheus v2.37 is a LTS release.
+  # See https://prometheus.io/docs/introduction/release-cycle/
+  set {
+    name  = "server.image.tag"
+    value = "v2.37.5"
+  }
+  # See https://github.com/prometheus/alertmanager/releases
+  set {
+    name  = "alertmanager.image.tag"
+    value = "v0.25.0"
+  }
+  # See https://github.com/prometheus/node_exporter/releases
+  set {
+    name  = "nodeExporter.image.tag"
+    value = "v1.5.0"
+  }
+  # See https://github.com/prometheus/pushgateway/releases
+  set {
+    name  = "pushgateway.image.tag"
+    value = "v1.5.1"
+  }
 }
 
 # Configures Grafana to get data from Prometheus. The label on this config map
