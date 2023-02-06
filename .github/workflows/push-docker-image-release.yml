@@ -72,7 +72,7 @@ jobs:
         username: isrgautomaton
         password: ${{ secrets.ISRG_AUTOMATON_DOCKERHUB_AUTH_TOKEN }}
     - name: build
-      uses: docker/build-push-action@v3
+      uses: docker/build-push-action@v4
       with:
         file: ./key-rotator/Dockerfile
         tags: letsencrypt/prio-key-rotator:${{ steps.get_version.outputs.VERSION }},letsencrypt/prio-key-rotator:latest
