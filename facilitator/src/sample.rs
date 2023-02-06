@@ -11,7 +11,7 @@ use chrono::NaiveDateTime;
 use prio::{
     client::Client,
     encrypt::PublicKey,
-    field::{FieldElement, FieldPriov2},
+    field::{FieldElement, FieldPrio2},
 };
 use ring::digest;
 use slog::{info, o, Logger};
@@ -47,7 +47,7 @@ impl SampleOutput {
 pub struct ReferenceSum {
     /// The reference sum, covering those packets whose shares appear in both
     /// PHA and facilitator ingestion batches.
-    pub sum: Vec<FieldPriov2>,
+    pub sum: Vec<FieldPrio2>,
     /// The number of contributions that went into the reference sum.
     pub contributions: usize,
     /// UUIDs of PHA packets that were dropped
@@ -209,7 +209,7 @@ impl<'a> SampleGenerator<'a> {
         let batch_start_time = self.batch_start_time;
         let batch_end_time = self.batch_end_time;
 
-        let mut reference_sum = vec![FieldPriov2::from(0); self.dimension as usize];
+        let mut reference_sum = vec![FieldPrio2::from(0); self.dimension as usize];
         let mut contributions = 0;
         let mut pha_packets = Vec::new();
         let mut pha_dropped_packets = Vec::new();
@@ -298,7 +298,7 @@ impl<'a> SampleGenerator<'a> {
                 name: aggregation_name.to_owned(),
                 bins: dimension,
                 epsilon,
-                prime: FieldPriov2::modulus() as i64,
+                prime: FieldPrio2::modulus() as i64,
                 number_of_servers: 2,
                 hamming_weight: None,
                 batch_start_time,
@@ -314,7 +314,7 @@ impl<'a> SampleGenerator<'a> {
                 name: aggregation_name.to_owned(),
                 bins: dimension,
                 epsilon,
-                prime: FieldPriov2::modulus() as i64,
+                prime: FieldPrio2::modulus() as i64,
                 number_of_servers: 2,
                 hamming_weight: None,
                 batch_start_time,
@@ -345,9 +345,9 @@ pub fn expected_sample_sum_for_batches(
     batch_uuids: &[Uuid],
     dimension: i32,
     packet_count: usize,
-) -> Vec<FieldPriov2> {
+) -> Vec<FieldPrio2> {
     let dimension = dimension as usize;
-    let mut sum = vec![FieldPriov2::from(0); dimension];
+    let mut sum = vec![FieldPrio2::from(0); dimension];
 
     for batch_uuid in batch_uuids {
         for packet_data in sample_data_iterator(batch_uuid, dimension).take(packet_count) {
@@ -369,7 +369,7 @@ pub fn expected_sample_sum_for_batches(
 fn sample_data_iterator(
     batch_uuid: &Uuid,
     dimension: usize,
-) -> impl Iterator<Item = Vec<FieldPriov2>> {
+) -> impl Iterator<Item = Vec<FieldPrio2>> {
     // Ensure preconditions.
     static DIGEST_ALGORITHM: &digest::Algorithm = &digest::SHA512_256;
     assert!(
@@ -393,7 +393,7 @@ fn sample_data_iterator(
             .as_bits::<Msb0>()
             .iter()
             .take(dimension)
-            .map(|bit| FieldPriov2::from(*bit as u32))
+            .map(|bit| FieldPrio2::from(*bit as u32))
             .collect()
     })
 }
@@ -486,7 +486,7 @@ mod tests {
             assert_eq!(parsed_header.name, "fake-aggregation".to_owned());
             assert_eq!(parsed_header.bins, 10);
             assert_eq!(parsed_header.epsilon, 0.11);
-            assert_eq!(parsed_header.prime, FieldPriov2::modulus() as i64);
+            assert_eq!(parsed_header.prime, FieldPrio2::modulus() as i64);
             assert_eq!(parsed_header.number_of_servers, 2);
             assert_eq!(parsed_header.hamming_weight, None);
             assert_eq!(parsed_header.batch_start_time, 100);
@@ -543,7 +543,7 @@ mod tests {
         );
 
         // Determine actual sum, per calls to generate_ingestion_sample.
-        let mut actual_sum = vec![FieldPriov2::from(0); DIMENSION as usize];
+        let mut actual_sum = vec![FieldPrio2::from(0); DIMENSION as usize];
         for batch_uuid in batch_uuids {
             let batch_sum = sample_generator
                 .generate_ingestion_sample(
