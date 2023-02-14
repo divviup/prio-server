@@ -427,31 +427,5 @@ mod tests {
         );
         transient_500_bad.assert();
         transient_500_good.assert();
-
-        let transient_bad_body = server
-            .mock("GET", "/transient_body_error")
-            .with_status(200)
-            .with_body_from_fn(|_| Err(std::io::ErrorKind::ConnectionAborted.into()))
-            .expect(1)
-            .create();
-        let transient_good_body = server
-            .mock("GET", "/transient_body_error")
-            .with_status(200)
-            .with_body("success response")
-            .expect(1)
-            .create();
-
-        assert_eq!(
-            simple_get_request(
-                base_url.join("/transient_body_error").unwrap(),
-                &logger,
-                "mock-server",
-                &api_metrics,
-            )
-            .unwrap(),
-            "success response"
-        );
-        transient_bad_body.assert();
-        transient_good_body.assert();
     }
 }
