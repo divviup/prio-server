@@ -39,7 +39,7 @@ rusoto_sns = { version = "^0.48", default_features = false, features = ["rustls"
 rusoto_sqs = { version = "^0.48", default_features = false, features = ["rustls"] }
 rusoto_sts = { version = "^0.48", default_features = false, features = ["rustls"] }
 sha2 = "0.10"
-signal-hook = "0.3.14"
+signal-hook = "0.3.15"
 slog = { version = "2.7.0", features = ["max_level_trace"] }
 slog-async = "2.7.0"
 slog-json = "2.6.1"
