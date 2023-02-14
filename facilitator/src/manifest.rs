@@ -617,7 +617,7 @@ mod tests {
             DEFAULT_PACKET_ENCRYPTION_CSR,
         },
     };
-    use mockito::mock;
+    use mockito::Server;
     use prio::encrypt::{PrivateKey, PublicKey};
     use ring::signature::{EcdsaKeyPair, ECDSA_P256_SHA256_ASN1_SIGNING};
     use rusoto_core::Region;
@@ -1518,8 +1518,9 @@ mod tests {
         let logger = setup_test_logging();
         let api_metrics =
             ApiClientMetricsCollector::new_with_metric_name("ingestor_global_manifest").unwrap();
+        let mut server = Server::new();
 
-        let mocked_get = mock("GET", "/global-manifest.json")
+        let mocked_get = server.mock("GET", "/global-manifest.json")
             .with_status(200)
             .with_body(r#"
 {
@@ -1541,7 +1542,7 @@ mod tests {
             .create();
 
         IngestionServerManifest::from_http(
-            &mockito::server_url(),
+            &server.url(),
             None,
             &logger,
             http_url_fetcher,
@@ -1558,15 +1559,17 @@ mod tests {
         let api_metrics =
             ApiClientMetricsCollector::new_with_metric_name("unparseable_ingestor_global_manifest")
                 .unwrap();
+        let mut server = Server::new();
 
-        let mocked_get = mock("GET", "/global-manifest.json")
+        let mocked_get = server
+            .mock("GET", "/global-manifest.json")
             .with_status(200)
             .with_body("invalid manifest")
             .expect(1)
             .create();
 
         IngestionServerManifest::from_http(
-            &mockito::server_url(),
+            &server.url(),
             None,
             &logger,
             http_url_fetcher,
@@ -1583,13 +1586,15 @@ mod tests {
         let api_metrics =
             ApiClientMetricsCollector::new_with_metric_name("ingestor_specific_manifest_fallback")
                 .unwrap();
+        let mut server = Server::new();
 
-        let mocked_global_get = mock("GET", "/global-manifest.json")
+        let mocked_global_get = server
+            .mock("GET", "/global-manifest.json")
             .with_status(404)
             .expect(1)
             .create();
 
-        let mocked_specific_get = mock("GET", "/instance-name-manifest.json")
+        let mocked_specific_get = server.mock("GET", "/instance-name-manifest.json")
         .with_status(200)
         .with_body(r#"
 {
@@ -1611,7 +1616,7 @@ mod tests {
             .create();
 
         IngestionServerManifest::from_http(
-            &mockito::server_url(),
+            &server.url(),
             Some("instance-name"),
             &logger,
             http_url_fetcher,
@@ -1630,20 +1635,23 @@ mod tests {
             "unparseable_ingestor_specific_manifest",
         )
         .unwrap();
+        let mut server = Server::new();
 
-        let mocked_global_get = mock("GET", "/global-manifest.json")
+        let mocked_global_get = server
+            .mock("GET", "/global-manifest.json")
             .with_status(404)
             .expect(1)
             .create();
 
-        let mocked_specific_get = mock("GET", "/instance-name-manifest.json")
+        let mocked_specific_get = server
+            .mock("GET", "/instance-name-manifest.json")
             .with_status(200)
             .with_body("invalid manifest")
             .expect(1)
             .create();
 
         IngestionServerManifest::from_http(
-            &mockito::server_url(),
+            &server.url(),
             Some("instance-name"),
             &logger,
             http_url_fetcher,
@@ -1661,19 +1669,22 @@ mod tests {
         let api_metrics =
             ApiClientMetricsCollector::new_with_metric_name("missing_ingestor_specific_manifest")
                 .unwrap();
+        let mut server = Server::new();
 
-        let mocked_global_get = mock("GET", "/global-manifest.json")
+        let mocked_global_get = server
+            .mock("GET", "/global-manifest.json")
             .with_status(404)
             .expect(1)
             .create();
 
-        let mocked_specific_get = mock("GET", "/instance-name-manifest.json")
+        let mocked_specific_get = server
+            .mock("GET", "/instance-name-manifest.json")
             .with_status(404)
             .expect(1)
             .create();
 
         IngestionServerManifest::from_http(
-            &mockito::server_url(),
+            &server.url(),
             Some("instance-name"),
             &logger,
             http_url_fetcher,

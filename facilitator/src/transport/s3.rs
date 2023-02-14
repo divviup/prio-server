@@ -488,7 +488,7 @@ mod tests {
         metrics::ApiClientMetricsCollector,
         test_utils::{test_runtime, DEFAULT_TRACE_ID},
     };
-    use mockito::{mock, Matcher, Mock};
+    use mockito::{Matcher, Mock, Server};
     use regex;
     use rusoto_core::{request::HttpClient, Region};
     use std::io::Read;
@@ -518,7 +518,12 @@ mod tests {
         Matcher::Regex(regex_text)
     }
 
-    fn mock_create_multipart_upload_request(bucket: &str, key: &str, upload_id: &str) -> Mock {
+    fn mock_create_multipart_upload_request(
+        server: &mut Server,
+        bucket: &str,
+        key: &str,
+        upload_id: &str,
+    ) -> Mock {
         // https://docs.aws.amazon.com/AmazonS3/latest/API/API_CreateMultipartUpload.html
         let path = format!("/{bucket}/{key}");
         let response_body = format!(
@@ -529,7 +534,8 @@ mod tests {
    <UploadId>{upload_id}</UploadId>
 </InitiateMultipartUploadResult>"#
         );
-        mock("POST", Matcher::Exact(path))
+        server
+            .mock("POST", Matcher::Exact(path))
             .match_query(has_query_parameter("uploads"))
             .with_body(response_body)
     }
@@ -537,6 +543,7 @@ mod tests {
     // Unfortunately, headers can't be removed from mocks, so we need to provide mocks with a
     // minimal number of headers.
     fn mock_upload_part_request_without_etag(
+        server: &mut Server,
         bucket: &str,
         key: &str,
         upload_id: &str,
@@ -544,13 +551,16 @@ mod tests {
     ) -> Mock {
         // https://docs.aws.amazon.com/AmazonS3/latest/API/API_UploadPart.html
         let path = format!("/{bucket}/{key}");
-        mock("PUT", Matcher::Exact(path)).match_query(Matcher::AllOf(vec![
-            Matcher::UrlEncoded("partNumber".to_string(), part_number.to_string()),
-            Matcher::UrlEncoded("uploadId".to_string(), upload_id.to_string()),
-        ]))
+        server
+            .mock("PUT", Matcher::Exact(path))
+            .match_query(Matcher::AllOf(vec![
+                Matcher::UrlEncoded("partNumber".to_string(), part_number.to_string()),
+                Matcher::UrlEncoded("uploadId".to_string(), upload_id.to_string()),
+            ]))
     }
 
     fn mock_upload_part_request(
+        server: &mut Server,
         bucket: &str,
         key: &str,
         upload_id: &str,
@@ -558,14 +568,20 @@ mod tests {
         etag: &str,
     ) -> Mock {
         // https://docs.aws.amazon.com/AmazonS3/latest/API/API_UploadPart.html
-        mock_upload_part_request_without_etag(bucket, key, upload_id, part_number)
+        mock_upload_part_request_without_etag(server, bucket, key, upload_id, part_number)
             .with_header("ETag", etag)
     }
 
-    fn mock_abort_multipart_upload_request(bucket: &str, key: &str, upload_id: &str) -> Mock {
+    fn mock_abort_multipart_upload_request(
+        server: &mut Server,
+        bucket: &str,
+        key: &str,
+        upload_id: &str,
+    ) -> Mock {
         // https://docs.aws.amazon.com/AmazonS3/latest/API/API_AbortMultipartUpload.html
         let path = format!("/{bucket}/{key}");
-        mock("DELETE", Matcher::Exact(path))
+        server
+            .mock("DELETE", Matcher::Exact(path))
             .match_query(Matcher::UrlEncoded(
                 "uploadId".to_string(),
                 upload_id.to_string(),
@@ -574,6 +590,7 @@ mod tests {
     }
 
     fn mock_complete_multipart_upload_request(
+        server: &mut Server,
         bucket: &str,
         key: &str,
         upload_id: &str,
@@ -594,7 +611,8 @@ mod tests {
             .into_iter()
             .map(|etag| Matcher::Regex(regex::escape(etag)))
             .collect();
-        mock("POST", Matcher::Exact(path))
+        server
+            .mock("POST", Matcher::Exact(path))
             .match_query(Matcher::UrlEncoded(
                 "uploadId".to_string(),
                 upload_id.to_string(),
@@ -603,9 +621,11 @@ mod tests {
             .with_body(response_body)
     }
 
-    fn mock_get_object_request(bucket: &str, key: &str) -> Mock {
+    fn mock_get_object_request(server: &mut Server, bucket: &str, key: &str) -> Mock {
         let path = format!("/{bucket}/{key}");
-        mock("GET", Matcher::Exact(path)).match_query(Matcher::Missing)
+        server
+            .mock("GET", Matcher::Exact(path))
+            .match_query(Matcher::Missing)
     }
 
     #[test]
@@ -616,12 +636,17 @@ mod tests {
             "mock_complete_multipart_upload_request",
         )
         .unwrap();
+        let mut server = Server::new();
 
-        let mocked_upload =
-            mock_create_multipart_upload_request(TEST_BUCKET, TEST_KEY, TEST_UPLOAD_ID)
-                .with_status(401)
-                .with_body("")
-                .create();
+        let mocked_upload = mock_create_multipart_upload_request(
+            &mut server,
+            TEST_BUCKET,
+            TEST_KEY,
+            TEST_UPLOAD_ID,
+        )
+        .with_status(401)
+        .with_body("")
+        .create();
 
         let err = MultipartUploadWriter::new(
             String::from(TEST_BUCKET),
@@ -638,7 +663,7 @@ mod tests {
                 aws_credentials::Provider::new_mock(&logger, &api_metrics),
                 Region::Custom {
                     name: TEST_REGION.into(),
-                    endpoint: mockito::server_url(),
+                    endpoint: server.url(),
                 },
             ),
             runtime.handle(),
@@ -661,17 +686,22 @@ mod tests {
         let api_metrics =
             ApiClientMetricsCollector::new_with_metric_name("multipart_upload_create_no_upload_id")
                 .unwrap();
+        let mut server = Server::new();
 
-        let mocked_upload =
-            mock_create_multipart_upload_request(TEST_BUCKET, TEST_KEY, TEST_UPLOAD_ID)
-                .with_body(
-                    r#"<?xml version="1.0" encoding="UTF-8"?>
+        let mocked_upload = mock_create_multipart_upload_request(
+            &mut server,
+            TEST_BUCKET,
+            TEST_KEY,
+            TEST_UPLOAD_ID,
+        )
+        .with_body(
+            r#"<?xml version="1.0" encoding="UTF-8"?>
 <InitiateMultipartUploadResult>
    <Bucket>fake-bucket</Bucket>
    <Key>fake-key</Key>
 </InitiateMultipartUploadResult>"#,
-                )
-                .create();
+        )
+        .create();
 
         // Response body format from
         // https://docs.aws.amazon.com/AmazonS3/latest/API/API_Operations_Amazon_Simple_Storage_Service.html
@@ -690,7 +720,7 @@ mod tests {
                 aws_credentials::Provider::new_mock(&logger, &api_metrics),
                 Region::Custom {
                     name: TEST_REGION.into(),
-                    endpoint: mockito::server_url(),
+                    endpoint: server.url(),
                 },
             ),
             runtime.handle(),
@@ -713,16 +743,30 @@ mod tests {
             "multipart_upload_fails_with_http_200_ok",
         )
         .unwrap();
+        let mut server = Server::new();
 
         // Response body format from
         // https://docs.aws.amazon.com/AmazonS3/latest/API/API_Operations_Amazon_Simple_Storage_Service.html
         let mocks: Vec<Mock> = vec![
-            mock_create_multipart_upload_request(TEST_BUCKET, TEST_KEY, TEST_UPLOAD_ID),
-            mock_upload_part_request(TEST_BUCKET, TEST_KEY, TEST_UPLOAD_ID, 1, TEST_ETAG),
+            mock_create_multipart_upload_request(
+                &mut server,
+                TEST_BUCKET,
+                TEST_KEY,
+                TEST_UPLOAD_ID,
+            ),
+            mock_upload_part_request(
+                &mut server,
+                TEST_BUCKET,
+                TEST_KEY,
+                TEST_UPLOAD_ID,
+                1,
+                TEST_ETAG,
+            ),
             // HTTP 200 response to CompleteMultipartUpload that contains an
             // error. Should cause us to retry.
             // https://docs.aws.amazon.com/AmazonS3/latest/API/API_CompleteMultipartUpload.html#API_CompleteMultipartUpload_Examples
             mock_complete_multipart_upload_request(
+                &mut server,
                 TEST_BUCKET,
                 TEST_KEY,
                 TEST_UPLOAD_ID,
@@ -738,6 +782,7 @@ mod tests {
 </Error>"#,
             ),
             mock_complete_multipart_upload_request(
+                &mut server,
                 TEST_BUCKET,
                 TEST_KEY,
                 TEST_UPLOAD_ID,
@@ -763,7 +808,7 @@ mod tests {
                 aws_credentials::Provider::new_mock(&logger, &api_metrics),
                 Region::Custom {
                     name: TEST_REGION.into(),
-                    endpoint: mockito::server_url(),
+                    endpoint: server.url(),
                 },
             ),
             runtime.handle(),
@@ -786,35 +831,74 @@ mod tests {
         let runtime = test_runtime();
         let api_metrics =
             ApiClientMetricsCollector::new_with_metric_name("multipart_upload").unwrap();
+        let mut server = Server::new();
 
         // Response body format from
         // https://docs.aws.amazon.com/AmazonS3/latest/API/API_Operations_Amazon_Simple_Storage_Service.html
         let mocks: Vec<Mock> = vec![
-            mock_create_multipart_upload_request(TEST_BUCKET, TEST_KEY, TEST_UPLOAD_ID),
+            mock_create_multipart_upload_request(
+                &mut server,
+                TEST_BUCKET,
+                TEST_KEY,
+                TEST_UPLOAD_ID,
+            ),
             // 500 status will cause a retry.
-            mock_upload_part_request_without_etag(TEST_BUCKET, TEST_KEY, TEST_UPLOAD_ID, 1)
-                .with_status(500),
+            mock_upload_part_request_without_etag(
+                &mut server,
+                TEST_BUCKET,
+                TEST_KEY,
+                TEST_UPLOAD_ID,
+                1,
+            )
+            .with_status(500),
             // HTTP 401 will cause failure.
-            mock_upload_part_request_without_etag(TEST_BUCKET, TEST_KEY, TEST_UPLOAD_ID, 1)
-                .with_status(401),
+            mock_upload_part_request_without_etag(
+                &mut server,
+                TEST_BUCKET,
+                TEST_KEY,
+                TEST_UPLOAD_ID,
+                1,
+            )
+            .with_status(401),
             // Expected because of previous UploadPart failure.
-            mock_abort_multipart_upload_request(TEST_BUCKET, TEST_KEY, TEST_UPLOAD_ID),
+            mock_abort_multipart_upload_request(&mut server, TEST_BUCKET, TEST_KEY, TEST_UPLOAD_ID),
             // HTTP 200 but no ETag header will cause failure.
-            mock_upload_part_request_without_etag(TEST_BUCKET, TEST_KEY, TEST_UPLOAD_ID, 1),
+            mock_upload_part_request_without_etag(
+                &mut server,
+                TEST_BUCKET,
+                TEST_KEY,
+                TEST_UPLOAD_ID,
+                1,
+            ),
             // Expected because of previous UploadPart failure.
-            mock_abort_multipart_upload_request(TEST_BUCKET, TEST_KEY, TEST_UPLOAD_ID),
+            mock_abort_multipart_upload_request(&mut server, TEST_BUCKET, TEST_KEY, TEST_UPLOAD_ID),
             // Well-formed response to UploadPart.
-            mock_upload_part_request(TEST_BUCKET, TEST_KEY, TEST_UPLOAD_ID, 1, TEST_ETAG),
-            mock_upload_part_request(TEST_BUCKET, TEST_KEY, TEST_UPLOAD_ID, 2, TEST_ETAG_2),
+            mock_upload_part_request(
+                &mut server,
+                TEST_BUCKET,
+                TEST_KEY,
+                TEST_UPLOAD_ID,
+                1,
+                TEST_ETAG,
+            ),
+            mock_upload_part_request(
+                &mut server,
+                TEST_BUCKET,
+                TEST_KEY,
+                TEST_UPLOAD_ID,
+                2,
+                TEST_ETAG_2,
+            ),
             // Well-formed response to CompleteMultipartUpload.
             mock_complete_multipart_upload_request(
+                &mut server,
                 TEST_BUCKET,
                 TEST_KEY,
                 TEST_UPLOAD_ID,
                 vec![TEST_ETAG, TEST_ETAG_2],
             ),
             // Expected because of final complete_upload call
-            mock_abort_multipart_upload_request(TEST_BUCKET, TEST_KEY, TEST_UPLOAD_ID),
+            mock_abort_multipart_upload_request(&mut server, TEST_BUCKET, TEST_KEY, TEST_UPLOAD_ID),
         ]
         .into_iter()
         .map(Mock::create)
@@ -835,7 +919,7 @@ mod tests {
                 aws_credentials::Provider::new_mock(&logger, &api_metrics),
                 Region::Custom {
                     name: TEST_REGION.into(),
-                    endpoint: mockito::server_url(),
+                    endpoint: server.url(),
                 },
             ),
             runtime.handle(),
@@ -873,17 +957,18 @@ mod tests {
             "roundtrip_s3_transport_failed_get_object",
         )
         .unwrap();
+        let mut server = Server::new();
 
         let s3_path = S3Path {
             region: Region::Custom {
                 name: TEST_REGION.into(),
-                endpoint: mockito::server_url(),
+                endpoint: server.url(),
             },
             bucket: TEST_BUCKET.into(),
             key: "".into(),
         };
 
-        let mocked_get_object = mock_get_object_request(TEST_BUCKET, TEST_KEY)
+        let mocked_get_object = mock_get_object_request(&mut server, TEST_BUCKET, TEST_KEY)
             .with_status(404)
             .create();
 
@@ -909,17 +994,18 @@ mod tests {
             "roundtrip_s3_transport_successful_get_object",
         )
         .unwrap();
+        let mut server = Server::new();
 
         let s3_path = S3Path {
             region: Region::Custom {
                 name: TEST_REGION.into(),
-                endpoint: mockito::server_url(),
+                endpoint: server.url(),
             },
             bucket: TEST_BUCKET.into(),
             key: "".into(),
         };
 
-        let mocked_get_object = mock_get_object_request(TEST_BUCKET, TEST_KEY)
+        let mocked_get_object = mock_get_object_request(&mut server, TEST_BUCKET, TEST_KEY)
             .with_body("fake-content")
             .create();
 
@@ -949,27 +1035,41 @@ mod tests {
             "roundtrip_s3_transport_create_multipart_upload",
         )
         .unwrap();
+        let mut server = Server::new();
 
         let s3_path = S3Path {
             region: Region::Custom {
                 name: TEST_REGION.into(),
-                endpoint: mockito::server_url(),
+                endpoint: server.url(),
             },
             bucket: TEST_BUCKET.into(),
             key: "".into(),
         };
 
         let mocks: Vec<Mock> = vec![
-            mock_create_multipart_upload_request(TEST_BUCKET, TEST_KEY, TEST_UPLOAD_ID),
-            mock_upload_part_request(TEST_BUCKET, TEST_KEY, TEST_UPLOAD_ID, 1, TEST_ETAG),
+            mock_create_multipart_upload_request(
+                &mut server,
+                TEST_BUCKET,
+                TEST_KEY,
+                TEST_UPLOAD_ID,
+            ),
+            mock_upload_part_request(
+                &mut server,
+                TEST_BUCKET,
+                TEST_KEY,
+                TEST_UPLOAD_ID,
+                1,
+                TEST_ETAG,
+            ),
             mock_complete_multipart_upload_request(
+                &mut server,
                 TEST_BUCKET,
                 TEST_KEY,
                 TEST_UPLOAD_ID,
                 vec![TEST_ETAG],
             ),
             // Expected because of cancel_upload call.
-            mock_abort_multipart_upload_request(TEST_BUCKET, TEST_KEY, TEST_UPLOAD_ID),
+            mock_abort_multipart_upload_request(&mut server, TEST_BUCKET, TEST_KEY, TEST_UPLOAD_ID),
         ]
         .into_iter()
         .map(Mock::create)
@@ -1000,20 +1100,26 @@ mod tests {
         let api_metrics =
             ApiClientMetricsCollector::new_with_metric_name("s3_transport_empty_multipart_upload")
                 .unwrap();
+        let mut server = Server::new();
 
         let s3_path = S3Path {
             region: Region::Custom {
                 name: TEST_REGION.into(),
-                endpoint: mockito::server_url(),
+                endpoint: server.url(),
             },
             bucket: TEST_BUCKET.into(),
             key: "".into(),
         };
 
         let mocks: Vec<Mock> = vec![
-            mock_create_multipart_upload_request(TEST_BUCKET, TEST_KEY, TEST_UPLOAD_ID),
+            mock_create_multipart_upload_request(
+                &mut server,
+                TEST_BUCKET,
+                TEST_KEY,
+                TEST_UPLOAD_ID,
+            ),
             // Expected because of completing upload immediately after put
-            mock_abort_multipart_upload_request(TEST_BUCKET, TEST_KEY, TEST_UPLOAD_ID),
+            mock_abort_multipart_upload_request(&mut server, TEST_BUCKET, TEST_KEY, TEST_UPLOAD_ID),
         ]
         .into_iter()
         .map(Mock::create)
