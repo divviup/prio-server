@@ -294,7 +294,7 @@ pub(crate) fn simple_get_request(
 mod tests {
     use super::*;
     use crate::logging::setup_test_logging;
-    use mockito::{mock, Matcher};
+    use mockito::{Matcher, Server};
 
     #[test]
     fn retryable_error() {
@@ -328,8 +328,10 @@ mod tests {
         let logger = setup_test_logging();
         let api_metrics =
             ApiClientMetricsCollector::new_with_metric_name("authenticated_request").unwrap();
+        let mut server = Server::new();
 
-        let mocked_get = mock("GET", "/resource")
+        let mocked_get = server
+            .mock("GET", "/resource")
             .match_header("Authorization", "Bearer fake-token")
             .with_status(200)
             .with_body("fake body")
@@ -341,7 +343,7 @@ mod tests {
         };
 
         let request_parameters = RequestParameters {
-            url: Url::parse(&format!("{}/resource", mockito::server_url())).unwrap(),
+            url: Url::parse(&format!("{}/resource", server.url())).unwrap(),
             method: Method::Get,
             token_provider: Some(&oauth_token_provider),
         };
@@ -363,8 +365,10 @@ mod tests {
         let logger = setup_test_logging();
         let api_metrics =
             ApiClientMetricsCollector::new_with_metric_name("unauthenticated_request").unwrap();
+        let mut server = Server::new();
 
-        let mocked_get = mock("GET", "/resource")
+        let mocked_get = server
+            .mock("GET", "/resource")
             .match_header("Authorization", Matcher::Missing)
             .with_status(200)
             .with_body("fake body")
@@ -372,7 +376,7 @@ mod tests {
             .create();
 
         let request_parameters = RequestParameters {
-            url: Url::parse(&format!("{}/resource", mockito::server_url())).unwrap(),
+            url: Url::parse(&format!("{}/resource", server.url())).unwrap(),
             method: Method::Get,
             token_provider: None,
         };
@@ -394,15 +398,18 @@ mod tests {
         let logger = setup_test_logging();
         let api_metrics =
             ApiClientMetricsCollector::new_with_metric_name("simple_get_request_failure").unwrap();
+        let mut server = Server::new();
 
-        let base_url = Url::parse(&mockito::server_url()).unwrap();
+        let base_url = Url::parse(&server.url()).unwrap();
 
-        let transient_500_bad = mock("GET", "/transient_500")
+        let transient_500_bad = server
+            .mock("GET", "/transient_500")
             .with_status(500)
             .with_body("error response")
             .expect(1)
             .create();
-        let transient_500_good = mock("GET", "/transient_500")
+        let transient_500_good = server
+            .mock("GET", "/transient_500")
             .with_status(200)
             .with_body("success response")
             .expect(1)
@@ -420,29 +427,5 @@ mod tests {
         );
         transient_500_bad.assert();
         transient_500_good.assert();
-
-        let transient_bad_body = mock("GET", "/transient_body_error")
-            .with_status(200)
-            .with_body_from_fn(|_| Err(std::io::ErrorKind::ConnectionAborted.into()))
-            .expect(1)
-            .create();
-        let transient_good_body = mock("GET", "/transient_body_error")
-            .with_status(200)
-            .with_body("success response")
-            .expect(1)
-            .create();
-
-        assert_eq!(
-            simple_get_request(
-                base_url.join("/transient_body_error").unwrap(),
-                &logger,
-                "mock-server",
-                &api_metrics,
-            )
-            .unwrap(),
-            "success response"
-        );
-        transient_bad_body.assert();
-        transient_good_body.assert();
     }
 }

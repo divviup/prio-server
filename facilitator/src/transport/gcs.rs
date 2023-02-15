@@ -521,15 +521,17 @@ mod tests {
     use super::*;
     use crate::logging::setup_test_logging;
     use assert_matches::assert_matches;
-    use mockito::{mock, Matcher};
+    use mockito::{Matcher, Server};
 
     #[test]
     fn simple_upload() {
         let logger = setup_test_logging();
         let api_metrics = ApiClientMetricsCollector::new_with_metric_name("simple_upload").unwrap();
+        let mut server = Server::new();
 
-        let fake_upload_session_uri = format!("{}/fake-session-uri", mockito::server_url());
-        let mocked_post = mock("POST", "/upload/storage/v1/b/fake-bucket/o/")
+        let fake_upload_session_uri = format!("{}/fake-session-uri", server.url());
+        let mocked_post = server
+            .mock("POST", "/upload/storage/v1/b/fake-bucket/o/")
             .match_header("Authorization", "Bearer fake-token")
             .match_header("Content-Length", "0")
             .match_query(Matcher::UrlEncoded(
@@ -550,7 +552,7 @@ mod tests {
             "fake-object".to_string(),
             "fake-token".to_string(),
             10,
-            Url::parse(&mockito::server_url()).expect("unable to parse mockito server url"),
+            Url::parse(&server.url()).expect("unable to parse mockito server url"),
             RetryingAgent::new("simple_upload", &api_metrics),
             &logger,
         )
@@ -558,7 +560,8 @@ mod tests {
 
         mocked_post.assert();
 
-        let mocked_put = mock("PUT", "/fake-session-uri")
+        let mocked_put = server
+            .mock("PUT", "/fake-session-uri")
             .match_header("Content-Length", "7")
             .match_header("Content-Range", "bytes 0-6/7")
             .match_body("content")
@@ -577,9 +580,11 @@ mod tests {
         let logger = setup_test_logging();
         let api_metrics =
             ApiClientMetricsCollector::new_with_metric_name("multi_chunk_upload").unwrap();
+        let mut server = Server::new();
 
-        let fake_upload_session_uri = format!("{}/fake-session-uri", mockito::server_url());
-        let mocked_post = mock("POST", "/upload/storage/v1/b/fake-bucket/o/")
+        let fake_upload_session_uri = format!("{}/fake-session-uri", server.url());
+        let mocked_post = server
+            .mock("POST", "/upload/storage/v1/b/fake-bucket/o/")
             .match_header("Authorization", "Bearer fake-token")
             .match_header("Content-Length", "0")
             .match_query(Matcher::UrlEncoded(
@@ -600,7 +605,7 @@ mod tests {
             "fake-object".to_string(),
             "fake-token".to_string(),
             4,
-            Url::parse(&mockito::server_url()).expect("unable to parse mockito server url"),
+            Url::parse(&server.url()).expect("unable to parse mockito server url"),
             RetryingAgent::new("multi_chunk_upload", &api_metrics),
             &logger,
         )
@@ -608,7 +613,8 @@ mod tests {
 
         mocked_post.assert();
 
-        let first_mocked_put = mock("PUT", "/fake-session-uri")
+        let first_mocked_put = server
+            .mock("PUT", "/fake-session-uri")
             .match_header("Content-Length", "4")
             .match_header("Content-Range", "bytes 0-3/*")
             .match_body("0123")
@@ -617,7 +623,8 @@ mod tests {
             .expect_at_most(1)
             .create();
 
-        let second_mocked_put = mock("PUT", "/fake-session-uri")
+        let second_mocked_put = server
+            .mock("PUT", "/fake-session-uri")
             .match_header("Content-Length", "4")
             .match_header("Content-Range", "bytes 4-7/*")
             .match_body("4567")
@@ -626,7 +633,8 @@ mod tests {
             .expect_at_most(1)
             .create();
 
-        let final_mocked_put = mock("PUT", "/fake-session-uri")
+        let final_mocked_put = server
+            .mock("PUT", "/fake-session-uri")
             .match_header("Content-Length", "3")
             .match_header("Content-Range", "bytes 7-9/10")
             .match_body("789")
@@ -647,9 +655,11 @@ mod tests {
         let logger = setup_test_logging();
         let api_metrics =
             ApiClientMetricsCollector::new_with_metric_name("empty_multi_chunk_upload").unwrap();
+        let mut server = Server::new();
 
-        let fake_upload_session_uri = format!("{}/fake-session-uri", mockito::server_url());
-        let mocked_post = mock("POST", "/upload/storage/v1/b/fake-bucket/o/")
+        let fake_upload_session_uri = format!("{}/fake-session-uri", server.url());
+        let mocked_post = server
+            .mock("POST", "/upload/storage/v1/b/fake-bucket/o/")
             .match_header("Authorization", "Bearer fake-token")
             .match_header("Content-Length", "0")
             .match_query(Matcher::UrlEncoded(
@@ -670,7 +680,7 @@ mod tests {
             "fake-object".to_string(),
             "fake-token".to_string(),
             8_388_608,
-            Url::parse(&mockito::server_url()).expect("unable to parse mockito server url"),
+            Url::parse(&server.url()).expect("unable to parse mockito server url"),
             RetryingAgent::new("multi_chunk_upload", &api_metrics),
             &logger,
         )
@@ -678,7 +688,8 @@ mod tests {
 
         mocked_post.assert();
 
-        let mocked_cancel = mock("DELETE", "/fake-session-uri")
+        let mocked_cancel = server
+            .mock("DELETE", "/fake-session-uri")
             .match_header("Content-Length", "0")
             .with_status(499)
             .expect_at_most(1)
@@ -694,9 +705,11 @@ mod tests {
         let logger = setup_test_logging();
         let api_metrics =
             ApiClientMetricsCollector::new_with_metric_name("upload_cancel_failure").unwrap();
+        let mut server = Server::new();
 
-        let fake_upload_session_uri = format!("{}/fake-session-uri", mockito::server_url());
-        let mocked_post = mock("POST", "/upload/storage/v1/b/fake-bucket/o/")
+        let fake_upload_session_uri = format!("{}/fake-session-uri", server.url());
+        let mocked_post = server
+            .mock("POST", "/upload/storage/v1/b/fake-bucket/o/")
             .match_header("Authorization", "Bearer fake-token")
             .match_header("Content-Length", "0")
             .match_query(Matcher::UrlEncoded(
@@ -717,7 +730,7 @@ mod tests {
             "fake-object".to_string(),
             "fake-token".to_string(),
             8_388_608,
-            Url::parse(&mockito::server_url()).expect("unable to parse mockito server url"),
+            Url::parse(&server.url()).expect("unable to parse mockito server url"),
             RetryingAgent::new("multi_chunk_upload", &api_metrics),
             &logger,
         )
@@ -727,7 +740,8 @@ mod tests {
 
         // Respond to cancel with HTTP status that ureq represents as an error
         // but is not 499
-        let mocked_cancel = mock("DELETE", "/fake-session-uri")
+        let mocked_cancel = server
+            .mock("DELETE", "/fake-session-uri")
             .match_header("Content-Length", "0")
             .with_status(404)
             .with_body("error body")
@@ -745,7 +759,8 @@ mod tests {
 
         // Respond to cancel with HTTP status that indicates cancel failed but
         // is not handled as an error by ureq
-        let mocked_cancel = mock("DELETE", "/fake-session-uri")
+        let mocked_cancel = server
+            .mock("DELETE", "/fake-session-uri")
             .match_header("Content-Length", "0")
             .with_status(200)
             .with_body("error body")

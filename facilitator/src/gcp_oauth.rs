@@ -940,7 +940,7 @@ impl GcpAccessTokenProviderFactory {
 mod tests {
     use super::*;
     use assert_matches::assert_matches;
-    use mockito::{mock, Matcher};
+    use mockito::{Matcher, Server};
     use serde_json::json;
     use std::str::FromStr;
 
@@ -951,8 +951,10 @@ mod tests {
         let logger = setup_test_logging();
         let api_metrics =
             ApiClientMetricsCollector::new_with_metric_name("metadata_service_token").unwrap();
+        let mut server = Server::new();
 
-        let mocked_get = mock("GET", DEFAULT_ACCESS_TOKEN_PATH)
+        let mocked_get = server
+            .mock("GET", DEFAULT_ACCESS_TOKEN_PATH)
             .match_header("Metadata-Flavor", "Google")
             .with_status(200)
             .with_body(
@@ -970,7 +972,7 @@ mod tests {
         let provider = GkeMetadataServiceDefaultAccessTokenProvider {
             agent: RetryingAgent::new("metadata_service_token", &api_metrics),
             logger,
-            metadata_service_base_url: leak_string(mockito::server_url()),
+            metadata_service_base_url: leak_string(server.url()),
         };
 
         provider
@@ -986,6 +988,7 @@ mod tests {
         let logger = setup_test_logging();
         let api_metrics =
             ApiClientMetricsCollector::new_with_metric_name("get_token_with_key_file").unwrap();
+        let mut server = Server::new();
 
         let key_file = ServiceAccountKeyFile {
             private_key: r#"
@@ -1020,14 +1023,15 @@ jbxbE/VdW03+iXZyrnDNFAFAsRR+XgjeYheAUVLelg9qBjM7jYNf
             .to_owned(),
             private_key_id: "fake-key-id".to_owned(),
             client_email: "fake@fake.fake".to_owned(),
-            token_uri: format!("{}/fake-token-uri", mockito::server_url()),
+            token_uri: format!("{}/fake-token-uri", server.url()),
         };
 
         // We intentionally don't check the body here: if we did, we would have
         // to re-implement most of account_token_with_key_file to construct the
         // expected body, and all that does is prove we can copy code rather
         // than prove that account_token_with_key_file is correct.
-        let mocked_post = mock("POST", "/fake-token-uri")
+        let mocked_post = server
+            .mock("POST", "/fake-token-uri")
             .with_status(200)
             .with_body(
                 r#"{
@@ -1081,10 +1085,12 @@ jbxbE/VdW03+iXZyrnDNFAFAsRR+XgjeYheAUVLelg9qBjM7jYNf
         let logger = setup_test_logging();
         let api_metrics =
             ApiClientMetricsCollector::new_with_metric_name("get_impersonated_token").unwrap();
+        let mut server = Server::new();
 
         let access_token_path: &str =
             &GcpAccessTokenProvider::access_token_path_for_service_account("fake-service-account");
-        let mocked_post_impersonated = mock("POST", access_token_path)
+        let mocked_post_impersonated = server
+            .mock("POST", access_token_path)
             .match_header("Authorization", "Bearer fake-default-token")
             .match_body(Matcher::Json(
                 json!({"scope": ["https://www.googleapis.com/auth/cloud-platform"] }),
@@ -1109,7 +1115,7 @@ jbxbE/VdW03+iXZyrnDNFAFAsRR+XgjeYheAUVLelg9qBjM7jYNf
             impersonated_account_token: Arc::new(RwLock::new(None)),
             agent: RetryingAgent::new("iamcredentials.googleapis.com", &api_metrics),
             logger,
-            iam_service_base_url: leak_string(mockito::server_url()),
+            iam_service_base_url: leak_string(server.url()),
         };
 
         assert_matches!(
