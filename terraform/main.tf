@@ -745,8 +745,9 @@ resource "google_project_service" "sts" {
 }
 
 resource "google_project_service" "iamcredentials" {
-  count   = var.use_aws ? 1 : 0
-  service = "iamcredentials.googleapis.com"
+  count              = var.use_aws ? 1 : 0
+  service            = "iamcredentials.googleapis.com"
+  disable_on_destroy = false
 }
 
 # If running EKS, we must create a Workload Identity Pool and Workload Identity
