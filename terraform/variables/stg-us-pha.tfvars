@@ -67,7 +67,7 @@ cluster_settings = {
   max_node_count      = 3
   gcp_machine_type    = "e2-standard-2"
   aws_machine_types   = ["t3.medium"]
-  eks_cluster_version = "1.22"
+  eks_cluster_version = "1.23"
   # https://docs.aws.amazon.com/eks/latest/userguide/managing-vpc-cni.html
   eks_vpc_cni_addon_version = "v1.11.4-eksbuild.1"
   # https://docs.aws.amazon.com/eks/latest/userguide/managing-ebs-csi.html#updating-ebs-csi-eks-add-on
