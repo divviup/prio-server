@@ -35,13 +35,25 @@ resource "aws_iam_role_policy" "cluster_autoscaler" {
     Statement = [
       {
         Action = [
+          "autoscaling:SetDesiredCapacity",
+          "autoscaling:TerminateInstanceInAutoScalingGroup",
+        ]
+        Resource = "*"
+        Effect   = "Allow"
+        Condition = {
+          StringEquals = {
+            "aws:ResourceTag/k8s.io/cluster-autoscaler/${data.aws_eks_cluster.cluster.name}" = "owned"
+          }
+        }
+      },
+      {
+        Action = [
           "autoscaling:DescribeAutoScalingGroups",
           "autoscaling:DescribeAutoScalingInstances",
           "autoscaling:DescribeLaunchConfigurations",
           "autoscaling:DescribeTags",
-          "autoscaling:SetDesiredCapacity",
-          "autoscaling:TerminateInstanceInAutoScalingGroup",
           "ec2:DescribeLaunchTemplateVersions",
+          "ec2:DescribeInstanceTypes",
         ]
         Resource = "*"
         Effect   = "Allow"
