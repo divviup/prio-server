@@ -99,11 +99,11 @@ cluster_settings = {
   aws_machine_types   = ["t3.large"]
   eks_cluster_version = "1.23"
   # https://docs.aws.amazon.com/eks/latest/userguide/managing-vpc-cni.html
-  eks_vpc_cni_addon_version = "v1.11.4-eksbuild.1"
+  eks_vpc_cni_addon_version = "v1.12.2-eksbuild.1"
   # https://docs.aws.amazon.com/eks/latest/userguide/managing-ebs-csi.html#updating-ebs-csi-eks-add-on
-  eks_ebs_csi_addon_version = "v1.13.0-eksbuild.2"
-  # https://github.com/kubernetes/autoscaler/releases/tag/cluster-autoscaler-1.22.1
-  eks_cluster_autoscaler_version = "k8s.gcr.io/autoscaling/cluster-autoscaler:v1.22.1"
+  eks_ebs_csi_addon_version = "v1.16.0-eksbuild.1"
+  # https://github.com/kubernetes/autoscaler/releases/tag/cluster-autoscaler-1.23.0
+  eks_cluster_autoscaler_version = "k8s.gcr.io/autoscaling/cluster-autoscaler:v1.23.0"
 }
 is_first                 = false
 use_aws                  = true
