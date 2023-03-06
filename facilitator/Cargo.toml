@@ -17,7 +17,7 @@ chrono = { version = "0.4", features = ["serde"] }
 clap = "2.34.0"
 derivative = "2.1.1"
 dyn-clone = "1.0.11"
-elliptic-curve = { version = "0.12.3", features = ["pem"] }
+elliptic-curve = { version = "0.13.1", features = ["pem"] }
 futures = "0.3"
 hex = "0.4"
 hmac = "0.12"
@@ -26,7 +26,7 @@ hyper = "^0.14"
 hyper-rustls = { version = "^0.23", features = ["http2"] }
 jsonwebtoken = "8"
 lazy_static = "1"
-p256 = "0.12.0"
+p256 = "0.13.0"
 pem = "1.1"
 pkix = "0.2.1"
 prio = { version = "0.10.0", features = ["prio2"] }
