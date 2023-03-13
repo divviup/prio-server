@@ -114,7 +114,7 @@ terraform {
     }
     external = {
       source  = "hashicorp/external"
-      version = "2.2.3"
+      version = "2.3.1"
     }
     random = {
       source  = "hashicorp/random"
