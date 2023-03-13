@@ -1,4 +1,4 @@
-FROM golang:1.20.1 as builder
+FROM golang:1.20.2 as builder
 
 # Copy go modules first, to allow module download to be cached.
 WORKDIR /workspace
