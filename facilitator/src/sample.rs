@@ -11,7 +11,7 @@ use chrono::NaiveDateTime;
 use prio::{
     client::Client,
     encrypt::PublicKey,
-    field::{FieldElement, FieldPrio2},
+    field::{FieldElementWithInteger, FieldPrio2},
 };
 use ring::digest;
 use slog::{info, o, Logger};
