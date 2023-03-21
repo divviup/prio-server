@@ -16,7 +16,7 @@ groups:
         ${environment} last ran successfully"
   - alert: facilitator_intake_failure_rate
     expr: (sum without (status, aggregation_id, instance, node) (rate(facilitator_intake_tasks_finished{status="success"}[1h])))
-      / (sum without (status, aggregation_id, instance, node) (rate(facilitator_intake_tasks_finished[1h]))) < 0.90
+      / (sum without (status, aggregation_id, instance, node) (rate(facilitator_intake_tasks_finished[1h]))) < 0.95
     for: 5m
     labels:
       severity: page
@@ -26,7 +26,7 @@ groups:
         {{ $labels.namespace }}-{{ $labels.service }}"
       description: "intake worker instance {{ $labels.namespace }}-
         {{ $labels.service }} in environment ${environment} is failing
-        more than 10% of the time in the last hour"
+        more than 5% of the time in the last hour"
   - alert: facilitator_aggregate_failure_rate
     # aggregations run much less often than intake so use a larger window of time
     expr: (sum without (status, aggregation_id, instance, node) (rate(facilitator_aggregate_tasks_finished{status="success"}[${aggregation_period}])))
@@ -43,7 +43,7 @@ groups:
         more than 5% of the time in the last 8 hours"
   - alert: facilitator_intake_rejection_rate
     expr: (sum without (status, aggregation_id, instance, node) (rate(facilitator_intake_tasks_finished{status="rejected"}[1h])))
-      / (sum without (status, aggregation_id, instance, node) (rate(facilitator_intake_tasks_finished[1h]))) > 0.10
+      / (sum without (status, aggregation_id, instance, node) (rate(facilitator_intake_tasks_finished[1h]))) > 0.01
     for: 5m
     labels:
       severity: page
@@ -53,7 +53,7 @@ groups:
         {{ $labels.namespace }}-{{ $labels.service }}"
       description: "intake worker instance {{ $labels.namespace }}-
         {{ $labels.service }} in environment ${environment} has
-        rejected more than 10% of tasks in the last hour"
+        rejected more than 1% of tasks in the last hour"
   - alert: facilitator_aggregate_rejection_rate
     expr: (sum without (status, aggregation_id, instance, node) (rate(facilitator_aggregate_tasks_finished{status="rejected"}[${aggregation_period}])))
       / (sum without (status, aggregation_id, instance, node) (rate(facilitator_aggregate_tasks_finished[${aggregation_period}]))) > 0.01
