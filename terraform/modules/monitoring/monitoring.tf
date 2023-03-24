@@ -423,6 +423,12 @@ resource "helm_release" "prometheus" {
     name  = "pushgateway.image.tag"
     value = "v1.5.1"
   }
+
+  # Pull from registry.k8s.io instead of k8s.gcr.io
+  set {
+    name  = "kube-state-metrics.image.repository"
+    value = "registry.k8s.io/kube-state-metrics/kube-state-metrics"
+  }
 }
 
 # Configures Grafana to get data from Prometheus. The label on this config map

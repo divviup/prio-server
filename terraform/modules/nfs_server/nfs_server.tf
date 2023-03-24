@@ -38,7 +38,7 @@ resource "kubernetes_deployment_v1" "nfs-server" {
       spec {
         container {
           name  = "nfs-server"
-          image = "k8s.gcr.io/volume-nfs:0.8"
+          image = "registry.k8s.io/volume-nfs:0.8"
           port {
             name           = "nfs"
             container_port = 2049

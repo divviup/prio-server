@@ -73,7 +73,7 @@ cluster_settings = {
   # https://docs.aws.amazon.com/eks/latest/userguide/managing-ebs-csi.html#updating-ebs-csi-eks-add-on
   eks_ebs_csi_addon_version = "v1.16.0-eksbuild.1"
   # https://github.com/kubernetes/autoscaler/releases/tag/cluster-autoscaler-1.23.0
-  eks_cluster_autoscaler_version = "k8s.gcr.io/autoscaling/cluster-autoscaler:v1.23.0"
+  eks_cluster_autoscaler_version = "registry.k8s.io/autoscaling/cluster-autoscaler:v1.23.0"
 }
 test_peer_environment = {
   env_with_ingestor    = "stg-us-facil"
