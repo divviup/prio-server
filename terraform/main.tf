@@ -381,7 +381,7 @@ terraform {
     }
     kubernetes = {
       source  = "hashicorp/kubernetes"
-      version = "2.18.1"
+      version = "2.19.0"
     }
     null = {
       source  = "hashicorp/null"
