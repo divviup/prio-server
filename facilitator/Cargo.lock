@@ -1785,9 +1785,9 @@ dependencies = [
 
 [[package]]
 name = "prio"
-version = "0.11.1"
+version = "0.12.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "942b15465147a8f027aba46630d1f5fe2decb15ec6263a396eb763b269cac60a"
+checksum = "9c2aa1f9faa3fab6f02b54025f411d6f4fcd31765765600db339280e3678ae20"
 dependencies = [
  "aes",
  "aes-gcm",
