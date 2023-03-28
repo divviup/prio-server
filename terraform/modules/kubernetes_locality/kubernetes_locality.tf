@@ -243,6 +243,14 @@ resource "kubernetes_cron_job" "key_rotator" {
         template {
           metadata {}
           spec {
+            # Allow key-rotator to run on both spot and non-spot nodes, with
+            # no preference.
+            toleration {
+              key      = "divviup.org/spot-vm"
+              operator = "Exists"
+              effect   = "NoSchedule"
+            }
+
             container {
               name  = "key-rotator"
               image = "${var.container_registry}/${var.key_rotator_image}:${var.key_rotator_version}"
