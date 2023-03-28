@@ -572,11 +572,11 @@ fn public_key_from_pem(pem_key: &str) -> Result<UnparsedPublicKey<Vec<u8>>> {
     }
     let pem = pem::parse(pem_key).context(format!("failed to parse key as PEM: {pem_key}"))?;
     const WANT_PEM_TAG: &str = "PUBLIC KEY";
-    if pem.tag != WANT_PEM_TAG {
+    if pem.tag() != WANT_PEM_TAG {
         return Err(anyhow!(
             "key is not a PEM-encoded public key (want tag {}, got tag {})",
             WANT_PEM_TAG,
-            pem.tag
+            pem.tag()
         ));
     }
 
@@ -584,13 +584,13 @@ fn public_key_from_pem(pem_key: &str) -> Result<UnparsedPublicKey<Vec<u8>>> {
     // prefix + 65 bytes of key = 91 bytes total. e.g.,
     // https://lapo.it/asn1js/#MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgD______________________________________________________________________________________w
     const WANT_PEM_CONTENT_LENGTH: usize = 91;
-    if pem.contents.len() != WANT_PEM_CONTENT_LENGTH {
+    if pem.contents().len() != WANT_PEM_CONTENT_LENGTH {
         return Err(anyhow!(
-            "PEM contents are wrong size for ASN.1 encoded ECDSA P256 SubjectPublicKeyInfo (want length {}, got length {})", WANT_PEM_CONTENT_LENGTH, pem.contents.len()
+            "PEM contents are wrong size for ASN.1 encoded ECDSA P256 SubjectPublicKeyInfo (want length {}, got length {})", WANT_PEM_CONTENT_LENGTH, pem.contents().len()
         ));
     }
 
-    let (prefix, key) = pem.contents.split_at(ECDSA_P256_SPKI_PREFIX.len());
+    let (prefix, key) = pem.contents().split_at(ECDSA_P256_SPKI_PREFIX.len());
 
     if prefix != ECDSA_P256_SPKI_PREFIX {
         return Err(anyhow!(
