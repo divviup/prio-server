@@ -23,7 +23,7 @@ hex = "0.4"
 hmac = "0.12"
 http = "^0.2"
 hyper = "^0.14"
-hyper-rustls = { version = "^0.23", features = ["http2"] }
+hyper-rustls = { version = "^0.24", features = ["http2"] }
 jsonwebtoken = "8"
 lazy_static = "1"
 p256 = "0.13.0"
