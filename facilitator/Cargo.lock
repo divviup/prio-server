@@ -397,9 +397,9 @@ dependencies = [
 
 [[package]]
 name = "cmac"
-version = "0.7.1"
+version = "0.7.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "606383658416244b8dc4b36f864ec1f86cb922b95c41a908fd07aeb01cad06fa"
+checksum = "8543454e3c3f5126effff9cd44d562af4e31fb8ce1cc0d3dcd8f084515dbc1aa"
 dependencies = [
  "cipher",
  "dbl",
@@ -1813,9 +1813,9 @@ dependencies = [
 
 [[package]]
 name = "prio"
-version = "0.12.0"
+version = "0.12.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9c2aa1f9faa3fab6f02b54025f411d6f4fcd31765765600db339280e3678ae20"
+checksum = "3675d093a7713f2b861f77b16c3c33fadd6de0a69bf7203014d938b9d5daa6f7"
 dependencies = [
  "aes",
  "aes-gcm",
