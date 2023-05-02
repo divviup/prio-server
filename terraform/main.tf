@@ -359,17 +359,17 @@ terraform {
   required_providers {
     aws = {
       source  = "hashicorp/aws"
-      version = "4.64.0"
+      version = "4.65.0"
     }
     google = {
       source = "hashicorp/google"
       # Keep this version in sync with provider google-beta
-      version = "4.63.0"
+      version = "4.63.1"
     }
     google-beta = {
       source = "hashicorp/google-beta"
       # Keep this version in sync with provider google
-      version = "4.63.0"
+      version = "4.63.1"
     }
     helm = {
       source  = "hashicorp/helm"
@@ -377,7 +377,7 @@ terraform {
     }
     http = {
       source  = "hashicorp/http"
-      version = "3.2.1"
+      version = "3.3.0"
     }
     kubernetes = {
       source  = "hashicorp/kubernetes"
