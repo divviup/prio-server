@@ -3,7 +3,7 @@ module github.com/letsencrypt/prio-server/workflow-manager
 go 1.19
 
 require (
-	cloud.google.com/go/pubsub v1.30.0
+	cloud.google.com/go/pubsub v1.30.1
 	cloud.google.com/go/storage v1.30.1
 	github.com/aws/aws-sdk-go v1.44.253
 	github.com/google/uuid v1.3.0
@@ -19,7 +19,7 @@ require (
 	cloud.google.com/go/iam v0.13.0 // indirect
 	github.com/beorn7/perks v1.0.1 // indirect
 	github.com/cespare/xxhash/v2 v2.2.0 // indirect
-	github.com/golang/groupcache v0.0.0-20200121045136-8c9f03a8e57e // indirect
+	github.com/golang/groupcache v0.0.0-20210331224755-41bb18bfe9da // indirect
 	github.com/golang/protobuf v1.5.3 // indirect
 	github.com/google/go-cmp v0.5.9 // indirect
 	github.com/google/s2a-go v0.1.2 // indirect
@@ -33,7 +33,7 @@ require (
 	github.com/prometheus/common v0.42.0 // indirect
 	github.com/prometheus/procfs v0.9.0 // indirect
 	go.opencensus.io v0.24.0 // indirect
-	golang.org/x/crypto v0.1.0 // indirect
+	golang.org/x/crypto v0.7.0 // indirect
 	golang.org/x/net v0.9.0 // indirect
 	golang.org/x/oauth2 v0.7.0 // indirect
 	golang.org/x/sync v0.1.0 // indirect
