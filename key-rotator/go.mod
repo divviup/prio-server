@@ -5,13 +5,13 @@ go 1.19
 require (
 	cloud.google.com/go/secretmanager v1.10.0
 	cloud.google.com/go/storage v1.30.1
-	github.com/aws/aws-sdk-go v1.44.254
+	github.com/aws/aws-sdk-go v1.44.260
 	github.com/google/go-cmp v0.5.9
 	github.com/googleapis/gax-go/v2 v2.8.0
-	github.com/prometheus/client_golang v1.15.0
+	github.com/prometheus/client_golang v1.15.1
 	github.com/rs/zerolog v1.29.1
 	golang.org/x/sync v0.2.0
-	google.golang.org/grpc v1.54.0
+	google.golang.org/grpc v1.55.0
 	k8s.io/api v0.27.1
 	k8s.io/apimachinery v0.27.1
 	k8s.io/client-go v0.27.1

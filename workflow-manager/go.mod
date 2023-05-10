@@ -5,11 +5,11 @@ go 1.19
 require (
 	cloud.google.com/go/pubsub v1.30.1
 	cloud.google.com/go/storage v1.30.1
-	github.com/aws/aws-sdk-go v1.44.253
+	github.com/aws/aws-sdk-go v1.44.260
 	github.com/google/uuid v1.3.0
 	github.com/prometheus/client_golang v1.15.1
 	github.com/rs/zerolog v1.29.1
-	google.golang.org/api v0.120.0
+	google.golang.org/api v0.122.0
 )
 
 require (
@@ -22,7 +22,7 @@ require (
 	github.com/golang/groupcache v0.0.0-20210331224755-41bb18bfe9da // indirect
 	github.com/golang/protobuf v1.5.3 // indirect
 	github.com/google/go-cmp v0.5.9 // indirect
-	github.com/google/s2a-go v0.1.2 // indirect
+	github.com/google/s2a-go v0.1.3 // indirect
 	github.com/googleapis/enterprise-certificate-proxy v0.2.3 // indirect
 	github.com/googleapis/gax-go/v2 v2.8.0 // indirect
 	github.com/jmespath/go-jmespath v0.4.0 // indirect
