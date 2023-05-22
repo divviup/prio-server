@@ -3776,9 +3776,9 @@ dependencies = [
 
 [[package]]
 name = "xml-rs"
-version = "0.8.11"
+version = "0.8.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1690519550bfa95525229b9ca2350c63043a4857b3b0013811b2ccf4a2420b01"
+checksum = "fbe2542b5faf6bc09dfd0b0701df8571259776d459af399aa97f2a1e4ebc0de9"
 
 [[package]]
 name = "yasna"
