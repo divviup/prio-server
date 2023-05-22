@@ -10,14 +10,14 @@ async-trait = "0.1"
 atty = "0.2"
 avro-rs = { version = "0.13.0", features = ["snappy"] }
 backoff = { version = "0.4.0", features = ["tokio"] }
-base64 = "0.21.0"
+base64 = "0.21.1"
 bitvec = "1"
 bytes = "1.4.0"
 chrono = { version = "0.4", features = ["serde"] }
 clap = "2.34.0"
 derivative = "2.1.1"
 dyn-clone = "1.0.11"
-elliptic-curve = { version = "0.13.4", features = ["pem"] }
+elliptic-curve = { version = "0.13.5", features = ["pem"] }
 futures = "0.3"
 hex = "0.4"
 hmac = "0.12"
