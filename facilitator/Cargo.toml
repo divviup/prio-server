@@ -29,7 +29,7 @@ lazy_static = "1"
 p256 = "0.13.2"
 pem = "2.0"
 pkix = "0.2.1"
-prio = { version = "0.12.1", features = ["prio2"] }
+prio = { version = "0.12.2", features = ["prio2"] }
 prometheus = { version = "0.13", features = ["process"] }
 rand = "0.8"
 ring = { version = "0.16.20", features = ["std"] }
