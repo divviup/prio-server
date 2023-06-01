@@ -6,7 +6,7 @@ use std::{
     boxed::Box,
     fs::{create_dir_all, File},
     io::{ErrorKind, Read},
-    path::{PathBuf, MAIN_SEPARATOR},
+    path::{PathBuf, MAIN_SEPARATOR_STR},
 };
 
 use super::TransportError;
@@ -39,7 +39,7 @@ impl LocalFileTransport {
     /// attempts to convert the provided key into a relative path valid for the
     /// current platform.
     fn relative_path(key: &str) -> PathBuf {
-        PathBuf::from(key.replace('/', &MAIN_SEPARATOR.to_string()))
+        PathBuf::from(key.replace('/', MAIN_SEPARATOR_STR))
     }
 }
 
