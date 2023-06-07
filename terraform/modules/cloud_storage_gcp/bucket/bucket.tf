@@ -32,7 +32,7 @@ resource "google_storage_bucket" "bucket" {
       type = "Delete"
     }
     condition {
-      age = 7
+      age = 1
     }
   }
   # Encrypt bucket contents at rest using KMS key
