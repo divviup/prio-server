@@ -18,6 +18,10 @@ variable "bucket_writer" {
   type = string
 }
 
+variable "grant_write_permissions" {
+  type = bool
+}
+
 resource "google_storage_bucket" "bucket" {
   name     = var.name
   location = var.gcp_region
@@ -43,6 +47,7 @@ resource "google_storage_bucket" "bucket" {
 }
 
 resource "google_storage_bucket_iam_binding" "bucket_writer" {
+  count  = var.grant_write_permissions ? 1 : 0
   bucket = google_storage_bucket.bucket.name
   role   = "roles/storage.legacyBucketWriter"
   members = [
