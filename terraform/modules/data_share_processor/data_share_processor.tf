@@ -155,48 +155,146 @@ variable "profile_nfs_server" {
   type = string
 }
 
-# We need the ingestion server's manifest so that we can discover the GCP
-# service account it will use to upload ingestion batches. Some ingestors
-# (Apple) are singletons, and advertise a single global manifest which contains
-# the single GCP SA used by that server to send ingestion batches. Others
-# (Google) operate a distinct instance per locality, using a distinct GCP SA for
-# each. We first check for a global manifest, and fall back to a specific
-# manifest if it cannot be found. A Terraform data.http block would cause the
-# entire plan or apply to fail if the specified URL can't be loaded, so we use
-# this data.external block to check the HTTP status.
-data "external" "global_manifest_http_status" {
-  program = [
-    "curl",
-    "--silent",
-    "--output", "/dev/null",
-    # Terraform insists that the output of the program be JSON so that it can be
-    # parsed into a Terraform map.
-    "--write-out", "{ \"http_code\": \"%%{http_code}\" }",
-    "https://${var.ingestor_manifest_base_url}/global-manifest.json"
-  ]
-}
-
-data "http" "ingestor_global_manifest" {
-  count = local.ingestor_global_manifest_exists ? 1 : 0
-  url   = "https://${var.ingestor_manifest_base_url}/global-manifest.json"
-}
-
-data "http" "ingestor_specific_manifest" {
-  count = local.ingestor_global_manifest_exists ? 0 : 1
-  url   = "https://${var.ingestor_manifest_base_url}/${var.data_share_processor_name}-manifest.json"
-}
-
-data "http" "peer_share_processor_global_manifest" {
-  url = "https://${var.peer_share_processor_manifest_base_url}/global-manifest.json"
-}
-
 locals {
-  ingestor_global_manifest_exists = data.external.global_manifest_http_status.result.http_code == "200"
-  ingestor_server_identity = local.ingestor_global_manifest_exists ? (
-    jsondecode(data.http.ingestor_global_manifest[0].response_body).server-identity
-    ) : (
-    jsondecode(data.http.ingestor_specific_manifest[0].response_body).server-identity
-  )
+  canned_ingestor_server_identities = {
+    "ta-ta-apple" = {
+      "aws-iam-entity"            = "arn:aws:iam::690017092588:role/ct_service"
+      "gcp-service-account-email" = "eprodxx@applesystem.iam.gserviceaccount.com"
+    }
+    "us-ak-apple" = {
+      "aws-iam-entity"            = "arn:aws:iam::690017092588:role/ct_service"
+      "gcp-service-account-email" = "eprodxx@applesystem.iam.gserviceaccount.com"
+    }
+    "us-ca-apple" = {
+      "aws-iam-entity"            = "arn:aws:iam::690017092588:role/ct_service"
+      "gcp-service-account-email" = "eprodxx@applesystem.iam.gserviceaccount.com"
+    }
+    "us-co-apple" = {
+      "aws-iam-entity"            = "arn:aws:iam::690017092588:role/ct_service"
+      "gcp-service-account-email" = "eprodxx@applesystem.iam.gserviceaccount.com"
+    }
+    "us-ct-apple" = {
+      "aws-iam-entity"            = "arn:aws:iam::690017092588:role/ct_service"
+      "gcp-service-account-email" = "eprodxx@applesystem.iam.gserviceaccount.com"
+    }
+    "us-dc-apple" = {
+      "aws-iam-entity"            = "arn:aws:iam::690017092588:role/ct_service"
+      "gcp-service-account-email" = "eprodxx@applesystem.iam.gserviceaccount.com"
+    }
+    "us-hi-apple" = {
+      "aws-iam-entity"            = "arn:aws:iam::690017092588:role/ct_service"
+      "gcp-service-account-email" = "eprodxx@applesystem.iam.gserviceaccount.com"
+    }
+    "us-la-apple" = {
+      "aws-iam-entity"            = "arn:aws:iam::690017092588:role/ct_service"
+      "gcp-service-account-email" = "eprodxx@applesystem.iam.gserviceaccount.com"
+    }
+    "us-ma-apple" = {
+      "aws-iam-entity"            = "arn:aws:iam::690017092588:role/ct_service"
+      "gcp-service-account-email" = "eprodxx@applesystem.iam.gserviceaccount.com"
+    }
+    "us-md-apple" = {
+      "aws-iam-entity"            = "arn:aws:iam::690017092588:role/ct_service"
+      "gcp-service-account-email" = "eprodxx@applesystem.iam.gserviceaccount.com"
+    }
+    "us-mo-apple" = {
+      "aws-iam-entity"            = "arn:aws:iam::690017092588:role/ct_service"
+      "gcp-service-account-email" = "eprodxx@applesystem.iam.gserviceaccount.com"
+    }
+    "us-nm-apple" = {
+      "aws-iam-entity"            = "arn:aws:iam::690017092588:role/ct_service"
+      "gcp-service-account-email" = "eprodxx@applesystem.iam.gserviceaccount.com"
+    }
+    "us-nv-apple" = {
+      "aws-iam-entity"            = "arn:aws:iam::690017092588:role/ct_service"
+      "gcp-service-account-email" = "eprodxx@applesystem.iam.gserviceaccount.com"
+    }
+    "us-ut-apple" = {
+      "aws-iam-entity"            = "arn:aws:iam::690017092588:role/ct_service"
+      "gcp-service-account-email" = "eprodxx@applesystem.iam.gserviceaccount.com"
+    }
+    "us-va-apple" = {
+      "aws-iam-entity"            = "arn:aws:iam::690017092588:role/ct_service"
+      "gcp-service-account-email" = "eprodxx@applesystem.iam.gserviceaccount.com"
+    }
+    "us-wa-apple" = {
+      "aws-iam-entity"            = "arn:aws:iam::690017092588:role/ct_service"
+      "gcp-service-account-email" = "eprodxx@applesystem.iam.gserviceaccount.com"
+    }
+    "us-wi-apple" = {
+      "aws-iam-entity"            = "arn:aws:iam::690017092588:role/ct_service"
+      "gcp-service-account-email" = "eprodxx@applesystem.iam.gserviceaccount.com"
+    }
+    "ta-ta-g-enpa" = {
+      "gcp-service-account-email" = "dataflow-job-runner@enpa-ingestion-ta-ta.iam.gserviceaccount.com"
+      "gcp-service-account-id"    = "109020912100641285657"
+    }
+    "us-ak-g-enpa" = {
+      "gcp-service-account-email" = "dataflow-job-runner@enpa-ingestion-us-ak.iam.gserviceaccount.com"
+      "gcp-service-account-id"    = "111551694987680708475"
+    }
+    "us-ca-g-enpa" = {
+      "gcp-service-account-email" = "dataflow-job-runner@enpa-ingestion-us-ca.iam.gserviceaccount.com"
+      "gcp-service-account-id"    = "103840253743419033664"
+    }
+    "us-co-g-enpa" = {
+      "gcp-service-account-email" = "dataflow-job-runner@enpa-ingestion-us-co.iam.gserviceaccount.com"
+      "gcp-service-account-id"    = "110611915166111847455"
+    }
+    "us-ct-g-enpa" = {
+      "gcp-service-account-email" = "dataflow-job-runner@enpa-ingestion-us-ct.iam.gserviceaccount.com"
+      "gcp-service-account-id"    = "116496586096763013722"
+    }
+    "us-dc-g-enpa" = {
+      "gcp-service-account-email" = "dataflow-job-runner@enpa-ingestion-us-dc.iam.gserviceaccount.com"
+      "gcp-service-account-id"    = "107515049260634291601"
+    }
+    "us-hi-g-enpa" = {
+      "gcp-service-account-email" = "dataflow-job-runner@enpa-ingestion-us-hi.iam.gserviceaccount.com"
+      "gcp-service-account-id"    = "105215147671385522170"
+    }
+    "us-la-g-enpa" = {
+      "gcp-service-account-email" = "dataflow-job-runner@enpa-ingestion-us-la.iam.gserviceaccount.com"
+      "gcp-service-account-id"    = "113423669241607447504"
+    }
+    "us-ma-g-enpa" = {
+      "gcp-service-account-email" = "dataflow-job-runner@enpa-ingestion-us-ma.iam.gserviceaccount.com"
+      "gcp-service-account-id"    = "105249126647703109150"
+    }
+    "us-md-g-enpa" = {
+      "gcp-service-account-email" = "dataflow-job-runner@enpa-ingestion-us-md.iam.gserviceaccount.com"
+      "gcp-service-account-id"    = "112131106368700882469"
+    }
+    "us-mo-g-enpa" = {
+      "gcp-service-account-email" = "dataflow-job-runner@enpa-ingestion-us-mo.iam.gserviceaccount.com"
+      "gcp-service-account-id"    = "103336767879594040242"
+    }
+    "us-nm-g-enpa" = {
+      "gcp-service-account-email" = "dataflow-job-runner@enpa-ingestion-us-nm.iam.gserviceaccount.com"
+      "gcp-service-account-id"    = "103830287952597922112"
+    }
+    "us-nv-g-enpa" = {
+      "gcp-service-account-email" = "dataflow-job-runner@enpa-ingestion-us-nv.iam.gserviceaccount.com"
+      "gcp-service-account-id"    = "109143840727213928841"
+    }
+    "us-ut-g-enpa" = {
+      "gcp-service-account-email" = "dataflow-job-runner@enpa-ingestion-us-ut.iam.gserviceaccount.com"
+      "gcp-service-account-id"    = "108996594782665934675"
+    }
+    "us-va-g-enpa" = {
+      "gcp-service-account-email" = "dataflow-job-runner@enpa-ingestion-us-va.iam.gserviceaccount.com"
+      "gcp-service-account-id"    = "117421313726844821980"
+    }
+    "us-wa-g-enpa" = {
+      "gcp-service-account-email" = "dataflow-job-runner@enpa-ingestion-us-wa.iam.gserviceaccount.com"
+      "gcp-service-account-id"    = "116332471847097368455"
+    }
+    "us-wi-g-enpa" = {
+      "gcp-service-account-email" = "dataflow-job-runner@enpa-ingestion-us-wi.iam.gserviceaccount.com"
+      "gcp-service-account-id"    = "102144474753019266865"
+    }
+  }
+  ingestor_server_identity        = local.canned_ingestor_server_identities[var.data_share_processor_name]
   ingestor_gcp_service_account_id = lookup(local.ingestor_server_identity, "gcp-service-account-id", "")
   ingestor_aws_role_arn           = lookup(local.ingestor_server_identity, "aws-iam-entity", "")
 
@@ -212,7 +310,145 @@ locals {
 
   resource_prefix = "prio-${var.environment}-${var.data_share_processor_name}"
 
-  peer_share_processor_server_identity               = jsondecode(data.http.peer_share_processor_global_manifest.response_body).server-identity
+  canned_peer_share_processor_server_identities = {
+    "ta-ta-apple" = {
+      "aws-account-id"            = "994058661178"
+      "gcp-service-account-email" = "mitre-collaboration-account@nih-nci-ext-collab-config-2d25.iam.gserviceaccount.com"
+    }
+    "ta-ta-g-enpa" = {
+      "aws-account-id"            = "994058661178"
+      "gcp-service-account-email" = "mitre-collaboration-account@nih-nci-ext-collab-config-2d25.iam.gserviceaccount.com"
+    }
+    "us-ak-apple" = {
+      "aws-account-id"            = "004406395600"
+      "gcp-service-account-email" = "mitre-collaboration-prod-accou@nih-nci-ext-collab-config-2d25.iam.gserviceaccount.com"
+    }
+    "us-ak-g-enpa" = {
+      "aws-account-id"            = "004406395600"
+      "gcp-service-account-email" = "mitre-collaboration-prod-accou@nih-nci-ext-collab-config-2d25.iam.gserviceaccount.com"
+    }
+    "us-ca-apple" = {
+      "aws-account-id"            = "004406395600"
+      "gcp-service-account-email" = "mitre-collaboration-prod-accou@nih-nci-ext-collab-config-2d25.iam.gserviceaccount.com"
+    }
+    "us-ca-g-enpa" = {
+      "aws-account-id"            = "004406395600"
+      "gcp-service-account-email" = "mitre-collaboration-prod-accou@nih-nci-ext-collab-config-2d25.iam.gserviceaccount.com"
+    }
+    "us-co-apple" = {
+      "aws-account-id"            = "004406395600"
+      "gcp-service-account-email" = "mitre-collaboration-prod-accou@nih-nci-ext-collab-config-2d25.iam.gserviceaccount.com"
+    }
+    "us-co-g-enpa" = {
+      "aws-account-id"            = "004406395600"
+      "gcp-service-account-email" = "mitre-collaboration-prod-accou@nih-nci-ext-collab-config-2d25.iam.gserviceaccount.com"
+    }
+    "us-ct-apple" = {
+      "aws-account-id"            = "004406395600"
+      "gcp-service-account-email" = "mitre-collaboration-prod-accou@nih-nci-ext-collab-config-2d25.iam.gserviceaccount.com"
+    }
+    "us-ct-g-enpa" = {
+      "aws-account-id"            = "004406395600"
+      "gcp-service-account-email" = "mitre-collaboration-prod-accou@nih-nci-ext-collab-config-2d25.iam.gserviceaccount.com"
+    }
+    "us-dc-apple" = {
+      "aws-account-id"            = "004406395600"
+      "gcp-service-account-email" = "mitre-collaboration-prod-accou@nih-nci-ext-collab-config-2d25.iam.gserviceaccount.com"
+    }
+    "us-dc-g-enpa" = {
+      "aws-account-id"            = "004406395600"
+      "gcp-service-account-email" = "mitre-collaboration-prod-accou@nih-nci-ext-collab-config-2d25.iam.gserviceaccount.com"
+    }
+    "us-hi-apple" = {
+      "aws-account-id"            = "004406395600"
+      "gcp-service-account-email" = "mitre-collaboration-prod-accou@nih-nci-ext-collab-config-2d25.iam.gserviceaccount.com"
+    }
+    "us-hi-g-enpa" = {
+      "aws-account-id"            = "004406395600"
+      "gcp-service-account-email" = "mitre-collaboration-prod-accou@nih-nci-ext-collab-config-2d25.iam.gserviceaccount.com"
+    }
+    "us-la-apple" = {
+      "aws-account-id"            = "004406395600"
+      "gcp-service-account-email" = "mitre-collaboration-prod-accou@nih-nci-ext-collab-config-2d25.iam.gserviceaccount.com"
+    }
+    "us-la-g-enpa" = {
+      "aws-account-id"            = "004406395600"
+      "gcp-service-account-email" = "mitre-collaboration-prod-accou@nih-nci-ext-collab-config-2d25.iam.gserviceaccount.com"
+    }
+    "us-ma-apple" = {
+      "aws-account-id"            = "004406395600"
+      "gcp-service-account-email" = "mitre-collaboration-prod-accou@nih-nci-ext-collab-config-2d25.iam.gserviceaccount.com"
+    }
+    "us-ma-g-enpa" = {
+      "aws-account-id"            = "004406395600"
+      "gcp-service-account-email" = "mitre-collaboration-prod-accou@nih-nci-ext-collab-config-2d25.iam.gserviceaccount.com"
+    }
+    "us-md-apple" = {
+      "aws-account-id"            = "004406395600"
+      "gcp-service-account-email" = "mitre-collaboration-prod-accou@nih-nci-ext-collab-config-2d25.iam.gserviceaccount.com"
+    }
+    "us-md-g-enpa" = {
+      "aws-account-id"            = "004406395600"
+      "gcp-service-account-email" = "mitre-collaboration-prod-accou@nih-nci-ext-collab-config-2d25.iam.gserviceaccount.com"
+    }
+    "us-mo-apple" = {
+      "aws-account-id"            = "004406395600"
+      "gcp-service-account-email" = "mitre-collaboration-prod-accou@nih-nci-ext-collab-config-2d25.iam.gserviceaccount.com"
+    }
+    "us-mo-g-enpa" = {
+      "aws-account-id"            = "004406395600"
+      "gcp-service-account-email" = "mitre-collaboration-prod-accou@nih-nci-ext-collab-config-2d25.iam.gserviceaccount.com"
+    }
+    "us-nm-apple" = {
+      "aws-account-id"            = "004406395600"
+      "gcp-service-account-email" = "mitre-collaboration-prod-accou@nih-nci-ext-collab-config-2d25.iam.gserviceaccount.com"
+    }
+    "us-nm-g-enpa" = {
+      "aws-account-id"            = "004406395600"
+      "gcp-service-account-email" = "mitre-collaboration-prod-accou@nih-nci-ext-collab-config-2d25.iam.gserviceaccount.com"
+    }
+    "us-nv-apple" = {
+      "aws-account-id"            = "004406395600"
+      "gcp-service-account-email" = "mitre-collaboration-prod-accou@nih-nci-ext-collab-config-2d25.iam.gserviceaccount.com"
+    }
+    "us-nv-g-enpa" = {
+      "aws-account-id"            = "004406395600"
+      "gcp-service-account-email" = "mitre-collaboration-prod-accou@nih-nci-ext-collab-config-2d25.iam.gserviceaccount.com"
+    }
+    "us-ut-apple" = {
+      "aws-account-id"            = "004406395600"
+      "gcp-service-account-email" = "mitre-collaboration-prod-accou@nih-nci-ext-collab-config-2d25.iam.gserviceaccount.com"
+    }
+    "us-ut-g-enpa" = {
+      "aws-account-id"            = "004406395600"
+      "gcp-service-account-email" = "mitre-collaboration-prod-accou@nih-nci-ext-collab-config-2d25.iam.gserviceaccount.com"
+    }
+    "us-va-apple" = {
+      "aws-account-id"            = "004406395600"
+      "gcp-service-account-email" = "mitre-collaboration-prod-accou@nih-nci-ext-collab-config-2d25.iam.gserviceaccount.com"
+    }
+    "us-va-g-enpa" = {
+      "aws-account-id"            = "004406395600"
+      "gcp-service-account-email" = "mitre-collaboration-prod-accou@nih-nci-ext-collab-config-2d25.iam.gserviceaccount.com"
+    }
+    "us-wa-apple" = {
+      "aws-account-id"            = "004406395600"
+      "gcp-service-account-email" = "mitre-collaboration-prod-accou@nih-nci-ext-collab-config-2d25.iam.gserviceaccount.com"
+    }
+    "us-wa-g-enpa" = {
+      "aws-account-id"            = "004406395600"
+      "gcp-service-account-email" = "mitre-collaboration-prod-accou@nih-nci-ext-collab-config-2d25.iam.gserviceaccount.com"
+    }
+    "us-wi-apple" = {
+      "aws-account-id"            = "004406395600"
+      "gcp-service-account-email" = "mitre-collaboration-prod-accou@nih-nci-ext-collab-config-2d25.iam.gserviceaccount.com"
+    }
+    "us-wi-g-enpa" = {
+      "aws-account-id"            = "004406395600"
+      "gcp-service-account-email" = "mitre-collaboration-prod-accou@nih-nci-ext-collab-config-2d25.iam.gserviceaccount.com"
+    }
+  }
+  peer_share_processor_server_identity               = local.canned_peer_share_processor_server_identities[var.data_share_processor_name]
   peer_share_processor_gcp_service_account_email     = local.peer_share_processor_server_identity.gcp-service-account-email
   peer_share_processor_gcp_service_account_unique_id = lookup(local.peer_share_processor_server_identity, "gcp-service-account-id", "")
 
