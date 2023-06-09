@@ -26,7 +26,8 @@ variable "cluster_settings" {
 
 # Activate some services which the deployment will require.
 resource "google_project_service" "compute" {
-  service = "compute.googleapis.com"
+  service            = "compute.googleapis.com"
+  disable_on_destroy = false
 }
 
 resource "google_project_service" "container" {
@@ -39,7 +40,8 @@ resource "google_project_service" "kms" {
 
 # This service is needed by Cloud Operations for GKE.
 resource "google_project_service" "logging" {
-  service = "logging.googleapis.com"
+  service            = "logging.googleapis.com"
+  disable_on_destroy = false
 }
 
 # This service will be required by key-rotator, after bootstrapping.
