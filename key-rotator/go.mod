@@ -7,7 +7,7 @@ require (
 	cloud.google.com/go/storage v1.30.1
 	github.com/aws/aws-sdk-go v1.44.285
 	github.com/google/go-cmp v0.5.9
-	github.com/googleapis/gax-go/v2 v2.10.0
+	github.com/googleapis/gax-go/v2 v2.11.0
 	github.com/prometheus/client_golang v1.16.0
 	github.com/rs/zerolog v1.29.1
 	golang.org/x/sync v0.3.0
@@ -62,7 +62,7 @@ require (
 	golang.org/x/text v0.9.0 // indirect
 	golang.org/x/time v0.0.0-20220210224613-90d013bbcef8 // indirect
 	golang.org/x/xerrors v0.0.0-20220907171357-04be3eba64a2 // indirect
-	google.golang.org/api v0.125.0 // indirect
+	google.golang.org/api v0.126.0 // indirect
 	google.golang.org/appengine v1.6.7 // indirect
 	google.golang.org/genproto v0.0.0-20230530153820-e85fd2cbaebc // indirect
 	google.golang.org/genproto/googleapis/api v0.0.0-20230530153820-e85fd2cbaebc // indirect
