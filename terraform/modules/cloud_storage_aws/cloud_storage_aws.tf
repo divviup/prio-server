@@ -34,7 +34,7 @@ locals {
   bucket_parameters = {
     ingestion = {
       name   = var.ingestion_bucket_name
-      writer = var.ingestion_bucket_writer
+      writer = null
     }
     local_peer_validation = {
       name   = var.peer_validation_bucket_name
@@ -82,37 +82,41 @@ resource "aws_s3_bucket_policy" "buckets" {
   bucket   = aws_s3_bucket.buckets[each.key].id
   policy = jsonencode({
     Version = "2012-10-17"
-    Statement = [
-      {
-        Effect = "Allow"
-        Principal = {
-          AWS = each.value.writer
+    Statement = concat(
+      each.value.writer == null ? [] : [
+        {
+          Effect = "Allow"
+          Principal = {
+            AWS = each.value.writer
+          }
+          Action = [
+            "s3:AbortMultipartUpload",
+            "s3:PutObject",
+            "s3:ListMultipartUploadParts",
+            "s3:ListBucketMultipartUploads",
+          ]
+          Resource = [
+            "${aws_s3_bucket.buckets[each.key].arn}/*",
+            aws_s3_bucket.buckets[each.key].arn
+          ]
         }
-        Action = [
-          "s3:AbortMultipartUpload",
-          "s3:PutObject",
-          "s3:ListMultipartUploadParts",
-          "s3:ListBucketMultipartUploads",
-        ]
-        Resource = [
-          "${aws_s3_bucket.buckets[each.key].arn}/*",
-          aws_s3_bucket.buckets[each.key].arn
-        ]
-      },
-      {
-        Effect = "Allow"
-        Principal = {
-          AWS = var.bucket_reader
+      ],
+      [
+        {
+          Effect = "Allow"
+          Principal = {
+            AWS = var.bucket_reader
+          }
+          Action = [
+            "s3:GetObject",
+            "s3:ListBucket",
+          ]
+          Resource = [
+            "${aws_s3_bucket.buckets[each.key].arn}/*",
+            aws_s3_bucket.buckets[each.key].arn
+          ]
         }
-        Action = [
-          "s3:GetObject",
-          "s3:ListBucket",
-        ]
-        Resource = [
-          "${aws_s3_bucket.buckets[each.key].arn}/*",
-          aws_s3_bucket.buckets[each.key].arn
-        ]
-      }
-    ]
+      ]
+    )
   })
 }
